@@ -70,60 +70,56 @@
       </div>
     </section>
 
-    <!-- 结果 -->
+    <!-- 回答：只放模型生成的正文，不放任何过程信息 -->
     <section class="panel result-panel" id="result-panel" hidden>
       <div class="panel-head">
         <h2>回答</h2>
         <div class="badges" id="result-badges"></div>
       </div>
-
       <div class="answer" id="answer-body"></div>
+    </section>
 
-      <div class="sql-block" id="sql-block" hidden>
-        <div class="sql-head">
-          <span>生成的 SQL</span>
-          <span id="rows-count"></span>
-        </div>
-        <pre id="sql-body"></pre>
+    <!-- 数据来源与检索过程：原问题 / 走的路径 / 改写的路径 / 来源内容 / SQL 与结果 -->
+    <section class="panel detail-panel" id="detail-panel" hidden>
+      <div class="panel-head">
+        <h2>数据来源与检索过程</h2>
+        <button type="button" class="trace-fold" id="detail-fold">收起</button>
       </div>
 
-      <div class="sources" id="sources-block" hidden>
-        <div class="sources-head">引用来源</div>
-        <div class="sources-list" id="sources-list"></div>
-      </div>
-
-      <!-- 检索过程：把中间步骤摊开，便于判断「答案是怎么来的」 -->
-      <div class="trace-block" id="trace-block" hidden>
-        <div class="trace-head">
-          <span>检索过程</span>
-          <button type="button" class="trace-fold" id="trace-fold">展开</button>
+      <div class="detail-body" id="detail-body">
+        <!-- 原问题 -->
+        <div class="detail-section">
+          <div class="detail-title">原问题</div>
+          <div class="detail-question" id="detail-question"></div>
         </div>
 
-        <div class="trace-body" id="trace-body">
-          <!-- 规划 -->
-          <div class="trace-section">
-            <div class="trace-section-title">多路规划（一次 LLM 调用）</div>
-            <div class="trace-plan" id="trace-plan"></div>
-          </div>
+        <!-- 走的路径 + 改写的路径 -->
+        <div class="detail-section">
+          <div class="detail-title">走的路径（多路规划）</div>
+          <div class="trace-plan" id="trace-plan"></div>
+          <div class="trace-variant-list" id="trace-variants"></div>
+        </div>
 
-          <!-- 每路召回 -->
-          <div class="trace-section">
-            <div class="trace-section-title">各路召回</div>
-            <div class="trace-variant-list" id="trace-variants"></div>
-          </div>
+        <!-- 融合与精排 -->
+        <div class="detail-section">
+          <div class="detail-title">融合与精排</div>
+          <div class="trace-flow" id="trace-flow"></div>
+        </div>
 
-          <!-- 融合 + 精排 -->
-          <div class="trace-section">
-            <div class="trace-section-title">融合与精排</div>
-            <div class="trace-flow" id="trace-flow"></div>
-            <div class="trace-rerank-list" id="trace-rerank"></div>
-          </div>
+        <!-- 数据来源（含内容） -->
+        <div class="detail-section">
+          <div class="detail-title">数据来源（进入上下文的资料）</div>
+          <div class="ds-list" id="detail-sources"></div>
+        </div>
 
-          <!-- SQL -->
-          <div class="trace-section" id="trace-sql-section" hidden>
-            <div class="trace-section-title">SQL 执行结果 <span id="trace-sql-note"></span></div>
-            <div class="trace-sql-rows" id="trace-sql-rows"></div>
+        <!-- SQL 语句与查询结果 -->
+        <div class="detail-section" id="trace-sql-section" hidden>
+          <div class="detail-title">生成的 SQL</div>
+          <pre class="detail-sql" id="sql-body"></pre>
+          <div class="detail-title is-sub">
+            查询结果 <span id="trace-sql-note"></span>
           </div>
+          <div class="trace-sql-rows" id="trace-sql-rows"></div>
         </div>
       </div>
     </section>

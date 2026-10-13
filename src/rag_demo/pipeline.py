@@ -209,7 +209,9 @@ def prepare(
             {
                 "index": i,
                 "source": c["source"],
-                "text": c["text"][:100],
+                # 400 字：要让人看清「这段资料到底说了什么」，100 字只够认个标题。
+                # wiki 做过全文扩展的最长 1200 字，这里截断后仍能看出主体内容。
+                "text": c["text"][:400],
                 "origin_query": c.get("origin_query", ""),
                 "from_query": c.get("from_query", ""),
                 "strategies": c.get("strategies", []),

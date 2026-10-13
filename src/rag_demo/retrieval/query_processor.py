@@ -317,6 +317,8 @@ def multi_query_search(
         trace_out=per_variant,
     )
     plan.trace = {
+        # 原问题一起带走：前端要对照「原问题 vs 改写后的检索式」才看得出改写做了什么
+        "question": question,
         "need_sql": plan.need_sql,
         "sql_blocked": plan.sql_blocked,
         "variants": per_variant,

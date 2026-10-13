@@ -187,7 +187,7 @@ async function ask(question) {
   }
 }
 
-/* 流式结果区：先搭好骨架，后续只更新答案文本 */
+/* 流式结果区：回答区只放正文，过程信息统一交给下一个面板 */
 function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlError, trace, cached }) {
   const badges = [
     `<span class="badge ${route}">${String(route).toUpperCase()}</span>`,
@@ -198,62 +198,30 @@ function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlErr
 
   el("answer-body").innerHTML = "";
 
-  renderSqlBlock(sqlText, rowsCount);
-  renderSources(sources);
-  renderTrace({ trace, sources, sqlText, sqlRows, sqlError });
+  renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace });
 
   el("result-panel").hidden = false;
   el("result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-/* SQL 卡片（正文里只放 SQL 原文，结果行放到「检索过程」里展开） */
-function renderSqlBlock(sqlText, rowsCount) {
-  if (sqlText) {
-    el("sql-block").hidden = false;
-    el("sql-body").textContent = sqlText;
-    el("rows-count").textContent = `共 ${rowsCount ?? 0} 行`;
-  } else {
-    el("sql-block").hidden = true;
-  }
-}
+/* ---------- 数据来源与检索过程（独立面板） ---------- */
+function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace }) {
+  const panel = el("detail-panel");
 
-/* 引用来源 chips（带精排分数） */
-function renderSources(sources) {
-  if (!sources.length) {
-    el("sources-block").hidden = true;
+  // 闲聊：没有来源、没有 SQL、没有留痕，这个过程区没有意义
+  if (!sources.length && !sqlText && !trace) {
+    panel.hidden = true;
     return;
   }
-  el("sources-block").hidden = false;
-  el("sources-list").innerHTML = sources
-    .map((s) => {
-      const name = s.source || "unknown";
-      let cls = "is-sql";
-      if (name.endsWith(".md")) cls = "is-wiki";
-      else if (name === "user_profile") cls = "is-profile";
-      const score =
-        typeof s.rerank_score === "number" ? `<i>${s.rerank_score.toFixed(3)}</i>` : "";
-      return `<span class="source-chip ${cls}">[来源${s.index}] ${escapeHtml(name)}${score}</span>`;
-    })
-    .join("");
-}
+  panel.hidden = false;
+  el("detail-body").hidden = false;
+  el("detail-fold").textContent = "收起";
 
-/* ---------- 检索过程 ---------- */
-function renderTrace({ trace, sources, sqlText, sqlRows, sqlError }) {
-  const block = el("trace-block");
+  // 1) 原问题
+  el("detail-question").textContent = (trace && trace.question) || "（缓存结果，未留痕）";
+
+  // 2) 走的路径 + 改写的路径
   const variants = (trace && trace.variants) || [];
-
-  // 闲聊、或缓存里没有过程数据（旧版本缓存）时，整块不显示
-  if (!trace && !sqlText) {
-    block.hidden = true;
-    return;
-  }
-  block.hidden = false;
-
-  // 默认展开——这块存在的意义就是让人看见
-  el("trace-body").hidden = false;
-  el("trace-fold").textContent = "收起";
-
-  // 1) 多路规划
   const chips = [`<span class="tp-chip">检索路 <b>${variants.length}</b> 条</span>`];
   if (trace) {
     chips.push(
@@ -269,7 +237,6 @@ function renderTrace({ trace, sources, sqlText, sqlRows, sqlError }) {
   }
   el("trace-plan").innerHTML = chips.join("");
 
-  // 2) 各路召回
   el("trace-variants").innerHTML =
     variants
       .map(
@@ -277,8 +244,11 @@ function renderTrace({ trace, sources, sqlText, sqlRows, sqlError }) {
       <div class="tp-variant">
         <div class="tp-variant-head">
           <span class="tp-strategy">${escapeHtml(v.strategy || "-")}</span>
+          <span class="tp-count">命中 ${v.hit_count ?? 0} 条</span>
+        </div>
+        <div class="tp-query-block">
+          <span class="tp-qlabel">检索式</span>
           <span class="tp-query">${escapeHtml(v.query || "")}</span>
-          <span class="tp-count">${v.hit_count ?? 0} 条</span>
         </div>
         <div class="tp-src-list">${
           (v.sources || []).map((s) => `<span class="tp-src">${escapeHtml(s)}</span>`).join("") ||
@@ -300,42 +270,48 @@ function renderTrace({ trace, sources, sqlText, sqlRows, sqlError }) {
     <span class="tp-arrow">→</span>
     <span class="tp-node is-final">入上下文 <b>${sources.length}</b></span>`;
 
-  // 4) 精排明细
-  el("trace-rerank").innerHTML =
+  // 4) 数据来源（名称 + 分数 + 命中它的检索式 + 内容）
+  el("detail-sources").innerHTML =
     sources
-      .map(
-        (s) => `
-      <div class="tp-rerank-row">
-        <span class="tp-idx">[来源${s.index}]</span>
-        <span class="tp-name">${escapeHtml(s.source || "-")}</span>
-        <span class="tp-score">${
-          typeof s.rerank_score === "number" ? s.rerank_score.toFixed(4) : "-"
-        }</span>
-        ${s.expanded ? `<span class="tp-tag is-expand">全文扩展</span>` : ""}
-        ${(s.strategies || [])
-          .map((x) => `<span class="tp-tag">${escapeHtml(x)}</span>`)
-          .join("")}
+      .map((s) => {
+        const name = s.source || "unknown";
+        let cls = "is-lib";
+        if (name.endsWith(".md")) cls = "is-wiki";
+        else if (name === "user_profile") cls = "is-profile";
+        return `
+      <div class="ds-item ${cls}">
+        <div class="ds-head">
+          <span class="ds-idx">[来源${s.index}]</span>
+          <span class="ds-name">${escapeHtml(name)}</span>
+          <span class="tp-score">${
+            typeof s.rerank_score === "number" ? s.rerank_score.toFixed(4) : "-"
+          }</span>
+          ${s.expanded ? `<span class="tp-tag is-expand">全文扩展</span>` : ""}
+          ${(s.strategies || [])
+            .map((x) => `<span class="tp-tag">${escapeHtml(x)}</span>`)
+            .join("")}
+        </div>
         ${
           s.from_query
-            ? `<span class="tp-from">← ${escapeHtml(String(s.from_query).slice(0, 36))}</span>`
+            ? `<div class="ds-from">命中检索式：${escapeHtml(String(s.from_query))}</div>`
             : ""
         }
-      </div>`
-      )
+        <div class="ds-text">${escapeHtml(s.text || "")}</div>
+      </div>`;
+      })
       .join("") || `<div class="tp-empty">（无）</div>`;
 
-  // 5) SQL 实际结果行
+  // 5) SQL 语句与查询结果
   const sqlSec = el("trace-sql-section");
   if (sqlText) {
     sqlSec.hidden = false;
+    el("sql-body").textContent = sqlText;
     el("trace-sql-note").textContent = sqlError
       ? `执行失败：${sqlError}`
       : `共 ${sqlRows.length} 行`;
     el("trace-sql-rows").innerHTML = sqlRows.length
       ? `<table class="tp-table">${sqlRows
-          .map(
-            (r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`
-          )
+          .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`)
           .join("")}</table>`
       : `<div class="tp-empty">${sqlError ? escapeHtml(sqlError) : "（空结果）"}</div>`;
   } else {
@@ -367,17 +343,15 @@ function renderResult(data, elapsed) {
   // 答案
   el("answer-body").innerHTML = formatAnswer(data.answer || "（无内容）");
 
-  // SQL 与来源（与流式路径共用同一套渲染，避免两处逻辑分叉）
-  renderSqlBlock(data.sql, data.rows_count);
-
+  // 过程信息统一走 renderDetail（与流式路径共用，避免两处逻辑分叉）
   const sources = data.sources || [];
-  renderSources(sources);
-  renderTrace({
-    trace: data.trace,
+  renderDetail({
     sources,
     sqlText: data.sql,
+    rowsCount: data.rows_count,
     sqlRows: data.sql_rows || [],
     sqlError: data.sql_error,
+    trace: data.trace,
   });
 
   el("result-panel").hidden = false;
@@ -465,10 +439,10 @@ document.addEventListener("DOMContentLoaded", () => {
   initRetriever();
   el("compare-btn").addEventListener("click", compareRecall);
 
-  el("trace-fold").addEventListener("click", () => {
-    const body = el("trace-body");
+  el("detail-fold").addEventListener("click", () => {
+    const body = el("detail-body");
     body.hidden = !body.hidden;
-    el("trace-fold").textContent = body.hidden ? "展开" : "收起";
+    el("detail-fold").textContent = body.hidden ? "展开" : "收起";
   });
 
   el("ask-form").addEventListener("submit", (e) => {
