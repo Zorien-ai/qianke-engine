@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from rag_demo.cache import answer_cache
 from rag_demo.db.connection import close_conn, get_conn
 from rag_demo.generation.generator import generate_stream
-from rag_demo.pipeline import answer_question, prepare
+from rag_demo.pipeline import answer_question, brief_rows, prepare
 from rag_demo.retrieval.hybrid_retriever import (
     _load_bm25_corpus,
     bm25_search,
@@ -261,8 +261,15 @@ def qa_stream(req: QueryRequest):
             key = answer_cache.make_key(req.question, req.dept, req.retriever)
             hit = answer_cache.get(key)
             if hit is not None:
-                yield _sse("meta", {"route": hit.get("route"), "sources": hit.get("sources", []),
-                                    "cached": True})
+                yield _sse("meta", {
+                    "route": hit.get("route"),
+                    "sources": hit.get("sources", []),
+                    "sql": hit.get("sql", ""),
+                    "rows_count": hit.get("rows_count"),
+                    "sql_rows": hit.get("sql_rows", []),
+                    "trace": hit.get("trace", {}),
+                    "cached": True,
+                })
                 yield _sse("delta", {"delta": hit.get("answer", "")})
                 yield _sse("done", {})
                 return
@@ -286,6 +293,10 @@ def qa_stream(req: QueryRequest):
                 "sources": ctx["sources"],
                 "sql": (sql_result or {}).get("sql", ""),
                 "rows_count": len((sql_result or {}).get("rows", [])),
+                # 过程数据：SQL 实际结果 + 检索留痕，供前端展开查看
+                "sql_rows": brief_rows((sql_result or {}).get("rows", [])),
+                "sql_error": (sql_result or {}).get("error"),
+                "trace": ctx.get("trace", {}),
             })
             yield _sse("stage", {"stage": "generating"})
 
@@ -301,6 +312,8 @@ def qa_stream(req: QueryRequest):
                 "route": route_name,
                 "sql": (sql_result or {}).get("sql", ""),
                 "rows_count": len((sql_result or {}).get("rows", [])),
+                "sql_rows": brief_rows((sql_result or {}).get("rows", [])),
+                "trace": ctx.get("trace", {}),
             })
 
         except Exception as e:  # 流式过程中出错也要让前端知道

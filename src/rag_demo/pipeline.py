@@ -86,6 +86,16 @@ def _run_sql(question: str) -> dict:
     return sql_tool.query(question)
 
 
+def brief_rows(rows: list[tuple], limit: int = 20) -> list[list[str]]:
+    """
+    SQL 结果行摘要（供前端展示原始数字）
+
+    最多 limit 行、每格截断——结果可能有 50 行 × 十余列，原样返回会让响应体失控。
+    前端只用来「看见具体数字」，不是拿去做计算。
+    """
+    return [[str(v)[:60] for v in r] for r in rows[:limit]]
+
+
 def _plan_and_retrieve(
     question: str,
     dept: str | None = None,
@@ -149,6 +159,11 @@ def _answer_uncached(
     if sql_result is not None:
         result["sql"] = sql_result.get("sql", "")
         result["rows_count"] = len(sql_result.get("rows", []))
+        result["sql_rows"] = brief_rows(sql_result.get("rows", []))
+        result["sql_error"] = sql_result.get("error")
+
+    # 检索过程留痕（哪几路、每路召回了什么、融合后剩多少），供前端展示
+    result["trace"] = plan.trace
     return result
 
 
@@ -165,8 +180,11 @@ def prepare(
 
     返回:
         {"route": "chitchat", "answer": ..., "sources": []}      闲聊：直接给答案
-        {"route": "rag", "candidates": [...], "sql_result": ..., "sources": [...]}
-                                                                  其余：交给 generate_stream
+        {"route": "rag", "candidates": [...], "sql_result": ...,
+         "sources": [...], "trace": {...}}
+            其余：交给 generate_stream
+            trace 是检索过程留痕（每路的策略/检索式/命中数、融合后数量、
+            SQL 判定是否被预测类规则否决），供前端把中间步骤展示出来
     """
     if route(question) == ROUTE_CHITCHAT:
         return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
@@ -186,6 +204,7 @@ def prepare(
         "route": ROUTE_RAG,
         "candidates": reranked,
         "sql_result": sql_result,
+        "trace": plan.trace,
         "sources": [
             {
                 "index": i,
@@ -194,6 +213,9 @@ def prepare(
                 "origin_query": c.get("origin_query", ""),
                 "from_query": c.get("from_query", ""),
                 "strategies": c.get("strategies", []),
+                # 精排分数与是否做过全文扩展——它们决定了这条资料凭什么占住名额
+                "rerank_score": round(float(c.get("rerank_score", 0)), 4),
+                "expanded": bool(c.get("expanded", False)),
             }
             for i, c in enumerate(reranked, 1)
         ],

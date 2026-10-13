@@ -110,6 +110,13 @@ class QueryPlan:
     need_sql: bool = False
     variants: list[tuple[str, str]] = field(default_factory=list)
     candidates: list[dict] = field(default_factory=list)
+    # 检索过程留痕：供前端展示「走了哪几路、每路召回了什么、融合后剩多少」。
+    # 只存摘要（策略名 / 检索式 / 命中数 / 前几条来源），**不存全文**——
+    # 多路 × top30 全带上会让响应体失控。
+    trace: dict = field(default_factory=dict)
+    # LLM 判了「需要 SQL」但被预测类规则否决——单独记着，否则前端看到
+    # need_sql=False 会以为模型没判出来，看不出是复核拦下的。
+    sql_blocked: bool = False
 
 
 def _parse_response(text: str) -> tuple[str, bool, list[tuple[str, str]]]:
@@ -202,9 +209,11 @@ def plan_queries(question: str) -> QueryPlan:
 
     # SQL 判定复核：LLM 判「需要」但问题属预测类 -> 关闭 SQL 路（硬兜底，
     # 与上面的路由复核并列；提示词是软约束，这里不依赖模型守不守规矩）
+    sql_blocked = False
     if need_sql and looks_predictive(question):
         logger.info("SQL 判定复核：问题属预测类，关闭 SQL 路 -> %s", question)
         need_sql = False
+        sql_blocked = True
 
     if route != ROUTE_RAG:
         logger.info("路由复核改道 -> %s（关键词路由原判 RAG）: %s", route, question)
@@ -215,7 +224,8 @@ def plan_queries(question: str) -> QueryPlan:
             "需要" if need_sql else "不需要",
         )
 
-    return QueryPlan(route=route, need_sql=need_sql, variants=variants)
+    return QueryPlan(route=route, need_sql=need_sql, variants=variants,
+                     sql_blocked=sql_blocked)
 
 
 def build_query_variants(question: str) -> list[tuple[str, str]]:
@@ -233,12 +243,16 @@ def search_variants(
     dept: str | None = None,
     keyword_mode: str | None = None,
     origin_query: str | None = None,
+    trace_out: list[dict] | None = None,
 ) -> list[dict]:
     """
     按变体各自召回后 RRF 融合；只用一路时直接返回，不再融合
 
     origin_query 会回填到每条候选上，生成阶段据此标注「这条资料是从哪个问题
     找出来的」（原始提问 vs 某条改写），避免 LLM 拿到一份无法溯源的扁平清单。
+
+    trace_out 传入列表时，每路的召回摘要会追加进去（策略名 / 检索式 / 命中数 /
+    前几条来源），供前端展示检索过程；不传则不留痕，行为与改造前一致。
     """
     result_lists = []
     for strategy, text in variants:
@@ -246,6 +260,11 @@ def search_variants(
             hits = hybrid_search(text, top_k=top_k, dept=dept, keyword_mode=keyword_mode)
         except Exception as e:
             logger.warning("策略「%s」检索失败，跳过: %s", strategy, e)
+            if trace_out is not None:
+                trace_out.append({
+                    "strategy": strategy, "query": text,
+                    "hit_count": 0, "sources": [], "error": str(e),
+                })
             continue
         if hits:
             for h in hits:
@@ -254,6 +273,13 @@ def search_variants(
                     h["origin_query"] = origin_query
                 h.setdefault("strategies", []).append(strategy)
             result_lists.append(hits)
+        if trace_out is not None:
+            trace_out.append({
+                "strategy": strategy,
+                "query": text,
+                "hit_count": len(hits),
+                "sources": [h["source"] for h in hits[:8]],
+            })
 
     if not result_lists:
         return []
@@ -284,8 +310,16 @@ def multi_query_search(
     if plan.route != ROUTE_RAG:
         return plan  # 改道了，candidates 用不上，检索直接省掉
 
+    per_variant: list[dict] = []
     plan.candidates = search_variants(
         plan.variants, top_k=top_k, dept=dept,
         keyword_mode=keyword_mode, origin_query=question,
+        trace_out=per_variant,
     )
+    plan.trace = {
+        "need_sql": plan.need_sql,
+        "sql_blocked": plan.sql_blocked,
+        "variants": per_variant,
+        "fused_count": len(plan.candidates),
+    }
     return plan

@@ -113,6 +113,9 @@ async function ask(question) {
     let sources = [];
     let sqlText = "";
     let rowsCount = null;
+    let sqlRows = [];
+    let sqlError = null;
+    let trace = null;
     let resultShown = false;
 
     while (true) {
@@ -143,11 +146,17 @@ async function ask(question) {
           sources = data.sources || [];
           sqlText = data.sql || "";
           rowsCount = data.rows_count ?? null;
+          sqlRows = data.sql_rows || [];
+          sqlError = data.sql_error || null;
+          trace = data.trace || null;
           if (data.cached) btnText.textContent = "命中缓存";
         } else if (event === "delta") {
           if (!resultShown) {
             // 首个片段到达——此刻才让结果区出现，避免空白面板闪一下
-            renderStreamShell(route, sources, sqlText, rowsCount, data.cached);
+            renderStreamShell({
+              route, sources, sqlText, rowsCount,
+              sqlRows, sqlError, trace, cached: data.cached,
+            });
             resultShown = true;
           }
           if (firstCharAt === null) {
@@ -179,7 +188,7 @@ async function ask(question) {
 }
 
 /* 流式结果区：先搭好骨架，后续只更新答案文本 */
-function renderStreamShell(route, sources, sqlText, rowsCount, cached) {
+function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlError, trace, cached }) {
   const badges = [
     `<span class="badge ${route}">${String(route).toUpperCase()}</span>`,
     `<span class="badge time" id="elapsed-badge">生成中…</span>`,
@@ -189,6 +198,16 @@ function renderStreamShell(route, sources, sqlText, rowsCount, cached) {
 
   el("answer-body").innerHTML = "";
 
+  renderSqlBlock(sqlText, rowsCount);
+  renderSources(sources);
+  renderTrace({ trace, sources, sqlText, sqlRows, sqlError });
+
+  el("result-panel").hidden = false;
+  el("result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* SQL 卡片（正文里只放 SQL 原文，结果行放到「检索过程」里展开） */
+function renderSqlBlock(sqlText, rowsCount) {
   if (sqlText) {
     el("sql-block").hidden = false;
     el("sql-body").textContent = sqlText;
@@ -196,24 +215,132 @@ function renderStreamShell(route, sources, sqlText, rowsCount, cached) {
   } else {
     el("sql-block").hidden = true;
   }
+}
 
-  if (sources.length) {
-    el("sources-block").hidden = false;
-    el("sources-list").innerHTML = sources
-      .map((s) => {
-        const name = s.source || "unknown";
-        let cls = "is-sql";
-        if (name.endsWith(".md")) cls = "is-wiki";
-        else if (name === "user_profile") cls = "is-profile";
-        return `<span class="source-chip ${cls}">[来源${s.index}] ${name}</span>`;
-      })
-      .join("");
-  } else {
+/* 引用来源 chips（带精排分数） */
+function renderSources(sources) {
+  if (!sources.length) {
     el("sources-block").hidden = true;
+    return;
   }
+  el("sources-block").hidden = false;
+  el("sources-list").innerHTML = sources
+    .map((s) => {
+      const name = s.source || "unknown";
+      let cls = "is-sql";
+      if (name.endsWith(".md")) cls = "is-wiki";
+      else if (name === "user_profile") cls = "is-profile";
+      const score =
+        typeof s.rerank_score === "number" ? `<i>${s.rerank_score.toFixed(3)}</i>` : "";
+      return `<span class="source-chip ${cls}">[来源${s.index}] ${escapeHtml(name)}${score}</span>`;
+    })
+    .join("");
+}
 
-  el("result-panel").hidden = false;
-  el("result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+/* ---------- 检索过程 ---------- */
+function renderTrace({ trace, sources, sqlText, sqlRows, sqlError }) {
+  const block = el("trace-block");
+  const variants = (trace && trace.variants) || [];
+
+  // 闲聊、或缓存里没有过程数据（旧版本缓存）时，整块不显示
+  if (!trace && !sqlText) {
+    block.hidden = true;
+    return;
+  }
+  block.hidden = false;
+
+  // 默认展开——这块存在的意义就是让人看见
+  el("trace-body").hidden = false;
+  el("trace-fold").textContent = "收起";
+
+  // 1) 多路规划
+  const chips = [`<span class="tp-chip">检索路 <b>${variants.length}</b> 条</span>`];
+  if (trace) {
+    chips.push(
+      trace.need_sql
+        ? `<span class="tp-chip is-sql">LLM 判定：需要 SQL</span>`
+        : `<span class="tp-chip">LLM 判定：不需要 SQL</span>`
+    );
+    if (trace.sql_blocked) {
+      chips.push(`<span class="tp-chip is-warn">SQL 路被「预测类」规则否决</span>`);
+    }
+  } else {
+    chips.push(`<span class="tp-chip is-warn">缓存结果，无过程数据</span>`);
+  }
+  el("trace-plan").innerHTML = chips.join("");
+
+  // 2) 各路召回
+  el("trace-variants").innerHTML =
+    variants
+      .map(
+        (v) => `
+      <div class="tp-variant">
+        <div class="tp-variant-head">
+          <span class="tp-strategy">${escapeHtml(v.strategy || "-")}</span>
+          <span class="tp-query">${escapeHtml(v.query || "")}</span>
+          <span class="tp-count">${v.hit_count ?? 0} 条</span>
+        </div>
+        <div class="tp-src-list">${
+          (v.sources || []).map((s) => `<span class="tp-src">${escapeHtml(s)}</span>`).join("") ||
+          `<span class="tp-src is-empty">无命中</span>`
+        }</div>
+        ${v.error ? `<div class="tp-err">${escapeHtml(v.error)}</div>` : ""}
+      </div>`
+      )
+      .join("") || `<div class="tp-empty">（无）</div>`;
+
+  // 3) 融合 → 精排 → 入上下文
+  const fused = (trace && trace.fused_count) ?? 0;
+  el("trace-flow").innerHTML = `
+    <span class="tp-node">各路召回</span>
+    <span class="tp-arrow">→</span>
+    <span class="tp-node">RRF 融合 <b>${fused}</b></span>
+    <span class="tp-arrow">→</span>
+    <span class="tp-node">Cross-Encoder 精排</span>
+    <span class="tp-arrow">→</span>
+    <span class="tp-node is-final">入上下文 <b>${sources.length}</b></span>`;
+
+  // 4) 精排明细
+  el("trace-rerank").innerHTML =
+    sources
+      .map(
+        (s) => `
+      <div class="tp-rerank-row">
+        <span class="tp-idx">[来源${s.index}]</span>
+        <span class="tp-name">${escapeHtml(s.source || "-")}</span>
+        <span class="tp-score">${
+          typeof s.rerank_score === "number" ? s.rerank_score.toFixed(4) : "-"
+        }</span>
+        ${s.expanded ? `<span class="tp-tag is-expand">全文扩展</span>` : ""}
+        ${(s.strategies || [])
+          .map((x) => `<span class="tp-tag">${escapeHtml(x)}</span>`)
+          .join("")}
+        ${
+          s.from_query
+            ? `<span class="tp-from">← ${escapeHtml(String(s.from_query).slice(0, 36))}</span>`
+            : ""
+        }
+      </div>`
+      )
+      .join("") || `<div class="tp-empty">（无）</div>`;
+
+  // 5) SQL 实际结果行
+  const sqlSec = el("trace-sql-section");
+  if (sqlText) {
+    sqlSec.hidden = false;
+    el("trace-sql-note").textContent = sqlError
+      ? `执行失败：${sqlError}`
+      : `共 ${sqlRows.length} 行`;
+    el("trace-sql-rows").innerHTML = sqlRows.length
+      ? `<table class="tp-table">${sqlRows
+          .map(
+            (r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`
+          )
+          .join("")}</table>`
+      : `<div class="tp-empty">${sqlError ? escapeHtml(sqlError) : "（空结果）"}</div>`;
+  } else {
+    sqlSec.hidden = true;
+  }
 }
 
 /* 收尾：把「生成中…」换成实测耗时，并标出首字延迟 */
@@ -240,31 +367,18 @@ function renderResult(data, elapsed) {
   // 答案
   el("answer-body").innerHTML = formatAnswer(data.answer || "（无内容）");
 
-  // SQL
-  if (data.sql) {
-    el("sql-block").hidden = false;
-    el("sql-body").textContent = data.sql;
-    el("rows-count").textContent = `共 ${data.rows_count ?? 0} 行`;
-  } else {
-    el("sql-block").hidden = true;
-  }
+  // SQL 与来源（与流式路径共用同一套渲染，避免两处逻辑分叉）
+  renderSqlBlock(data.sql, data.rows_count);
 
-  // 来源
   const sources = data.sources || [];
-  if (sources.length) {
-    el("sources-block").hidden = false;
-    el("sources-list").innerHTML = sources
-      .map((s) => {
-        const name = s.source || "unknown";
-        let cls = "is-sql";
-        if (name.endsWith(".md")) cls = "is-wiki";
-        else if (name === "user_profile") cls = "is-profile";
-        return `<span class="source-chip ${cls}">[来源${s.index}] ${name}</span>`;
-      })
-      .join("");
-  } else {
-    el("sources-block").hidden = true;
-  }
+  renderSources(sources);
+  renderTrace({
+    trace: data.trace,
+    sources,
+    sqlText: data.sql,
+    sqlRows: data.sql_rows || [],
+    sqlError: data.sql_error,
+  });
 
   el("result-panel").hidden = false;
   el("result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -350,6 +464,12 @@ document.addEventListener("DOMContentLoaded", () => {
   renderExamples();
   initRetriever();
   el("compare-btn").addEventListener("click", compareRecall);
+
+  el("trace-fold").addEventListener("click", () => {
+    const body = el("trace-body");
+    body.hidden = !body.hidden;
+    el("trace-fold").textContent = body.hidden ? "展开" : "收起";
+  });
 
   el("ask-form").addEventListener("submit", (e) => {
     e.preventDefault();

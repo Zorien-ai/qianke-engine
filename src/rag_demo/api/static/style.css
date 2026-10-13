@@ -395,6 +395,184 @@ button#ask-btn:disabled { opacity: .62; cursor: not-allowed; }
 .source-chip.is-profile { border-color: #cffafe; background: #ecfeff; color: #0e7490; }
 .source-chip.is-sql { border-color: #bfdbfe; background: var(--sql-soft); color: var(--sql); }
 
+/* 来源 chip 上的精排分数 */
+.source-chip i {
+  font-style: normal;
+  margin-left: 5px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  opacity: .7;
+}
+
+/* ---------- 检索过程 ---------- */
+.trace-block {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  overflow: hidden;
+  background: #fbfcfe;
+}
+.trace-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 13px;
+  background: #f3f4f6;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: #374151;
+}
+.trace-fold {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 7px;
+  padding: 3px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all .15s;
+}
+.trace-fold:hover { border-color: var(--primary); color: var(--primary); }
+
+.trace-body { padding: 13px; display: flex; flex-direction: column; gap: 16px; }
+.trace-body[hidden] { display: none; }
+
+.trace-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 8px;
+  letter-spacing: .2px;
+}
+
+/* 多路规划 */
+.trace-plan { display: flex; flex-wrap: wrap; gap: 7px; }
+.tp-chip {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 3px 11px;
+  background: #f3f4f6;
+  color: #374151;
+}
+.tp-chip b { color: var(--primary); }
+.tp-chip.is-sql { background: var(--sql-soft); color: var(--sql); }
+.tp-chip.is-warn { background: #fffbeb; color: #b45309; }
+
+/* 各路召回 */
+.trace-variant-list { display: flex; flex-direction: column; gap: 8px; }
+.tp-variant {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: #fff;
+}
+.tp-variant-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tp-strategy {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.tp-query {
+  font-size: 12.7px;
+  color: #262c38;
+  flex: 1;
+  min-width: 140px;
+  word-break: break-word;
+}
+.tp-count { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tp-src-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tp-src {
+  font-size: 11.7px;
+  color: #3d4453;
+  background: #f6f7fb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+.tp-src.is-empty { color: var(--muted); font-style: italic; }
+.tp-err { font-size: 12px; color: var(--danger); margin-top: 6px; }
+
+/* 融合链路 */
+.trace-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.tp-node {
+  font-size: 12.3px;
+  background: #f6f7fb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 11px;
+  color: #3d4453;
+}
+.tp-node b { color: var(--primary); }
+.tp-node.is-final { background: var(--rag-soft); border-color: #a7f3d0; color: var(--rag); }
+.tp-node.is-final b { color: var(--rag); }
+.tp-arrow { color: var(--muted); font-size: 13px; }
+
+/* 精排明细 */
+.trace-rerank-list { display: flex; flex-direction: column; gap: 5px; }
+.tp-rerank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.3px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+.tp-idx { color: var(--primary); font-weight: 600; white-space: nowrap; }
+.tp-name { color: #262c38; font-weight: 560; }
+.tp-score {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11.7px;
+  color: #0f766e;
+  background: var(--rag-soft);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.tp-tag {
+  font-size: 11.5px;
+  color: var(--muted);
+  background: #f3f4f6;
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.tp-tag.is-expand { background: #eef2ff; color: var(--primary); }
+.tp-from { font-size: 11.7px; color: var(--muted); }
+.tp-empty { font-size: 12.3px; color: var(--muted); font-style: italic; }
+
+/* SQL 结果表 */
+.trace-sql-rows { overflow-x: auto; }
+.tp-table {
+  border-collapse: collapse;
+  font-size: 12.2px;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+.tp-table td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  white-space: nowrap;
+  color: #24303f;
+}
+.tp-table tr:first-child td { background: var(--sql-soft); font-weight: 560; }
+#trace-sql-note { color: var(--muted); font-weight: 400; }
+
 /* ---------- Error ---------- */
 .error-panel { border-color: #fecaca; background: var(--danger-soft); }
 .error-text { color: var(--danger); font-size: 14px; }
