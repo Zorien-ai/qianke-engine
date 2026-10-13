@@ -52,6 +52,49 @@ FIELD_TO_STRATEGY = {
     "假设": STRATEGY_HYDE,
 }
 
+# ==================== 预测类问题的规则拦截 ====================
+# 为什么需要：SQL 判定是 LLM 给出的「软约束」，它可能把「预测明年 GMV」判成需要 SQL。
+# 但库内只有 2024-12-30 的单时点静态快照，没有时间序列，SUM / AVG 只能重述历史、
+# 算不出未来值 —— 最终会产出一个「有来源标记、无实际依据」的数字（EDGE-02 实测）。
+# 这里做一次硬复核，不依赖模型是否守规矩。
+#
+# 误伤控制：**只在 need_sql 已为真时才复核**。即它不会改变「本来就不需要 SQL」的问题
+# （业务知识类，如「明年会员等级会不会调整」），只否决「既要算数 + 又是未来时点」这个
+# 交集 —— 而这个交集恰好就是 SQL 必然答不好的那批。
+# 局限：仍是关键词匹配，措辞绕开这些词就无法命中；详见 bug 文档「局限性」。
+
+FUTURE_TIME_MARKERS = (
+    "明年", "后年", "下一年", "次年",
+    "下个月", "下个季度", "下季度", "下一季度",
+    "未来", "将来",
+)
+
+PREDICTIVE_ACTION_MARKERS = (
+    "预测", "预估", "预计", "推算", "推演", "展望",
+    "会增长", "会减少", "会下降", "会达到", "会突破", "会变成",
+)
+
+# 反事实推演：「如果……多少 / 涨降 / 达到」（如「不发券 GMV 会少多少」）
+# 不要求出现「会」字——「会员」「优惠」都含「会」，加这个词会引入大量假阳性
+_COUNTERFACTUAL_RE = re.compile(
+    r"如果.{0,30}?(多少|金额|GMV|占比|比例|数量|人数|涨|降|增|减|达到|变化)"
+)
+
+
+def looks_predictive(question: str) -> bool:
+    """
+    问题是否属于「预测 / 未来时点 / 反事实推演」——SQL 路无法回答的那一类
+
+    只做否定性判断（用于关闭 SQL 路），不参与路由：
+    命中也只是「不给数字」，问题仍会走 RAG 检索，不会被拦成闲聊。
+    """
+    q = question or ""
+    if any(m in q for m in FUTURE_TIME_MARKERS):
+        return True
+    if any(m in q for m in PREDICTIVE_ACTION_MARKERS):
+        return True
+    return bool(_COUNTERFACTUAL_RE.search(q))
+
 
 @dataclass
 class QueryPlan:
@@ -156,6 +199,12 @@ def plan_queries(question: str) -> QueryPlan:
         return QueryPlan(route=ROUTE_RAG, variants=variants)
 
     variants.extend(extra[:MULTI_QUERY_MAX_VARIANTS])
+
+    # SQL 判定复核：LLM 判「需要」但问题属预测类 -> 关闭 SQL 路（硬兜底，
+    # 与上面的路由复核并列；提示词是软约束，这里不依赖模型守不守规矩）
+    if need_sql and looks_predictive(question):
+        logger.info("SQL 判定复核：问题属预测类，关闭 SQL 路 -> %s", question)
+        need_sql = False
 
     if route != ROUTE_RAG:
         logger.info("路由复核改道 -> %s（关键词路由原判 RAG）: %s", route, question)
