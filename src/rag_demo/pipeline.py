@@ -3,11 +3,25 @@
 """
 @Author  : Vincent
 @File    : pipeline.py
-@Function: 统一问答编排入口：意图路由 -> 闲聊 / Text2SQL / RAG
-           /qa 接口与评测脚本共用同一实现，避免逻辑漂移
+@Function: 统一问答编排入口：二分类路由 -> 多路聚合（检索路 + 可选 SQL 路）-> 生成
 
-           RAG 分支内还有一层 LLM 路由复核，用于捞回关键词路由（router.route）的漏判，
-           详见 _retrieve 与 query_processor.plan_queries
+链路（与流程图一致）：
+
+    闲聊 / 域外  -> 固定回复（不检索、不调模型）
+    其余全部     -> 多路聚合
+                     ├─ 检索路 1~N（各自召回后 RRF 融合、分来源精排）
+                     ├─ SQL 路（多路规划判定需要时才追加）
+                     └─ 聚合后**一次**生成
+
+为什么 SQL 不再是独立分支
+------------------------
+改造前是「闲聊 / SQL / RAG」三选一的互斥分流，靠关键词判聚合类问题，
+实测漏判率 50%（8 个统计问法里 4 个没命中）。漏判后问题再也进不了 SQL 链路。
+
+现在 SQL 变成多路里的一路，由 query_processor 的多路规划统一决定是否追加——
+那次 LLM 调用本来就要做（判断检索路数），所以这个判定是免费的，而且比关键词准。
+
+`/qa` 接口与评测脚本共用同一实现，避免逻辑漂移。
 
 性能说明
 --------
@@ -20,18 +34,13 @@ import logging
 
 from rag_demo.cache import answer_cache
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF, TOP_K_WIKI
-from rag_demo.generation.generator import generate, llm_summarize
-from rag_demo.prompts import CHITCHAT_REPLY, SQL_SCHEMA
+from rag_demo.generation.generator import generate
+from rag_demo.prompts import CHITCHAT_REPLY
 from rag_demo.retrieval.hybrid_retriever import hybrid_search
-from rag_demo.retrieval.query_processor import multi_query_search
+from rag_demo.retrieval.query_processor import QueryPlan, multi_query_search
 from rag_demo.retrieval.reranker import rerank_by_source
 from rag_demo.tools import sql_tool
-from rag_demo.tools.router import (
-    ROUTE_CHITCHAT,
-    ROUTE_RAG,
-    ROUTE_SQL,
-    route,
-)
+from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG, route
 
 logger = logging.getLogger(__name__)
 
@@ -71,57 +80,39 @@ def _chitchat_result() -> dict:
     return {"answer": CHITCHAT_REPLY, "sources": [], "route": ROUTE_CHITCHAT}
 
 
-def _sql_result(question: str) -> dict:
-    """聚合统计：Text2SQL —— 生成 → 安全校验 → 执行 → 自然语言化"""
-    sql_result = sql_tool.query(question)
-    return {
-        "answer": llm_summarize(question, sql_result, schema=SQL_SCHEMA),
-        "sources": [{
-            "index": 1,
-            "source": "sql",
-            "text": sql_result.get("sql", ""),
-        }],
-        "sql": sql_result.get("sql", ""),
-        "rows_count": len(sql_result.get("rows", [])),
-        "route": ROUTE_SQL,
-    }
+def _run_sql(question: str) -> dict:
+    """执行 SQL 路（多路规划判定需要时才会调到这里）"""
+    logger.info("追加 SQL 路: %s", question)
+    return sql_tool.query(question)
 
 
-def _prepare_sql(question: str) -> dict:
-    """流式接口用：SQL 的前置阶段（结果集交给 llm_summarize）"""
-    sql_result = sql_tool.query(question)
-    return {
-        "route": ROUTE_SQL,
-        "sql_result": sql_result,
-        "sources": [{"index": 1, "source": "sql", "text": sql_result.get("sql", "")}],
-    }
-
-
-def _retrieve(
+def _plan_and_retrieve(
     question: str,
     dept: str | None = None,
     keyword_mode: str | None = None,
-) -> tuple[str, list[dict]]:
+) -> QueryPlan:
     """
-    RAG 检索阶段，返回 (最终路由, 候选列表)
+    多路规划 + 检索路执行
 
-    这里会顺带做一次 **LLM 路由复核**（复用变体生成的那次调用，零额外成本）：
-    router.route() 是纯关键词规则，统计类问题只要没命中 SQL_KEYWORDS 就会落到 RAG
-    ——实测 8 个统计类问法漏判 4 个。复核能在同一轮把它们捞回 SQL 或闲聊。
+    返回的 QueryPlan 中：
+        route     可能被 LLM 复核改道成 chitchat（捞关键词路由的漏判）
+        need_sql  是否需要再追加一条结构化查询路
+        candidates 已融合的检索候选（带溯源字段）
 
-    注意复核的边界：只可能把「rag」改成别的——被判成 sql / chitchat 的问题
-    在 route() 阶段就分流走了，压根到不了这里。
+    关闭 ENABLE_MULTI_QUERY 时没有那次 LLM 调用，退化为单路检索、无 SQL 判定
+    —— 这是该开关的固有代价，不是缺陷。
     """
     if not ENABLE_MULTI_QUERY:
-        # 没有变体生成那次 LLM 调用，也就没有顺带的复核机会
-        return ROUTE_RAG, hybrid_search(
-            question, top_k=TOP_K_RRF, dept=dept, keyword_mode=keyword_mode
+        return QueryPlan(
+            route=ROUTE_RAG,
+            candidates=hybrid_search(
+                question, top_k=TOP_K_RRF, dept=dept, keyword_mode=keyword_mode
+            ),
         )
 
-    plan = multi_query_search(
+    return multi_query_search(
         question, top_k=TOP_K_RRF, dept=dept, keyword_mode=keyword_mode
     )
-    return plan.route, plan.candidates
 
 
 def _answer_uncached(
@@ -132,43 +123,32 @@ def _answer_uncached(
     """
     实际问答流程
 
-    三条链路（与流程图一致）：
-        闲聊 / 域外 -> 固定回复（不检索、不调模型）
-        聚合统计    -> Text2SQL
-        语义检索    -> 按需多路 query + 混合检索 + 分来源精排（默认）
-
-    后两条之间还有一层兜底：RAG 检索时会用 LLM 复核一次路由，
-    捞回被关键词规则漏判的统计类问题（详见 _retrieve）。
-
-    返回:
+    二分类路由 -> 多路聚合。返回:
         闲聊: {"answer", "sources": [], "route": "chitchat"}
-        RAG : {"answer", "sources", "route": "rag"}
-        SQL : {"answer", "sources", "sql", "rows_count", "route": "sql"}
+        其余: {"answer", "sources", "route": "rag"}
+              命中 SQL 路时额外带 "sql" / "rows_count"
     """
-    route_result = route(question)
-
-    if route_result == ROUTE_CHITCHAT:
+    if route(question) == ROUTE_CHITCHAT:
         return _chitchat_result()
 
-    if route_result == ROUTE_SQL:
-        return _sql_result(question)
+    plan = _plan_and_retrieve(question, dept, keyword_mode)
 
-    # 关键词路由判成 RAG，但可能是漏判——检索阶段顺带复核
-    final_route, candidates = _retrieve(question, dept, keyword_mode)
-
-    if final_route == ROUTE_SQL:
-        logger.info("路由复核改道 -> sql: %s", question)
-        return _sql_result(question)
-
-    if final_route == ROUTE_CHITCHAT:
+    if plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
         return _chitchat_result()
 
+    # SQL 路：与检索路并行产出，最终一起进 context
+    sql_result = _run_sql(question) if plan.need_sql else None
+
     reranked = rerank_by_source(
-        question, candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
+        question, plan.candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
     )
-    result = generate(question, reranked)
+    result = generate(question, reranked, sql_result=sql_result)
     result["route"] = ROUTE_RAG
+
+    if sql_result is not None:
+        result["sql"] = sql_result.get("sql", "")
+        result["rows_count"] = len(sql_result.get("rows", []))
     return result
 
 
@@ -178,45 +158,43 @@ def prepare(
     keyword_mode: str | None = None,
 ) -> dict:
     """
-    问答前置阶段：路由 + 检索 + 精排（**不含生成**）
+    问答前置阶段：路由 + 多路检索 + 精排 + （按需）SQL（**不含生成**）
 
     供流式接口使用——先同步做完检索拿到上下文，再交给 LLM 逐字生成。
     这样前置阶段（约 3~6s）与生成阶段可以分开观测。
 
-    与 _answer_uncached 一样会做 LLM 路由复核，所以返回的 route 可能与
-    route(question) 的结果不同（关键词漏判被复核改道）。
-
     返回:
-        {"route": "chitchat", "answer": ..., "sources": []}          闲聊：直接给答案
-        {"route": "sql", "sql_result": ..., "sources": [...]}        SQL：交给 llm_summarize
-        {"route": "rag", "candidates": [...], "sources": [...]}      RAG：交给 generate_stream
+        {"route": "chitchat", "answer": ..., "sources": []}      闲聊：直接给答案
+        {"route": "rag", "candidates": [...], "sql_result": ..., "sources": [...]}
+                                                                  其余：交给 generate_stream
     """
-    route_result = route(question)
-
-    if route_result == ROUTE_CHITCHAT:
+    if route(question) == ROUTE_CHITCHAT:
         return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
 
-    if route_result == ROUTE_SQL:
-        return _prepare_sql(question)
+    plan = _plan_and_retrieve(question, dept, keyword_mode)
 
-    final_route, candidates = _retrieve(question, dept, keyword_mode)
-
-    if final_route == ROUTE_SQL:
-        logger.info("路由复核改道 -> sql: %s", question)
-        return _prepare_sql(question)
-
-    if final_route == ROUTE_CHITCHAT:
+    if plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
         return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
 
+    sql_result = _run_sql(question) if plan.need_sql else None
+
     reranked = rerank_by_source(
-        question, candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
+        question, plan.candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
     )
     return {
         "route": ROUTE_RAG,
         "candidates": reranked,
+        "sql_result": sql_result,
         "sources": [
-            {"index": i, "source": c["source"], "text": c["text"][:100]}
+            {
+                "index": i,
+                "source": c["source"],
+                "text": c["text"][:100],
+                "origin_query": c.get("origin_query", ""),
+                "from_query": c.get("from_query", ""),
+                "strategies": c.get("strategies", []),
+            }
             for i, c in enumerate(reranked, 1)
         ],
     }

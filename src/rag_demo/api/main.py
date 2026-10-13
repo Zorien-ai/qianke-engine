@@ -32,9 +32,8 @@ from pydantic import BaseModel
 
 from rag_demo.cache import answer_cache
 from rag_demo.db.connection import close_conn, get_conn
-from rag_demo.generation.generator import generate_stream, llm_summarize
+from rag_demo.generation.generator import generate_stream
 from rag_demo.pipeline import answer_question, prepare
-from rag_demo.prompts import SQL_SCHEMA
 from rag_demo.retrieval.hybrid_retriever import (
     _load_bm25_corpus,
     bm25_search,
@@ -280,34 +279,18 @@ def qa_stream(req: QueryRequest):
                 answer_cache.set(key, {"answer": ctx["answer"], "sources": [], "route": route_name})
                 return
 
-            # SQL：结果集小，一次性总结即可（无需流式）
-            if route_name == "sql":
-                sql_result = ctx["sql_result"]
-                yield _sse("meta", {
-                    "route": route_name,
-                    "sources": ctx["sources"],
-                    "sql": sql_result.get("sql", ""),
-                    "rows_count": len(sql_result.get("rows", [])),
-                })
-                yield _sse("stage", {"stage": "generating"})
-                answer = llm_summarize(req.question, sql_result, schema=SQL_SCHEMA)
-                yield _sse("delta", {"delta": answer})
-                yield _sse("done", {})
-                answer_cache.set(key, {
-                    "answer": answer,
-                    "sources": ctx["sources"],
-                    "sql": sql_result.get("sql", ""),
-                    "rows_count": len(sql_result.get("rows", [])),
-                    "route": route_name,
-                })
-                return
-
-            # RAG：流式生成
-            yield _sse("meta", {"route": route_name, "sources": ctx["sources"]})
+            # 流式生成：检索路候选 + （按需的）SQL 路结果一起进 context
+            sql_result = ctx.get("sql_result")
+            yield _sse("meta", {
+                "route": route_name,
+                "sources": ctx["sources"],
+                "sql": (sql_result or {}).get("sql", ""),
+                "rows_count": len((sql_result or {}).get("rows", [])),
+            })
             yield _sse("stage", {"stage": "generating"})
 
             chunks = []
-            for delta in generate_stream(req.question, ctx["candidates"]):
+            for delta in generate_stream(req.question, ctx["candidates"], sql_result):
                 chunks.append(delta)
                 yield _sse("delta", {"delta": delta})
 
@@ -316,6 +299,8 @@ def qa_stream(req: QueryRequest):
                 "answer": "".join(chunks),
                 "sources": ctx["sources"],
                 "route": route_name,
+                "sql": (sql_result or {}).get("sql", ""),
+                "rows_count": len((sql_result or {}).get("rows", [])),
             })
 
         except Exception as e:  # 流式过程中出错也要让前端知道

@@ -219,17 +219,38 @@ def bm25_search(query, top_k=TOP_K_BM25):
 
 
 def rrf_fusion(result_lists, k=60, top_n=TOP_K_RRF):
-    """Reciprocal Rank Fusion"""
+    """
+    Reciprocal Rank Fusion
+
+    按 id 去重，名次累加 1/(k+rank+1)——只用名次不用原始分数，
+    因为向量相似度、BM25 分、稀疏内积三者的量纲不可比。
+
+    strategies 做**并集**：同一条资料被多路命中时，要把各路的名字都记下来
+    （这正是"多路共识"的依据）。此前 item 只在首次出现时保留，
+    后面那路的命中记录会被丢掉，导致 strategies 退化成「第一路的名字」。
+    """
     fused = {}
     for results in result_lists:
         for rank, item in enumerate(results):
             key = item["id"]
             if key not in fused:
-                fused[key] = {"item": item, "rrf_score": 0.0}
+                fused[key] = {
+                    "item": item,
+                    "rrf_score": 0.0,
+                    "strategies": list(item.get("strategies") or []),
+                }
+            else:
+                merged = fused[key]["strategies"]
+                for s in item.get("strategies") or []:
+                    if s not in merged:
+                        merged.append(s)
             fused[key]["rrf_score"] += 1.0 / (k + rank + 1)
 
     sorted_items = sorted(fused.values(), key=lambda x: -x["rrf_score"])
-    return [{**x["item"], "rrf_score": x["rrf_score"]} for x in sorted_items[:top_n]]
+    return [
+        {**x["item"], "rrf_score": x["rrf_score"], "strategies": x["strategies"]}
+        for x in sorted_items[:top_n]
+    ]
 
 
 def keyword_search(query, top_k=TOP_K_BM25, mode=None):

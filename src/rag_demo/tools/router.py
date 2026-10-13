@@ -3,19 +3,31 @@
 """
 @Author  : Vincent
 @File    : router.py
-@Function: 轻量意图路由——决定问题走哪条链路
+@Function: 轻量意图路由（二分类）——只负责筛掉闲聊
 
-三条走向（与流程图一致）：
+走向只有两条：
     chitchat  闲聊 / 域外问题 -> 直接返回固定回复，不检索、不调模型
-    sql       聚合统计类问题  -> Text2SQL
-    rag       语义检索类问题  -> 混合检索（默认）
+    rag       其余全部        -> 进入多路聚合链路
+
+为什么不再判 SQL
+----------------
+原先这里用 SQL_KEYWORDS 做「闲聊 / 聚合 / 检索」三分类，但关键词判聚合的
+漏判率实测达 50%——8 个统计类问法里 4 个没命中（如「上海和北京的用户哪个多」
+「用户里买母婴的多不多」）。口语化的聚合问法靠词表覆盖不住，而一旦漏判，
+问题就再也进不了 SQL 链路。
+
+现在 SQL 不再是独立分支，而是「多路聚合」里的一路，由 query_processor 的
+多路规划统一决定是否追加——那次 LLM 调用本来就存在（用于判断检索路数），
+所以追加 SQL 判断不产生额外成本，而且比关键词准得多。
+
+本模块因此收窄为只做一件事：**筛掉闲聊**。这件事必须留在规则层：
+一旦交给 LLM，闲聊也要付一次模型往返，「闲聊省掉两次推理」的初衷就没了。
+漏判（该拦没拦）由 query_processor 的路由复核兜底，代价可接受。
 """
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 
-ROUTE_SQL = "sql"
 ROUTE_RAG = "rag"
 ROUTE_CHITCHAT = "chitchat"
 
@@ -58,10 +70,10 @@ def is_chitchat(question: str) -> bool:
     """
     判断是否为闲聊 / 域外问题
 
-    规则优先：快、免费、可控。宁可漏判（走正常 RAG），也不要误伤真业务问题——
+    规则优先：快、免费、可控。宁可漏判（走正常链路），也不要误伤真业务问题——
     漏判的代价是浪费一次检索，误伤的代价是把该答的问题拒之门外。
 
-    漏判由 query_processor 的 LLM 路由复核兜底（复用已有调用，零额外成本）。
+    漏判由 query_processor 的路由复核兜底（复用已有 LLM 调用，零额外成本）。
     """
     if not question:
         return False
@@ -79,35 +91,12 @@ def is_chitchat(question: str) -> bool:
     return False
 
 
-# ---------- 聚合 / 统计类意图 ----------
-SQL_KEYWORDS = [
-    # 数量类
-    "多少", "几个", "几笔", "几家", "几条", "数量", "规模", "总数", "总共", "合计",
-    # 排名类
-    "排名", "排行", "top", "前几", "前 5", "前5", "前 3", "前3", "前 10", "前10",
-    # 分布 / 比例类
-    "分布", "占比", "比例", "百分比", "集中", "聚集",
-    # 对比类
-    "差异", "对比", "相比",
-    # 数值统计类
-    "平均", "均值", "最高", "最低", "最多", "最少", "最大", "最小",
-    "统计", "汇总", "求和", "计数",
-    # 口语化比较 / 计数（2026-10-12 补）
-    # 实测漏判：「上海和北京的用户哪个多」「用户里买母婴的多不多」都没命中上面的词。
-    # 这里只收「几乎只用于聚合」的说法；判别不了的（如「有啥不一样」）不硬塞，
-    # 交给 query_processor 的 LLM 复核——规则层宁可漏，也不要误判。
-    "哪个多", "哪个少", "谁多", "谁少", "哪边多", "哪边少",
-    "多不多", "少不少", "数一下", "算一下", "数数",
-]
-
-# 闲聊固定回复见 rag_demo/prompts.py::CHITCHAT_REPLY
-
-
 def route(question: str) -> str:
     """
-    判断问题走向，返回 "chitchat" / "sql" / "rag"
+    判断问题走向，返回 "chitchat" / "rag"
 
-    顺序很重要：先挡闲聊（最省），再判聚合（要 SQL），剩下的走 RAG。
+    只做二分类：拦掉闲聊，其余一律进入多路聚合链路。
+    「是否需要 SQL 路」「需要哪几路检索」都由 query_processor.plan_queries 统一决定。
     """
     if not question:
         return ROUTE_RAG
@@ -116,11 +105,5 @@ def route(question: str) -> str:
         logger.info("意图路由 -> chitchat: %s", question)
         return ROUTE_CHITCHAT
 
-    q = question.lower()
-    for kw in SQL_KEYWORDS:
-        if kw in q:
-            logger.info("意图路由 -> sql（命中关键词 '%s'）: %s", kw, question)
-            return ROUTE_SQL
-
-    logger.info("意图路由 -> rag: %s", question)
+    logger.info("意图路由 -> 多路聚合: %s", question)
     return ROUTE_RAG

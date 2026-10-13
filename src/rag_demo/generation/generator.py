@@ -20,15 +20,71 @@ client = OpenAI(api_key=API_KEY or "EMPTY", base_url=BASE_URL)
 # ==========================================
 
 
-def build_context(candidates):
-    lines = []
-    for i, c in enumerate(candidates, 1):
-        lines.append(f"[来源{i}] ({c['source']}) {c['text']}")
-    return "\n".join(lines)
+def build_context(candidates, sql_result=None):
+    """
+    把检索资料与结构化查询结果拼成 LLM 的 context
+
+    分两段输出，因为二者性质不同：
+        [检索资料]        —— 「找到的文本」，需要归纳、可以有推断
+        [结构化查询结果]  —— 「算出来的数」，必须原样引用、不能归纳
+    混在一起写，模型容易把统计数字当成文本一起"总结"掉。
+
+    每条资料带溯源：从哪个问题找出来的（原始 / 改写）、走的是哪几路。
+    没有溯源的话，LLM 只看到一份扁平清单，无法判断某条资料对应提问的哪一部分。
+    """
+    parts = []
+
+    if candidates:
+        lines = ["[检索资料]"]
+        for i, c in enumerate(candidates, 1):
+            origin = c.get("origin_query") or ""
+            from_q = c.get("from_query") or ""
+            ways = "、".join(c.get("strategies") or [])
+
+            tags = []
+            if origin:
+                tags.append(f"原问题: {origin}")
+            if from_q and from_q != origin:
+                tags.append(f"改写: {from_q}")
+            if ways:
+                tags.append(f"路径: {ways}")
+
+            head = f"[资料{i}] ({c.get('source', '')})"
+            if tags:
+                head += "（" + " | ".join(tags) + "）"
+            lines.append(f"{head}\n{c['text']}")
+        parts.append("\n".join(lines))
+
+    if sql_result and sql_result.get("rows"):
+        rows = sql_result["rows"]
+        rows_text = "\n".join(str(r) for r in rows[:50])
+        parts.append(
+            f"[结构化查询结果]\n{sql_result.get('sql', '')}\n"
+            f"（共 {len(rows)} 行）\n{rows_text}"
+        )
+
+    return "\n\n".join(parts)
 
 
-def generate(query, candidates, model=MODEL):
-    if not candidates:
+def _build_sources(candidates):
+    """候选 → 对外的 sources 列表（带溯源，便于前端/排查）"""
+    return [
+        {
+            "index": i,
+            "source": c["source"],
+            "text": c["text"][:100],
+            "origin_query": c.get("origin_query", ""),
+            "from_query": c.get("from_query", ""),
+            "strategies": c.get("strategies", []),
+        }
+        for i, c in enumerate(candidates, 1)
+    ]
+
+
+def generate(query, candidates, sql_result=None, model=MODEL):
+    has_sql = bool(sql_result and sql_result.get("rows"))
+
+    if not candidates and not has_sql:
         return {"answer": "根据现有资料无法确定。", "sources": []}
 
     if not API_KEY:
@@ -37,7 +93,7 @@ def generate(query, candidates, model=MODEL):
             "请先设置：set DEEPSEEK_API_KEY=sk-xxxx"
         )
 
-    context = build_context(candidates)
+    context = build_context(candidates, sql_result)
     prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
     resp = client.chat.completions.create(
         model=model,
@@ -45,11 +101,7 @@ def generate(query, candidates, model=MODEL):
         temperature=0.3,
     )
     answer = resp.choices[0].message.content
-    sources = [
-        {"index": i, "source": c["source"], "text": c["text"][:100]}
-        for i, c in enumerate(candidates, 1)
-    ]
-    return {"answer": answer, "sources": sources}
+    return {"answer": answer, "sources": _build_sources(candidates)}
 
 
 # ---------- Text2SQL 结果自然语言化 ----------
@@ -60,7 +112,7 @@ def generate(query, candidates, model=MODEL):
 #             但只有「结果 0 行」时才真正需要枚举信息。可改为按需注入。
 #             注意：这是修 OPT-06 时引入的必要代价，属可优化点而非缺陷。
 #             详见 bug/性能隐患台账.md
-def generate_stream(query, candidates, model=MODEL):
+def generate_stream(query, candidates, sql_result=None, model=MODEL):
     """
     流式生成：逐段产出文本片段
 
@@ -70,11 +122,12 @@ def generate_stream(query, candidates, model=MODEL):
 
     产出的是字符串片段（delta），调用方负责拼接与推送。
     """
-    if not candidates:
+    has_sql = bool(sql_result and sql_result.get("rows"))
+    if not candidates and not has_sql:
         yield "根据现有资料无法确定。"
         return
 
-    context = build_context(candidates)
+    context = build_context(candidates, sql_result)
     prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
     stream = client.chat.completions.create(
         model=model,
