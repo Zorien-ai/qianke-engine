@@ -1,0 +1,25 @@
+========================================================================
+[DA-01] 哪些标签跟美妆相关
+========================================================================
+--- /search 召回对比 ---
+BM25   top3: ['tag_definitions.md', 'tag_definitions.md', 'tag_definitions.md']
+Sparse top3: ['user_profile', 'user_profile', 'user_profile']
+共同召回 1 个 | 仅 BM25: ['tag_definitions.md'] | 仅 Sparse: []
+
+--- /qa 按策略切换（同一问题） ---
+  [bm25  ] route=rag   来源=['user_profile', 'user_profile', 'user_profile', 'tag_definitions.md']
+  [sparse] route=rag   来源=['user_profile', 'user_profile', 'user_profile']
+  [both  ] route=rag   来源=['user_profile', 'user_profile', 'user_profile', 'tag_definitions.md']
+
+========================================================================
+[MGT-01] 本周高价值用户规模有多少
+========================================================================
+--- /search 召回对比 ---
+BM25   top3: ['segmentation.md', 'segmentation.md', 'segmentation.md']
+Sparse top3: ['tag_definitions.md', 'tag_definitions.md', 'segmentation.md']
+共同召回 4 个 | 仅 BM25: ['analysis_report_template.md', 'cs_sop.md'] | 仅 Sparse: ['user_profile']
+
+--- /qa 按策略切换（同一问题） ---
+  [bm25  ] route=sql   来源=['sql']
+  [sparse] route=sql   来源=['sql']
+  [both  ] route=sql   来源=['sql']

@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用户画像 RAG 系统 · 架构图与流程图 v1.0</title>
+<style>
+  :root {
+    --bg: #F6F7F9;
+    --card: #FFFFFF;
+    --ink: #1F2937;
+    --ink-2: #5A6472;
+    --ink-3: #8A9099;
+    --line: #E5E8EC;
+    --data: #5B8DC8;  --data-bg: #E8F1FB;  --data-fg: #1F4E79;
+    --model: #8B7BC7; --model-bg: #F0EBFA; --model-fg: #4A3B7A;
+    --ret: #6BAF7B;   --ret-bg: #E9F5EC;   --ret-fg: #2E6B3E;
+    --gen: #D99B5C;   --gen-bg: #FDF0E3;   --gen-fg: #8A5A1E;
+    --api: #5EA8AE;   --api-bg: #E6F4F5;   --api-fg: #1F5F66;
+    --inf: #9AA0A6;   --inf-bg: #F1F2F4;   --inf-fg: #4A4F55;
+    --out: #C97B6B;   --out-bg: #FBEDEA;   --out-fg: #7A3B2E;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 20px 64px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  header.page {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 26px 30px;
+    margin-bottom: 26px;
+    box-shadow: 0 1px 3px rgba(16,24,40,.04);
+  }
+  header.page h1 { margin: 0 0 10px; font-size: 25px; letter-spacing: .2px; }
+  header.page .sub { color: var(--ink-2); font-size: 14.5px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip {
+    display: inline-block; padding: 4px 11px; border-radius: 999px;
+    font-size: 13px; border: 1px solid var(--line); background: #FAFBFC; color: var(--ink-2);
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+
+  .card {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px 30px 26px;
+    margin-bottom: 26px;
+    box-shadow: 0 1px 3px rgba(16,24,40,.04);
+  }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 20px; }
+  .card-head h2 { margin: 0; font-size: 19px; }
+  .card-head .hint { color: var(--ink-3); font-size: 13px; font-weight: 400; margin-left: 10px; }
+  .ver {
+    flex: none; font-size: 12px; letter-spacing: .5px; color: var(--ink-3);
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; background: #FAFBFC;
+    font-variant-numeric: tabular-nums;
+  }
+  .diagram { overflow-x: auto; padding: 6px 0 12px; }
+  .diagram .mermaid { margin: 0; text-align: center; }
+  .diagram svg { max-width: 100%; height: auto; }
+
+  h4.sec { font-size: 14px; margin: 18px 0 10px; color: var(--ink); letter-spacing: .3px; }
+  h4.sec::before { content: ""; display: inline-block; width: 3px; height: 13px; background: var(--api); border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+  .li { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-2); }
+  .sw { width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid; flex: none; }
+  .sw.line { height: 0; border-radius: 0; border-width: 0; border-top-width: 2px; width: 22px; }
+  .sw.dash { border-top-style: dashed; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 6px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #FAFBFC; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+  td code, .mono { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: 12.5px; background: #F4F5F7; padding: 1px 5px; border-radius: 4px; color: #38404E; }
+
+  ol.pts, ul.pts { margin: 6px 0 0; padding-left: 22px; }
+  ol.pts li, ul.pts li { margin-bottom: 7px; color: var(--ink-2); }
+  ol.pts li b, ul.pts li b { color: var(--ink); }
+
+  pre.code {
+    background: #F7F8FA; border: 1px solid var(--line); border-radius: 9px;
+    padding: 13px 16px; overflow-x: auto; margin: 8px 0 0;
+    font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+    font-size: 12.5px; line-height: 1.65; color: #2F3743;
+  }
+  footer.page { text-align: center; color: var(--ink-3); font-size: 13px; padding-top: 8px; }
+  .err { background: #FDECEA; border: 1px solid #F3C2BC; color: #8B2E22; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <h1>用户画像 RAG 系统 · 架构图与流程图</h1>
+    <div class="sub">基于 RAG 的用户画像分析助手 Demo — 业务人员用自然语言查询用户画像、标签定义、客服 SOP 与营销策略</div>
+    <div class="meta">
+      <span class="chip">版本 <b>v1.0 / 2026-10</b></span>
+      <span class="chip">数据规模 <b>8110 条画像 + 29 个文档分块</b></span>
+      <span class="chip">部署 <b>FastAPI 单进程 + pgvector 容器</b></span>
+      <span class="chip">检索 <b>混合召回 + 分来源精排 + 引用溯源</b></span>
+    </div>
+  </header>
+
+  <div id="err" class="err" style="display:none"></div>
+
+  <!-- ============ 图 1 ============ -->
+  <section class="card">
+    <div class="card-head">
+      <h2>图 1 · 系统分层架构图<span class="hint">五层纵向分层 + 底部横切基础设施层</span></h2>
+      <span class="ver">v1.0 / 2026-10</span>
+    </div>
+    <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+    subgraph L5["⑤ API 层 · FastAPI 单进程（uvicorn）"]
+        A1["POST /qa<br/>question · dept · top_k"]
+        A2["GET /health<br/>健康检查"]
+        A3["POST /admin/reload<br/>刷新 BM25 语料"]
+        A4["lifespan 预加载<br/>启动时加载模型 + BM25"]
+    end
+
+    subgraph L4["④ 生成层"]
+        G1["generator.py<br/>Prompt 组装（带来源编号）"]
+        G2["DeepSeek API 调用<br/>temperature = 0.3"]
+        G3["输出 answer + sources<br/>引用溯源 · 脱敏"]
+    end
+
+    subgraph L3["③ 检索层"]
+        R1["hybrid_retriever.py<br/>向量 + BM25 → RRF 融合"]
+        R2["reranker.py<br/>rerank_by_source<br/>画像 Top-3 / 文档 Top-2"]
+    end
+
+    subgraph L2["② 模型层"]
+        M1["bge-m3<br/>嵌入 · 1024 维"]
+        M2["bge-reranker-v2-m3<br/>CrossEncoder 精排"]
+        M3["jieba<br/>分词 + 自定义词典 + 停用词"]
+        M4["DeepSeek API<br/>OpenAI 兼容接口"]
+    end
+
+    subgraph L1["① 数据层"]
+        D1["PostgreSQL 16 + pgvector<br/>:5432 · vec_db"]
+        D2["user_profile_vectors<br/>8110 条画像 · 1024 维"]
+        D3["wiki_vectors<br/>29 分块 · 5 篇 Markdown"]
+        D4["原始数据源<br/>dianshuang/*.csv · docs/*.md"]
+    end
+
+    subgraph L0["基础设施层 · 横切所有层"]
+        I1["config.py<br/>路径 · DB_CONFIG · TOP_K_* · DEVICE · DTYPE"]
+        I2["db/connection.py<br/>连接单例 · SELECT 1 探活 · 自动重连"]
+    end
+
+    A1 ~~~ A2 ~~~ A3 ~~~ A4
+    G1 ~~~ G2 ~~~ G3
+    R1 ~~~ R2
+    M1 ~~~ M2 ~~~ M3 ~~~ M4
+    D1 ~~~ D2 ~~~ D3 ~~~ D4
+    I1 ~~~ I2
+
+    L5 --> L4
+    L4 --> L3
+    L3 --> L2
+    L2 --> L1
+    L1 --> L0
+
+    classDef cApi fill:#FFFFFF,stroke:#5EA8AE,stroke-width:1.5px,color:#1F5F66
+    classDef cGen fill:#FFFFFF,stroke:#D99B5C,stroke-width:1.5px,color:#8A5A1E
+    classDef cRet fill:#FFFFFF,stroke:#6BAF7B,stroke-width:1.5px,color:#2E6B3E
+    classDef cMod fill:#FFFFFF,stroke:#8B7BC7,stroke-width:1.5px,color:#4A3B7A
+    classDef cDat fill:#FFFFFF,stroke:#5B8DC8,stroke-width:1.5px,color:#1F4E79
+    classDef cInf fill:#FFFFFF,stroke:#9AA0A6,stroke-width:1.5px,color:#4A4F55
+
+    class A1,A2,A3,A4 cApi
+    class G1,G2,G3 cGen
+    class R1,R2 cRet
+    class M1,M2,M3,M4 cMod
+    class D1,D2,D3,D4 cDat
+    class I1,I2 cInf
+
+    style L5 fill:#E6F4F5,stroke:#5EA8AE,stroke-width:2px,color:#1F5F66
+    style L4 fill:#FDF0E3,stroke:#D99B5C,stroke-width:2px,color:#8A5A1E
+    style L3 fill:#E9F5EC,stroke:#6BAF7B,stroke-width:2px,color:#2E6B3E
+    style L2 fill:#F0EBFA,stroke:#8B7BC7,stroke-width:2px,color:#4A3B7A
+    style L1 fill:#E8F1FB,stroke:#5B8DC8,stroke-width:2px,color:#1F4E79
+    style L0 fill:#F1F2F4,stroke:#9AA0A6,stroke-width:2px,color:#4A4F55
+</pre>
+    </div>
+    <h4 class="sec">图例</h4>
+    <div class="legend">
+      <span class="li"><i class="sw" style="background:var(--api-bg);border-color:var(--api)"></i>⑤ API 层</span>
+      <span class="li"><i class="sw" style="background:var(--gen-bg);border-color:var(--gen)"></i>④ 生成层</span>
+      <span class="li"><i class="sw" style="background:var(--ret-bg);border-color:var(--ret)"></i>③ 检索层</span>
+      <span class="li"><i class="sw" style="background:var(--model-bg);border-color:var(--model)"></i>② 模型层</span>
+      <span class="li"><i class="sw" style="background:var(--data-bg);border-color:var(--data)"></i>① 数据层</span>
+      <span class="li"><i class="sw" style="background:var(--inf-bg);border-color:var(--inf)"></i>基础设施层（横切）</span>
+      <span class="li"><i class="sw line" style="border-color:#8A9099"></i>层间箭头：分层依赖方向（上层依赖下层）</span>
+      <span class="li">层内 <span class="mono">~~~</span>：同层模块并列，不表示依赖</span>
+    </div>
+    <h4 class="sec">读图要点</h4>
+    <ul class="pts">
+      <li>层间箭头表示<b>分层依赖</b>：API 层 → 生成层 → 检索层 → 模型层 → 数据层 → 基础设施层。</li>
+      <li>运行时调用链：<span class="mono">POST /qa</span> → <span class="mono">hybrid_search</span>（bge-m3 / jieba / pgvector）→ <span class="mono">rerank_by_source</span>（bge-reranker-v2-m3）→ <span class="mono">generate</span>（DeepSeek API）。</li>
+      <li>数据层被两条路径访问：检索层<b>在线读</b> pgvector，<span class="mono">ingest_*.py</span> <b>离线写</b> 向量，读写分离。</li>
+      <li><span class="mono">config.py</span> / <span class="mono">db/connection.py</span> 是被各层直接 import 的横切依赖，故置于底部。</li>
+    </ul>
+  </section>
+
+  <!-- ============ 图 2 ============ -->
+  <section class="card">
+    <div class="card-head">
+      <h2>图 2 · 端到端数据流图<span class="hint">用户提问 → 返回 answer + sources</span></h2>
+      <span class="ver">v1.0 / 2026-10</span>
+    </div>
+    <div class="diagram">
+<pre class="mermaid">
+flowchart TD
+    U(["用户提问<br/>自然语言 query"])
+    API["FastAPI POST /qa<br/>输入 question / dept / top_k"]
+
+    V["向量召回 · pgvector<br/>cosine 相似度"]
+    B["BM25 召回 · rank_bm25<br/>jieba 分词 + 停用词过滤"]
+    RRF["RRF 融合<br/>k = 60 · 无需分数归一化"]
+    C30["Top-30 候选<br/>每条含 id / source / text"]
+
+    RS["rerank_by_source<br/>分来源精排 · 核心设计"]
+    RP["画像候选 user_profile<br/>CrossEncoder → Top-3"]
+    RW["文档候选 *.md<br/>CrossEncoder → Top-2"]
+    MG["合并 · 按 rerank_score 降序<br/>各自保名额，wiki 不被画像挤掉"]
+
+    GEN["generator<br/>Prompt 组装 · 带来源编号"]
+    LLM["DeepSeek API 调用<br/>temperature = 0.3"]
+    CIT["引用溯源 + 脱敏<br/>sources: index / source / text"]
+    OUT(["返回 answer + sources"])
+
+    U --> API
+    API --> V
+    API --> B
+    V -->|"Top-20"| RRF
+    B -->|"Top-20"| RRF
+    RRF -->|"Top-30"| C30
+    C30 --> RS
+    RS --> RP
+    RS --> RW
+    RP -->|"Top-3"| MG
+    RW -->|"Top-2"| MG
+    MG -->|"Top-5"| GEN
+    GEN --> LLM
+    LLM --> CIT
+    CIT --> OUT
+
+    classDef cIn fill:#FFFFFF,stroke:#5EA8AE,stroke-width:1.5px,color:#1F5F66
+    classDef cRec fill:#FFFFFF,stroke:#6BAF7B,stroke-width:1.5px,color:#2E6B3E
+    classDef cRank fill:#FFF7E6,stroke:#D99B5C,stroke-width:2px,color:#8A5A1E
+    classDef cGen fill:#FFFFFF,stroke:#C97B6B,stroke-width:1.5px,color:#7A3B2E
+    classDef cOut fill:#FFFFFF,stroke:#8B7BC7,stroke-width:1.5px,color:#4A3B7A
+
+    class U,API cIn
+    class V,B,RRF,C30 cRec
+    class RS,RP,RW,MG cRank
+    class GEN,LLM,CIT cGen
+    class OUT cOut
+
+    style RS fill:#FDF0E3,stroke:#D99B5C,stroke-width:3px,color:#8A5A1E
+    style MG fill:#FDF0E3,stroke:#D99B5C,stroke-width:2px,color:#8A5A1E
+</pre>
+    </div>
+    <h4 class="sec">图例</h4>
+    <div class="legend">
+      <span class="li"><i class="sw" style="background:var(--api-bg);border-color:var(--api)"></i>入口：用户 → API</span>
+      <span class="li"><i class="sw" style="background:var(--ret-bg);border-color:var(--ret)"></i>混合召回 + RRF 融合</span>
+      <span class="li"><i class="sw" style="background:var(--gen-bg);border-color:var(--gen);border-width:3px"></i>分来源精排（核心，加粗边）</span>
+      <span class="li"><i class="sw" style="background:var(--out-bg);border-color:var(--out)"></i>生成与溯源</span>
+      <span class="li"><i class="sw" style="background:var(--model-bg);border-color:var(--model)"></i>出口：answer + sources</span>
+    </div>
+    <h4 class="sec">数量变化一览</h4>
+    <table>
+      <tr><th>阶段</th><th>输入</th><th>输出</th><th>作用</th></tr>
+      <tr><td>向量召回</td><td>query → 1024 维向量</td><td><b>Top-20</b></td><td>pgvector cosine 相似度</td></tr>
+      <tr><td>BM25 召回</td><td>jieba 分词后 query</td><td><b>Top-20</b></td><td>关键词精确匹配，补向量语义盲区</td></tr>
+      <tr><td>RRF 融合</td><td>2 × 20</td><td><b>Top-30</b></td><td>按排名累加，免归一化</td></tr>
+      <tr><td><b>分来源精排</b></td><td>30</td><td><b>3 + 2 = 5</b></td><td>画像与 wiki 分池，各自保名额</td></tr>
+      <tr><td>生成</td><td>5 条候选</td><td>answer + sources</td><td>带编号引用、区分事实/推断、脱敏</td></tr>
+    </table>
+    <h4 class="sec">读图要点</h4>
+    <ol class="pts">
+      <li><b>双轨并行</b>：向量与 BM25 两路独立召回，各取 Top-20，互不影响，任何一路失效另一路仍可用。</li>
+      <li><b>RRF 免归一化</b>：cosine 距离与 BM25 分数量纲不同，用<b>排名</b>而非分数融合，规避归一化调参；同一文档双路命中则分数累加，天然奖励"双路共识"。</li>
+      <li><b>分来源精排（核心）</b>：先按 <span class="mono">source</span> 是否以 <span class="mono">.md</span> 结尾拆成两池，<b>画像池取 Top-3、文档池取 Top-2</b>，再合并重排。若单池精排，8110 条画像在数量上会整体挤掉 29 个业务规则分块，SOP / 标签口径类问题将无据可依。</li>
+      <li><b>引用可回溯</b>：候选全程携带 <span class="mono">id / source / text</span>，生成后映射回原文，<span class="mono">sources</span> 返回编号、来源类型与原文片段（截断 100 字）。</li>
+    </ol>
+  </section>
+
+  <!-- ============ 图 3 ============ -->
+  <section class="card">
+    <div class="card-head">
+      <h2>图 3 · 检索层细节图<span class="hint">hybrid_search 内部：向量 + BM25 + RRF</span></h2>
+      <span class="ver">v1.0 / 2026-10</span>
+    </div>
+    <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+    Q(["query 输入"])
+    ENC["bge-m3 encode(query)<br/>→ 1024 维向量"]
+    TOK["jieba 分词 _tokenize()<br/>同义词归一（女性→女）<br/>→ 停用词过滤 → 单字过滤"]
+
+    subgraph VEC["向量召回 · vector_search()　TOP_K_VECTOR = 20"]
+        direction TB
+        SQL["pgvector SQL（余弦距离）<br/>SELECT id, user_id, profile_text,<br/>1 - (embedding #60;=#62; qvec) AS score<br/>WHERE sensitivity #60;= 3 [AND dept = ...]<br/>ORDER BY embedding #60;=#62; qvec<br/>LIMIT 20"]
+        V20["user_profile_vectors Top-20<br/>+ wiki_vectors Top-20（两表各自 LIMIT）"]
+        SQL --> V20
+    end
+
+    subgraph BM["BM25 召回 · bm25_search()　TOP_K_BM25 = 20"]
+        direction TB
+        IDX["BM25Okapi(全量分词语料)<br/>8110 条画像 + 29 个文档分块"]
+        B20["get_scores → argsort 降序<br/>Top-20（仅保留 score #62; 0）"]
+        IDX --> B20
+    end
+
+    ENC --> SQL
+    TOK --> IDX
+
+    RRF["RRF 融合 · rrf_fusion(k = 60)<br/>score = Σ 1 / (k + rank + 1)<br/>按 id 去重累加 · 无需分数归一化"]
+    OUT(["TOP_K_RRF = 30<br/>候选带 rrf_score，按分降序"])
+
+    V20 -->|"排名列表"| RRF
+    B20 -->|"排名列表"| RRF
+    RRF -->|"Top-30"| OUT
+
+    classDef cIn fill:#FFFFFF,stroke:#5EA8AE,stroke-width:1.5px,color:#1F5F66
+    classDef cVec fill:#FFFFFF,stroke:#5B8DC8,stroke-width:1.5px,color:#1F4E79
+    classDef cBm fill:#FFFFFF,stroke:#8B7BC7,stroke-width:1.5px,color:#4A3B7A
+    classDef cRrf fill:#FFFFFF,stroke:#6BAF7B,stroke-width:1.5px,color:#2E6B3E
+
+    class Q,ENC,TOK cIn
+    class SQL,V20 cVec
+    class IDX,B20 cBm
+    class RRF,OUT cRrf
+
+    style VEC fill:#E8F1FB,stroke:#5B8DC8,stroke-width:2px,color:#1F4E79
+    style BM fill:#F0EBFA,stroke:#8B7BC7,stroke-width:2px,color:#4A3B7A
+    style RRF fill:#E9F5EC,stroke:#6BAF7B,stroke-width:2px,color:#2E6B3E
+</pre>
+    </div>
+    <h4 class="sec">图例</h4>
+    <div class="legend">
+      <span class="li"><i class="sw" style="background:var(--api-bg);border-color:var(--api)"></i>公共预处理（编码 / 分词）</span>
+      <span class="li"><i class="sw" style="background:var(--data-bg);border-color:var(--data)"></i>向量召回分支（pgvector）</span>
+      <span class="li"><i class="sw" style="background:var(--model-bg);border-color:var(--model)"></i>BM25 召回分支（jieba + rank_bm25）</span>
+      <span class="li"><i class="sw" style="background:var(--ret-bg);border-color:var(--ret)"></i>RRF 融合与输出</span>
+    </div>
+    <h4 class="sec">TOP_K 参数表</h4>
+    <table>
+      <tr><th>参数</th><th>值</th><th>说明</th></tr>
+      <tr><td class="mono">TOP_K_VECTOR</td><td>20</td><td>向量单路召回数量</td></tr>
+      <tr><td class="mono">TOP_K_BM25</td><td>20</td><td>BM25 单路召回数量</td></tr>
+      <tr><td class="mono">TOP_K_RRF</td><td>30</td><td>RRF 融合后候选数量</td></tr>
+      <tr><td class="mono">rrf_fusion(k)</td><td>60</td><td>平滑常数，抑制头部单一排名的主导性</td></tr>
+      <tr><td class="mono">sensitivity_max</td><td>3</td><td>向量召回敏感度过滤上限</td></tr>
+      <tr><td class="mono">dept</td><td>可选</td><td>传入时对画像表追加 <span class="mono">AND dept = %s</span></td></tr>
+    </table>
+    <h4 class="sec">真实 SQL（向量召回）</h4>
+    <pre class="code">SELECT id, user_id, profile_text, 'user_profile' AS source,
+       1 - (embedding &lt;=&gt; %s::vector) AS score
+FROM user_profile_vectors
+WHERE sensitivity &lt;= %s
+  -- [可选] AND dept = %s
+ORDER BY embedding &lt;=&gt; %s::vector
+LIMIT 20;</pre>
+    <h4 class="sec">RRF 公式</h4>
+    <pre class="code">score(d) = Σ_r  1 / (k + rank_r(d) + 1)        k = 60, rank 从 0 计</pre>
+    <ul class="pts">
+      <li>同一文档在两路中都出现则<b>分数累加</b>——这正是 RRF 既奖励"双路命中"、又不需要归一化的原因。</li>
+      <li>BM25 分支在分词阶段做了三层清洗：<b>同义词归一</b>（女性→女）、<b>停用词过滤</b>（画像文本为统一模板，"用户/累计/订单"等词几乎全量出现，只带噪声）、<b>单字过滤</b>（仅保留"男/女"）。</li>
+    </ul>
+  </section>
+
+  <!-- ============ 图 4 ============ -->
+  <section class="card">
+    <div class="card-head">
+      <h2>图 4 · 代码模块依赖图<span class="hint">src/rag_demo/ 模块关系，箭头方向 = 依赖方向</span></h2>
+      <span class="ver">v1.0 / 2026-10</span>
+    </div>
+    <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+    API["api/main.py<br/>FastAPI 编排层"]
+    HR["retrieval/hybrid_retriever.py<br/>vector_search / bm25_search / rrf_fusion"]
+    RR["retrieval/reranker.py<br/>rerank / rerank_by_source"]
+    GEN["generation/generator.py<br/>generate / build_context"]
+    DBC["db/connection.py<br/>get_conn / close_conn"]
+    CFG["config.py<br/>路径 · DB_CONFIG · TOP_K_* · DEVICE · DTYPE"]
+    IN1["ingest_data.py<br/>画像 CSV → 向量入库"]
+    IN2["ingest_docs.py<br/>Markdown → 分块入库"]
+
+    API --> HR
+    API --> RR
+    API --> GEN
+    API --> DBC
+
+    HR --> DBC
+    HR --> CFG
+
+    RR --> CFG
+    DBC --> CFG
+
+    IN1 --> CFG
+    IN1 --> DBC
+    IN2 --> CFG
+    IN2 --> DBC
+
+    classDef cRoot fill:#E6F4F5,stroke:#5EA8AE,stroke-width:2px,color:#1F5F66
+    classDef cCfg fill:#F1F2F4,stroke:#9AA0A6,stroke-width:2px,color:#4A4F55
+    classDef cRet fill:#FFFFFF,stroke:#6BAF7B,stroke-width:1.5px,color:#2E6B3E
+    classDef cGen fill:#FFFFFF,stroke:#D99B5C,stroke-width:1.5px,color:#8A5A1E
+    classDef cIng fill:#FFFFFF,stroke:#5B8DC8,stroke-width:1.5px,color:#1F4E79
+
+    class API cRoot
+    class CFG cCfg
+    class HR,RR cRet
+    class GEN cGen
+    class DBC,IN1,IN2 cIng
+
+    style CFG fill:#F1F2F4,stroke:#9AA0A6,stroke-width:3px,color:#4A4F55
+    style API fill:#E6F4F5,stroke:#5EA8AE,stroke-width:3px,color:#1F5F66
+</pre>
+    </div>
+    <h4 class="sec">图例</h4>
+    <div class="legend">
+      <span class="li"><i class="sw" style="background:var(--inf-bg);border-color:var(--inf);border-width:3px"></i>config.py · 被 5 个模块直接 import</span>
+      <span class="li"><i class="sw" style="background:var(--api-bg);border-color:var(--api);border-width:3px"></i>api/main.py · 唯一组装点</span>
+      <span class="li"><i class="sw" style="background:var(--ret-bg);border-color:var(--ret)"></i>retrieval/*</span>
+      <span class="li"><i class="sw" style="background:var(--gen-bg);border-color:var(--gen)"></i>generation/*</span>
+      <span class="li"><i class="sw" style="background:var(--data-bg);border-color:var(--data)"></i>db 与离线入库脚本</span>
+    </div>
+    <h4 class="sec">依赖矩阵</h4>
+    <table>
+      <tr><th>模块</th><th>依赖</th><th>角色</th></tr>
+      <tr><td class="mono">config.py</td><td>（无）</td><td><b>零依赖底座</b>，被 5 个模块直接 import</td></tr>
+      <tr><td class="mono">db/connection.py</td><td>config</td><td>第二层公共依赖，连接单例 + 探活重连</td></tr>
+      <tr><td class="mono">retrieval/hybrid_retriever.py</td><td>config, db</td><td>在线读库；被 api 调用</td></tr>
+      <tr><td class="mono">retrieval/reranker.py</td><td>config</td><td>纯模型推理，不碰数据库</td></tr>
+      <tr><td class="mono">generation/generator.py</td><td>（无，仅第三方 openai SDK）</td><td>纯 LLM 调用，不感知向量库</td></tr>
+      <tr><td class="mono">api/main.py</td><td>retrieval, generation, db</td><td><b>唯一组装点</b>，lifespan 预加载</td></tr>
+      <tr><td class="mono">ingest_data.py</td><td>config, db</td><td>离线：画像 CSV → 向量入库</td></tr>
+      <tr><td class="mono">ingest_docs.py</td><td>config, db</td><td>离线：Markdown → 分块入库</td></tr>
+    </table>
+    <h4 class="sec">读图要点</h4>
+    <ul class="pts">
+      <li><span class="mono">config.py</span> 是唯一的<b>零依赖底座</b>，被 5 个模块直接 import（db、retrieval×2、ingest×2）——改配置只需改一处。</li>
+      <li><span class="mono">db/connection.py</span> 是第二层公共依赖：<b>在线检索读库</b>（hybrid_retriever）与<b>离线入库写库</b>（ingest_*）都经它拿连接。</li>
+      <li><span class="mono">api/main.py</span> 是唯一<b>组装点</b>；<b>retrieval 与 generation 之间互不感知</b>——检索层不知道有 LLM，生成层不知道有向量库，替换任一侧不影响另一侧。</li>
+      <li><span class="mono">hybrid_retriever.py</span> 与 <span class="mono">reranker.py</span> <b>彼此不 import</b>，两个模块平级，由 main.py 依次调用。</li>
+    </ul>
+  </section>
+
+  <!-- ============ 附录 ============ -->
+  <section class="card">
+    <div class="card-head">
+      <h2>附 · 五个关键设计点</h2>
+      <span class="ver">v1.0 / 2026-10</span>
+    </div>
+    <table>
+      <tr><th>#</th><th>设计点</th><th>落点</th><th>解决什么问题</th></tr>
+      <tr><td>1</td><td><b>双轨召回</b></td><td class="mono">rerank_by_source</td><td>画像与业务规则分来源精排、各自保名额，避免 wiki 被 8110 条画像在数量上挤掉</td></tr>
+      <tr><td>2</td><td><b>RRF 融合</b></td><td class="mono">rrf_fusion(k=60)</td><td>两路分数无需归一化，按排名累加，双路命中获得奖励</td></tr>
+      <tr><td>3</td><td><b>引用溯源</b></td><td class="mono">候选带 id/source/text</td><td>生成后映射回原文，sources 返回编号 + 类型 + 片段</td></tr>
+      <tr><td>4</td><td><b>探活重连</b></td><td class="mono">get_conn()</td><td>每次调用先 SELECT 1，失败自动重连（规避服务端 kill 后 closed 仍为 0 的坑）</td></tr>
+      <tr><td>5</td><td><b>预加载</b></td><td class="mono">lifespan</td><td>启动时一次性加载模型 + BM25 语料，避免首次请求慢</td></tr>
+    </table>
+  </section>
+
+  <footer class="page">v1.0 / 2026-10 · 所有模块名、参数与数据规模均取自仓库实际代码与数据目录</footer>
+</div>
+
+<script>
+(function () {
+  var CDN = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js';
+  var LOCAL = './vendor/mermaid.min.js';
+
+  function showErr(msg) {
+    var el = document.getElementById('err');
+    el.style.display = 'block';
+    el.textContent = 'Mermaid 运行时加载失败：' + msg + '。请联网打开本页，或将 mermaid.min.js 放到同目录 vendor/ 下再刷新。';
+  }
+
+  function boot() {
+    try {
+      window.mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'loose',
+        theme: 'base',
+        themeVariables: {
+          darkMode: false,
+          background: '#FFFFFF',
+          fontFamily: '"Microsoft YaHei","PingFang SC","Hiragino Sans GB","Segoe UI",sans-serif',
+          fontSize: '16px',
+          primaryColor: '#FFFFFF',
+          primaryBorderColor: '#5EA8AE',
+          primaryTextColor: '#1F2937',
+          lineColor: '#8A9099',
+          textColor: '#1F2937',
+          edgeLabelBackground: '#FFFFFF',
+          tertiaryColor: '#FFFFFF'
+        },
+        flowchart: {
+          curve: 'basis',
+          nodeSpacing: 42,
+          rankSpacing: 52,
+          padding: 12,
+          htmlLabels: true,
+          useMaxWidth: true
+        }
+      });
+      window.mermaid.run({ querySelector: '.mermaid' }).catch(function (e) {
+        showErr('渲染异常 ' + (e && e.message ? e.message : e));
+      });
+    } catch (e) {
+      showErr(e && e.message ? e.message : String(e));
+    }
+  }
+
+  function load(src, onok, onfail) {
+    var s = document.createElement('script');
+    s.src = src;
+    s.onload = onok;
+    s.onerror = onfail;
+    document.head.appendChild(s);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+
+  function start() {
+    load(LOCAL, boot, function () {
+      load(CDN, boot, function () { showErr('本地与 CDN 均不可达'); });
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+@Author  : Vincent
+@File    : reranker.py
+@Function: bge-reranker-v2-m3 精排
+"""
+import logging
+import os
+
+from sentence_transformers import CrossEncoder
+
+from rag_demo.config import (
+    DEVICE,
+    DOCS_DIR,
+    DTYPE,
+    RERANKER_PATH,
+    WIKI_EXPAND_FULLTEXT,
+    WIKI_MAX_CHARS,
+    WIKI_MIN_SCORE,
+)
+
+logger = logging.getLogger(__name__)
+
+_reranker = None
+
+
+def get_reranker():
+    global _reranker
+    if _reranker is None:
+        if os.path.exists(RERANKER_PATH):
+            logger.info(f"正在加载本地 bge-reranker-v2-m3（device={DEVICE}, dtype={DTYPE}）...")
+            _reranker = CrossEncoder(
+                str(RERANKER_PATH),
+                device=DEVICE,
+                model_kwargs={"dtype": DTYPE},
+            )
+        else:
+            logger.warning("本地未找到 bge-reranker-v2-m3，从 HuggingFace 加载（首次会下载）...")
+            _reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device=DEVICE)
+    return _reranker
+
+
+def rerank(query, candidates, top_k=5):
+    """对候选列表精排，返回 Top-K"""
+    if not candidates:
+        return []
+    reranker = get_reranker()
+    pairs = [(query, c["text"]) for c in candidates]
+    scores = reranker.predict(pairs)
+    for c, s in zip(candidates, scores):
+        c["rerank_score"] = float(s)
+    return sorted(candidates, key=lambda x: -x["rerank_score"])[:top_k]
+
+
+# TODO(perf): [P2] wiki 全文扩展会放大上下文，实测 11.0s → 15.1s（+16%）。
+#             可调小 WIKI_MAX_CHARS、或只扩展被多次命中的文档。
+#             注意：此机制解决了「chunk 粒度错配」问题（DA-01 靠它才能列出全部标签），
+#             属正向改进而非缺陷，只是有成本，不可简单移除。详见 bug/性能隐患台账.md
+def _expand_to_full_doc(items, max_chars=WIKI_MAX_CHARS):
+    """
+    Parent Document 召回：把命中的 wiki chunk 扩展为所在文档的全文。
+
+    动机：chunk 级 rerank 分数无法支撑文档级取舍——例如 DA-01「哪些标签跟美妆相关」
+    需要 tag_definitions.md 里的**全部**标签定义，而其中任一 chunk 单独看都答不了
+    这个问题（rerank 只给 0.001，见 bug/10.11 问题 5）。
+
+    同一文档的多个 chunk 合并为一条，避免重复占名额；保留原 chunk 的 rerank_score
+    用于排序，附加 expanded 标记便于排查。
+    """
+    expanded = []
+    seen = set()
+    for c in items:
+        doc = c["source"]
+        if doc in seen:
+            continue
+        seen.add(doc)
+
+        path = os.path.join(DOCS_DIR, doc)
+        if not os.path.exists(path):
+            logger.warning(f"Parent Document 扩展失败，找不到源文件: {path}")
+            expanded.append(c)
+            continue
+
+        with open(path, "r", encoding="utf-8") as f:
+            full = f.read().strip()
+        if len(full) > max_chars:
+            full = full[:max_chars] + "……"
+
+        expanded.append({**c, "text": full, "expanded": True})
+    return expanded
+
+
+def rerank_by_source(query, candidates, top_k_profile=3, top_k_wiki=2,
+                     min_wiki_score=WIKI_MIN_SCORE, expand_fulltext=WIKI_EXPAND_FULLTEXT):
+    """
+    分来源精排：
+    - 画像类（user_profile）：取 Top-N
+    - 文档类（*.md）：取 Top-M，可选扩展为整篇文档（Parent Document 召回）
+    - 合并后按 rerank_score 重排
+
+    注意：wiki 名额是「上限」而非「强制填满」。检索池里的 wiki 可能全都不相关，
+    硬塞会浪费 token 并干扰生成（详见 bug/10.11 问题 5）。
+    实测分数参考（sigmoid 后）：强相关 ≈ 0.8，明确无关 ≈ 0.005。
+    """
+    profiles = [c for c in candidates if not c["source"].endswith(".md")]
+    wikis = [c for c in candidates if c["source"].endswith(".md")]
+
+    reranked_profiles = rerank(query, profiles, top_k=top_k_profile) if profiles else []
+
+    reranked_wikis = []
+    if wikis:
+        reranked_wikis = [
+            c
+            for c in rerank(query, wikis, top_k=top_k_wiki)
+            if c.get("rerank_score", 0) >= min_wiki_score
+        ]
+        if expand_fulltext and reranked_wikis:
+            reranked_wikis = _expand_to_full_doc(reranked_wikis)
+
+    combined = reranked_profiles + reranked_wikis
+    combined.sort(key=lambda x: -x.get("rerank_score", 0))
+    return combined

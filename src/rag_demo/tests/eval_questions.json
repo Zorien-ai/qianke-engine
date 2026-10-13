@@ -1,0 +1,182 @@
+[
+  {
+    "id": "OPT-01",
+    "module": "运营/市场",
+    "question": "高客单、喜欢美妆的女性用户有哪些",
+    "type": "combo",
+    "expect_wiki": true,
+    "expect_sources": ["user_profile", "tag_definitions.md"],
+    "acceptance": "引用高客单定义（累计≥1000）+ 列出符合的美妆女性用户，含客单价数值"
+  },
+  {
+    "id": "OPT-02",
+    "module": "运营/市场",
+    "question": "深圳的钻石会员都是什么特征",
+    "type": "semantic",
+    "expect_wiki": false,
+    "expect_sources": ["user_profile"],
+    "acceptance": "返回深圳用户画像，归纳年龄/性别/品类分布"
+  },
+  {
+    "id": "OPT-03",
+    "module": "运营/市场",
+    "question": "高价值用户怎么定义的",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": ["tag_definitions.md"],
+    "acceptance": "引用「近90天消费排名前20%，且近30天有活跃行为」"
+  },
+  {
+    "id": "OPT-04",
+    "module": "运营/市场",
+    "question": "给流失预警用户推荐召回方案",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": ["marketing_playbook.md", "tag_definitions.md"],
+    "acceptance": "引用「大额无门槛券50元 + 电话回访 + 新品优先体验」"
+  },
+  {
+    "id": "OPT-05",
+    "module": "运营/市场",
+    "question": "高客单用户和普通用户的偏好差异",
+    "type": "combo",
+    "expect_wiki": true,
+    "expect_sources": ["user_profile", "tag_definitions.md"],
+    "acceptance": "引用高客单定义 + 分别列出两组用户偏好品类，做对比"
+  },
+  {
+    "id": "OPT-06",
+    "module": "运营/市场",
+    "question": "母婴偏好用户在哪些城市集中",
+    "type": "gap",
+    "expect_wiki": false,
+    "expect_sources": [],
+    "acceptance": "说明数据中不存在母婴品类（top_category 枚举无母婴），因此无法统计城市分布；不得编造数据"
+  },
+  {
+    "id": "CS-01",
+    "module": "销售/客服",
+    "question": "用户投诉物流延迟怎么回复",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": ["cs_sop.md"],
+    "acceptance": "引用物流延迟 SOP 的 5 个步骤"
+  },
+  {
+    "id": "CS-02",
+    "module": "销售/客服",
+    "question": "退换货流程是什么",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": ["cs_sop.md"],
+    "acceptance": "引用商品质量问题场景处理步骤"
+  },
+  {
+    "id": "CS-03",
+    "module": "销售/客服",
+    "question": "U2765 是什么用户",
+    "type": "fact",
+    "expect_wiki": false,
+    "expect_sources": ["user_profile"],
+    "acceptance": "返回 U2765 画像（30岁女/成都/美妆/2540元）"
+  },
+  {
+    "id": "CS-04",
+    "module": "销售/客服",
+    "question": "钻石会员有什么权益",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": ["member_benefits.md"],
+    "acceptance": "引用钻石会员的具体权益（专属客服/全场免运费/9折/生日礼遇/新品优先购/30天退换/双倍积分）"
+  },
+  {
+    "id": "CS-05",
+    "module": "销售/客服",
+    "question": "用户说优惠券过期了怎么办",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": ["cs_sop.md"],
+    "acceptance": "引用「视情况补发同等面额券 + 引导下次使用」"
+  },
+  {
+    "id": "DA-01",
+    "module": "数据分析师/产品",
+    "question": "哪些标签跟美妆相关",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": ["tag_definitions.md"],
+    "acceptance": "对照 tag_definitions.md 已定义的标签（高客单/流失预警/高价值等）给出明确结论，不得只答「无法确定」"
+  },
+  {
+    "id": "DA-02",
+    "module": "数据分析师/产品",
+    "question": "高价值沉默客怎么运营",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": ["segmentation.md", "marketing_playbook.md"],
+    "acceptance": "引用「一对一召回 + 大额优惠券 + 电话回访」"
+  },
+  {
+    "id": "DA-03",
+    "module": "数据分析师/产品",
+    "question": "用户分析报告有哪些板块",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": ["analysis_report_template.md"],
+    "acceptance": "列出报告模板的 7 个板块"
+  },
+  {
+    "id": "DA-04",
+    "module": "数据分析师/产品",
+    "question": "美妆用户的客单价分布",
+    "type": "numeric",
+    "expect_wiki": false,
+    "expect_sources": ["user_profile"],
+    "acceptance": "列出美妆用户的客单价，归纳分布区间"
+  },
+  {
+    "id": "MGT-01",
+    "module": "管理层",
+    "question": "本周高价值用户规模有多少",
+    "type": "numeric",
+    "expect_wiki": true,
+    "expect_sources": ["user_profile", "tag_definitions.md"],
+    "acceptance": "引用高价值用户定义 + 给出符合定义的用户数量（需 SQL 计数）"
+  },
+  {
+    "id": "MGT-02",
+    "module": "管理层",
+    "question": "流失预警的判定标准",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": ["tag_definitions.md"],
+    "acceptance": "引用「近30天未活跃，且历史客单价>500，且累计≥3次」"
+  },
+  {
+    "id": "EDGE-01",
+    "module": "边界",
+    "question": "今天天气怎么样",
+    "type": "negative",
+    "expect_wiki": false,
+    "expect_sources": [],
+    "acceptance": "明确拒答，不编造内容"
+  },
+  {
+    "id": "EDGE-02",
+    "module": "边界",
+    "question": "预测一下明年的GMV",
+    "type": "negative",
+    "expect_wiki": false,
+    "expect_sources": [],
+    "acceptance": "说明无法预测，只能做历史检索"
+  },
+  {
+    "id": "EDGE-03",
+    "module": "边界",
+    "question": "和 U2765 相似的用户有哪些",
+    "type": "relation",
+    "expect_wiki": false,
+    "expect_sources": ["user_profile"],
+    "acceptance": "至少能按画像特征（年龄段/品类/城市）找到相近用户；理想应走 GraphRAG"
+  }
+]

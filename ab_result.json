@@ -1,0 +1,358 @@
+[
+  {
+    "id": "OPT-01",
+    "question": "高客单、喜欢美妆的女性用户有哪些",
+    "expect": [
+      "tag_definitions.md",
+      "user_profile"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 84.65218544006348,
+    "sp_ms": 772.6266384124756,
+    "bm_top": [
+      "tag_definitions.md",
+      "user_profile",
+      "user_profile"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "OPT-02",
+    "question": "深圳的钻石会员都是什么特征",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 2,
+    "sp_rank": 1,
+    "bm_ms": 36.023616790771484,
+    "sp_ms": 93.07169914245605,
+    "bm_top": [
+      "analysis_report_template.md",
+      "user_profile",
+      "user_profile"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "OPT-03",
+    "question": "高价值用户怎么定义的",
+    "expect": [
+      "tag_definitions.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 15.101909637451172,
+    "sp_ms": 86.16757392883301,
+    "bm_top": [
+      "tag_definitions.md",
+      "segmentation.md",
+      "tag_definitions.md"
+    ],
+    "sp_top": [
+      "tag_definitions.md",
+      "tag_definitions.md",
+      "segmentation.md"
+    ]
+  },
+  {
+    "id": "OPT-04",
+    "question": "给流失预警用户推荐召回方案",
+    "expect": [
+      "marketing_playbook.md",
+      "tag_definitions.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 30.025005340576172,
+    "sp_ms": 89.6599292755127,
+    "bm_top": [
+      "tag_definitions.md",
+      "marketing_playbook.md",
+      "analysis_report_template.md"
+    ],
+    "sp_top": [
+      "tag_definitions.md",
+      "marketing_playbook.md",
+      "analysis_report_template.md"
+    ]
+  },
+  {
+    "id": "OPT-05",
+    "question": "高客单用户和普通用户的偏好差异",
+    "expect": [
+      "tag_definitions.md",
+      "user_profile"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 13.516902923583984,
+    "sp_ms": 110.58282852172852,
+    "bm_top": [
+      "tag_definitions.md",
+      "tag_definitions.md",
+      "tag_definitions.md"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "CS-01",
+    "question": "用户投诉物流延迟怎么回复",
+    "expect": [
+      "cs_sop.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 18.514156341552734,
+    "sp_ms": 89.26606178283691,
+    "bm_top": [
+      "cs_sop.md"
+    ],
+    "sp_top": [
+      "cs_sop.md",
+      "tag_definitions.md",
+      "tag_definitions.md"
+    ]
+  },
+  {
+    "id": "CS-02",
+    "question": "退换货流程是什么",
+    "expect": [
+      "cs_sop.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 10.511398315429688,
+    "sp_ms": 117.23661422729492,
+    "bm_top": [
+      "cs_sop.md",
+      "member_benefits.md",
+      "member_benefits.md"
+    ],
+    "sp_top": [
+      "cs_sop.md",
+      "cs_sop.md",
+      "member_benefits.md"
+    ]
+  },
+  {
+    "id": "CS-03",
+    "question": "U2765 是什么用户",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 8.51750373840332,
+    "sp_ms": 86.53450012207031,
+    "bm_top": [
+      "user_profile"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "CS-04",
+    "question": "钻石会员有什么权益",
+    "expect": [
+      "member_benefits.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 11.506319046020508,
+    "sp_ms": 91.16196632385254,
+    "bm_top": [
+      "member_benefits.md",
+      "member_benefits.md",
+      "cs_sop.md"
+    ],
+    "sp_top": [
+      "member_benefits.md",
+      "member_benefits.md",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "CS-05",
+    "question": "用户说优惠券过期了怎么办",
+    "expect": [
+      "cs_sop.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 12.023448944091797,
+    "sp_ms": 88.81711959838867,
+    "bm_top": [
+      "cs_sop.md",
+      "segmentation.md",
+      "tag_definitions.md"
+    ],
+    "sp_top": [
+      "cs_sop.md",
+      "segmentation.md",
+      "tag_definitions.md"
+    ]
+  },
+  {
+    "id": "DA-01",
+    "question": "哪些标签跟美妆相关",
+    "expect": [
+      "tag_definitions.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 0,
+    "bm_ms": 12.511491775512695,
+    "sp_ms": 76.16376876831055,
+    "bm_top": [
+      "tag_definitions.md",
+      "tag_definitions.md",
+      "tag_definitions.md"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "DA-02",
+    "question": "高价值沉默客怎么运营",
+    "expect": [
+      "marketing_playbook.md",
+      "segmentation.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 13.007164001464844,
+    "sp_ms": 84.81907844543457,
+    "bm_top": [
+      "segmentation.md",
+      "marketing_playbook.md",
+      "segmentation.md"
+    ],
+    "sp_top": [
+      "marketing_playbook.md",
+      "segmentation.md",
+      "segmentation.md"
+    ]
+  },
+  {
+    "id": "DA-03",
+    "question": "用户分析报告有哪些板块",
+    "expect": [
+      "analysis_report_template.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 11.003255844116211,
+    "sp_ms": 81.04538917541504,
+    "bm_top": [
+      "analysis_report_template.md",
+      "analysis_report_template.md",
+      "analysis_report_template.md"
+    ],
+    "sp_top": [
+      "analysis_report_template.md",
+      "analysis_report_template.md",
+      "analysis_report_template.md"
+    ]
+  },
+  {
+    "id": "DA-04",
+    "question": "美妆用户的客单价分布",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 5.508899688720703,
+    "sp_ms": 94.30742263793945,
+    "bm_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "MGT-01",
+    "question": "本周高价值用户规模有多少",
+    "expect": [
+      "tag_definitions.md",
+      "user_profile"
+    ],
+    "bm_rank": 7,
+    "sp_rank": 1,
+    "bm_ms": 11.507511138916016,
+    "sp_ms": 86.0602855682373,
+    "bm_top": [
+      "segmentation.md",
+      "segmentation.md",
+      "segmentation.md"
+    ],
+    "sp_top": [
+      "tag_definitions.md",
+      "tag_definitions.md",
+      "segmentation.md"
+    ]
+  },
+  {
+    "id": "MGT-02",
+    "question": "流失预警的判定标准",
+    "expect": [
+      "tag_definitions.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 9.514331817626953,
+    "sp_ms": 85.42227745056152,
+    "bm_top": [
+      "tag_definitions.md",
+      "marketing_playbook.md",
+      "analysis_report_template.md"
+    ],
+    "sp_top": [
+      "tag_definitions.md",
+      "marketing_playbook.md",
+      "analysis_report_template.md"
+    ]
+  },
+  {
+    "id": "EDGE-03",
+    "question": "和 U2765 相似的用户有哪些",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 7.004737854003906,
+    "sp_ms": 86.60316467285156,
+    "bm_top": [
+      "user_profile"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  }
+]

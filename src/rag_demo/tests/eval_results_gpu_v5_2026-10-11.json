@@ -1,0 +1,598 @@
+[
+  {
+    "id": "OPT-01",
+    "module": "运营/市场",
+    "route": "rag",
+    "question": "高客单、喜欢美妆的女性用户有哪些",
+    "type": "combo",
+    "expect_wiki": true,
+    "expect_sources": [
+      "user_profile",
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "user_profile",
+      "tag_definitions.md"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**结论（推断）**：根据现有资料，符合“高客单、喜欢美妆的女性用户”条件的只有 **用户U2765**。[来源2][来源4]\n\n**事实依据**：\n- “高客单用户”定义为：累计平均客单价 ≥ 1000 元。[来源4]\n- 用户U2765：女性，偏好品类为美妆，累计订单2笔，总消费5080元，平均客单价2540元。[来源2]\n- 因此，用户U2765同时满足“女性”“偏好美妆”“平均客单价≥1000元”。（推断）[来源2][来源4]\n\n**其他相关用户（事实）**：\n- 用户U7508：女性，偏好品类为美妆，但平均客单价为908元，低于1000元，因此不符合“高客单”定义。[来源1][来源4]\n- 用户U2974：女性，偏好品类为美妆，但平均客单价为666元，低于1000元，因此不符合“高客单”定义。[来源3][来源4]\n\n**最终结果**：\n- 符合“高客单、喜欢美妆的女性用户”：**用户U2765**。[来源2][来源4]\n- 其他用户虽为女性且偏好美妆，但平均客单价未达到高客单口径，故不纳入。[来源1][来源3][来源4]\n\n注：已避免展示完整姓名等敏感信息，仅保留用户ID用于区分。",
+    "sources_count": 4,
+    "elapsed_sec": 30.55,
+    "acceptance": "引用高客单定义（累计≥1000）+ 列出符合的美妆女性用户，含客单价数值",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "tag_definitions.md",
+      "user_profile"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "OPT-02",
+    "module": "运营/市场",
+    "route": "rag",
+    "question": "深圳的钻石会员都是什么特征",
+    "type": "semantic",
+    "expect_wiki": false,
+    "expect_sources": [
+      "user_profile"
+    ],
+    "actual_sources": [
+      "user_profile",
+      "analysis_report_template.md"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "根据现有资料，无法确定“深圳的钻石会员都”是什么特征；资料中仅能找到3名深圳钻石会员样本 [来源1][来源2][来源3]，且未提供该人群规模、占比等总体数据 [来源4]。\n\n**事实（3名样本可观察到的特征）：**\n- 共同点：均为深圳人、钻石会员，活跃平台均为 ecommerce_data [来源1][来源2][来源3]。\n- 年龄与性别：年龄分别为65岁、60岁、64岁，均为60岁及以上；性别为女性1名、男性2名 [来源1][来源2][来源3]。\n- 消费与订单：累计订单分别为1笔、1笔、2笔；总消费分别为3656元、10822元、26447元；平均客单价分别为3656元、10822元、13223元 [来源1][来源2][来源3]。\n- 偏好品类：偏好电子产品1名，偏好家居2名 [来源1][来源2][来源3]。\n- 最近购买时间：分别为2024-07-04、2024-09-09、2024-11-05 [来源1][来源2][来源3]。\n\n**推断（基于以上3个样本，不能代表全部深圳钻石会员）：**\n- 这3名样本中，深圳钻石会员呈现中老年为主、男性略多、偏好家居较多、订单频次较低但消费金额差异较大的倾向 [来源1][来源2][来源3]。\n- 由于样本量仅3，且来源4仅给出报告模板字段、未提供具体人群规模和占比，因此深圳钻石会员的整体特征、规模、占比及完整分布根据现有资料无法确定 [来源4]。",
+    "sources_count": 4,
+    "elapsed_sec": 15.04,
+    "acceptance": "返回深圳用户画像，归纳年龄/性别/品类分布",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "user_profile"
+    ],
+    "wiki_hit": false,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "OPT-03",
+    "module": "运营/市场",
+    "route": "rag",
+    "question": "高价值用户怎么定义的",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": [
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "tag_definitions.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**事实（来自资料）：**\n\n高价值用户的定义是：近 90 天消费金额排名前 20%，且近 30 天有活跃行为（登录、浏览、下单任一）[来源1]。\n\n补充口径信息：\n- 更新频率：T+1 [来源1]。\n- 负责人：数据部-用户增长组 [来源1]。\n- 用途：营销优先级排序、专属客服分配 [来源1]。\n\n**推断：**\n- 无额外推断。根据现有资料，可确定高价值用户同时满足“近 90 天消费金额排名前 20%”和“近 30 天有活跃行为”两个条件 [来源1]。\n\n注意：资料中另有“高客单用户”定义，为累计平均客单价 ≥ 1000 元 [来源2]，这与“高价值用户”不是同一个标签。",
+    "sources_count": 5,
+    "elapsed_sec": 2.9,
+    "acceptance": "引用「近90天消费排名前20%，且近30天有活跃行为」",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "tag_definitions.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "OPT-04",
+    "module": "运营/市场",
+    "route": "rag",
+    "question": "给流失预警用户推荐召回方案",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": [
+      "marketing_playbook.md",
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "marketing_playbook.md",
+      "tag_definitions.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**事实**\n- 流失预警用户定义：近 30 天未活跃，且历史客单价 > 500 元，且累计购买次数 ≥ 3 次；更新频率 T+1；负责人为数据部-用户留存组；用途包括召回活动、定向优惠券发放。[来源2]\n- 流失客挽回方案：目标人群为流失客（> 90 天无行为）；渠道为短信、邮件；内容为回归礼包（100 元券），限 7 天有效；时机为流失第 91 天、第 120 天；频控为每月最多 1 次。[来源1]\n\n**推断与建议**\n- 针对流失预警用户，可先按“近 30 天未活跃、历史客单价 > 500 元、累计购买次数 ≥ 3 次”圈选人群，并由数据部-用户留存组按 T+1 更新标签。[来源2]\n- 因资料未提供流失预警用户专用召回方案，可参考流失客挽回策略：通过短信/邮件触达，发放回归礼包/100 元券（限 7 天），并控制每月最多 1 次。[来源1][来源2]（推断：该组合是否完全适用于流失预警用户需验证）\n- 触发时机不宜直接套用“第 91 天、第 120 天”：该时机对应流失客（> 90 天无行为），而流失预警是近 30 天未活跃，两者口径不同。[来源1][来源2] 流失预警用户的具体触发时点，根据现有资料无法确定。[来源1][来源2]\n- 若应用到资料中的具体用户：部分用户累计订单不足 3 笔，不满足流失预警条件；其他用户虽订单数和客单价可能满足，但缺少当前日期，无法判断是否“近 30 天未活跃”。因此无法确认其是否为流失预警用户。[来源2][来源3][来源4][来源5]\n\n**结论**\n可推荐的参考框架是：圈选流失预警用户 → 短信/邮件触达 → 定向优惠券/回归礼包 → 每月最多 1 次频控。[来源1][来源2]（推断：这是基于流失客方案的参考，不是资料明确给出的流失预警专用方案）\n\n但流失预警用户的专属权益金额、最佳触发时点、频控上限等参数，根据现有资料无法确定。[来源1][来源2]",
+    "sources_count": 5,
+    "elapsed_sec": 15.18,
+    "acceptance": "引用「大额无门槛券50元 + 电话回访 + 新品优先体验」",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "marketing_playbook.md",
+      "tag_definitions.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "OPT-05",
+    "module": "运营/市场",
+    "route": "sql",
+    "question": "高客单用户和普通用户的偏好差异",
+    "type": "combo",
+    "expect_wiki": true,
+    "expect_sources": [
+      "user_profile",
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "sql"
+    ],
+    "sql": "SELECT\n  user_type,\n  top_category,\n  user_count,\n  ROUND(user_count * 100.0 / SUM(user_count) OVER (PARTITION BY user_type), 2) AS category_pct,\n  ROUND(avg_avg_amount, 2) AS avg_avg_amount,\n  ROUND(avg_order_count, 2) AS avg_order_count,\n  ROUND(avg_total_amount, 2) AS avg_total_amount\nFROM (\n  SELECT\n    CASE WHEN avg_amount >= 1000 THEN '高客单用户' ELSE '普通用户' END AS user_type,\n    top_category,\n    COUNT(*) AS user_count,\n    AVG(avg_amount) AS avg_avg_amount,\n    AVG(order_count) AS avg_order_count,\n    AVG(total_amount) AS avg_total_amount\n  FROM user_profile_vectors\n  GROUP BY 1, 2\n) t\nORDER BY user_type, category_pct DESC, user_count DESC\nLIMIT 50",
+    "rows_count": 14,
+    "error": null,
+    "answer": "根据结构化数据统计（按 `avg_amount >= 1000 元` 划分高客单用户），高客单用户与普通用户的偏好差异明显：\n\n1. **普通用户品类分布较分散**\n   - 主流品类占比接近：美妆 20.47%（287 人）、服装 19.26%（270 人）、书籍 18.90%（265 人）、玩具 18.33%（257 人）、运动 17.55%（246 人）。\n   - 家居仅 4.56%（64 人），电子产品仅 0.93%（13 人），明显偏低。\n\n2. **高客单用户更集中在电子产品和家居**\n   - 电子产品占比最高：33.12%（2222 人）。\n   - 家居次之：25.79%（1730 人）。\n   - 两者合计约 58.91%，是高客单用户的核心偏好。\n   - 其余品类占比均低于 10%：书籍 8.78%、玩具 8.66%、运动 8.21%、服装 7.90%、美妆 7.53%。\n\n3. **高客单用户消费指标也更高**\n   - 以电子产品为例：高客单用户平均客单价 9026.54 元，普通用户为 806.80 元；平均订单数分别为 3.07 笔和 2.46 笔；平均总金额分别为 23794.38 元和 1972.07 元。\n   - 家居同样差异显著：高客单用户平均客单价 5412.99 元，普通用户为 695.97 元；平均总金额分别为 14501.88 元和 1430.40 元。\n\n4. **结论**\n   - 普通用户偏好相对分散，集中在美妆、服装、书籍、玩具、运动等日常或中等客单品类。\n   - 高客单用户更偏好高价值品类，尤其集中在电子产品和家居，并且购买频次、平均客单价和平均总金额均更高。\n\n以上结论来自对 `user_profile_vectors` 表的结构化分组统计结果。",
+    "sources_count": 1,
+    "elapsed_sec": 20.13,
+    "acceptance": "引用高客单定义 + 分别列出两组用户偏好品类，做对比",
+    "manual_score": null,
+    "note": "",
+    "source_match": [],
+    "wiki_hit": false,
+    "sql_ok": true,
+    "sql_ok_source": "rows_count",
+    "passed": true
+  },
+  {
+    "id": "OPT-06",
+    "module": "运营/市场",
+    "route": "sql",
+    "question": "母婴偏好用户在哪些城市集中",
+    "type": "semantic",
+    "expect_wiki": true,
+    "expect_sources": [
+      "user_profile",
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "sql"
+    ],
+    "sql": "SELECT city, COUNT(*) AS mother_baby_user_count\nFROM user_profile_vectors\nWHERE profile_text LIKE '%母婴%'\nGROUP BY city\nORDER BY mother_baby_user_count DESC\nLIMIT 50",
+    "rows_count": 0,
+    "error": null,
+    "answer": "没有符合条件的记录。\n\n根据结构化数据统计，在 `user_profile_vectors` 中按 `profile_text LIKE '%母婴%'` 筛选后，按 `city` 分组统计的结果为 **0 行**，即没有找到带有“母婴”偏好的用户城市分布数据。因此，无法判断母婴偏好用户集中在哪些城市。",
+    "sources_count": 1,
+    "elapsed_sec": 14.51,
+    "acceptance": "引用母婴偏好定义 + 按城市统计用户分布，给出 Top 城市",
+    "manual_score": null,
+    "note": "",
+    "source_match": [],
+    "wiki_hit": false,
+    "sql_ok": false,
+    "sql_ok_source": "rows_count",
+    "passed": false
+  },
+  {
+    "id": "CS-01",
+    "module": "销售/客服",
+    "route": "rag",
+    "question": "用户投诉物流延迟怎么回复",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": [
+      "cs_sop.md"
+    ],
+    "actual_sources": [
+      "cs_sop.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "根据现有资料，可以确定物流延迟投诉的**标准处理步骤**，但资料未提供可直接发送的逐字回复话术，因此无法确定具体话术模板。\n\n**事实（来自资料）**\n- 物流延迟投诉应先查询订单状态，确认是否已发货。[来源1]\n- 若已发货且超过 7 天未更新，应主动致歉。[来源1]\n- 补偿方案为：10 元无门槛券，或积分补偿。[来源1]\n- 若用户坚持退款，引导至自助退款入口。[来源1]\n- 最后记录工单，标记“物流延迟”。[来源1]\n- 资料未提供积分补偿的具体数量，也未提供逐字回复模板。[来源1]\n\n**推断（基于资料）**\n- 回复用户时，可按以下顺序处理：先核实并告知订单状态；若符合“已发货且超过 7 天未更新”，主动致歉；再说明可选补偿方案；若用户坚持退款，则引导至自助退款入口；处理完成后记录工单并标记“物流延迟”。[来源1]\n- 若需要个性化回复，需先确认本次投诉对应的具体用户身份；现有资料包含若干用户画像，但未标明本次物流延迟投诉对应哪一位用户。[来源3][来源4][来源5]\n\n因此，具体回复话术**根据现有资料无法确定**，只能按上述 SOP 要点组织回复。",
+    "sources_count": 5,
+    "elapsed_sec": 11.36,
+    "acceptance": "引用物流延迟 SOP 的 5 个步骤",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "cs_sop.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "CS-02",
+    "module": "销售/客服",
+    "route": "rag",
+    "question": "退换货流程是什么",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": [
+      "cs_sop.md"
+    ],
+    "actual_sources": [
+      "cs_sop.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**事实（基于资料）：**  \n- 针对“商品质量问题”场景，退换货流程第1步：请用户提供照片或视频证据。[来源1]  \n- 第2步：确认在退换货期内（签收后 7 天）。[来源1]  \n- 第3步：提供换货或退款选项，优先换货。[来源1]  \n- 第4步：若用户不满，升级至客服主管。[来源1]  \n- 第5步：记录工单，标记“质量问题”。[来源1]  \n\n**推断：**  \n- 根据现有资料，只能确定“商品质量问题”场景下的退换货流程；资料未说明其他退换货场景（如无理由退货等）的通用流程，因此无法确定完整的通用退换货流程。[来源1]  \n- “物流延迟投诉”流程涉及致歉、补偿券/积分、引导自助退款，不属于退换货流程。[来源2]",
+    "sources_count": 5,
+    "elapsed_sec": 4.75,
+    "acceptance": "引用商品质量问题场景处理步骤",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "cs_sop.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "CS-03",
+    "module": "销售/客服",
+    "route": "rag",
+    "question": "U2765 是什么用户",
+    "type": "fact",
+    "expect_wiki": false,
+    "expect_sources": [
+      "user_profile"
+    ],
+    "actual_sources": [
+      "user_profile",
+      "tag_definitions.md"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**事实（来自资料）：**\n- 用户 U2765 是 30 岁女性，成都人，钻石会员。[来源1]\n- 累计订单 2 笔，总消费 5080 元，平均客单价 2540 元。[来源1]\n- 偏好品类为美妆。[来源1]\n- 最近一次购买在 2024-10-23。[来源1]\n- 活跃平台：ecommerce_data、淘宝。[来源1]\n- 姓名等身份信息已脱敏，不展示具体姓名。[来源1]\n\n**推断/标签判断：**\n- 按“流失预警用户”口径，需满足：近 30 天未活跃、历史客单价 > 500 元、累计购买次数 ≥ 3 次。[来源4]  \n  该用户平均客单价为 2540 元，满足客单价条件；但累计购买次数只有 2 次，不满足“≥ 3 次”。[来源1]  \n  因此，根据现有资料，不能将 U2765 判定为流失预警用户。[来源1][来源4]\n- 按“母婴偏好用户”口径，需满足：近 90 天购买母婴品类 ≥ 2 次，或浏览母婴品类 ≥ 10 次。[来源5]  \n  现有资料未提供其母婴品类购买或浏览记录，仅显示偏好美妆。[来源1]  \n  因此，根据现有资料无法确定其是否为母婴偏好用户。[来源1][来源5]\n\n**结论：**  \n根据现有资料，U2765 可描述为：30 岁成都女性、钻石会员、偏好美妆、平均客单价较高，但累计购买次数仅 2 次的用户。[来源1] 无法确认其属于流失预警用户或母婴偏好用户。[来源1][来源4][来源5]",
+    "sources_count": 5,
+    "elapsed_sec": 8.77,
+    "acceptance": "返回 U2765 画像（30岁女/成都/美妆/2540元）",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "user_profile"
+    ],
+    "wiki_hit": false,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "CS-04",
+    "module": "销售/客服",
+    "route": "rag",
+    "question": "钻石会员有什么权益",
+    "type": "gap",
+    "expect_wiki": false,
+    "expect_sources": [],
+    "actual_sources": [
+      "user_profile",
+      "cs_sop.md"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**事实：**\n- 现有资料中只显示部分用户被标记为“钻石会员”，但没有列出钻石会员具体享有哪些权益。[来源1][来源2][来源3]\n- 会员权益咨询SOP仅规定客服应查询会员等级和权益有效期、解释当前等级对应权益、提示升级差额、推荐续费或升级礼包并记录工单，但未给出钻石会员的具体权益内容。[来源4]\n- 因此，关于“钻石会员有什么权益”，根据现有资料无法确定。[来源1][来源2][来源3][来源4]\n\n**推断：**\n- 钻石会员的具体权益可能需要通过系统查询或按客服SOP向用户解释，但现有资料不足以提供权益清单。[来源4]",
+    "sources_count": 4,
+    "elapsed_sec": 5.16,
+    "acceptance": "知识库无会员权益说明，应诚实说明现有资料未覆盖，不得编造权益内容",
+    "manual_score": null,
+    "note": "",
+    "source_match": [],
+    "wiki_hit": false,
+    "sql_ok": null,
+    "passed": null
+  },
+  {
+    "id": "CS-05",
+    "module": "销售/客服",
+    "route": "rag",
+    "question": "用户说优惠券过期了怎么办",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": [
+      "cs_sop.md"
+    ],
+    "actual_sources": [
+      "cs_sop.md",
+      "segmentation.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "事实：\n- 客服处理优惠券使用问题的标准流程是：先查询用户账户内可用券 [来源1]。\n- 然后向用户解释优惠券的使用门槛和有效期 [来源1]。\n- 若券已过期，SOP规定“视情况补发一张同等面额券” [来源1]。\n- 之后引导用户下次使用 [来源1]。\n- 最后记录工单，并标记“优惠券” [来源1]。\n- 用户分群策略中，“高价值沉默客”的策略包括一对一召回、大额优惠券、电话回访 [来源2]。\n\n推断：\n- 如果该用户被判定为“高价值沉默客”，可参考该分群策略考虑大额优惠券或召回 [来源2]，但资料未提供当前用户的分群信息，无法确定其是否适用 [来源2]。\n- 来源1只写了“视情况补发”，未说明补发的具体条件、面额上限或审批要求，因此具体是否补发、补发多少，根据现有资料无法确定 [来源1]。\n\n结论：\n- 一般处理路径是：查询可用券 → 解释门槛和有效期 → 若过期则视情况补发同等面额券 → 引导下次使用 → 记录工单并标记“优惠券” [来源1]。\n- 具体到某位用户能否补发及补发方案，需结合账户和分群信息判断；根据现有资料无法确定 [来源1][来源2]。",
+    "sources_count": 5,
+    "elapsed_sec": 9.08,
+    "acceptance": "引用「视情况补发同等面额券 + 引导下次使用」",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "cs_sop.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "DA-01",
+    "module": "数据分析师/产品",
+    "route": "rag",
+    "question": "哪些标签跟美妆相关",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": [
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "user_profile",
+      "tag_definitions.md"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**事实：**\n1. 用户画像中，用户U2027、U3749、U5430均记录“偏好品类为美妆” [来源1][来源2][来源3]。  \n2. 标签“高客单用户”的定义为：累计平均客单价 ≥ 1000 元，未提及美妆 [来源4]。  \n3. 标签“流失预警用户”的定义为：近30天未活跃，且历史客单价 > 500元，且累计购买次数 ≥ 3次，未提及美妆 [来源5]。\n\n**推断：**\n- 如果把“偏好品类为美妆”视为用户标签/属性，则它与美妆相关；但现有资料中它出现在用户画像字段里，并未被列入标签定义文档 [来源1][来源2][来源3]。  \n- 现有已定义标签“高客单用户”“流失预警用户”均没有直接与美妆关联 [来源4][来源5]。\n\n**结论：**\n根据现有资料无法确定哪些已定义标签直接跟美妆相关。仅能确认部分用户画像中记录“偏好品类为美妆” [来源1][来源2][来源3]。",
+    "sources_count": 5,
+    "elapsed_sec": 7.21,
+    "acceptance": "对照 tag_definitions.md 已定义的标签（高客单/流失预警/高价值等）给出明确结论，不得只答「无法确定」",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "tag_definitions.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "DA-02",
+    "module": "数据分析师/产品",
+    "route": "rag",
+    "question": "高价值沉默客怎么运营",
+    "type": "sop",
+    "expect_wiki": true,
+    "expect_sources": [
+      "segmentation.md",
+      "marketing_playbook.md"
+    ],
+    "actual_sources": [
+      "marketing_playbook.md",
+      "segmentation.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "根据现有资料，高价值沉默客的运营方式如下：\n\n**事实（资料明确给出）**\n- 目标人群：高价值 + 沉默客 [来源1][来源2]。\n- 运营渠道：电话回访、专属客服企微、短信 [来源1]。\n- 运营策略：一对一召回、大额优惠券、电话回访 [来源2]。\n- 触达内容：大额无门槛券（50元）、新品优先体验 [来源1]。\n- 触达时机：沉默第31天、第60天 [来源1]。\n- 频控要求：每月最多1次电话，2次短信 [来源1]。\n\n**推断（基于资料的运营落地建议）**\n- 执行时应先圈选“高价值 + 沉默客”人群，再在沉默第31天和第60天，通过电话回访、专属客服企微、短信进行触达，并提供50元无门槛券和新品优先体验 [来源1][来源2]。\n- 可结合一对一召回、大额优惠券、电话回访来提升召回效果 [来源2]。\n- 因资料未给出“高价值”和“沉默”的具体判定阈值或定义，无法确定精确圈选规则 [来源1][来源2]。\n\n**敏感信息说明**\n本次回答未返回具体用户个人信息；如涉及用户画像，应按脱敏后内容处理。",
+    "sources_count": 5,
+    "elapsed_sec": 7.19,
+    "acceptance": "引用「一对一召回 + 大额优惠券 + 电话回访」",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "marketing_playbook.md",
+      "segmentation.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "DA-03",
+    "module": "数据分析师/产品",
+    "route": "rag",
+    "question": "用户分析报告有哪些板块",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": [
+      "analysis_report_template.md"
+    ],
+    "actual_sources": [
+      "analysis_report_template.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "根据现有资料，无法确定“用户分析报告”的完整板块列表，只能确定模板中明确出现的部分板块。\n\n**事实：**\n- 用户分析报告模板中包含“四、行为分析”板块，其下包括：活跃度、购买频次、客单价、偏好品类。[来源1]\n- 用户分析报告模板中包含“五、流失/转化分析”板块，其下包括：流失率、转化率、关键影响因素。[来源2]\n\n**推断：**\n- 该模板可能还有“一、二、三”等其他前置板块，以及“五”之后的后续板块，但现有资料未提供，因此无法确定。[来源1][来源2]\n\n**结论：**\n根据现有资料，只能确定用户分析报告至少包含“行为分析”和“流失/转化分析”两个板块；完整板块列表无法确定。",
+    "sources_count": 5,
+    "elapsed_sec": 3.12,
+    "acceptance": "列出报告模板的 7 个板块",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "analysis_report_template.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "DA-04",
+    "module": "数据分析师/产品",
+    "route": "sql",
+    "question": "美妆用户的客单价分布",
+    "type": "numeric",
+    "expect_wiki": false,
+    "expect_sources": [
+      "user_profile"
+    ],
+    "actual_sources": [
+      "sql"
+    ],
+    "sql": "SELECT price_band, COUNT(*) AS user_count\nFROM (\n  SELECT CASE\n           WHEN avg_amount < 500 THEN '低客单(<500)'\n           WHEN avg_amount < 1000 THEN '中客单(500-999)'\n           ELSE '高客单(>=1000)'\n         END AS price_band\n  FROM user_profile_vectors\n  WHERE top_category = '美妆'\n) t\nGROUP BY price_band\nORDER BY price_band\nLIMIT 50",
+    "rows_count": 3,
+    "error": null,
+    "answer": "美妆用户的客单价分布为：\n\n- **高客单（≥1000元）**：505人，占比约63.8%，人数最多\n- **中客单（500-999元）**：176人，占比约22.2%\n- **低客单（<500元）**：111人，占比约14.0%\n\n合计美妆用户 **792人**。该结论来自对结构化数据表 `user_profile_vectors` 中 `top_category = '美妆'` 用户按平均客单价分档后的统计结果。",
+    "sources_count": 1,
+    "elapsed_sec": 7.94,
+    "acceptance": "列出美妆用户的客单价，归纳分布区间",
+    "manual_score": null,
+    "note": "",
+    "source_match": [],
+    "wiki_hit": false,
+    "sql_ok": true,
+    "sql_ok_source": "rows_count",
+    "passed": true
+  },
+  {
+    "id": "MGT-01",
+    "module": "管理层",
+    "route": "sql",
+    "question": "本周高价值用户规模有多少",
+    "type": "numeric",
+    "expect_wiki": true,
+    "expect_sources": [
+      "user_profile",
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "sql"
+    ],
+    "sql": "SELECT COUNT(*) AS high_value_user_count\nFROM user_profile_vectors\nWHERE avg_amount >= 1000\n  AND days_since_last_buy <= 7\nLIMIT 50",
+    "rows_count": 1,
+    "error": null,
+    "answer": "本周高价值用户规模为 **398 人**。\n\n该结论来自结构化数据统计：在 `user_profile_vectors` 表中，筛选 **平均消费金额 ≥ 1000 元** 且 **最近一次购买距今天数 ≤ 7 天** 的用户后，统计得到 **398 人**。",
+    "sources_count": 1,
+    "elapsed_sec": 2.4,
+    "acceptance": "引用高价值用户定义 + 给出符合定义的用户数量（需 SQL 计数）",
+    "manual_score": null,
+    "note": "",
+    "source_match": [],
+    "wiki_hit": false,
+    "sql_ok": true,
+    "sql_ok_source": "rows_count",
+    "passed": true
+  },
+  {
+    "id": "MGT-02",
+    "module": "管理层",
+    "route": "rag",
+    "question": "流失预警的判定标准",
+    "type": "wiki",
+    "expect_wiki": true,
+    "expect_sources": [
+      "tag_definitions.md"
+    ],
+    "actual_sources": [
+      "tag_definitions.md",
+      "analysis_report_template.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**事实：**\n- 流失预警用户的判定标准为：**近 30 天未活跃，且历史客单价 > 500 元，且累计购买次数 ≥ 3 次** [来源1]。\n- 该标签更新频率为 **T+1** [来源1]。\n- 负责人为 **数据部-用户留存组** [来源1]。\n- 用途为 **召回活动、定向优惠券发放** [来源1]。\n\n**推断：**\n- 上述三个条件之间是“且”的关系，即需要**同时满足**近 30 天未活跃、历史客单价 > 500 元、累计购买次数 ≥ 3 次，缺一不可 [来源1]。\n- 若用户近 30 天有活跃，或历史客单价 ≤ 500 元，或累计购买次数 < 3 次，则不满足该流失预警口径 [来源1]。\n- 关于“未活跃”的具体行为定义、统计截止时间、客单价是否包含退款等细节，资料未说明，**根据现有资料无法确定** [来源1]。",
+    "sources_count": 5,
+    "elapsed_sec": 4.17,
+    "acceptance": "引用「近30天未活跃，且历史客单价>500，且累计≥3次」",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "tag_definitions.md"
+    ],
+    "wiki_hit": true,
+    "sql_ok": null,
+    "passed": true
+  },
+  {
+    "id": "EDGE-01",
+    "module": "边界",
+    "route": "rag",
+    "question": "今天天气怎么样",
+    "type": "negative",
+    "expect_wiki": false,
+    "expect_sources": [],
+    "actual_sources": [
+      "user_profile",
+      "segmentation.md",
+      "cs_sop.md"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "根据现有资料无法确定今天天气情况。\n\n- 事实：现有资料仅包含用户画像、用户分群策略和客服SOP，未包含天气相关数据 [来源1][来源2][来源3][来源4][来源5]。\n- 推断：因此无法根据这些资料判断“今天天气怎么样” [来源1][来源2][来源3][来源4][来源5]。",
+    "sources_count": 5,
+    "elapsed_sec": 2.85,
+    "acceptance": "明确拒答，不编造内容",
+    "manual_score": null,
+    "note": "",
+    "source_match": [],
+    "wiki_hit": false,
+    "sql_ok": null,
+    "passed": null
+  },
+  {
+    "id": "EDGE-02",
+    "module": "边界",
+    "route": "rag",
+    "question": "预测一下明年的GMV",
+    "type": "negative",
+    "expect_wiki": false,
+    "expect_sources": [],
+    "actual_sources": [
+      "analysis_report_template.md",
+      "segmentation.md",
+      "user_profile"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "**结论：根据现有资料无法确定明年的 GMV，不能给出数值或区间。** [来源1][来源2][来源3][来源4][来源5]\n\n**事实：**\n1. 资料中未包含整体 GMV 的历史值、时间序列、增长率、预测模型或业务计划数据。[来源1][来源2][来源3][来源4][来源5]\n2. 用户分析报告模板只有“核心结论”占位，没有实际 GMV 结论。[来源1]\n3. 用户分群策略仅给出分群维度：生命周期、价值分层、品类偏好，但未提供各分群用户数、GMV 贡献、复购率、流失率等可汇总预测指标。[来源2]\n4. 用户画像仅包含 3 个个体用户的订单数、总消费、客单价、偏好品类、最近购买时间和活跃平台，属于个体样本，不能代表整体 GMV。[来源3][来源4][来源5]\n\n**推断：**\n1. 仅凭 3 个个体用户记录，无法外推到整体用户规模或平台 GMV。[来源3][来源4][来源5]\n2. 若要进行明年 GMV 预测，至少需要历史 GMV、用户规模与分群占比、复购/流失率、客单价趋势、季节性和业务计划等数据；现有资料均未提供。[来源1][来源2][来源3][来源4][来源5]\n\n**最终回答：根据现有资料无法确定明年的 GMV。** [来源1][来源2][来源3][来源4][来源5]",
+    "sources_count": 5,
+    "elapsed_sec": 8.85,
+    "acceptance": "说明无法预测，只能做历史检索",
+    "manual_score": null,
+    "note": "",
+    "source_match": [],
+    "wiki_hit": false,
+    "sql_ok": null,
+    "passed": null
+  },
+  {
+    "id": "EDGE-03",
+    "module": "边界",
+    "route": "rag",
+    "question": "和 U2765 相似的用户有哪些",
+    "type": "relation",
+    "expect_wiki": false,
+    "expect_sources": [
+      "user_profile"
+    ],
+    "actual_sources": [
+      "user_profile",
+      "segmentation.md",
+      "tag_definitions.md"
+    ],
+    "sql": "",
+    "rows_count": null,
+    "error": null,
+    "answer": "根据现有资料，未给出“相似用户”的判定规则，因此只能做标签粗匹配。\n\n**事实（来自资料）**\n- U2765：30岁女性，成都，钻石会员，2笔订单，总消费5080元，客单价2540元，偏好美妆，最近购买2024-10-23，活跃平台为 ecommerce_data、淘宝 [来源1]。\n- U1302：65岁女性，广州，白银会员，2笔订单，总消费1637元，客单价818元，偏好美妆，最近购买2024-06-24，活跃平台为1688 [来源2]。\n- U1677：65岁女性，深圳，白银会员，1笔订单，总消费648元，客单价648元，偏好美妆，最近购买2024-04-29，活跃平台为 ecommerce_data [来源3]。\n- 分群维度包含品类偏好，美妆是示例品类之一 [来源4]。\n\n**推断（基于资料）**\n- 若仅按“女性 + 偏好美妆”匹配，U1302、U1677 与 U2765 有相似点 [来源1][来源2][来源3]。\n- 但按年龄、城市、会员等级、客单价、订单数、活跃平台等维度看，U1302、U1677 与 U2765 差异明显，不能判定为高度相似 [来源1][来源2][来源3]。\n- 资料未提供相似度算法、价值分层结果或当前生命周期状态，无法确定官方口径下的相似用户 [来源4]。\n\n**结论**\n- 可识别共同点相似用户：U1302、U1677，但仅基于“女性 + 美妆偏好” [来源1][来源2][来源3]。\n- 若要求较高画像相似度，根据现有资料无法确定 [来源1][来源2][来源3][来源4]。",
+    "sources_count": 5,
+    "elapsed_sec": 14.59,
+    "acceptance": "至少能按画像特征（年龄段/品类/城市）找到相近用户；理想应走 GraphRAG",
+    "manual_score": null,
+    "note": "",
+    "source_match": [
+      "user_profile"
+    ],
+    "wiki_hit": false,
+    "sql_ok": null,
+    "passed": true
+  }
+]

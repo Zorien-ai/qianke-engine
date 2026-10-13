@@ -1,0 +1,164 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+@Author  : Vincent
+@File    : build_search_index.py
+@Function: 构建检索索引表 search_index（BM25 分词结果 + BGE-M3 稀疏权重）
+
+取代此前的本地 pkl 缓存：
+  - BM25 分词结果落库，服务启动时读回内存即可，免去重新 jieba 分词
+  - 稀疏权重以 pgvector sparsevec 落库，检索可直接在库内完成
+
+语料口径与 sparse_retriever._build_corpus 保持一致（画像表 + 文档表），
+保证落库前后检索结果可比。
+
+写入策略：先算完再「TRUNCATE + 批量 INSERT」，整个过程在同一事务内，
+构建失败会回滚保留旧索引，不会出现空表窗口。
+
+用法：
+    uv run python src/rag_demo/tools/build_search_index.py
+"""
+import io
+import logging
+import os
+import time
+
+from psycopg2.extras import execute_values
+
+from rag_demo.config import BASE_DIR, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
+from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.db.schema import ensure_schema
+from rag_demo.retrieval.hybrid_retriever import _tokenize
+from rag_demo.retrieval.sparse_retriever import encode_sparse, weights_to_sparsevec
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+logger = logging.getLogger(__name__)
+
+BATCH = 256
+OUT = os.path.join(BASE_DIR, "build_search_index.txt")
+
+
+def load_corpus() -> list[dict]:
+    """语料 = 画像文本 + 知识库分块，与 sparse_retriever._build_corpus 同源"""
+    conn = get_conn()
+    cur = conn.cursor()
+    corpus = []
+
+    cur.execute("SELECT user_id, profile_text FROM user_profile_vectors")
+    for uid, text in cur.fetchall():
+        corpus.append({"id": f"user:{uid}", "text": text, "source": "user_profile"})
+
+    cur.execute("SELECT id, doc_name, chunk_text FROM wiki_vectors")
+    for cid, doc, text in cur.fetchall():
+        corpus.append({"id": f"wiki:{cid}", "text": text, "source": doc})
+
+    cur.close()
+    return corpus
+
+
+def main() -> None:
+    lines = ["检索索引构建（search_index）", "=" * 70]
+    t_all = time.time()
+
+    ensure_schema()
+
+    corpus = load_corpus()
+    logger.info("语料条数: %d", len(corpus))
+    lines.append(f"语料条数: {len(corpus)}")
+
+    # ---------- 1. jieba 分词（BM25 用） ----------
+    t = time.time()
+    tokenized = [_tokenize(c["text"]) for c in corpus]
+    dt_tokenize = time.time() - t
+    logger.info("jieba 分词完成: %.2fs", dt_tokenize)
+    lines.append(f"jieba 分词耗时: {dt_tokenize:.2f}s")
+
+    # ---------- 2. BGE-M3 稀疏编码 ----------
+    t = time.time()
+    weights_list = encode_sparse([c["text"] for c in corpus])
+    dt_encode = time.time() - t
+    logger.info("稀疏编码完成: %.2fs", dt_encode)
+    lines.append(f"稀疏编码耗时: {dt_encode:.2f}s")
+
+    # ---------- 3. 落库（同一事务：先清空再批量写入） ----------
+    rows = [
+        (
+            c["id"],
+            c["source"],
+            c["text"],
+            tokens,
+            weights_to_sparsevec(weights, SPARSE_VEC_DIM),
+        )
+        for c, tokens, weights in zip(corpus, tokenized, weights_list)
+    ]
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    t = time.time()
+    cur.execute(f"TRUNCATE {SEARCH_INDEX_TABLE}")
+    for i in range(0, len(rows), BATCH):
+        execute_values(
+            cur,
+            f"""INSERT INTO {SEARCH_INDEX_TABLE}
+                (corpus_id, source, text, bm25_tokens, sparse_weights)
+                VALUES %s""",
+            rows[i:i + BATCH],
+            template="(%s, %s, %s, %s, %s::sparsevec)",
+        )
+    conn.commit()
+    dt_db = time.time() - t
+    logger.info("写入完成: %.2fs（%d 行）", dt_db, len(rows))
+    lines.append(f"写库耗时: {dt_db:.2f}s（{len(rows)} 行）")
+
+    # ---------- 4. 回读校验 ----------
+    cur.execute(f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE}")
+    total = cur.fetchone()[0]
+    cur.execute(
+        f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE} WHERE sparse_weights IS NULL"
+    )
+    missing_sparse = cur.fetchone()[0]
+    cur.execute(f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE} WHERE bm25_tokens IS NULL")
+    missing_bm25 = cur.fetchone()[0]
+    cur.execute(
+        f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE} WHERE array_length(bm25_tokens, 1) = 0"
+    )
+    empty_tokens = cur.fetchone()[0]
+    conn.rollback()
+
+    lines.append(f"回读条数: {total}")
+    lines.append(f"sparse_weights 缺失: {missing_sparse}")
+    lines.append(f"bm25_tokens 缺失: {missing_bm25}")
+    lines.append(f"bm25_tokens 为空数组: {empty_tokens}")
+
+    # ---------- 5. 稀疏检索自测（确认库内算子可用） ----------
+    probe = corpus[0]["text"][:20]
+    probe_vec = weights_to_sparsevec(encode_sparse([probe])[0], SPARSE_VEC_DIM)
+    cur.execute(
+        f"""SELECT corpus_id, sparse_weights <#> %s::sparsevec AS neg_ip
+            FROM {SEARCH_INDEX_TABLE}
+            WHERE sparse_weights IS NOT NULL
+            ORDER BY sparse_weights <#> %s::sparsevec
+            LIMIT 3""",
+        (probe_vec, probe_vec),
+    )
+    probe_rows = cur.fetchall()
+    conn.rollback()
+    lines.append(f"库内稀疏检索自测（query={probe!r}）:")
+    for cid, neg_ip in probe_rows:
+        lines.append(f"    {cid}  score={-float(neg_ip):.4f}")
+
+    lines.append(f"总耗时: {time.time() - t_all:.2f}s")
+
+    cur.close()
+    close_conn()
+
+    with io.open(OUT, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"written: {OUT}")
+    for line in lines:
+        print(line)
+
+
+if __name__ == "__main__":
+    main()

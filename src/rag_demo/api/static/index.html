@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>用户画像 RAG 智能问答</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>用户画像 RAG 智能问答</h1>
+      <p class="hero-sub">
+        向量召回 + BM25 + RRF 融合 · bge-reranker-v2-m3 精排 · 意图路由分流 Text2SQL
+      </p>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 数据概况 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>数据概况</h2>
+        <span class="panel-tag" id="stats-status">加载中…</span>
+      </div>
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card is-loading"></div>
+        <div class="stat-card is-loading"></div>
+        <div class="stat-card is-loading"></div>
+        <div class="stat-card is-loading"></div>
+      </div>
+    </section>
+
+    <!-- 提问 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>提问</h2>
+        <span class="panel-tag">支持画像查询 / 知识库问答 / 聚合统计</span>
+      </div>
+      <div class="retriever-bar">
+        <span class="retriever-label">关键词召回策略</span>
+        <div class="retriever-options" id="retriever-options">
+          <button type="button" data-mode="bm25" class="active"
+                  title="数词频 + IDF 加权。快，无需模型；强于罕见结构词（如「标签」）">BM25</button>
+          <button type="button" data-mode="sparse"
+                  title="bge-m3 学出来的权重。命中时名次更靠前，但每次多一次模型前向；强于核心实体词（如「高价值」）">BGE-M3 稀疏向量</button>
+          <button type="button" data-mode="both"
+                  title="两路都跑再 RRF 融合。质量最稳，代价也最大">两者组合</button>
+        </div>
+        <button type="button" class="compare-btn" id="compare-btn">对比召回</button>
+      </div>
+      <form id="ask-form" class="ask-form">
+        <textarea
+          id="question-input"
+          rows="3"
+          placeholder="例如：高客单、喜欢美妆的女性用户有哪些"
+          autocomplete="off"
+        ></textarea>
+        <div class="ask-actions">
+          <span class="hint" id="ask-hint">按 Ctrl / Cmd + Enter 快速提交</span>
+          <button type="submit" id="ask-btn">
+            <span class="spinner" hidden></span>
+            <span class="btn-text">提问</span>
+          </button>
+        </div>
+      </form>
+      <div class="examples">
+        <span class="examples-label">示例问题</span>
+        <div class="examples-list" id="examples-list"></div>
+      </div>
+    </section>
+
+    <!-- 结果 -->
+    <section class="panel result-panel" id="result-panel" hidden>
+      <div class="panel-head">
+        <h2>回答</h2>
+        <div class="badges" id="result-badges"></div>
+      </div>
+
+      <div class="answer" id="answer-body"></div>
+
+      <div class="sql-block" id="sql-block" hidden>
+        <div class="sql-head">
+          <span>生成的 SQL</span>
+          <span id="rows-count"></span>
+        </div>
+        <pre id="sql-body"></pre>
+      </div>
+
+      <div class="sources" id="sources-block" hidden>
+        <div class="sources-head">引用来源</div>
+        <div class="sources-list" id="sources-list"></div>
+      </div>
+    </section>
+
+    <section class="panel error-panel" id="error-panel" hidden>
+      <div class="error-text" id="error-text"></div>
+    </section>
+
+    <!-- 召回对比：同一问题，两条关键词通路并排 -->
+    <section class="panel compare-panel" id="compare-panel" hidden>
+      <div class="panel-head">
+        <h2>召回对比 · BM25 vs BGE-M3 稀疏向量</h2>
+        <span class="panel-tag" id="compare-note"></span>
+      </div>
+      <div class="compare-summary" id="compare-summary"></div>
+      <div class="compare-grid">
+        <div class="compare-col">
+          <div class="compare-col-head">BM25<span>数词频 · IDF 加权</span></div>
+          <div class="compare-list" id="compare-bm25"></div>
+        </div>
+        <div class="compare-col">
+          <div class="compare-col-head is-sparse">BGE-M3 稀疏向量<span>模型学出的权重</span></div>
+          <div class="compare-list" id="compare-sparse"></div>
+        </div>
+      </div>
+      <p class="compare-foot">
+        高亮行 = 只有该方法召回、另一方没找到——这正是两种策略的差异所在。
+      </p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>本地启动：</span>
+    <code>uvicorn rag_demo.api.main:app --reload --port 8000</code>
+    <span class="footer-sep">·</span>
+    <a href="/docs" target="_blank" rel="noopener">API 文档</a>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+INFO:     127.0.0.1:6702 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:6707 - "POST /admin/clear-cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:6708 - "POST /qa/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1753 - "POST /qa/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1754 - "GET /cache/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:11795 - "POST /admin/clear-cache HTTP/1.1" 200 OK
+INFO:     127.0.0.1:11796 - "POST /qa/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:11808 - "POST /qa/stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:11809 - "GET /cache/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:11764 - "GET /health HTTP/1.1" 200 OK

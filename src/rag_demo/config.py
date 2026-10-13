@@ -1,0 +1,84 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+@Author  : Vincent
+@File    : config.py
+@Function: 全局配置（路径 / 数据库 / 检索参数 / 计算设备）
+"""
+import os
+
+import torch
+
+# 项目根目录：src/rag_demo/config.py -> rag_demo -> src -> 根
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# ---------- 数据与模型路径 ----------
+DATA_DIR = os.path.join(BASE_DIR, "data", "dianshuang")
+DOCS_DIR = os.path.join(BASE_DIR, "data", "docs")
+MODEL_PATH = os.path.join(BASE_DIR, "models", "bge-m3")
+RERANKER_PATH = os.path.join(BASE_DIR, "models", "bge-reranker-v2-m3")
+
+# ---------- 数据库 ----------
+DB_CONFIG = {
+    "host": "localhost",
+    "port": 5432,
+    "user": "postgres",
+    "password": "123456",
+    "dbname": "vec_db",
+}
+
+# ---------- 检索参数 ----------
+TOP_K_VECTOR = 20   # 向量单路召回数量
+TOP_K_BM25 = 20     # BM25 单路召回数量
+TOP_K_RRF = 30      # RRF 融合后候选数量
+TOP_K_PROFILE = 3   # 精排后保留的画像条数
+TOP_K_WIKI = 2      # 精排后保留的文档条数（上限，非强制填满）
+
+# 关键词召回走哪一路：bm25 / sparse / both
+#   bm25   仅 BM25（默认）—— 快、命中率略高（实测 hit@20 100% vs 94.1%）
+#   sparse 仅 BGE-M3 原生稀疏向量 —— 命中时名次更靠前，但每次多一次模型前向（约 80ms）
+#   both   两路都跑再 RRF 融合 —— 质量最稳，代价最大
+# 背景：A/B 实验显示两者各有强项，详见 bug/10.11/2026-10-11_BM25对BGE-M3稀疏向量实验.md
+KEYWORD_RETRIEVER = "bm25"
+
+# ---------- 检索索引持久化（search_index 表） ----------
+# BM25 分词结果与 BGE-M3 稀疏权重统一落库，取代此前的本地 pkl 缓存：
+#   1. 启动免去重新 jieba 分词 8146 条
+#   2. 稀疏检索走 pgvector sparsevec 的库内计算，不再把全量权重拉进内存
+#   3. 多实例共享同一份索引，一致性由数据库保证（不再依赖内容指纹）
+SEARCH_INDEX_TABLE = "search_index"
+SPARSE_VEC_DIM = 250002   # BGE-M3 词表大小，即 sparsevec 的维度上限
+
+# 五路 query 检索（直接/分解/简化/关键词/HyDE）
+# 开启后每次问答多一次 LLM 调用（4 个变体一起生成）与 4 次额外检索，RQ 更稳但更慢。
+# 关闭则退化为单路混合检索。
+ENABLE_MULTI_QUERY = True  # TODO(perf): [P1] 开启后平均耗时 +51%，详见 bug/性能隐患台账.md
+
+# 按需多路：由 LLM 判断需要哪几路，不是一律全跑。
+# 上限指「额外方式」的个数（不含永远执行的「直接检索」），防止模型贪心全选。
+MULTI_QUERY_MAX_VARIANTS = 2
+
+# wiki 精排分数门槛：低于此分不占名额（0 = 不过滤，保持原有行为）。
+#
+# 实测（bge-reranker-v2-m3，sigmoid 后）：强相关 chunk ≈ 0.8，明显无关 ≈ 0.005。
+# 但「是否该占名额」不能用分数判定，实测三组反例：
+#   DA-01「哪些标签跟美妆相关」需要 tag_definitions.md ...... 0.001
+#   OPT-02「深圳钻石会员特征」不需要 analysis_report_template.md ... 0.010
+#   OPT-01「高客单美妆女性」需要 tag_definitions.md 的高客单定义 .... 0.054
+# 需要的最分（0.001）反而低于不需要的（0.010）——根因是 chunk 粒度错配：
+# reranker 判断「单个 chunk 能否直接作答」，而 DA-01 需要的是「chunk 集合能否提供线索」。
+# 故默认设 0 不过滤，待 Parent Document 召回落地后再启用（详见 bug/10.11 问题 5）。
+WIKI_MIN_SCORE = 0.0
+
+# ---------- Parent Document 召回 ----------
+# 命中的 wiki chunk 扩展为所在文档的全文，解决「chunk 级分数无法支撑文档级取舍」的问题。
+# 典型场景：DA-01「哪些标签跟美妆相关」需要 tag_definitions.md 的全部标签定义，
+# 而其中任一个 chunk 单独看都答不了该问题（rerank 只给 0.001）。
+WIKI_EXPAND_FULLTEXT = True
+WIKI_MAX_CHARS = 1200   # 单篇文档扩展后的最大字符数（TODO(perf): [P2] 调小可降耗时，见 bug/性能隐患台账.md）
+
+# ---------- 计算设备 ----------
+# RTX 3060 6GB 显存紧张：两个 568M 模型 fp32 约 4.4GB 必 OOM，
+# 故 cuda 下统一用 fp16（约 2.2GB）；cpu 下保持 fp32（CPU 不支持 fp16 算子）。
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
