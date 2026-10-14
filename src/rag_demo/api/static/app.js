@@ -116,6 +116,7 @@ async function ask(question) {
     let sqlRows = [];
     let sqlError = null;
     let trace = null;
+    let cached = false;
     let resultShown = false;
 
     while (true) {
@@ -149,13 +150,14 @@ async function ask(question) {
           sqlRows = data.sql_rows || [];
           sqlError = data.sql_error || null;
           trace = data.trace || null;
+          cached = !!data.cached;
           if (data.cached) btnText.textContent = "命中缓存";
         } else if (event === "delta") {
           if (!resultShown) {
             // 首个片段到达——此刻才让结果区出现，避免空白面板闪一下
             renderStreamShell({
               route, sources, sqlText, rowsCount,
-              sqlRows, sqlError, trace, cached: data.cached,
+              sqlRows, sqlError, trace, cached,
             });
             resultShown = true;
           }
