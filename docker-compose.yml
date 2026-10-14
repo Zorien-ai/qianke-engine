@@ -1,0 +1,52 @@
+# 依赖服务：PostgreSQL + pgvector
+#
+# 为什么要落成文件：
+#   此前「数据库怎么起」只存在于 Docker Desktop 的点击记录里，
+#   别人拿到代码是跑不起来的 —— 参数（库名/密码/端口）散落在容器配置中，
+#   README 又只写了怎么起应用。落成 compose 文件后，环境可复现、可进版本控制。
+#
+# 参数与 src/rag_demo/config.py::DB_CONFIG 严格对齐，改一边务必改另一边。
+#
+# 用法：
+#   docker compose up -d     起库（后台）
+#   docker compose ps        看状态，healthy 才是真的好了
+#   docker compose logs -f   看日志
+#   docker compose down      停掉（数据卷保留）
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    # 固定容器名：与既有的手工容器保持一致，避免出现两套库抢 5432 端口
+    container_name: pgvector
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "123456"
+      POSTGRES_DB: vec_db
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+    # 健康检查：这条是防「带病运行」的。
+    # 2026-10-14 踩过一次 —— PostgreSQL 没启动，检索静默返回空，
+    # 所有题都答「根据现有资料无法确定」，评测 0/20，还差点被误判成提示词改坏了。
+    # 有 healthcheck 时 docker compose ps 会显示 (healthy)，
+    # 没起来一眼就能看出来，不必等到跑完评测才发现。
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vec_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    # 固定卷名（不加 compose 项目前缀），从而复用已有的 pgdata 卷 —— 现有数据不会丢。
+    # 若写成普通卷，compose 会创建 rag-demo_pgdata，那是一个空库，
+    # 表现为「应用能连上但一张表都没有」。
+    name: pgdata
