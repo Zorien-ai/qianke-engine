@@ -8,7 +8,12 @@
 import os
 from openai import OpenAI
 
-from rag_demo.config import ENABLE_THINKING
+from rag_demo.config import (
+    CONTEXT_INCLUDE_SQL_TEXT,
+    ENABLE_THINKING,
+    SQL_CELL_MAX_CHARS,
+    SQL_ROWS_MAX,
+)
 from rag_demo.prompts import RAG_ANSWER_PROMPT, SQL_SUMMARY_PROMPT
 
 # ================= 配置区 =================
@@ -82,11 +87,18 @@ def build_context(candidates, sql_result=None):
 
     if sql_result and sql_result.get("rows"):
         rows = sql_result["rows"]
-        rows_text = "\n".join(str(r) for r in rows[:50])
-        parts.append(
-            f"[结构化查询结果]\n{sql_result.get('sql', '')}\n"
-            f"（共 {len(rows)} 行）\n{rows_text}"
+        # 单元格逐个截断：一格可能是整段画像文本或十几个字段，原样塞进去很占地方
+        rows_text = "\n".join(
+            " | ".join(str(v)[:SQL_CELL_MAX_CHARS] for v in r)
+            for r in rows[:SQL_ROWS_MAX]
         )
+        head = "[结构化查询结果]"
+        if CONTEXT_INCLUDE_SQL_TEXT:
+            # 默认不放 SQL 原文：模型需要的是「结果」，不是「查询怎么写」。
+            # 复杂 SQL 常有 5 个 CTE、50 行，实测占 OPT-05 的 context 1503 字中的大头。
+            head += f"\n{sql_result.get('sql', '')}"
+        shown = min(len(rows), SQL_ROWS_MAX)
+        parts.append(f"{head}\n（共 {len(rows)} 行，下列 {shown} 行）\n{rows_text}")
 
     return "\n\n".join(parts)
 
