@@ -77,6 +77,21 @@ WIKI_MIN_SCORE = 0.0
 WIKI_EXPAND_FULLTEXT = True
 WIKI_MAX_CHARS = 1200   # 单篇文档扩展后的最大字符数（TODO(perf): [P2] 调小可降耗时，见 bug/性能隐患台账.md）
 
+# ---------- LLM 调用 ----------
+# 思考模式（reasoning）：开启时模型会先输出一大段推理过程，再给最终答案。
+# 那段推理不返回给用户、也进不了答案，但**照样消耗时间和 token**。
+#
+# 实测（2026-10-14，deepseek-flash，同一问题）：
+#     开启  20.36s  completion_tokens 2930（其中 reasoning 2197，占 75%）
+#     关闭   7.46s  completion_tokens  863（无 reasoning）
+# 关闭后**快 63%**，而且耗时波动大幅收窄 —— reasoning 长度本身波动很大，
+# 是此前「同一 prompt 耗时差 11~14 倍」的主要原因之一（见台账 P9）。
+#
+# ⚠️ 关闭参数是 {"thinking": {"type": "disabled"}}：
+#    服务端期望的是 ThinkingOptions 结构体，传布尔值 false 会直接 422。
+#    另外 "enable_thinking" 字段**无效**（实测传了照旧输出 reasoning）。
+ENABLE_THINKING = False
+
 # ---------- 计算设备 ----------
 # RTX 3060 6GB 显存紧张：两个 568M 模型 fp32 约 4.4GB 必 OOM，
 # 故 cuda 下统一用 fp16（约 2.2GB）；cpu 下保持 fp32（CPU 不支持 fp16 算子）。

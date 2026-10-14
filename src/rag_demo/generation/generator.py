@@ -8,6 +8,7 @@
 import os
 from openai import OpenAI
 
+from rag_demo.config import ENABLE_THINKING
 from rag_demo.prompts import RAG_ANSWER_PROMPT, SQL_SUMMARY_PROMPT
 
 # ================= 配置区 =================
@@ -18,6 +19,30 @@ MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 client = OpenAI(api_key=API_KEY or "EMPTY", base_url=BASE_URL)
 # 提示词统一在 rag_demo/prompts.py 维护
 # ==========================================
+
+
+def chat_completion(messages, model=None, temperature=0.0, stream=False, **kwargs):
+    """
+    统一的 LLM 调用入口
+
+    **所有模块都应走这里**，而不是各自 `client.chat.completions.create(...)`。
+    公共参数（当前是思考模式）集中一处控制——麻烦的从来不是参数写错，
+    而是散在 4 个调用点、改的时候漏掉一个，表现为「有的路快有的路慢」。
+
+    extra_body 允许调用方追加自己的参数，思考模式开关会合并进去；
+    调用方已显式指定的 thinking 优先（便于单点实验）。
+    """
+    extra = dict(kwargs.pop("extra_body", None) or {})
+    if not ENABLE_THINKING:
+        extra.setdefault("thinking", {"type": "disabled"})
+    return client.chat.completions.create(
+        model=model or MODEL,
+        messages=messages,
+        temperature=temperature,
+        stream=stream,
+        extra_body=extra or None,
+        **kwargs,
+    )
 
 
 def build_context(candidates, sql_result=None):
@@ -97,9 +122,9 @@ def generate(query, candidates, sql_result=None, model=MODEL):
 
     context = build_context(candidates, sql_result)
     prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
-    resp = client.chat.completions.create(
-        model=model,
+    resp = chat_completion(
         messages=[{"role": "user", "content": prompt}],
+        model=model,
         temperature=0.3,
     )
     answer = resp.choices[0].message.content
@@ -131,9 +156,9 @@ def generate_stream(query, candidates, sql_result=None, model=MODEL):
 
     context = build_context(candidates, sql_result)
     prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
-    stream = client.chat.completions.create(
-        model=model,
+    stream = chat_completion(
         messages=[{"role": "user", "content": prompt}],
+        model=model,
         temperature=0.3,
         stream=True,
     )
@@ -175,8 +200,7 @@ def llm_summarize(question: str, sql_result: dict, schema: str = "") -> str:
         row_count=len(rows),
         rows=rows_text,
     )
-    resp = client.chat.completions.create(
-        model=MODEL,
+    resp = chat_completion(
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )

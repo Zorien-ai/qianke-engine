@@ -10,7 +10,7 @@ import logging
 import re
 
 from rag_demo.db.connection import get_conn
-from rag_demo.generation.generator import MODEL, client
+from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import SQL_SCHEMA, TEXT2SQL_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -49,8 +49,7 @@ def text2sql(question: str) -> str:
     temperature=0 保证同样的问题生成稳定的 SQL。
     """
     prompt = TEXT2SQL_PROMPT.format(schema=SQL_SCHEMA, question=question)
-    resp = client.chat.completions.create(
-        model=MODEL,
+    resp = chat_completion(
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )

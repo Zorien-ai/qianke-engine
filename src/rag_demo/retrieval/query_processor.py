@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass, field
 
 from rag_demo.config import MULTI_QUERY_MAX_VARIANTS, TOP_K_RRF
-from rag_demo.generation.generator import MODEL, client
+from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import MULTI_QUERY_PROMPT
 from rag_demo.retrieval.hybrid_retriever import hybrid_search, rrf_fusion
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG
@@ -209,8 +209,7 @@ def plan_queries(question: str) -> QueryPlan:
     variants: list[tuple[str, str]] = [(STRATEGY_DIRECT, question)]
 
     try:
-        resp = client.chat.completions.create(
-            model=MODEL,
+        resp = chat_completion(
             messages=[{"role": "user", "content": MULTI_QUERY_PROMPT.format(question=question)}],
             temperature=0,
         )
