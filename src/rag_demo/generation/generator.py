@@ -72,7 +72,9 @@ def _build_sources(candidates):
         {
             "index": i,
             "source": c["source"],
-            "text": c["text"][:100],
+            # 与 pipeline.prepare 保持同一长度，否则非流式与流式两条路的
+            # 来源内容长度会不一致（都是「来源」，长度却不同，很容易被当成 bug）
+            "text": c["text"][:400],
             "origin_query": c.get("origin_query", ""),
             "from_query": c.get("from_query", ""),
             "strategies": c.get("strategies", []),

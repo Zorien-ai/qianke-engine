@@ -96,6 +96,20 @@ def looks_predictive(question: str) -> bool:
     return bool(_COUNTERFACTUAL_RE.search(q))
 
 
+class RetrievalUnavailableError(RuntimeError):
+    """
+    检索基础设施不可用（数据库连不上、索引表缺失等）
+
+    必须与「检索成功但无命中」严格区分：
+        本异常   = 系统故障（如 PostgreSQL 没启动）
+        返回空   = 资料里确实没有
+
+    不区分的话，上层拿到空 candidates 会输出「根据现有资料无法确定」——
+    把系统故障伪装成知识库缺失，排查时会被带到完全错误的方向
+    （2026-10-14 实际踩过：PG 停了，先怀疑的是提示词改动）。
+    """
+
+
 @dataclass
 class QueryPlan:
     """
@@ -282,6 +296,13 @@ def search_variants(
             })
 
     if not result_lists:
+        # 注意区分两种「空」：
+        #   全部路都抛异常  -> 检索不可用，必须让上层知道（否则被当成「资料缺失」）
+        #   全部路都无命中  -> 正常的空结果，按「资料里没有」处理
+        if trace_out and len(trace_out) == len(variants) and all(v.get("error") for v in trace_out):
+            raise RetrievalUnavailableError(
+                f"全部 {len(variants)} 路检索均失败：{trace_out[0].get('error')}"
+            )
         return []
     if len(result_lists) == 1:
         return result_lists[0]

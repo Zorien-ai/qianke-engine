@@ -35,9 +35,13 @@ import logging
 from rag_demo.cache import answer_cache
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF, TOP_K_WIKI
 from rag_demo.generation.generator import generate
-from rag_demo.prompts import CHITCHAT_REPLY
+from rag_demo.prompts import CHITCHAT_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
 from rag_demo.retrieval.hybrid_retriever import hybrid_search
-from rag_demo.retrieval.query_processor import QueryPlan, multi_query_search
+from rag_demo.retrieval.query_processor import (
+    QueryPlan,
+    RetrievalUnavailableError,
+    multi_query_search,
+)
 from rag_demo.retrieval.reranker import rerank_by_source
 from rag_demo.tools import sql_tool
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG, route
@@ -78,6 +82,21 @@ def answer_question(
 def _chitchat_result() -> dict:
     """闲聊 / 域外：固定回复，不检索、不调模型"""
     return {"answer": CHITCHAT_REPLY, "sources": [], "route": ROUTE_CHITCHAT}
+
+
+# 第三种 route：既不是正常回答（rag），也不是闲聊（chitchat），而是检索基础设施挂了。
+# 单独标记出来，调用方（前端 / 评测脚本）才能区分「答不出」和「服务坏了」。
+ROUTE_ERROR = "error"
+
+
+def _unavailable_result() -> dict:
+    """
+    检索基础设施不可用（数据库连不上、索引表缺失等）
+
+    刻意用独立文案与 route：若沿用「根据现有资料无法确定」，
+    排查的人会去查知识库、调检索参数——而真正的问题只是数据库没启动。
+    """
+    return {"answer": RETRIEVAL_UNAVAILABLE_REPLY, "sources": [], "route": ROUTE_ERROR}
 
 
 def _run_sql(question: str) -> dict:
@@ -141,7 +160,12 @@ def _answer_uncached(
     if route(question) == ROUTE_CHITCHAT:
         return _chitchat_result()
 
-    plan = _plan_and_retrieve(question, dept, keyword_mode)
+    try:
+        plan = _plan_and_retrieve(question, dept, keyword_mode)
+    except RetrievalUnavailableError as e:
+        # 数据库挂了不能伪装成「资料里没有」——明确报「服务不可用」
+        logger.error("检索不可用: %s", e)
+        return _unavailable_result()
 
     if plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
@@ -189,7 +213,18 @@ def prepare(
     if route(question) == ROUTE_CHITCHAT:
         return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
 
-    plan = _plan_and_retrieve(question, dept, keyword_mode)
+    try:
+        plan = _plan_and_retrieve(question, dept, keyword_mode)
+    except RetrievalUnavailableError as e:
+        logger.error("检索不可用: %s", e)
+        return {
+            "route": ROUTE_ERROR,
+            "answer": RETRIEVAL_UNAVAILABLE_REPLY,
+            "sources": [],
+            "candidates": [],
+            "sql_result": None,
+            "trace": {},
+        }
 
     if plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)

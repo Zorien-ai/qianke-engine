@@ -278,6 +278,14 @@ def qa_stream(req: QueryRequest):
             ctx = prepare(req.question, req.dept, req.retriever)
             route_name = ctx["route"]
 
+            # 检索基础设施不可用：直接告知，不走生成、不写缓存
+            # （不能缓存，否则数据库恢复后还会返回这条错误）
+            if route_name == "error":
+                yield _sse("meta", {"route": route_name, "sources": []})
+                yield _sse("delta", {"delta": ctx["answer"]})
+                yield _sse("done", {})
+                return
+
             # 闲聊：不调模型，直接给固定回复
             if route_name == "chitchat":
                 yield _sse("meta", {"route": route_name, "sources": []})
