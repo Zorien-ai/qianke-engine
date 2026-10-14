@@ -5,13 +5,26 @@
 @File    : profile_pipeline.py
 @Function: 拆解一次问答的各环节耗时，定位真实瓶颈
 
-用途：回答「五路检索为什么慢」这类问题——逐段计时，不靠猜测。
-      脚本会先预热（加载模型），再跑两轮；**看第二轮的数值**，第一轮含有
-      模型加载与 CUDA 首次分配的开销。
+用途：回答「为什么这么慢」这类问题——逐段计时，不靠猜测。
+
+⚠ 性能问题必须先测量再下结论。本项目有过两次教训：按代码结构猜「串行是瓶颈」，
+  实测那部分只占 3.8%；按结构猜「五路检索贵」，实测 0.75s。
+  结论：任何优化提案前，先跑这个脚本。
+
+链路（与 pipeline 实际执行顺序一致）：
+    ① 多路规划   1 次 LLM —— 路由复核 + SQL 判定 + 变体生成，三合一
+    ② 各路检索   hybrid_search × N
+    ③ RRF 融合
+    ④ 精排 + Parent Document 全文扩展
+    ⑤ Text2SQL   1 次 LLM（仅 need_sql 时）
+    ⑥ SQL 执行   PostgreSQL
+    ⑦ 答案生成   1 次 LLM（流式，计时含全部 chunk）
+
+脚本先预热（加载模型），再跑两轮；**看第二轮**——第一轮含模型加载与 CUDA 首次分配。
 
 用法：
     python src/rag_demo/tools/profile_pipeline.py
-    python src/rag_demo/tools/profile_pipeline.py OPT-04     # 指定题目
+    python src/rag_demo/tools/profile_pipeline.py OPT-04      # 指定题目
 """
 import json
 import os
@@ -19,72 +32,98 @@ import sys
 import time
 
 from rag_demo.config import BASE_DIR, TOP_K_PROFILE, TOP_K_RRF, TOP_K_WIKI
-from rag_demo.generation.generator import generate
-from rag_demo.retrieval.hybrid_retriever import hybrid_search, rrf_fusion
-from rag_demo.retrieval.query_processor import build_query_variants
+from rag_demo.generation.generator import generate_stream
+from rag_demo.retrieval.hybrid_retriever import hybrid_search
+from rag_demo.retrieval.query_processor import plan_queries, search_variants
 from rag_demo.retrieval.reranker import rerank_by_source
+from rag_demo.tools.sql_tool import execute_sql, text2sql, validate_sql
 
 TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
 
 
 def run_once(qid: str, question: str, label: str) -> dict:
-    print(f"\n{'=' * 68}\n【{label}】{qid} | {question}\n{'=' * 68}")
+    print(f"\n{'=' * 72}\n【{label}】{qid} | {question}\n{'=' * 72}")
+    s = {}
 
-    # ① 变体生成：1 次 LLM 调用出 4 个变体
+    # ① 多路规划：1 次 LLM 调用同时产出「路由复核 + SQL 判定 + 变体」
     t = time.time()
-    variants = build_query_variants(question)
-    t_variants = time.time() - t
-    print(f"① 变体生成（1 次 LLM 调用）  : {t_variants:6.2f}s   产出 {len(variants)} 路")
+    plan = plan_queries(question)
+    s["plan"] = time.time() - t
+    print(f"① 多路规划（1 次 LLM）     : {s['plan']:6.2f}s   "
+          f"路由={plan.route}  SQL={plan.need_sql}  变体={len(plan.variants)} 路")
+    for name, text in plan.variants:
+        print(f"      └ [{name:<8}] {text[:52]}")
 
-    # ② 各路检索：逐个跑，单独计时
-    all_hits = []
-    t_search_total = 0.0
-    for name, text in variants:
+    # ② 各路检索
+    trace = []
+    t = time.time()
+    candidates = search_variants(
+        plan.variants, top_k=TOP_K_RRF, origin_query=question, trace_out=trace
+    )
+    s["search"] = time.time() - t
+    print(f"② 检索（{len(plan.variants)} 路）            : {s['search']:6.2f}s   "
+          f"融合前候选 {sum(v['hit_count'] for v in trace)} 条")
+
+    # ③ ④ 精排（含全文扩展）
+    t = time.time()
+    reranked = rerank_by_source(
+        question, candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
+    )
+    s["rerank"] = time.time() - t
+    print(f"③ 精排 + 文档扩展          : {s['rerank']:6.2f}s   "
+          f"入上下文 {len(reranked)} 条")
+
+    # ⑤⑥ SQL 路：生成 + 执行（仅 need_sql 时）
+    sql_result = None
+    s["sql_gen"] = s["sql_exec"] = 0.0
+    if plan.need_sql:
         t = time.time()
-        hits = hybrid_search(text, top_k=TOP_K_RRF)
-        dt = time.time() - t
-        t_search_total += dt
-        all_hits.append(hits)
-        print(f"     检索[{name:<8}]      : {dt:6.2f}s   命中 {len(hits):>3} 条")
+        try:
+            sql = text2sql(question)
+        except Exception as e:
+            sql = ""
+            print(f"⑤ Text2SQL 失败: {e}")
+        s["sql_gen"] = time.time() - t
 
-    print(f"② 检索合计（串行累加）       : {t_search_total:6.2f}s")
+        rows, err = [], None
+        if sql and validate_sql(sql):
+            t = time.time()
+            try:
+                rows = execute_sql(sql)
+            except Exception as e:
+                err = str(e)
+            s["sql_exec"] = time.time() - t
+        sql_result = {"sql": sql, "rows": rows, "error": err}
+        print(f"④ Text2SQL（1 次 LLM）    : {s['sql_gen']:6.2f}s")
+        print(f"⑤ SQL 执行（DB）          : {s['sql_exec']:6.2f}s   返回 {len(rows)} 行")
+    else:
+        print("④ Text2SQL                :   ——    （本次不需要 SQL）")
 
-    # ③ RRF 融合
+    # ⑦ 答案生成（流式，计时覆盖全部 chunk）
     t = time.time()
-    fused = rrf_fusion(all_hits, top_n=TOP_K_RRF)
-    t_fuse = time.time() - t
-    print(f"③ RRF 融合                   : {t_fuse:6.2f}s   候选 {len(fused)} 条")
+    chunks = []
+    for delta in generate_stream(question, reranked, sql_result):
+        chunks.append(delta)
+    s["generate"] = time.time() - t
+    answer = "".join(chunks)
+    print(f"⑥ 答案生成（1 次 LLM）    : {s['generate']:6.2f}s   答案 {len(answer)} 字")
 
-    # ④ 分来源精排（含 Parent Document 扩展）
-    t = time.time()
-    reranked = rerank_by_source(question, fused, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI)
-    t_rerank = time.time() - t
-    print(f"④ 精排 + 文档扩展            : {t_rerank:6.2f}s   保留 {len(reranked)} 条")
+    s["total"] = sum(s.values())
+    llm_total = s["plan"] + s["sql_gen"] + s["generate"]
+    print(f"\n   合计 : {s['total']:.2f}s")
+    print(f"   其中 LLM 调用 {llm_total:.2f}s（{llm_total / s['total'] * 100:.1f}%）"
+          f" | 本地计算（检索+精排+SQL执行）"
+          f" {s['total'] - llm_total:.2f}s（{(s['total'] - llm_total) / s['total'] * 100:.1f}%）")
+    print(f"   占比 : 规划 {s['plan'] / s['total'] * 100:.1f}% | "
+          f"检索 {s['search'] / s['total'] * 100:.1f}% | "
+          f"精排 {s['rerank'] / s['total'] * 100:.1f}% | "
+          f"Text2SQL {s['sql_gen'] / s['total'] * 100:.1f}% | "
+          f"SQL执行 {s['sql_exec'] / s['total'] * 100:.1f}% | "
+          f"生成 {s['generate'] / s['total'] * 100:.1f}%")
 
-    # ⑤ LLM 生成
-    t = time.time()
-    result = generate(question, reranked)
-    t_gen = time.time() - t
-    answer = result.get("answer", "")
-    print(f"⑤ LLM 生成                   : {t_gen:6.2f}s   答案 {len(answer)} 字")
-
-    total = t_variants + t_search_total + t_fuse + t_rerank + t_gen
-    print(f"\n   合计 : {total:.2f}s")
-    print(f"   占比 : 变体生成 {t_variants / total * 100:4.1f}% | "
-          f"检索 {t_search_total / total * 100:4.1f}% | "
-          f"融合 {t_fuse / total * 100:4.1f}% | "
-          f"精排 {t_rerank / total * 100:4.1f}% | "
-          f"生成 {t_gen / total * 100:4.1f}%")
-
-    return {
-        "variants": t_variants,
-        "search": t_search_total,
-        "fuse": t_fuse,
-        "rerank": t_rerank,
-        "generate": t_gen,
-        "total": total,
-        "answer_len": len(answer),
-    }
+    s["answer_len"] = len(answer)
+    s["need_sql"] = plan.need_sql
+    return s
 
 
 def main() -> None:
@@ -92,10 +131,13 @@ def main() -> None:
 
     with open(os.path.join(TESTS_DIR, "eval_questions.json"), encoding="utf-8") as f:
         items = {q["id"]: q for q in json.load(f)}
-    if qid not in items:
-        print(f"未知题目 ID: {qid}")
+    if qid == "CUSTOM" and len(sys.argv) > 2:
+        question = sys.argv[2]
+    elif qid in items:
+        question = items[qid]["question"]
+    else:
+        print(f"未知题目 ID: {qid}（可用 CUSTOM \"你的问题\" 直接传问题）")
         return
-    question = items[qid]["question"]
 
     # 预热：把模型加载、CUDA 首次分配的开销排除在统计之外
     print("[预热] 加载模型与索引...")
@@ -104,13 +146,21 @@ def main() -> None:
     print("[预热] 完成")
 
     run_once(qid, question, "第 1 轮（看数值，不看结论）")
-    stats = run_once(qid, question, "第 2 轮 ★ 以这轮为准")
+    st = run_once(qid, question, "第 2 轮 ★ 以这轮为准")
 
-    print(f"\n{'=' * 68}")
+    print(f"\n{'=' * 72}")
     print("结论数据（第 2 轮）：")
-    print(f"  五路检索本身只占 {stats['search']:.2f}s（{stats['search'] / stats['total'] * 100:.1f}%）")
-    print(f"  变体生成占       {stats['variants']:.2f}s（{stats['variants'] / stats['total'] * 100:.1f}%）")
-    print(f"  LLM 生成占       {stats['generate']:.2f}s（{stats['generate'] / stats['total'] * 100:.1f}%）")
+    rows = [
+        ("多路规划（LLM）", st["plan"]),
+        ("检索", st["search"]),
+        ("精排 + 扩展", st["rerank"]),
+        ("Text2SQL（LLM）", st["sql_gen"]),
+        ("SQL 执行（DB）", st["sql_exec"]),
+        ("答案生成（LLM）", st["generate"]),
+    ]
+    for name, v in sorted(rows, key=lambda x: -x[1]):
+        print(f"  {name:<18} {v:6.2f}s   {v / st['total'] * 100:5.1f}%")
+    print(f"  {'合计':<18} {st['total']:6.2f}s")
 
 
 if __name__ == "__main__":
