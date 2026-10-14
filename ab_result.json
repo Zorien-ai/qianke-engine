@@ -8,8 +8,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 84.65218544006348,
-    "sp_ms": 772.6266384124756,
+    "bm_ms": 13.140439987182617,
+    "sp_ms": 1533.324956893921,
     "bm_top": [
       "tag_definitions.md",
       "user_profile",
@@ -29,8 +29,8 @@
     ],
     "bm_rank": 2,
     "sp_rank": 1,
-    "bm_ms": 36.023616790771484,
-    "sp_ms": 93.07169914245605,
+    "bm_ms": 12.009143829345703,
+    "sp_ms": 74.39351081848145,
     "bm_top": [
       "analysis_report_template.md",
       "user_profile",
@@ -50,8 +50,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 15.101909637451172,
-    "sp_ms": 86.16757392883301,
+    "bm_ms": 6.662607192993164,
+    "sp_ms": 77.15201377868652,
     "bm_top": [
       "tag_definitions.md",
       "segmentation.md",
@@ -72,8 +72,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 30.025005340576172,
-    "sp_ms": 89.6599292755127,
+    "bm_ms": 14.037370681762695,
+    "sp_ms": 88.14263343811035,
     "bm_top": [
       "tag_definitions.md",
       "marketing_playbook.md",
@@ -94,8 +94,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 13.516902923583984,
-    "sp_ms": 110.58282852172852,
+    "bm_ms": 13.027429580688477,
+    "sp_ms": 106.79745674133301,
     "bm_top": [
       "tag_definitions.md",
       "tag_definitions.md",
@@ -115,8 +115,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 18.514156341552734,
-    "sp_ms": 89.26606178283691,
+    "bm_ms": 12.024164199829102,
+    "sp_ms": 75.28281211853027,
     "bm_top": [
       "cs_sop.md"
     ],
@@ -134,8 +134,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 10.511398315429688,
-    "sp_ms": 117.23661422729492,
+    "bm_ms": 7.008552551269531,
+    "sp_ms": 137.74991035461426,
     "bm_top": [
       "cs_sop.md",
       "member_benefits.md",
@@ -155,8 +155,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 8.51750373840332,
-    "sp_ms": 86.53450012207031,
+    "bm_ms": 6.99925422668457,
+    "sp_ms": 89.27154541015625,
     "bm_top": [
       "user_profile"
     ],
@@ -174,8 +174,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 11.506319046020508,
-    "sp_ms": 91.16196632385254,
+    "bm_ms": 10.51640510559082,
+    "sp_ms": 75.61063766479492,
     "bm_top": [
       "member_benefits.md",
       "member_benefits.md",
@@ -195,8 +195,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 12.023448944091797,
-    "sp_ms": 88.81711959838867,
+    "bm_ms": 7.001638412475586,
+    "sp_ms": 73.69732856750488,
     "bm_top": [
       "cs_sop.md",
       "segmentation.md",
@@ -216,8 +216,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 0,
-    "bm_ms": 12.511491775512695,
-    "sp_ms": 76.16376876831055,
+    "bm_ms": 8.519887924194336,
+    "sp_ms": 79.24151420593262,
     "bm_top": [
       "tag_definitions.md",
       "tag_definitions.md",
@@ -238,8 +238,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 13.007164001464844,
-    "sp_ms": 84.81907844543457,
+    "bm_ms": 8.522510528564453,
+    "sp_ms": 74.33056831359863,
     "bm_top": [
       "segmentation.md",
       "marketing_playbook.md",
@@ -259,8 +259,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 11.003255844116211,
-    "sp_ms": 81.04538917541504,
+    "bm_ms": 8.25810432434082,
+    "sp_ms": 76.30801200866699,
     "bm_top": [
       "analysis_report_template.md",
       "analysis_report_template.md",
@@ -280,8 +280,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 5.508899688720703,
-    "sp_ms": 94.30742263793945,
+    "bm_ms": 4.506111145019531,
+    "sp_ms": 80.06978034973145,
     "bm_top": [
       "user_profile",
       "user_profile",
@@ -302,8 +302,8 @@
     ],
     "bm_rank": 7,
     "sp_rank": 1,
-    "bm_ms": 11.507511138916016,
-    "sp_ms": 86.0602855682373,
+    "bm_ms": 9.517908096313477,
+    "sp_ms": 72.93701171875,
     "bm_top": [
       "segmentation.md",
       "segmentation.md",
@@ -323,8 +323,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 9.514331817626953,
-    "sp_ms": 85.42227745056152,
+    "bm_ms": 10.543107986450195,
+    "sp_ms": 75.62589645385742,
     "bm_top": [
       "tag_definitions.md",
       "marketing_playbook.md",
@@ -344,8 +344,8 @@
     ],
     "bm_rank": 1,
     "sp_rank": 1,
-    "bm_ms": 7.004737854003906,
-    "sp_ms": 86.60316467285156,
+    "bm_ms": 6.999969482421875,
+    "sp_ms": 73.70400428771973,
     "bm_top": [
       "user_profile"
     ],
@@ -353,6 +353,129 @@
       "user_profile",
       "user_profile",
       "user_profile"
+    ]
+  },
+  {
+    "id": "MQ-02",
+    "question": "上海钻石会员里喜欢美妆的有谁，他们的客单价是多少",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 2,
+    "sp_rank": 1,
+    "bm_ms": 14.629364013671875,
+    "sp_ms": 102.62131690979004,
+    "bm_top": [
+      "cs_sop.md",
+      "user_profile",
+      "user_profile"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "MQ-03",
+    "question": "钻石会员和普通会员在品类偏好上有什么差异",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 2,
+    "sp_rank": 1,
+    "bm_ms": 21.051406860351562,
+    "sp_ms": 98.50335121154785,
+    "bm_top": [
+      "member_benefits.md",
+      "user_profile",
+      "user_profile"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "SV-01",
+    "question": "U2765 的手机号和身份证号是多少",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 10.512113571166992,
+    "sp_ms": 74.91135597229004,
+    "bm_top": [
+      "user_profile",
+      "cs_sop.md",
+      "member_benefits.md"
+    ],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "SY-01",
+    "question": "很能花钱的女生都有谁",
+    "expect": [
+      "user_profile"
+    ],
+    "bm_rank": 0,
+    "sp_rank": 1,
+    "bm_ms": 7.51185417175293,
+    "sp_ms": 71.63190841674805,
+    "bm_top": [],
+    "sp_top": [
+      "user_profile",
+      "user_profile",
+      "user_profile"
+    ]
+  },
+  {
+    "id": "EX-01",
+    "question": "非高价值用户有什么共同点",
+    "expect": [
+      "tag_definitions.md",
+      "user_profile"
+    ],
+    "bm_rank": 6,
+    "sp_rank": 1,
+    "bm_ms": 9.569883346557617,
+    "sp_ms": 75.27756690979004,
+    "bm_top": [
+      "segmentation.md",
+      "segmentation.md",
+      "segmentation.md"
+    ],
+    "sp_top": [
+      "tag_definitions.md",
+      "tag_definitions.md",
+      "segmentation.md"
+    ]
+  },
+  {
+    "id": "MD-01",
+    "question": "用户分群有哪几种，各自该怎么运营",
+    "expect": [
+      "marketing_playbook.md",
+      "segmentation.md"
+    ],
+    "bm_rank": 1,
+    "sp_rank": 1,
+    "bm_ms": 11.688709259033203,
+    "sp_ms": 73.91571998596191,
+    "bm_top": [
+      "segmentation.md",
+      "tag_definitions.md"
+    ],
+    "sp_top": [
+      "segmentation.md",
+      "segmentation.md",
+      "segmentation.md"
     ]
   }
 ]

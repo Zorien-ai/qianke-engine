@@ -3,7 +3,7 @@
 """
 @Author  : Vincent
 @File    : ab_sparse_vs_bm25.py
-@Function: A/B 实验——BM25 关键词召回 vs BGE-M3 原生稀疏向量
+@Function: A/B 实验——BM25 关键词召回 vs BGE-M3 原生稀疏向量（在线链路版）
 
 背景
 ----
@@ -11,10 +11,26 @@
 但 bge-m3 模型本身就能输出稀疏向量（learned sparse），理论上语义对齐更好。
 两条路到底谁强？跑实验对比，不靠感觉。
 
+改版说明（2026-10-14）
+--------------------
+本脚本此前自己维护一套稀疏向量：用 BGEM3FlagModel 给 8146 条语料现算权重、
+pickle 落盘到 sparse_cache.pkl，再用 Python 双重循环逐条算内积。
+
+问题是**它测的不是线上那条路**——线上走的是 sparse_retriever.sparse_search()，
+索引存在 search_index 表、打分交给 pgvector 的 sparsevec（P7 的改造结果）。
+自维护那套在 P7 之后已经没人用了，跑出来的结论对线上没有约束力。
+
+现在直接调用两个**线上函数**：
+    bm25_search()    —— hybrid_retriever：读 search_index.bm25_tokens，内存 BM25 打分
+    sparse_search()  —— sparse_retriever：读 search_index.sparse_weights，库内 sparsevec 打分
+
+顺带删掉的东西：本地 pkl 缓存、全量语料编码（约 27s）、约 120 行自维护索引代码。
+而且两者读的是同一张表，语料口径天然一致，不会再出现「两套语料比来比去」。
+
 做法
 ----
-1. 把全部语料（画像 N 条 + 知识库分块 M 条）分别建两套索引
-2. 对评测集每道题，各召回 top-K
+1. 先确认 search_index 表里 BM25 分词与稀疏权重都存在（缺稀疏索引就没法比）
+2. 对评测集每道题，两条路各召回 top-K
 3. 看「期望来源」有没有被召回到、排在第几名
 
 为什么用「期望来源命中」当指标
@@ -25,101 +41,50 @@
 
 用法
 ----
-    python src/rag_demo/tools/ab_sparse_vs_bm25.py
-    可选参数：--topk 20 --limit 0（0 表示全部语料）
+    uv run python src/rag_demo/tools/ab_sparse_vs_bm25.py
+    可选参数：--topk 20
+
+局限（读数前必须先知道）
+----------------------
+只测「召回」这一环，不含精排与生成。后面还有 bge-reranker 分池精排
+（画像 Top-3 / 文档 Top-2），**前 20 名内的名次差基本会被精排纠正**，
+所以本实验的「名次」差异不能直接等同于最终答案质量差异。
 """
 import argparse
 import json
 import logging
 import os
-import pickle
 import time
 
-import numpy as np
-
-from rag_demo.config import BASE_DIR, MODEL_PATH
+from rag_demo.config import BASE_DIR, SEARCH_INDEX_TABLE
 from rag_demo.db.connection import get_conn
-from rag_demo.retrieval.hybrid_retriever import _tokenize, reload_bm25, bm25_search
+from rag_demo.retrieval.hybrid_retriever import bm25_search, reload_bm25
+from rag_demo.retrieval.sparse_retriever import prewarm, sparse_search
 
 logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
 
 TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
-CACHE_PATH = os.path.join(BASE_DIR, "sparse_cache.pkl")
 
 
-def load_corpus():
-    """从库里拉全部语料，与 BM25 语料保持一致（画像 + 文档分块）"""
+def check_index() -> tuple[int, int, int]:
+    """
+    确认索引表里两种索引都在
+
+    返回 (总数, 有 bm25_tokens 的条数, 有 sparse_weights 的条数)。
+    稀疏索引缺失时实验无从谈起——与其跑出一堆「稀疏没命中」的假结论，
+    不如直接报错，这种静默降级之前吃过亏。
+    """
     conn = get_conn()
     cur = conn.cursor()
-
-    corpus = []
-    cur.execute("SELECT user_id, profile_text FROM user_profile_vectors")
-    for uid, text in cur.fetchall():
-        corpus.append({"id": f"user:{uid}", "text": text, "source": "user_profile"})
-
-    cur.execute("SELECT id, doc_name, chunk_text FROM wiki_vectors")
-    for cid, doc, text in cur.fetchall():
-        corpus.append({"id": f"wiki:{cid}", "text": text, "source": doc})
-
-    cur.close()
-    return corpus
-
-
-def build_sparse_index(corpus, batch_size=64, force=False):
-    """
-    用 BGEM3FlagModel 给全部语料算稀疏权重
-
-    结果缓存到磁盘——8110 条编码要几分钟，重复实验不该重复付这个代价。
-    """
-    if os.path.exists(CACHE_PATH) and not force:
-        with open(CACHE_PATH, "rb") as f:
-            cached = pickle.load(f)
-        if len(cached) == len(corpus):
-            print(f"[缓存] 复用稀疏向量索引（{len(cached)} 条）")
-            return cached
-
-    from FlagEmbedding import BGEM3FlagModel
-
-    print(f"[编码] 正在用 bge-m3 计算稀疏向量（{len(corpus)} 条）...")
-    model = BGEM3FlagModel(str(MODEL_PATH), use_fp16=True)
-
-    texts = [c["text"] for c in corpus]
-    t0 = time.time()
-    output = model.encode(
-        texts,
-        batch_size=batch_size,
-        max_length=512,
-        return_dense=False,
-        return_sparse=True,
-        return_colbert_vecs=False,
-    )
-    elapsed = time.time() - t0
-    weights = output["lexical_weights"]
-
-    print(f"[编码] 完成，耗时 {elapsed:.1f}s（{elapsed / max(len(texts), 1) * 1000:.1f} ms/条）")
-
-    with open(CACHE_PATH, "wb") as f:
-        pickle.dump(weights, f)
-    return weights
-
-
-def sparse_scores(query_weights: dict, corpus_weights: list) -> np.ndarray:
-    """
-    稀疏向量打分：查询与文档的 token 权重内积
-
-    稀疏向量长这样 {token_id: weight}，只有几百个非零项——
-    这也是它「稀疏」的含义：不用给整个词表都存一个数。
-    """
-    scores = np.zeros(len(corpus_weights), dtype=np.float32)
-    for i, doc_w in enumerate(corpus_weights):
-        s = 0.0
-        for token, w in query_weights.items():
-            dw = doc_w.get(token)
-            if dw:
-                s += w * dw
-        scores[i] = s
-    return scores
+    try:
+        cur.execute(
+            f"SELECT COUNT(*), COUNT(bm25_tokens), COUNT(sparse_weights) "
+            f"FROM {SEARCH_INDEX_TABLE}"
+        )
+        return cur.fetchone()
+    finally:
+        conn.rollback()
+        cur.close()
 
 
 def rank_of_expect(hits: list[dict], expect: set[str]) -> int:
@@ -131,26 +96,29 @@ def rank_of_expect(hits: list[dict], expect: set[str]) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="BM25 vs BGE-M3 稀疏向量 A/B")
+    parser = argparse.ArgumentParser(description="BM25 vs BGE-M3 稀疏向量 A/B（在线链路）")
     parser.add_argument("--topk", type=int, default=20, help="每路召回数量")
-    parser.add_argument("--force", action="store_true", help="强制重算稀疏向量缓存")
     args = parser.parse_args()
 
-    # ---------- 语料 ----------
-    corpus = load_corpus()
-    print(f"[语料] 共 {len(corpus)} 条"
-          f"（画像 {sum(1 for c in corpus if c['source'] == 'user_profile')}，"
-          f"文档分块 {sum(1 for c in corpus if c['source'] != 'user_profile')}）")
+    # ---------- 索引 ----------
+    total, bm25_n, sparse_n = check_index()
+    print(f"[索引] {SEARCH_INDEX_TABLE}: 共 {total} 条"
+          f" | bm25_tokens {bm25_n} | sparse_weights {sparse_n}")
+    if not sparse_n:
+        raise SystemExit(
+            f"索引表 {SEARCH_INDEX_TABLE} 里没有 sparse_weights，稀疏检索无从比对。\n"
+            f"请先运行：uv run python src/rag_demo/tools/build_search_index.py"
+        )
+    if bm25_n != sparse_n:
+        print(f"[警告] 两种索引覆盖条数不一致（{bm25_n} vs {sparse_n}），结果不可比")
 
-    # ---------- BM25 ----------
     reload_bm25()
-    print("[BM25] 索引就绪")
+    print("[BM25] 索引就绪（来自 search_index）")
 
-    # ---------- Sparse ----------
-    sparse_corpus = build_sparse_index(corpus, force=args.force)
-
-    from FlagEmbedding import BGEM3FlagModel
-    model = BGEM3FlagModel(str(MODEL_PATH), use_fp16=True)
+    # 预热稀疏模型：不预热的话，首次调用会把约 4s 的模型加载算进第一条的耗时，
+    # 23 条平均下来凭空多出约 170ms——「稀疏慢」会因此被高估。
+    prewarm()
+    print("[Sparse] 模型就绪")
 
     # ---------- 评测题 ----------
     with open(os.path.join(TESTS_DIR, "eval_questions.json"), encoding="utf-8") as f:
@@ -166,21 +134,15 @@ def main() -> None:
         question = q["question"]
         expect = set(q["expect_sources"])
 
-        # BM25
+        # BM25（在线：hybrid_retriever.bm25_search）
         t0 = time.time()
         bm_hits = bm25_search(question, top_k=args.topk)
         bm_ms = (time.time() - t0) * 1000
         bm_rank = rank_of_expect(bm_hits, expect)
 
-        # Sparse
+        # 稀疏（在线：sparse_retriever.sparse_search，含 query 编码）
         t0 = time.time()
-        q_out = model.encode([question], return_dense=False, return_sparse=True,
-                             return_colbert_vecs=False)
-        q_w = q_out["lexical_weights"][0]
-        scores = sparse_scores(q_w, sparse_corpus)
-        top_idx = np.argsort(scores)[::-1][: args.topk]
-        sp_hits = [{"id": corpus[i]["id"], "source": corpus[i]["source"],
-                    "score": float(scores[i])} for i in top_idx if scores[i] > 0]
+        sp_hits = sparse_search(question, top_k=args.topk)
         sp_ms = (time.time() - t0) * 1000
         sp_rank = rank_of_expect(sp_hits, expect)
 
@@ -214,7 +176,7 @@ def main() -> None:
 
     print(f"\n【查询耗时】单次检索平均")
     print(f"  BM25   : {sum(r['bm_ms'] for r in rows) / n:.1f} ms（内存索引，不含编码）")
-    print(f"  Sparse : {sum(r['sp_ms'] for r in rows) / n:.1f} ms（含 query 编码）")
+    print(f"  Sparse : {sum(r['sp_ms'] for r in rows) / n:.1f} ms（库内打分，含 query 编码）")
 
     # 逐题差异
     print(f"\n【谁更好】逐题对比")
