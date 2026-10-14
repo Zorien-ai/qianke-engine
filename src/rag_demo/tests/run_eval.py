@@ -168,10 +168,12 @@ def print_timing_spread(results: list[dict]) -> None:
             worst_pct = (worst[3] - worst[2]) / worst[1] * 100
             print(f"\n  题内波动: 中位 {mid_inner:.0f}% | 最大 {worst_pct:.0f}%（{worst[0]}）")
             if mid_inner > 15:
-                print(f"  ⚠ 题内波动偏大，单次测量不足以判断优化是否生效；"
+                # 不用 emoji：Windows 默认 GBK 控制台打印非 ASCII 符号会
+                # UnicodeEncodeError 直接崩掉 summarize（2026-10-14 v16 实测踩中）
+                print(f"  [!] 题内波动偏大，单次测量不足以判断优化是否生效；"
                       f"对比配置请用 --repeat 3 并比较中位数")
             else:
-                print(f"  ✅ 题内波动 {mid_inner:.0f}%，测量可信；"
+                print(f"  [OK] 题内波动 {mid_inner:.0f}%，测量可信；"
                       f"对比配置时比较中位数即可")
     else:
         print("  （单轮结果，看不出题内波动；加 --repeat 3 可看分布）")
