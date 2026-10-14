@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# 运行期日志（按天轮转，不入库）
+logs/

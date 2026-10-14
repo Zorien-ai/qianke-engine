@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from rag_demo.cache import answer_cache
 from rag_demo.db.connection import close_conn, get_conn
 from rag_demo.generation.generator import generate_stream
+from rag_demo.logging_setup import setup_logging
 from rag_demo.pipeline import answer_question, brief_rows, prepare
 from rag_demo.retrieval.hybrid_retriever import (
     _load_bm25_corpus,
@@ -42,7 +43,8 @@ from rag_demo.retrieval.hybrid_retriever import (
     sparse_search,  # 可能为 None（FlagEmbedding 未安装时降级）
 )
 
-logging.basicConfig(level=logging.INFO)
+# 控制台 + logs/rag_demo.log 双通道（此前只打屏，服务跑后台日志就丢了）
+setup_logging()
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
