@@ -13,12 +13,12 @@
 
 链路（与 pipeline 实际执行顺序一致）：
     ① 多路规划   1 次 LLM —— 路由复核 + SQL 判定 + 变体生成，三合一
-    ② 各路检索   hybrid_search × N
-    ③ RRF 融合
-    ④ 精排 + Parent Document 全文扩展
-    ⑤ Text2SQL   1 次 LLM（仅 need_sql 时）
-    ⑥ SQL 执行   PostgreSQL
-    ⑦ 答案生成   1 次 LLM（流式，计时含全部 chunk）
+    ② 各路并行检索 + 各路精排   hybrid_search × N（并行）→ 各路 RRF top30
+                                → 各路分来源精排（画像 Top-3 + 文档 Top-2）
+    ③ 合并去重   各路 top5 按 id 去重，直接作为候选（无二次融合、无整体终选）
+    ④ Text2SQL   1 次 LLM（仅 need_sql 时）
+    ⑤ SQL 执行   PostgreSQL
+    ⑥ 答案生成   1 次 LLM（流式，计时含全部 chunk）
 
 脚本先预热（加载模型），再跑两轮；**看第二轮**——第一轮含模型加载与 CUDA 首次分配。
 
@@ -31,11 +31,13 @@ import os
 import sys
 import time
 
-from rag_demo.config import BASE_DIR, TOP_K_PROFILE, TOP_K_RRF, TOP_K_WIKI
+from rag_demo.config import BASE_DIR, TOP_K_RRF
 from rag_demo.generation.generator import generate_stream
-from rag_demo.retrieval.hybrid_retriever import hybrid_search
-from rag_demo.retrieval.query_processor import plan_queries, search_variants
-from rag_demo.retrieval.reranker import rerank_by_source
+from rag_demo.retrieval.query_processor import (
+    STRATEGY_DIRECT,
+    plan_queries,
+    search_variants,
+)
 from rag_demo.tools.sql_tool import execute_sql, text2sql, validate_sql
 
 TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
@@ -54,7 +56,7 @@ def run_once(qid: str, question: str, label: str) -> dict:
     for name, text in plan.variants:
         print(f"      └ [{name:<8}] {text[:52]}")
 
-    # ② 各路检索 + 各路精排（先精排再聚合：每路只把头部交给融合）
+    # ② 各路并行检索 + 各路分来源精排 + 合并去重（一次调用内完成）
     trace = []
     t = time.time()
     candidates = search_variants(
@@ -63,17 +65,8 @@ def run_once(qid: str, question: str, label: str) -> dict:
     s["search"] = time.time() - t
     hit_total = sum(v["hit_count"] for v in trace)
     kept_total = sum(v.get("kept_count", 0) for v in trace)
-    print(f"② 检索+各路精排（{len(plan.variants)} 路）     : {s['search']:6.2f}s   "
-          f"召回 {hit_total} → 各路精排后 {kept_total} 条")
-
-    # ③ 终选：按原问题分来源精排（含全文扩展）
-    t = time.time()
-    reranked = rerank_by_source(
-        question, candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
-    )
-    s["rerank"] = time.time() - t
-    print(f"③ 终选精排 + 文档扩展        : {s['rerank']:6.2f}s   "
-          f"入上下文 {len(reranked)} 条")
+    print(f"② 并行检索+各路精排+去重（{len(plan.variants)} 路）: {s['search']:6.2f}s   "
+          f"召回 {hit_total} → 各路精排后 {kept_total} → 去重后 {len(candidates)} 条")
 
     # ⑤⑥ SQL 路：生成 + 执行（仅 need_sql 时）
     sql_result = None
@@ -104,7 +97,7 @@ def run_once(qid: str, question: str, label: str) -> dict:
     # ⑦ 答案生成（流式，计时覆盖全部 chunk）
     t = time.time()
     chunks = []
-    for delta in generate_stream(question, reranked, sql_result):
+    for delta in generate_stream(question, candidates, sql_result):
         chunks.append(delta)
     s["generate"] = time.time() - t
     answer = "".join(chunks)
@@ -117,8 +110,7 @@ def run_once(qid: str, question: str, label: str) -> dict:
           f" | 本地计算（检索+精排+SQL执行）"
           f" {s['total'] - llm_total:.2f}s（{(s['total'] - llm_total) / s['total'] * 100:.1f}%）")
     print(f"   占比 : 规划 {s['plan'] / s['total'] * 100:.1f}% | "
-          f"检索 {s['search'] / s['total'] * 100:.1f}% | "
-          f"精排 {s['rerank'] / s['total'] * 100:.1f}% | "
+          f"检索+精排+去重 {s['search'] / s['total'] * 100:.1f}% | "
           f"Text2SQL {s['sql_gen'] / s['total'] * 100:.1f}% | "
           f"SQL执行 {s['sql_exec'] / s['total'] * 100:.1f}% | "
           f"生成 {s['generate'] / s['total'] * 100:.1f}%")
@@ -143,8 +135,7 @@ def main() -> None:
 
     # 预热：把模型加载、CUDA 首次分配的开销排除在统计之外
     print("[预热] 加载模型与索引...")
-    warm = hybrid_search("预热", top_k=1)
-    rerank_by_source("预热", warm)
+    search_variants([(STRATEGY_DIRECT, "预热")], top_k=1)
     print("[预热] 完成")
 
     run_once(qid, question, "第 1 轮（看数值，不看结论）")
@@ -154,8 +145,7 @@ def main() -> None:
     print("结论数据（第 2 轮）：")
     rows = [
         ("多路规划（LLM）", st["plan"]),
-        ("检索", st["search"]),
-        ("精排 + 扩展", st["rerank"]),
+        ("检索+精排+去重", st["search"]),
         ("Text2SQL（LLM）", st["sql_gen"]),
         ("SQL 执行（DB）", st["sql_exec"]),
         ("答案生成（LLM）", st["generate"]),

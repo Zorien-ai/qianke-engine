@@ -27,13 +27,19 @@
 """
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
-from rag_demo.config import MULTI_QUERY_MAX_VARIANTS, PER_ROUTE_TOPK, TOP_K_RRF
+from rag_demo.config import (
+    MULTI_QUERY_MAX_VARIANTS,
+    TOP_K_PROFILE,
+    TOP_K_RRF,
+    TOP_K_WIKI,
+)
 from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import MULTI_QUERY_PROMPT
-from rag_demo.retrieval.hybrid_retriever import hybrid_search, rrf_fusion
-from rag_demo.retrieval.reranker import rerank
+from rag_demo.retrieval.hybrid_retriever import hybrid_search
+from rag_demo.retrieval.reranker import get_reranker, rerank_by_source
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG
 
 logger = logging.getLogger(__name__)
@@ -251,25 +257,49 @@ def build_query_variants(question: str) -> list[tuple[str, str]]:
     return plan_queries(question).variants
 
 
+def _retrieve_one(
+    strategy: str,
+    text: str,
+    top_k: int,
+    dept: str | None,
+    keyword_mode: str | None,
+    origin_query: str | None,
+) -> list[dict]:
+    """单路混合检索 + 溯源标注（供线程池并行调用）"""
+    hits = hybrid_search(text, top_k=top_k, dept=dept, keyword_mode=keyword_mode)
+    for h in hits:
+        h["from_query"] = text
+        if origin_query:
+            h["origin_query"] = origin_query
+        h.setdefault("strategies", []).append(strategy)
+    return hits
+
+
 def search_variants(
     variants: list[tuple[str, str]],
     top_k: int = TOP_K_RRF,
     dept: str | None = None,
     keyword_mode: str | None = None,
     origin_query: str | None = None,
-    per_route_topk: int = PER_ROUTE_TOPK,
     trace_out: list[dict] | None = None,
 ) -> list[dict]:
     """
-    按变体各自召回、**各自精排**后 RRF 融合；只用一路时直接返回，不再融合
+    各路**并行**检索 → 各路 RRF 出 top30 → 各路**分来源精排** → 合并去重
 
-    为什么先精排再聚合（而不是融合后再精排）：
-    各路召回分数的量纲不可比（向量相似度 / BM25 分 / 稀疏内积），且不同检索式
-    的头部质量差异很大。混在一起融合时，弱路的第 30 名仅凭名次就能挤掉强路的
-    第 2 名，而精排发生在融合之后、候选已被挤掉，救不回来。
-    先用**该路检索式**做 Cross-Encoder 精排砍到 per_route_topk 条——
-    各路只把头部交出来，再按名次 RRF 融合。终选入上下文时仍会按原问题
-    再做一次分来源精排（pipeline.rerank_by_source），两层各司其职。
+    链路（与设计约定一致）：
+        每条改写 query 独立走 hybrid_search（向量 top20 + BM25 top20 → RRF → top30）；
+        该路 30 条按来源分池精排——画像池 rerank 取 Top-3、文档池取 Top-2
+        （wiki 入选项扩展为父块全文）——每路交出 5 条；
+        各路结果合并、按 id 去重后直接作为候选，**不再做第二次融合**。
+        3 路 + SQL 的场合进 LLM 的就是 15 条 + SQL 结果；子问题更多则按比例增加。
+
+    为什么各路之间不再 RRF：各路 top5 已经是「该路检索式下最好的 5 条」，
+    再按名次融合等于让它们重新竞争——弱路的第 5 名仅凭名次就能挤掉强路的
+    第 1 名。合并去重只解决「同一条被多路选中」，不改变各路的选择结果。
+
+    为什么精排串行、检索并行：检索是 DB + BM25，线程池并发安全且收益直接；
+    精排是 GPU 前向，多线程同时 predict 同一 CrossEncoder 会争抢 CUDA，
+    串行执行（每路 30 条约 0.1s）没有感知成本。
 
     origin_query 会回填到每条候选上，生成阶段据此标注「这条资料是从哪个问题
     找出来的」（原始提问 vs 某条改写），避免 LLM 拿到一份无法溯源的扁平清单。
@@ -277,41 +307,72 @@ def search_variants(
     trace_out 传入列表时，每路的摘要会追加进去（策略名 / 检索式 / 召回数 /
     精排后保留数 / 前几条来源），供前端展示检索过程；不传则不留痕。
     """
-    result_lists = []
+    if not variants:
+        return []
+
+    # 预热精排模型：确保在进入线程池之前已加载完，
+    # 否则并发首次调用可能触发重复加载（get_reranker 无锁）
+    get_reranker()
+
+    # ① 各路并行检索
+    per_variant_hits: dict[tuple[str, str], list[dict]] = {}
+    errors: dict[tuple[str, str], str] = {}
+    with ThreadPoolExecutor(max_workers=len(variants)) as pool:
+        futures = {
+            pool.submit(
+                _retrieve_one, strategy, text, top_k, dept, keyword_mode, origin_query
+            ): (strategy, text)
+            for strategy, text in variants
+        }
+        for fut in as_completed(futures):
+            key = futures[fut]
+            try:
+                per_variant_hits[key] = fut.result()
+            except Exception as e:
+                logger.warning("策略「%s」检索失败，跳过: %s", key[0], e)
+                errors[key] = str(e)
+
+    # ② 各路串行精排（分来源：画像 Top-3 + 文档 Top-2）
+    #    ③ 合并去重：同一条资料被多路选中时合并 strategies，保留先出现的那份
+    merged: list[dict] = []
+    seen: dict[str, dict] = {}
     for strategy, text in variants:
-        try:
-            hits = hybrid_search(text, top_k=top_k, dept=dept, keyword_mode=keyword_mode)
-        except Exception as e:
-            logger.warning("策略「%s」检索失败，跳过: %s", strategy, e)
+        key = (strategy, text)
+        if key in errors:
             if trace_out is not None:
                 trace_out.append({
                     "strategy": strategy, "query": text,
-                    "hit_count": 0, "kept_count": 0, "sources": [], "error": str(e),
+                    "hit_count": 0, "kept_count": 0, "sources": [], "error": errors[key],
                 })
             continue
+        hits = per_variant_hits.get(key) or []
         hit_count = len(hits)
-        if hits:
-            for h in hits:
-                h["from_query"] = text
-                if origin_query:
-                    h["origin_query"] = origin_query
-                h.setdefault("strategies", []).append(strategy)
-            # 每路先精排：用该路检索式给本路候选打分，只留头部进融合。
-            # 精排失败不按「跳过该路」处理——与改造前 rerank_by_source 失败的
-            # 语义保持一致：精排是整个链路的基础能力，它挂了应该整体暴露，
-            # 而不是静默退化成一个只有部分资料的回答。
-            hits = rerank(text, hits, top_k=per_route_topk)
-            result_lists.append(hits)
+        # 精排失败不按「跳过该路」处理——精排是整个链路的基础能力，
+        # 它挂了应该整体暴露，而不是静默退化成一个只有部分资料的回答
+        kept = (
+            rerank_by_source(text, hits, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI)
+            if hits else []
+        )
         if trace_out is not None:
             trace_out.append({
                 "strategy": strategy,
                 "query": text,
                 "hit_count": hit_count,
-                "kept_count": len(hits),
-                "sources": [h["source"] for h in hits[:8]],
+                "kept_count": len(kept),
+                "sources": [h["source"] for h in kept[:8]],
             })
+        for c in kept:
+            cid = c["id"]
+            if cid in seen:
+                # 多路共识：把命中它的各路名字都记上（这正是「共识」的依据）
+                for s in c.get("strategies") or []:
+                    if s not in seen[cid]["strategies"]:
+                        seen[cid]["strategies"].append(s)
+                continue
+            seen[cid] = c
+            merged.append(c)
 
-    if not result_lists:
+    if not merged:
         # 注意区分两种「空」：
         #   全部路都抛异常  -> 检索不可用，必须让上层知道（否则被当成「资料缺失」）
         #   全部路都无命中  -> 正常的空结果，按「资料里没有」处理
@@ -320,12 +381,7 @@ def search_variants(
                 f"全部 {len(variants)} 路检索均失败：{trace_out[0].get('error')}"
             )
         return []
-    if len(result_lists) == 1:
-        return result_lists[0]
-
-    # 融合不再截到 top_k（30）：每路已精排到 per_route_topk 条，
-    # 总量 ≤ 路数 × per_route_topk，全部保留交给终选
-    return rrf_fusion(result_lists, top_n=len(result_lists) * per_route_topk)
+    return merged
 
 
 # TODO(perf): [P1] 多路规划那次 LLM 调用仍是主要开销（实测约 6s，占单次问答 31%）。
@@ -336,10 +392,9 @@ def multi_query_search(
     top_k: int = TOP_K_RRF,
     dept: str | None = None,
     keyword_mode: str | None = None,
-    per_route_topk: int = PER_ROUTE_TOPK,
 ) -> QueryPlan:
     """
-    多路检索（各路先精排）+ RRF 融合（一步到位）
+    多路并行检索 + 各路分来源精排 + 合并去重（一步到位）
 
     返回 QueryPlan：调用方应先看 plan.route——若被复核改道成 chitchat，
     说明这个问题本就不该走检索，此时 candidates 为空且**检索已被跳过**（省一次白跑）。
@@ -354,7 +409,6 @@ def multi_query_search(
     plan.candidates = search_variants(
         plan.variants, top_k=top_k, dept=dept,
         keyword_mode=keyword_mode, origin_query=question,
-        per_route_topk=per_route_topk,
         trace_out=per_variant,
     )
     plan.trace = {
@@ -363,8 +417,9 @@ def multi_query_search(
         "need_sql": plan.need_sql,
         "sql_blocked": plan.sql_blocked,
         "variants": per_variant,
+        # 合并去重后的候选总数（不是各路之和——同一条被多路选中只算一份）
         "fused_count": len(plan.candidates),
-        # 每路精排后保留数：前端据此展示「召回 30 -> 精排 5」的收敛过程
-        "per_route_topk": per_route_topk,
+        # 每路精排的分池配额：前端据此展示「各路精排 画像3 + 文档2」
+        "kept_per_route": {"profile": TOP_K_PROFILE, "wiki": TOP_K_WIKI},
     }
     return plan

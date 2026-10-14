@@ -9,8 +9,9 @@
 
     闲聊 / 域外  -> 固定回复（不检索、不调模型）
     其余全部     -> 多路聚合
-                    ├─ 检索路 1~N（各自召回后**先各自精排**、再 RRF 融合、
-                    │            最后按原问题分来源终选——弱路的尾部挤不掉强路的头部）
+                    ├─ 检索路 1~N（**并行**检索，各路 RRF 出 top30 后
+                    │            分来源精排：画像 Top-3 + 文档 Top-2）
+                    ├─ 各路结果合并去重（不再二次融合，不按名次重新竞争）
                     ├─ SQL 路（多路规划判定需要时才追加）
                     └─ 聚合后**一次**生成
 
@@ -34,16 +35,16 @@ tools/profile_modes_compare.py：检索仅 0.35~0.51s、精排 0.15~0.32s）。
 import logging
 
 from rag_demo.cache import answer_cache
-from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF, TOP_K_WIKI
+from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_RRF
 from rag_demo.generation.generator import generate
 from rag_demo.prompts import CHITCHAT_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
-from rag_demo.retrieval.hybrid_retriever import hybrid_search
 from rag_demo.retrieval.query_processor import (
+    STRATEGY_DIRECT,
     QueryPlan,
     RetrievalUnavailableError,
     multi_query_search,
+    search_variants,
 )
-from rag_demo.retrieval.reranker import rerank_by_source
 from rag_demo.tools import sql_tool
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG, route
 
@@ -127,16 +128,18 @@ def _plan_and_retrieve(
     返回的 QueryPlan 中：
         route     可能被 LLM 复核改道成 chitchat（捞关键词路由的漏判）
         need_sql  是否需要再追加一条结构化查询路
-        candidates 已融合的检索候选（带溯源字段）
+        candidates 各路并行检索 + 分来源精排 + 合并去重后的候选（带溯源字段）
 
     关闭 ENABLE_MULTI_QUERY 时没有那次 LLM 调用，退化为单路检索、无 SQL 判定
-    —— 这是该开关的固有代价，不是缺陷。
+    ——这是该开关的固有代价，不是缺陷。单路同样走「RRF top30 → 分来源精排」，
+    与多路时每路的行为一致。
     """
     if not ENABLE_MULTI_QUERY:
         return QueryPlan(
             route=ROUTE_RAG,
-            candidates=hybrid_search(
-                question, top_k=TOP_K_RRF, dept=dept, keyword_mode=keyword_mode
+            candidates=search_variants(
+                [(STRATEGY_DIRECT, question)], top_k=TOP_K_RRF,
+                dept=dept, keyword_mode=keyword_mode,
             ),
         )
 
@@ -175,10 +178,9 @@ def _answer_uncached(
     # SQL 路：与检索路并行产出，最终一起进 context
     sql_result = _run_sql(question) if plan.need_sql else None
 
-    reranked = rerank_by_source(
-        question, plan.candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
-    )
-    result = generate(question, reranked, sql_result=sql_result)
+    # 检索路已在 multi_query_search 内完成「各路 RRF top30 → 各路分来源精排
+    # → 合并去重」，这里直接进生成，不再做整体终选（否则等于三层精排）
+    result = generate(question, plan.candidates, sql_result=sql_result)
     result["route"] = ROUTE_RAG
 
     if sql_result is not None:
@@ -233,12 +235,11 @@ def prepare(
 
     sql_result = _run_sql(question) if plan.need_sql else None
 
-    reranked = rerank_by_source(
-        question, plan.candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
-    )
+    # candidates 已是「各路 RRF top30 → 各路分来源精排 → 合并去重」的结果，
+    # 直接透传给生成层，不再做整体终选（否则等于三层精排）
     return {
         "route": ROUTE_RAG,
-        "candidates": reranked,
+        "candidates": plan.candidates,
         "sql_result": sql_result,
         "trace": plan.trace,
         "sources": [
@@ -255,6 +256,6 @@ def prepare(
                 "rerank_score": round(float(c.get("rerank_score", 0)), 4),
                 "expanded": bool(c.get("expanded", False)),
             }
-            for i, c in enumerate(reranked, 1)
+            for i, c in enumerate(plan.candidates, 1)
         ],
     }

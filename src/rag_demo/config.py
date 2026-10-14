@@ -31,9 +31,8 @@ DB_CONFIG = {
 TOP_K_VECTOR = 20   # 向量单路召回数量
 TOP_K_BM25 = 20     # BM25 单路召回数量
 TOP_K_RRF = 30      # RRF 融合后候选数量
-PER_ROUTE_TOPK = 5  # 各路精排后保留条数（先精排再聚合：每路只把头部交给融合）
-TOP_K_PROFILE = 3   # 精排后保留的画像条数
-TOP_K_WIKI = 2      # 精排后保留的文档条数（上限，非强制填满）
+TOP_K_PROFILE = 3   # 各路精排后保留的画像条数
+TOP_K_WIKI = 2      # 各路精排后保留的文档条数（上限，非强制填满）
 
 # 关键词召回走哪一路：bm25 / sparse / both
 #   bm25   仅 BM25（默认）—— 快、命中率略高（实测 hit@20 100% vs 94.1%）

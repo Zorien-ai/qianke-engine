@@ -261,18 +261,20 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace })
       )
       .join("") || `<div class="tp-empty">（无）</div>`;
 
-  // 3) 收敛链路：各路召回 → 各路精排 → 融合 → 终选 → 入上下文
+  // 3) 收敛链路：各路并行召回 → 各路分来源精排 → 合并去重 → 入上下文
   const totalHits = variants.reduce((n, v) => n + (v.hit_count ?? 0), 0);
-  const fused = (trace && trace.fused_count) ?? 0;
-  const perRoute = (trace && trace.per_route_topk) ?? 0;
+  const merged = (trace && trace.fused_count) ?? 0;
+  const kept = (trace && trace.kept_per_route) || {};
+  const keptText =
+    kept.profile != null && kept.wiki != null
+      ? `画像<b>${kept.profile}</b>+文档<b>${kept.wiki}</b>`
+      : "分来源";
   el("trace-flow").innerHTML = `
-    <span class="tp-node">各路召回 <b>${totalHits}</b></span>
+    <span class="tp-node">各路并行召回 <b>${totalHits}</b></span>
     <span class="tp-arrow">→</span>
-    <span class="tp-node">各路精排 top<b>${perRoute}</b></span>
+    <span class="tp-node">各路精排 ${keptText}</span>
     <span class="tp-arrow">→</span>
-    <span class="tp-node">RRF 融合 <b>${fused}</b></span>
-    <span class="tp-arrow">→</span>
-    <span class="tp-node">分来源终选</span>
+    <span class="tp-node">合并去重 <b>${merged}</b></span>
     <span class="tp-arrow">→</span>
     <span class="tp-node is-final">入上下文 <b>${sources.length}</b></span>`;
 
