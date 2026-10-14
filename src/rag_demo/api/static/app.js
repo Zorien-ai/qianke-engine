@@ -314,9 +314,15 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace })
   if (sqlText) {
     sqlSec.hidden = false;
     el("sql-body").textContent = sqlText;
+    // 总行数用后端的 rows_count（真实行数），不能用 sqlRows.length——
+    // 后者是回传数组，已被 brief_rows 截到 20 行，>20 行时会显示成「共 20 行」，
+    // 与顶部徽章的「返回 N 行」自相矛盾。
+    const sqlTotal = typeof rowsCount === "number" ? rowsCount : sqlRows.length;
     el("trace-sql-note").textContent = sqlError
       ? `执行失败：${sqlError}`
-      : `共 ${sqlRows.length} 行`;
+      : sqlTotal > sqlRows.length
+        ? `共 ${sqlTotal} 行，下列前 ${sqlRows.length} 行`
+        : `共 ${sqlTotal} 行`;
     el("trace-sql-rows").innerHTML = sqlRows.length
       ? `<table class="tp-table">${sqlRows
           .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`)
