@@ -73,6 +73,10 @@ def _warmup_sparse() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时预加载模型与索引，避免首个请求等待过久"""
+    # 这里再配置一次日志：模块导入时那次执行早于 uvicorn 的 dictConfig，
+    # 而 uvicorn 会重置自己那几个 logger 的 handler。不在这里补挂，
+    # 「启动信息 + 谁在什么时候请求了什么」就不会落盘。
+    setup_logging()
     logger.info("预加载模型和 BM25 语料...")
     get_model()
     _load_bm25_corpus()
