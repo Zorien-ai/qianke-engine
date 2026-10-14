@@ -29,10 +29,11 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from rag_demo.config import MULTI_QUERY_MAX_VARIANTS, TOP_K_RRF
+from rag_demo.config import MULTI_QUERY_MAX_VARIANTS, PER_ROUTE_TOPK, TOP_K_RRF
 from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import MULTI_QUERY_PROMPT
 from rag_demo.retrieval.hybrid_retriever import hybrid_search, rrf_fusion
+from rag_demo.retrieval.reranker import rerank
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG
 
 logger = logging.getLogger(__name__)
@@ -256,16 +257,25 @@ def search_variants(
     dept: str | None = None,
     keyword_mode: str | None = None,
     origin_query: str | None = None,
+    per_route_topk: int = PER_ROUTE_TOPK,
     trace_out: list[dict] | None = None,
 ) -> list[dict]:
     """
-    按变体各自召回后 RRF 融合；只用一路时直接返回，不再融合
+    按变体各自召回、**各自精排**后 RRF 融合；只用一路时直接返回，不再融合
+
+    为什么先精排再聚合（而不是融合后再精排）：
+    各路召回分数的量纲不可比（向量相似度 / BM25 分 / 稀疏内积），且不同检索式
+    的头部质量差异很大。混在一起融合时，弱路的第 30 名仅凭名次就能挤掉强路的
+    第 2 名，而精排发生在融合之后、候选已被挤掉，救不回来。
+    先用**该路检索式**做 Cross-Encoder 精排砍到 per_route_topk 条——
+    各路只把头部交出来，再按名次 RRF 融合。终选入上下文时仍会按原问题
+    再做一次分来源精排（pipeline.rerank_by_source），两层各司其职。
 
     origin_query 会回填到每条候选上，生成阶段据此标注「这条资料是从哪个问题
     找出来的」（原始提问 vs 某条改写），避免 LLM 拿到一份无法溯源的扁平清单。
 
-    trace_out 传入列表时，每路的召回摘要会追加进去（策略名 / 检索式 / 命中数 /
-    前几条来源），供前端展示检索过程；不传则不留痕，行为与改造前一致。
+    trace_out 传入列表时，每路的摘要会追加进去（策略名 / 检索式 / 召回数 /
+    精排后保留数 / 前几条来源），供前端展示检索过程；不传则不留痕。
     """
     result_lists = []
     for strategy, text in variants:
@@ -276,21 +286,28 @@ def search_variants(
             if trace_out is not None:
                 trace_out.append({
                     "strategy": strategy, "query": text,
-                    "hit_count": 0, "sources": [], "error": str(e),
+                    "hit_count": 0, "kept_count": 0, "sources": [], "error": str(e),
                 })
             continue
+        hit_count = len(hits)
         if hits:
             for h in hits:
                 h["from_query"] = text
                 if origin_query:
                     h["origin_query"] = origin_query
                 h.setdefault("strategies", []).append(strategy)
+            # 每路先精排：用该路检索式给本路候选打分，只留头部进融合。
+            # 精排失败不按「跳过该路」处理——与改造前 rerank_by_source 失败的
+            # 语义保持一致：精排是整个链路的基础能力，它挂了应该整体暴露，
+            # 而不是静默退化成一个只有部分资料的回答。
+            hits = rerank(text, hits, top_k=per_route_topk)
             result_lists.append(hits)
         if trace_out is not None:
             trace_out.append({
                 "strategy": strategy,
                 "query": text,
-                "hit_count": len(hits),
+                "hit_count": hit_count,
+                "kept_count": len(hits),
                 "sources": [h["source"] for h in hits[:8]],
             })
 
@@ -306,7 +323,9 @@ def search_variants(
     if len(result_lists) == 1:
         return result_lists[0]
 
-    return rrf_fusion(result_lists, top_n=top_k)
+    # 融合不再截到 top_k（30）：每路已精排到 per_route_topk 条，
+    # 总量 ≤ 路数 × per_route_topk，全部保留交给终选
+    return rrf_fusion(result_lists, top_n=len(result_lists) * per_route_topk)
 
 
 # TODO(perf): [P1] 多路规划那次 LLM 调用仍是主要开销（实测约 6s，占单次问答 31%）。
@@ -317,9 +336,10 @@ def multi_query_search(
     top_k: int = TOP_K_RRF,
     dept: str | None = None,
     keyword_mode: str | None = None,
+    per_route_topk: int = PER_ROUTE_TOPK,
 ) -> QueryPlan:
     """
-    多路检索 + RRF 融合（一步到位）
+    多路检索（各路先精排）+ RRF 融合（一步到位）
 
     返回 QueryPlan：调用方应先看 plan.route——若被复核改道成 chitchat，
     说明这个问题本就不该走检索，此时 candidates 为空且**检索已被跳过**（省一次白跑）。
@@ -334,6 +354,7 @@ def multi_query_search(
     plan.candidates = search_variants(
         plan.variants, top_k=top_k, dept=dept,
         keyword_mode=keyword_mode, origin_query=question,
+        per_route_topk=per_route_topk,
         trace_out=per_variant,
     )
     plan.trace = {
@@ -343,5 +364,7 @@ def multi_query_search(
         "sql_blocked": plan.sql_blocked,
         "variants": per_variant,
         "fused_count": len(plan.candidates),
+        # 每路精排后保留数：前端据此展示「召回 30 -> 精排 5」的收敛过程
+        "per_route_topk": per_route_topk,
     }
     return plan

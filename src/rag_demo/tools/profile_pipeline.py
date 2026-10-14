@@ -54,23 +54,25 @@ def run_once(qid: str, question: str, label: str) -> dict:
     for name, text in plan.variants:
         print(f"      └ [{name:<8}] {text[:52]}")
 
-    # ② 各路检索
+    # ② 各路检索 + 各路精排（先精排再聚合：每路只把头部交给融合）
     trace = []
     t = time.time()
     candidates = search_variants(
         plan.variants, top_k=TOP_K_RRF, origin_query=question, trace_out=trace
     )
     s["search"] = time.time() - t
-    print(f"② 检索（{len(plan.variants)} 路）            : {s['search']:6.2f}s   "
-          f"融合前候选 {sum(v['hit_count'] for v in trace)} 条")
+    hit_total = sum(v["hit_count"] for v in trace)
+    kept_total = sum(v.get("kept_count", 0) for v in trace)
+    print(f"② 检索+各路精排（{len(plan.variants)} 路）     : {s['search']:6.2f}s   "
+          f"召回 {hit_total} → 各路精排后 {kept_total} 条")
 
-    # ③ ④ 精排（含全文扩展）
+    # ③ 终选：按原问题分来源精排（含全文扩展）
     t = time.time()
     reranked = rerank_by_source(
         question, candidates, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI
     )
     s["rerank"] = time.time() - t
-    print(f"③ 精排 + 文档扩展          : {s['rerank']:6.2f}s   "
+    print(f"③ 终选精排 + 文档扩展        : {s['rerank']:6.2f}s   "
           f"入上下文 {len(reranked)} 条")
 
     # ⑤⑥ SQL 路：生成 + 执行（仅 need_sql 时）
