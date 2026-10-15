@@ -13,6 +13,7 @@ import argparse
 import os
 import json
 import statistics
+import sys
 import time
 from collections import defaultdict
 from datetime import date
@@ -20,7 +21,12 @@ from datetime import date
 from rag_demo.config import BASE_DIR
 from rag_demo.pipeline import answer_question
 
+# tests 目录进 sys.path，保证能 import 同目录的 preflight
 TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
+sys.path.insert(0, TESTS_DIR)
+
+from preflight import check_api  # noqa: E402
+
 DEFAULT_QUESTIONS = "eval_questions.json"
 
 # SQL 失败的典型措辞（旧归档无 rows_count 字段时的启发式依据）
@@ -326,6 +332,13 @@ def main() -> None:
     # 看着像「LLM 不稳定」，实际是模型加载。
     # 用真实业务问题（不是「预热一下」那种短句），否则会被判成闲聊直接返回，
     # 根本走不到检索与精排，等于没预热。
+    # 预检：LLM API 不通就不要启动。20+ 题跑一遍要好几分钟，
+    # API 故障期间跑完只会得到一堆失败记录（2026-10-14 实测踩过：
+    # 忠实度评测首跑 3 题全因 API 超时挂掉）
+    if not check_api():
+        print("LLM API 当前不可用，评测中止。")
+        return
+
     print("[预热] 加载模型与索引（不计入统计）...")
     warm_t0 = time.time()
     answer_question("高价值用户怎么定义", use_cache=False)

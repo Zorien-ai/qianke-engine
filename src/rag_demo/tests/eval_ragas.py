@@ -56,6 +56,8 @@ from ragas.metrics import (  # noqa: E402
     LLMContextRecall,
 )
 
+from preflight import check_api  # noqa: E402
+
 from rag_demo.config import BASE_DIR  # noqa: E402
 from rag_demo.generation.generator import generate_stream  # noqa: E402
 from rag_demo.pipeline import prepare  # noqa: E402
@@ -141,6 +143,13 @@ def main() -> None:
 
     print(f"[RAGAS] 待评 {len(questions)} 题 · 4 指标（忠实度/答案相关性/上下文相关性/上下文召回率）")
 
+    # 预检：LLM API 不通就不要启动。本脚本全量约 20 分钟，
+    # 且 ragas 的 raise_exceptions=False 会把失败样本静默记成 NaN——
+    # API 故障期间跑完只会得到一堆空值，白等一轮（2026-10-14 实测踩过）
+    if not check_api():
+        print("LLM API 当前不可用，RAGAS 评测中止。")
+        sys.exit(2)
+
     # ---------- 1) 跑项目链路，收集 question / answer / contexts / reference ----------
     samples, meta = [], []
     for i, item in enumerate(questions, 1):
@@ -218,10 +227,23 @@ def main() -> None:
     print("\n=== 平均分 ===")
     summary = {}
     for label in labels:
-        v = df[col_map[label]].mean()
+        col = col_map[label]
+        n_nan = int(df[col].isna().sum())
+        v = df[col].mean()
         summary[label] = None if v != v else round(float(v), 4)
-        print(f"  {label:<12} {(f'{v:.4f}' if v == v else 'nan')}")
+        note = f"  ⚠ {n_nan} 个样本无结果" if n_nan else ""
+        print(f"  {label:<12} {(f'{v:.4f}' if v == v else 'nan')}{note}")
     print(f"  {'样本数':<12} {len(df)}")
+
+    # NaN 兜底告警：ragas 的 raise_exceptions=False 会静默吞掉失败样本，
+    # 均值照样算得出来——但那是对「部分样本」的均值，不能当全量结论用。
+    # 典型成因：LLM API 抖动 / 限流 / 超时（2026-10-14 实测 16 路并发 +
+    # API 故障时，33 题里有 25 题上下文相关性为空）。
+    total_nan = sum(int(df[col_map[l]].isna().sum()) for l in labels)
+    if total_nan:
+        print(f"\n⚠️ 共有 {total_nan} 个指标样本无结果（已从均值中剔除）。")
+        print("   上述均值只代表有效样本，不能当全量结论。")
+        print("   常见原因：LLM API 抖动/限流/超时。确认 API 稳定后重跑。")
 
     # ---------- 4) 落 CSV ----------
     import pandas as pd

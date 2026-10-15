@@ -54,12 +54,17 @@ import time
 import traceback
 from datetime import date
 
-from rag_demo.config import BASE_DIR, DEVICE, DTYPE
-from rag_demo.generation.generator import chat_completion, generate_stream
-from rag_demo.pipeline import prepare
-from rag_demo.retrieval.hybrid_retriever import hybrid_search, vector_search
+# tests 目录进 sys.path，保证能 import 同目录的 preflight
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, TESTS_DIR)
 
-TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
+from preflight import check_api  # noqa: E402
+
+from rag_demo.config import BASE_DIR, DEVICE, DTYPE  # noqa: E402
+from rag_demo.generation.generator import chat_completion, generate_stream  # noqa: E402
+from rag_demo.pipeline import prepare  # noqa: E402
+from rag_demo.retrieval.hybrid_retriever import hybrid_search  # noqa: E402
+
 QUESTIONS_PATH = os.path.join(TESTS_DIR, "eval_questions.json")
 RESULTS_PATH = os.path.join(TESTS_DIR, "faithfulness_results.json")
 
@@ -169,6 +174,12 @@ def main() -> None:
     if args.ids:
         want = {x.strip() for x in args.ids.split(",") if x.strip()}
         questions = [q for q in questions if q["id"] in want]
+
+    # 预检：LLM API 不通就不要启动——跑完只会得到一堆 judge 失败
+    # （2026-10-14 实测：API 故障期间首跑 3 题全挂，白等一轮）
+    if not check_api():
+        print("LLM API 当前不可用，忠实度评测中止。")
+        sys.exit(2)
 
     # 预热 + 自检：模型加载不计入忠实度统计（与 run_eval 一致）
     print(f"[预热] 加载模型与索引（device={DEVICE}, dtype={DTYPE}）...")
