@@ -60,6 +60,7 @@ def answer_question(
     keyword_mode: str | None = None,
     use_cache: bool = True,
     profile_limit: int | None = None,
+    deep_thinking: bool | None = None,
 ) -> dict:
     """
     统一问答入口（带缓存）
@@ -72,12 +73,18 @@ def answer_question(
         profile_limit: 「返回多少个用户」（画像池的全局名额），None = 用 config
                        默认值 TOP_K_PROFILE(3)。由接口层按角色放行后传入
                        （permissions.clamp_top_k）；评测/工具脚本不传即默认行为。
+        deep_thinking: 最后一个生成调用是否开启思考模式（None/False = 关，默认）。
+                       True = 让模型先推理再作答：实测忠实度 95.7%→100%，
+                       代价是慢 5.5 倍、token 7.2 倍（见 tools/ab_deep_thinking.py）。
+                       **只作用于生成这一次调用**——规划与 Text2SQL 恒不思考，
+                       它们开思考只是白慢，答案质量并不因此提高。
+                       它进缓存键：开与不开是两份不同的答案，不能互相命中。
 
     注意：本函数返回的是**完整结果**，不做任何按角色的裁剪——裁剪统一在
     api 层的 permissions.render() 做。这样评测脚本直接调它拿到的仍是全量字段，
     不会因为加了权限而失能。
     """
-    key = answer_cache.make_key(question, dept, keyword_mode, profile_limit)
+    key = answer_cache.make_key(question, dept, keyword_mode, profile_limit, deep_thinking)
 
     if use_cache:
         hit = answer_cache.get(key)
@@ -86,7 +93,7 @@ def answer_question(
             return {**hit, "cached": True}
 
     try:
-        result = _answer_uncached(question, dept, keyword_mode, profile_limit)
+        result = _answer_uncached(question, dept, keyword_mode, profile_limit, deep_thinking)
     except APIError as e:
         # LLM 接口故障（超时 / 限流 / 5xx）：不写缓存（恢复后要能正常回答），
         # 返回固定文案 + 独立 route，让用户知道该重试、排查的人知道查 LLM 侧
@@ -193,6 +200,7 @@ def _answer_uncached(
     dept: str | None = None,
     keyword_mode: str | None = None,
     profile_limit: int | None = None,
+    deep_thinking: bool | None = None,
 ) -> dict:
     """
     实际问答流程
@@ -226,7 +234,7 @@ def _answer_uncached(
 
     # 检索路已在 multi_query_search 内完成「各路 RRF top30 → 分池取舍 → 合并去重」，
     # 这里直接进生成，不再做整体终选（否则等于三层精排）
-    result = generate(question, candidates, sql_result=sql_result)
+    result = generate(question, candidates, sql_result=sql_result, deep_thinking=deep_thinking)
     result["route"] = ROUTE_RAG
 
     if sql_result is not None:

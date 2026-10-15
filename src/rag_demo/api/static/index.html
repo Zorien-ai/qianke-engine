@@ -60,6 +60,14 @@
           <input type="number" id="topk-input" min="1" placeholder="默认" />
           <span class="topk-range" id="topk-range"></span>
         </div>
+        <!-- 深度思考：只作用于最后一个生成调用（规划 / Text2SQL 不受影响）。
+             所有身份都能开——代价是自选的，但必须显式告知，所以「慢约 5 倍」常驻可见。 -->
+        <label class="think-bar" id="think-bar"
+               title="让模型先推理再作答。实测忠实度 95.7%→100%，代价是耗时约 5.5 倍、token 约 7.2 倍。开启后首字要等 20~45 秒，期间会实时显示思维链。">
+          <input type="checkbox" id="think-input" />
+          <span class="think-label">深度思考</span>
+          <span class="think-hint">慢约 5 倍</span>
+        </label>
       </div>
       <form id="ask-form" class="ask-form">
         <textarea
@@ -88,6 +96,15 @@
         <h2>回答</h2>
         <div class="badges" id="result-badges"></div>
       </div>
+      <!-- 思维链：只在开启深度思考时出现。它是模型的推理过程，**不属于回答**——
+           不参与 [来源N] 引用，也不进「数据来源」，所以单独一块、默认可折叠。 -->
+      <details class="reasoning" id="reasoning-box" hidden>
+        <summary>
+          <span class="reasoning-title">思维链（模型推理过程，不是回答的一部分）</span>
+          <span class="reasoning-meta" id="reasoning-meta"></span>
+        </summary>
+        <div class="reasoning-body" id="reasoning-body"></div>
+      </details>
       <div class="answer" id="answer-body"></div>
     </section>
 

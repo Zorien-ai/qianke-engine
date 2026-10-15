@@ -43,7 +43,7 @@ class AnswerCache:
 
     @staticmethod
     def make_key(question: str, dept: str | None = None, keyword_mode: str | None = None,
-                 profile_limit: int | None = None) -> str:
+                 profile_limit: int | None = None, deep_thinking: bool | None = None) -> str:
         """
         生成缓存键
 
@@ -55,9 +55,15 @@ class AnswerCache:
         污染高权角色的缓存。所以角色不进键、也不进缓存内容。
 
         但 `profile_limit` 必须进键——它改变的是**检索结果本身**，不是展示形态。
+        `deep_thinking` 同理：它是**生成参数**，开思考与不开生成的是两份不同的
+        答案，不进键就会出现「勾上深度思考却秒回上次那条没思考的缓存」，
+        而且看起来完全像「开关没生效」。
+
+        None 与 False 归一到同一个键（都表示不思考），避免两种写法各占一份缓存。
         """
         raw = (f"{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
-               f"|{profile_limit if profile_limit else '-'}")
+               f"|{profile_limit if profile_limit else '-'}"
+               f"|{1 if deep_thinking else 0}")
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict | None:

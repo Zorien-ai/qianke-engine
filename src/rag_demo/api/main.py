@@ -46,10 +46,15 @@ from rag_demo.config import (
     TOP_K_PROFILE_MIN,
 )
 from rag_demo.db.connection import close_conn, get_conn
-from rag_demo.generation.generator import generate_stream
+from rag_demo.generation.generator import (
+    EVENT_ANSWER,
+    EVENT_REASONING,
+    generate_events,
+)
 from rag_demo.logging_setup import setup_logging
 from rag_demo.pipeline import answer_question, brief_rows, prepare
 from rag_demo.prompts import LLM_UNAVAILABLE_REPLY
+from rag_demo.retrieval.reranker import get_reranker
 from rag_demo.retrieval.hybrid_retriever import (
     _load_bm25_corpus,
     bm25_search,
@@ -117,6 +122,14 @@ async def lifespan(app: FastAPI):
     logger.info("预加载模型和 BM25 语料...")
     get_model()
     _load_bm25_corpus()
+    # 精排模型也必须在**启动时**加载，不能等第一个请求。
+    # 实测（2026-10-15）：请求期间首次加载精排模型会得到**半转换的 fp16 模型**
+    # （权重 fp16、输入 fp32），首次 forward 抛
+    # "mat1 and mat2 must have the same dtype, but got Half and Float"，
+    # 且该进程此后**每次**检索都失败（模型停在坏状态，重启才恢复）。
+    # 具体触发条件是「加载模型的同时还有其他 CUDA 活动」（请求里的 embed 编码、
+    # 或下面那个后台稀疏预热线程），所以这里把它挪到启动阶段，与 get_model 同一批。
+    get_reranker()
     logger.info("预加载完成")
 
     # 稀疏索引放后台预热：不拖慢启动，但让首个 sparse 请求即热态
@@ -142,13 +155,18 @@ app = FastAPI(
 class QueryRequest(BaseModel):
     question: str
     dept: str | None = None
-    # 「返回多少个用户」的上限（画像条数）。None = 走系统默认（不额外截断）。
+    # 「返回多少个用户」= 画像池的全局名额。None = 用 config 默认值 TOP_K_PROFILE(3)。
     # 只有运营及以上角色能生效，其余角色的传值会被静默忽略（见 permissions.clamp_top_k）。
     #
     # 改造前这个字段是 `top_k: int = 5` 但**整条链路没有任何地方用它**——
     # 收了参数却完全忽略，比不收更糟：调用方以为生效了。
     top_k: int | None = None
     retriever: str | None = None  # 关键词召回方式：bm25 / sparse / both；缺省用 config
+    # 深度思考：只作用于**最后一个生成调用**（规划 / Text2SQL 恒不思考）。
+    # 所有角色都能开——它是用户自选的代价（实测慢 5.5 倍、token 7.2 倍，
+    # 忠实度 95.7%→100%，见 tools/ab_deep_thinking.py），不做权限收窄。
+    # None/False = 关（也是全局默认），True = 开。
+    deep_thinking: bool | None = None
 
 
 class SearchRequest(BaseModel):
@@ -231,7 +249,8 @@ def qa(req: QueryRequest, x_role: str | None = Header(default=None, alias=ROLE_H
     dept = req.dept if permissions.has(role, permissions.CAP_OPS) else None
 
     result = answer_question(
-        req.question, dept, keyword_mode=req.retriever, profile_limit=limit
+        req.question, dept, keyword_mode=req.retriever, profile_limit=limit,
+        deep_thinking=req.deep_thinking,
     )
     return permissions.render(result, role)
 
@@ -353,11 +372,13 @@ def qa_stream(req: QueryRequest, x_role: str | None = Header(default=None, alias
     逐字出现。**总耗时基本不变，但感知延迟大幅下降。**
 
     事件类型：
-        stage  阶段提示（retrieving / generating）
-        meta   元信息（route / sources / cached），**按角色裁剪后才发出**
-        delta  文本片段
-        done   结束
-        error  错误
+        stage     阶段提示（retrieving / generating）
+        meta      元信息（route / sources / cached / deep_thinking），**按角色裁剪后才发出**
+        delta     回答正文片段
+        reasoning 思维链片段（仅开启深度思考时出现）——**不属于回答**：
+                  推理先于正文到达，独立一条通道，不参与 [来源N]、不进「数据来源」
+        done      结束
+        error     错误
 
     权限说明（重要）：本函数有 **4 个 meta 出口**（缓存命中 / 检索不可用 / 闲聊 /
     正常生成），每个都单独构造 payload。**每一处都必须过 permissions.render()**——
@@ -377,8 +398,12 @@ def qa_stream(req: QueryRequest, x_role: str | None = Header(default=None, alias
 
     def event_stream():
         try:
-            # 命中缓存时直接吐完，不用走生成
-            key = answer_cache.make_key(req.question, dept, req.retriever, limit)
+            # 命中缓存时直接吐完，不用走生成。
+            # 键里带 deep_thinking：开与不开是两份不同的答案，不能互相命中。
+            # 缓存里**不存思维链**——它只是展示物、不进答案，存下来让缓存翻倍不划算；
+            # 代价是命中缓存时前端拿不到思维链（此时下面也不会发 reasoning 事件）。
+            key = answer_cache.make_key(req.question, dept, req.retriever, limit,
+                                        req.deep_thinking)
             hit = answer_cache.get(key)
             if hit is not None:
                 yield meta({
@@ -427,13 +452,28 @@ def qa_stream(req: QueryRequest, x_role: str | None = Header(default=None, alias
                 "sql_error": (sql_result or {}).get("error"),
                 "trace": ctx.get("trace", {}),
             }
-            yield meta({"route": route_name, "sources": ctx["sources"], **sql_payload})
+            # deep_thinking 走 **extra 而不是放进 payload：
+            # payload 要过 permissions.render()（只复制白名单字段，这是防越权的关键），
+            # 而本字段是**请求方自己发过来的**、不含知识库内容，属「非裁剪项」——
+            # 与 cached 同类。（实测：放进 payload 会被 render 静默丢掉。）
+            yield meta(
+                {"route": route_name, "sources": ctx["sources"], **sql_payload},
+                deep_thinking=bool(req.deep_thinking),
+            )
             yield _sse("stage", {"stage": "generating"})
 
+            # 推理段与答案段走两个事件：思维链要单独展示，不能混进回答正文
+            # （混进去会污染 [来源N] 与「事实/推断」的呈现）
             chunks = []
-            for delta in generate_stream(req.question, ctx["candidates"], sql_result):
-                chunks.append(delta)
-                yield _sse("delta", {"delta": delta})
+            for kind, text in generate_events(
+                req.question, ctx["candidates"], sql_result,
+                deep_thinking=req.deep_thinking,
+            ):
+                if kind == EVENT_REASONING:
+                    yield _sse("reasoning", {"delta": text})
+                else:
+                    chunks.append(text)
+                    yield _sse("delta", {"delta": text})
 
             yield _sse("done", {})
             # 写缓存的是**完整结果**（不裁剪）：否则低权角色先问一次，

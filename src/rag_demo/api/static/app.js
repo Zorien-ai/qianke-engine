@@ -154,6 +154,16 @@ function formatAnswer(text) {
   return html.replace(/\[来源\s*(\d+)\]/g, '<span class="cite">[来源$1]</span>');
 }
 
+/* ---------- 思维链（仅开启深度思考时出现） ---------- */
+/* 每轮都重置：上一条问题的推理留在页面上，会被当成这次的结果 */
+function resetReasoning() {
+  const box = el("reasoning-box");
+  box.hidden = true;
+  box.open = false;
+  el("reasoning-body").textContent = "";
+  el("reasoning-meta").textContent = "";
+}
+
 /* ---------- 提交提问（流式）---------- */
 async function ask(question) {
   const btn = el("ask-btn");
@@ -162,6 +172,7 @@ async function ask(question) {
 
   el("result-panel").hidden = true;
   el("error-panel").hidden = true;
+  resetReasoning();
   btn.disabled = true;
   spinner.hidden = false;
   btnText.textContent = "检索中…";
@@ -176,6 +187,9 @@ async function ask(question) {
       const v = parseInt(el("topk-input").value, 10);
       if (!Number.isNaN(v)) payload.top_k = v;
     }
+    // 深度思考：所有身份都能开。只影响最后一个生成调用，
+    // 但首字要等 20~45s（推理不通过 delta 下发到回答里），所以文案要跟着变
+    if (el("think-input").checked) payload.deep_thinking = true;
     const res = await apiFetch("/qa/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -199,6 +213,7 @@ async function ask(question) {
     let trace = null;
     let cached = false;
     let resultShown = false;
+    let reasoning = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -233,6 +248,27 @@ async function ask(question) {
           trace = data.trace || null;
           cached = !!data.cached;
           if (data.cached) btnText.textContent = "命中缓存";
+        } else if (event === "reasoning") {
+          // 思维链先于答案到达（开启深度思考时才有）。它单独一条通道，
+          // 不拼进 answer——否则推理里的 [来源N] 会被当成引用、污染事实/推断的呈现。
+          if (!resultShown) {
+            renderStreamShell({
+              route, sources, sqlText, rowsCount,
+              sqlRows, sqlError, trace, cached,
+            });
+            resultShown = true;
+          }
+          const box = el("reasoning-box");
+          if (box.hidden) {
+            // 推理阶段就展开：这是 20~45s 等待里唯一在动的东西，
+            // 收起来用户只会看到界面卡住
+            box.hidden = false;
+            box.open = true;
+          }
+          reasoning += data.delta;
+          el("reasoning-body").textContent = reasoning;
+          el("reasoning-meta").textContent = `${reasoning.length} 字`;
+          btnText.textContent = "深度思考中…";
         } else if (event === "delta") {
           if (!resultShown) {
             // 首个片段到达——此刻才让结果区出现，避免空白面板闪一下
@@ -245,6 +281,8 @@ async function ask(question) {
           if (firstCharAt === null) {
             firstCharAt = performance.now();
             btnText.textContent = "生成中…";
+            // 答案开始到达：把思维链收起来，否则它会一直把正文顶在视口外
+            if (reasoning && el("reasoning-box").open) el("reasoning-box").open = false;
           }
           answer += data.delta;
           el("answer-body").innerHTML = formatAnswer(answer);
@@ -289,6 +327,8 @@ function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlErr
   el("result-badges").innerHTML = badges.join("");
 
   el("answer-body").innerHTML = "";
+  // 思维链与回答同一个生命周期：新一轮提问不该看到上一轮的推理
+  resetReasoning();
 
   renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace });
 
@@ -452,6 +492,7 @@ function renderResult(data, elapsed) {
   el("result-badges").innerHTML = badges.join("");
 
   // 答案
+  resetReasoning();
   el("answer-body").innerHTML = formatAnswer(data.answer || "（无内容）");
 
   // 过程信息统一走 renderDetail（与流式路径共用，避免两处逻辑分叉）

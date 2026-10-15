@@ -185,6 +185,54 @@ def generate(query, candidates, sql_result=None, model=MODEL, deep_thinking=None
     return {"answer": answer, "sources": _build_sources(candidates), "usage": usage_of(resp)}
 
 
+# ---------- 流式事件类型 ----------
+# 推理段与答案段必须分成两个通道：混成一条字符串流也能拼出全文，
+# 但前端没法把思维链单独折叠展示，也没法在「只有推理、还没有答案」的阶段
+# 给出正确的等待提示（那时它会误以为在正常生成）。
+EVENT_REASONING = "reasoning"
+EVENT_ANSWER = "answer"
+
+
+def generate_events(query, candidates, sql_result=None, model=MODEL, deep_thinking=None):
+    """
+    流式生成（带类型的事件流）：yield (kind, text)，kind ∈ {EVENT_REASONING, EVENT_ANSWER}
+
+    为什么需要这个函数：开启思考模式时，推理过程**先于**答案逐段下发，且走的是
+    delta 的另一个字段（reasoning_content）。实测两者不交叠——问一个两步心算题，
+    前 46 个 chunk 全是 reasoning_content，之后才切到 content。所以这里按字段分流。
+
+    不开启思考时只产生 EVENT_ANSWER，与 generate_stream 完全等价。
+
+    ⚠️ 推理**语言不稳定**：同一个中文问题，实测有时全程英文（两步心算题）、
+    有时全程中文（数据统计题）。展示时不要按某一种语言的排版/标点做假设，
+    更不要把它当成「答案的草稿」去解析引用——推理不进答案、也不参与 [来源N]。
+    """
+    has_sql = bool(sql_result and sql_result.get("rows"))
+    if not candidates and not has_sql:
+        yield EVENT_ANSWER, "根据现有资料无法确定。"
+        return
+
+    context = build_context(candidates, sql_result)
+    prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
+    stream = chat_completion(
+        messages=[{"role": "user", "content": prompt}],
+        model=model,
+        temperature=0.3,
+        stream=True,
+        deep_thinking=deep_thinking,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        # 两个字段都取：思考模式下推理先到，漏掉任一个都会丢内容
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning:
+            yield EVENT_REASONING, reasoning
+        if delta.content:
+            yield EVENT_ANSWER, delta.content
+
+
 # ---------- Text2SQL 结果自然语言化 ----------
 # 提示词见 rag_demo/prompts.py::SQL_SUMMARY_PROMPT
 
@@ -203,31 +251,16 @@ def generate_stream(query, candidates, sql_result=None, model=MODEL, deep_thinki
 
     产出的是字符串片段（delta），调用方负责拼接与推送。
 
-    ⚠️ 开启 deep_thinking 时首字延迟会大幅劣化：推理过程不通过 delta 下发，
-    流在**推理跑完、开始吐答案**之前一直是空的。也就是说思考模式下「流式」
-    只是不用等全部答案，仍要等全部推理——这一点必须在界面上讲清楚，
-    否则用户看到的是「点了深度思考之后卡住不动」。
+    ⚠️ 开启 deep_thinking 时首字延迟会大幅劣化：流在**推理跑完、开始吐答案**
+    之前一直是空的（推理走另一个字段，本函数把它丢掉了）。也就是说思考模式下
+    「流式」只是不用等全部答案，仍要等全部推理——想看推理过程要改用
+    `generate_events`，否则用户看到的是「点了深度思考之后卡住不动」。
     """
-    has_sql = bool(sql_result and sql_result.get("rows"))
-    if not candidates and not has_sql:
-        yield "根据现有资料无法确定。"
-        return
-
-    context = build_context(candidates, sql_result)
-    prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
-    stream = chat_completion(
-        messages=[{"role": "user", "content": prompt}],
-        model=model,
-        temperature=0.3,
-        stream=True,
-        deep_thinking=deep_thinking,
-    )
-    for chunk in stream:
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+    for kind, text in generate_events(
+        query, candidates, sql_result=sql_result, model=model, deep_thinking=deep_thinking
+    ):
+        if kind == EVENT_ANSWER:
+            yield text
 
 
 def llm_summarize(question: str, sql_result: dict, schema: str = "") -> str:
