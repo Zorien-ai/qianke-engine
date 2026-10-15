@@ -42,13 +42,22 @@ class AnswerCache:
         self._misses = 0
 
     @staticmethod
-    def make_key(question: str, dept: str | None = None, keyword_mode: str | None = None) -> str:
+    def make_key(question: str, dept: str | None = None, keyword_mode: str | None = None,
+                 profile_limit: int | None = None) -> str:
         """
         生成缓存键
 
-        显式拼接三个维度再哈希，避免不同参数组合互相覆盖。
+        显式拼接各维度再哈希，避免不同参数组合互相覆盖。
+
+        **不含角色**：缓存里存的是完整结果，裁剪发生在响应序列化那一刻
+        （permissions.render）。若把角色拼进来，同一个人问题会按角色重复算一遍，
+        白烧 LLM 调用；而如果改成"裁剪后再写缓存"，低权角色先问就会
+        污染高权角色的缓存。所以角色不进键、也不进缓存内容。
+
+        但 `profile_limit` 必须进键——它改变的是**检索结果本身**，不是展示形态。
         """
-        raw = f"{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
+        raw = (f"{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
+               f"|{profile_limit if profile_limit else '-'}")
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict | None:

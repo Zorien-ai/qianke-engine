@@ -13,12 +13,18 @@
       <p class="hero-sub">
         向量召回 + BM25 + RRF 融合 · bge-reranker-v2-m3 精排 · 意图路由分流 Text2SQL
       </p>
+      <!-- Demo 用身份切换器。生产环境身份应来自登录态，不该由页面自选 -->
+      <div class="role-bar">
+        <label for="role-select">当前身份</label>
+        <select id="role-select" title="Demo 切换器：生产环境的身份应来自登录态，而不是页面自选"></select>
+        <span class="role-note" id="role-note"></span>
+      </div>
     </div>
   </header>
 
   <main class="container">
-    <!-- 数据概况 -->
-    <section class="panel">
+    <!-- 数据概况：仅管理员可见（等价于免 SQL 的聚合统计，见 README 权限矩阵） -->
+    <section class="panel" id="stats-panel" hidden>
       <div class="panel-head">
         <h2>数据概况</h2>
         <span class="panel-tag" id="stats-status">加载中…</span>
@@ -47,7 +53,13 @@
           <button type="button" data-mode="both"
                   title="两路都跑再 RRF 融合。质量最稳，代价也最大">两者组合</button>
         </div>
-        <button type="button" class="compare-btn" id="compare-btn">对比召回</button>
+        <button type="button" class="compare-btn" id="compare-btn" hidden>对比召回</button>
+        <!-- 返回多少个用户：仅运营及以上身份可见（其余身份直接不渲染，不做"无权限"提示） -->
+        <div class="topk-bar" id="topk-bar" hidden>
+          <span class="retriever-label">返回多少个用户</span>
+          <input type="number" id="topk-input" min="1" placeholder="默认" />
+          <span class="topk-range" id="topk-range"></span>
+        </div>
       </div>
       <form id="ask-form" class="ask-form">
         <textarea

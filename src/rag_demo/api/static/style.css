@@ -48,6 +48,52 @@ body {
   opacity: .9;
 }
 
+/* ---------- 身份切换（Demo 用） ---------- */
+.role-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+.role-bar label { opacity: .85; }
+.role-bar select {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .45);
+  background: rgba(255, 255, 255, .16);
+  color: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.role-bar select option { color: #24303f; }
+.role-note {
+  opacity: .72;
+  font-size: 11.5px;
+  line-height: 1.5;
+  flex-basis: 100%;
+}
+
+/* ---------- 返回多少个用户（仅运营及以上可见） ---------- */
+.topk-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.topk-bar input {
+  width: 88px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #24303f;
+}
+.topk-range {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
 /* ---------- Layout ---------- */
 .container {
   max-width: 920px;
