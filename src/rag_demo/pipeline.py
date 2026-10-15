@@ -34,10 +34,12 @@ tools/profile_modes_compare.py：检索仅 0.35~0.51s、精排 0.15~0.32s）。
 """
 import logging
 
+from openai import APIError
+
 from rag_demo.cache import answer_cache
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_RRF
 from rag_demo.generation.generator import generate
-from rag_demo.prompts import CHITCHAT_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
+from rag_demo.prompts import CHITCHAT_REPLY, LLM_UNAVAILABLE_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
 from rag_demo.retrieval.query_processor import (
     STRATEGY_DIRECT,
     QueryPlan,
@@ -56,6 +58,7 @@ def answer_question(
     dept: str | None = None,
     keyword_mode: str | None = None,
     use_cache: bool = True,
+    profile_limit: int | None = None,
 ) -> dict:
     """
     统一问答入口（带缓存）
@@ -63,10 +66,17 @@ def answer_question(
     相比内部实现，返回值多一个 `cached` 字段标明本次是否命中缓存。
 
     参数:
-        keyword_mode: 关键词召回策略 bm25 / sparse / both，缺省读 config
-        use_cache:    评测对比不同策略时应传 False，否则会拿到上一次的结果
+        keyword_mode:  关键词召回策略 bm25 / sparse / both，缺省读 config
+        use_cache:     评测对比不同策略时应传 False，否则会拿到上一次的结果
+        profile_limit: 「返回多少个用户」的上限（画像条数），None = 不额外截断。
+                       由接口层按角色放行后传入（permissions.clamp_top_k）；
+                       评测/工具脚本不传，行为与改造前完全一致。
+
+    注意：本函数返回的是**完整结果**，不做任何按角色的裁剪——裁剪统一在
+    api 层的 permissions.render() 做。这样评测脚本直接调它拿到的仍是全量字段，
+    不会因为加了权限而失能。
     """
-    key = answer_cache.make_key(question, dept, keyword_mode)
+    key = answer_cache.make_key(question, dept, keyword_mode, profile_limit)
 
     if use_cache:
         hit = answer_cache.get(key)
@@ -74,7 +84,13 @@ def answer_question(
             logger.info("缓存命中: %s", (question or "")[:40])
             return {**hit, "cached": True}
 
-    result = _answer_uncached(question, dept, keyword_mode)
+    try:
+        result = _answer_uncached(question, dept, keyword_mode, profile_limit)
+    except APIError as e:
+        # LLM 接口故障（超时 / 限流 / 5xx）：不写缓存（恢复后要能正常回答），
+        # 返回固定文案 + 独立 route，让用户知道该重试、排查的人知道查 LLM 侧
+        logger.error("LLM 服务不可用: %s: %s", type(e).__name__, e)
+        return {**_llm_unavailable_result(), "cached": False}
 
     if use_cache:
         answer_cache.set(key, result)
@@ -101,6 +117,20 @@ def _unavailable_result() -> dict:
     return {"answer": RETRIEVAL_UNAVAILABLE_REPLY, "sources": [], "route": ROUTE_ERROR}
 
 
+# 第三种 route：LLM 服务不可用（API 故障 / 超时 / 限流）。
+# 与检索不可用分开标记：两者的排查方向完全相反——一个查数据库，
+# 一个查 LLM 接口。混成一个 route 会把排查带到错误的方向。
+ROUTE_LLM_ERROR = "llm_error"
+
+
+def _llm_unavailable_result() -> dict:
+    """
+    LLM 接口不可用时的兜底（2026-10-14/15 DeepSeek API 故障期间实测：
+    用户看到的是「APITimeoutError」，既不知是服务挂了也不知该重试）
+    """
+    return {"answer": LLM_UNAVAILABLE_REPLY, "sources": [], "route": ROUTE_LLM_ERROR}
+
+
 def _run_sql(question: str) -> dict:
     """执行 SQL 路（多路规划判定需要时才会调到这里）"""
     logger.info("追加 SQL 路: %s", question)
@@ -115,6 +145,30 @@ def brief_rows(rows: list[tuple], limit: int = 20) -> list[list[str]]:
     前端只用来「看见具体数字」，不是拿去做计算。
     """
     return [[str(v)[:60] for v in r] for r in rows[:limit]]
+
+
+def apply_profile_limit(candidates: list[dict], limit: int | None) -> list[dict]:
+    """
+    把画像候选条数截到 limit（文档候选不受影响）
+
+    为什么只截画像：这个参数在界面上叫「返回多少个用户」，用户想控制的是
+    "给我看几个用户"，不是"少给我几条业务规则"——把 wiki 一起截掉会直接
+    损害答案质量（口径定义没了，数字就没人能解释）。
+
+    候选本身已按精排分数降序，所以截断等价于"保留最相关的 N 个用户"。
+    """
+    if not limit or limit <= 0:
+        return candidates
+
+    kept: list[dict] = []
+    seen_profiles = 0
+    for c in candidates:
+        if c.get("source") == "user_profile":
+            seen_profiles += 1
+            if seen_profiles > limit:
+                continue
+        kept.append(c)
+    return kept
 
 
 def _plan_and_retrieve(
@@ -152,6 +206,7 @@ def _answer_uncached(
     question: str,
     dept: str | None = None,
     keyword_mode: str | None = None,
+    profile_limit: int | None = None,
 ) -> dict:
     """
     实际问答流程
@@ -175,12 +230,15 @@ def _answer_uncached(
         logger.info("路由复核改道 -> chitchat: %s", question)
         return _chitchat_result()
 
+    # 「返回多少个用户」：在进生成之前收窄画像条数，wiki 不动
+    candidates = apply_profile_limit(plan.candidates, profile_limit)
+
     # SQL 路：与检索路并行产出，最终一起进 context
     sql_result = _run_sql(question) if plan.need_sql else None
 
     # 检索路已在 multi_query_search 内完成「各路 RRF top30 → 各路分来源精排
     # → 合并去重」，这里直接进生成，不再做整体终选（否则等于三层精排）
-    result = generate(question, plan.candidates, sql_result=sql_result)
+    result = generate(question, candidates, sql_result=sql_result)
     result["route"] = ROUTE_RAG
 
     if sql_result is not None:
@@ -198,6 +256,7 @@ def prepare(
     question: str,
     dept: str | None = None,
     keyword_mode: str | None = None,
+    profile_limit: int | None = None,
 ) -> dict:
     """
     问答前置阶段：路由 + 多路检索 + 精排 + （按需）SQL（**不含生成**）
@@ -233,13 +292,18 @@ def prepare(
         logger.info("路由复核改道 -> chitchat: %s", question)
         return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
 
+    # 「返回多少个用户」：在进生成之前收窄画像条数，wiki 不动。
+    # sources 与 candidates 必须用**同一份**结果——否则会出现
+    # 「答案里提到 5 个用户，来源列里却有 9 条」的不一致。
+    candidates = apply_profile_limit(plan.candidates, profile_limit)
+
     sql_result = _run_sql(question) if plan.need_sql else None
 
     # candidates 已是「各路 RRF top30 → 各路分来源精排 → 合并去重」的结果，
     # 直接透传给生成层，不再做整体终选（否则等于三层精排）
     return {
         "route": ROUTE_RAG,
-        "candidates": plan.candidates,
+        "candidates": candidates,
         "sql_result": sql_result,
         "trace": plan.trace,
         "sources": [
@@ -256,6 +320,6 @@ def prepare(
                 "rerank_score": round(float(c.get("rerank_score", 0)), 4),
                 "expanded": bool(c.get("expanded", False)),
             }
-            for i, c in enumerate(plan.candidates, 1)
+            for i, c in enumerate(candidates, 1)
         ],
     }

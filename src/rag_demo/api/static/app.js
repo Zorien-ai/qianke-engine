@@ -13,12 +13,86 @@ const EXAMPLE_QUESTIONS = [
 
 const el = (id) => document.getElementById(id);
 
+/* ---------- 身份与权限 ----------
+ * 能力清单来自后端 /whoami，前端**不硬编码权限表**——两份真源必然改漏一处。
+ *
+ * ⚠ 前端隐藏面板只是"不设计入口"，不是权限。真正的拦截在后端
+ *   （直接 curl 接口绕不过去）。这里隐藏是因为"用不了的功能不该出现"，
+ *   而不是因为"藏起来就安全"。
+ */
+let currentRole = null;
+let CAPS = {};
+let TOPK_RANGE = { min: 1, max: 30 };
+
+/* 所有请求都带上当前角色（后端按它裁剪响应） */
+function apiFetch(url, options = {}) {
+  const opts = { ...options, headers: { ...(options.headers || {}) } };
+  if (currentRole) opts.headers["X-Role"] = currentRole;
+  return fetch(url, opts);
+}
+
+async function loadWhoami() {
+  // 第一次（可能不带角色）：只为拿"可选角色清单"，避免把角色写死在前端
+  let info = await (await fetch("/whoami")).json();
+
+  const select = el("role-select");
+  if (!select.options.length) {
+    // 只列出**可用**的角色。未识别身份（guest）不提供入口——
+    // 用不了的东西直接不呈现，而不是让他点一下再告知没权限。
+    const usable = (info.roles || []).filter((r) => r.usable);
+    select.innerHTML = usable
+      .map((r) => `<option value="${r.value}">${r.label}</option>`)
+      .join("");
+    select.value = currentRole || (usable.length ? usable[usable.length - 1].value : "");
+  }
+
+  currentRole = select.value;
+  const mine = await (await apiFetch("/whoami")).json(); // 带上角色，拿自己的能力清单
+  CAPS = mine.can || {};
+  TOPK_RANGE = mine.topk_range || TOPK_RANGE;
+
+  // 权限申请只做声明、不做处理：尚未接入电商系统，页面上说清楚
+  el("role-note").textContent = mine.note || "";
+  applyCapabilities();
+
+  el("stats-panel").hidden = !CAPS.stats;
+  if (CAPS.stats) loadStats();
+  return mine;
+}
+
+function applyCapabilities() {
+  // 数据概况：无权限直接不渲染
+  if (!CAPS.stats) el("stats-grid").innerHTML = "";
+
+  // 召回对比（/search）是最敏感的接口：无权限连入口都不出现
+  el("compare-btn").hidden = !CAPS.raw_search;
+  if (!CAPS.raw_search) el("compare-panel").hidden = true;
+
+  // 返回多少个用户：运营及以上才出现
+  el("topk-bar").hidden = !CAPS.topk;
+  if (CAPS.topk) {
+    const input = el("topk-input");
+    input.min = String(TOPK_RANGE.min);
+    input.max = String(TOPK_RANGE.max);
+    input.placeholder = `默认（上限 ${TOPK_RANGE.max}）`;
+    el("topk-range").textContent = `范围 ${TOPK_RANGE.min}~${TOPK_RANGE.max}`;
+  }
+
+  // 看不到任何过程信息时，把上一身份留下的面板清掉，避免残留
+  if (!CAPS.sources && !CAPS.sql && !CAPS.internals) el("detail-panel").hidden = true;
+
+  el("ask-btn").disabled = !CAPS.ask;
+  el("ask-hint").textContent = CAPS.ask
+    ? "按 Ctrl / Cmd + Enter 快速提交"
+    : "当前身份无权提问";
+}
+
 /* ---------- 数据概况 ---------- */
 async function loadStats() {
   const grid = el("stats-grid");
   const status = el("stats-status");
   try {
-    const res = await fetch("/stats");
+    const res = await apiFetch("/stats");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -73,10 +147,11 @@ function escapeHtml(text) {
 }
 
 function formatAnswer(text) {
-  return escapeHtml(text).replace(
-    /\[来源\s*(\d+)\]/g,
-    '<span class="cite">[来源$1]</span>'
-  );
+  let html = escapeHtml(text);
+  // 看不到来源列表的身份：[来源N] 指向一个用户看不见的东西，留着比去掉更糟。
+  // 流式路径必须在这里处理——服务端按 delta 分片正则匹配会被切片边界漏掉。
+  if (!CAPS.sources) html = html.replace(/\[来源\s*\d+\]/g, "");
+  return html.replace(/\[来源\s*(\d+)\]/g, '<span class="cite">[来源$1]</span>');
 }
 
 /* ---------- 提交提问（流式）---------- */
@@ -95,10 +170,16 @@ async function ask(question) {
   let firstCharAt = null;
 
   try {
-    const res = await fetch("/qa/stream", {
+    const payload = { question, retriever: currentRetriever };
+    // 返回多少个用户：仅运营及以上身份能调，且留空表示用系统默认
+    if (CAPS.topk) {
+      const v = parseInt(el("topk-input").value, 10);
+      if (!Number.isNaN(v)) payload.top_k = v;
+    }
+    const res = await apiFetch("/qa/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, retriever: currentRetriever }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const detail = await res.text();
@@ -168,7 +249,11 @@ async function ask(question) {
           answer += data.delta;
           el("answer-body").innerHTML = formatAnswer(answer);
         } else if (event === "error") {
-          throw new Error(data.message || "服务端错误");
+          // 把错误类型带到外层 catch，由它统一决定显示什么文案
+          // （LLM 故障用人话，其他错误照实但截断）
+          const err = new Error(data.message || "服务端错误");
+          err.kind = data.kind || "";
+          throw err;
         }
       }
     }
@@ -181,7 +266,12 @@ async function ask(question) {
     }
   } catch (err) {
     el("error-panel").hidden = false;
-    el("error-text").textContent = `请求失败：${err.message}`;
+    // LLM 接口故障：固定文案 + 说明检索是正常的，
+    // 别把 APITimeoutError 直接甩给用户（2026-10-15 改）
+    el("error-text").textContent =
+      err.kind === "llm_unavailable"
+        ? "模型服务暂时不可用（LLM 接口调用失败），请稍后重试。检索是正常的——你的问题和资料都没问题。"
+        : `请求失败：${err.message}`;
   } finally {
     btn.disabled = false;
     spinner.hidden = true;
@@ -399,7 +489,7 @@ async function compareRecall() {
   btn.textContent = "对比中…";
 
   try {
-    const res = await fetch("/search", {
+    const res = await apiFetch("/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, top_k: 10 }),
@@ -447,11 +537,25 @@ function renderCompare(data) {
 }
 
 /* ---------- 初始化 ---------- */
-document.addEventListener("DOMContentLoaded", () => {
-  loadStats();
+document.addEventListener("DOMContentLoaded", async () => {
   renderExamples();
   initRetriever();
   el("compare-btn").addEventListener("click", compareRecall);
+
+  // 切换身份：必须先清空上一个身份留下的结果。
+  // 不清的话，降权后旧的高权内容还挂在页面上，会让人以为"权限没生效"。
+  el("role-select").addEventListener("change", async () => {
+    currentRole = el("role-select").value;
+    el("result-panel").hidden = true;
+    el("detail-panel").hidden = true;
+    el("compare-panel").hidden = true;
+    el("error-panel").hidden = true;
+    el("answer-body").innerHTML = "";
+    await loadWhoami();
+  });
+
+  // 先定身份，再决定渲染什么（loadStats 由 applyCapabilities 按能力触发）
+  await loadWhoami();
 
   el("detail-fold").addEventListener("click", () => {
     const body = el("detail-body");

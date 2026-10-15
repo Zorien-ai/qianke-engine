@@ -26,13 +26,31 @@
 import sys
 import time
 
-from rag_demo.generation.generator import chat_completion
+from rag_demo.generation import generator
 
 # 判定「API 不可用」的连续失败次数：偶发一次超时不算挂（网络抖动常见），
 # 连续失败才说明是真故障
 REQUIRED_OK = 2
 MAX_ATTEMPTS = 4
 RETRY_SLEEP = 3
+
+
+def _probe(timeout: int):
+    """
+    发一次最小请求探测 API。
+
+    不经过 chat_completion 的 kwargs 通道——`max_retries` 是 **client 级**
+    参数，openai 3.26 的 create() 直接传会 TypeError（实测踩过）。
+    用 client.with_options() 做 per-call 覆盖，SDK 内部重试关掉，
+    重试策略由本模块自己控制。
+    """
+    client = generator.client.with_options(max_retries=0, timeout=timeout)
+    return client.chat.completions.create(
+        model=generator.MODEL,
+        messages=[{"role": "user", "content": "只回答两个字：正常"}],
+        temperature=0.0,
+        extra_body={"thinking": {"type": "disabled"}} if not generator.ENABLE_THINKING else None,
+    )
 
 
 def check_api(verbose: bool = True, timeout: int = 20) -> bool:
@@ -44,21 +62,12 @@ def check_api(verbose: bool = True, timeout: int = 20) -> bool:
     timeout 必须短（默认 20s）：API 挂起时 openai 客户端默认等 600s，
     4 次尝试会拖 40 分钟，预检反而成了新的等待源。短超时下
     最坏耗时 ≈ MAX_ATTEMPTS × timeout + 重试间隔。
-
-    max_retries=0 同样关键：openai SDK **默认内部重试 2 次**，
-    一次 timeout=20 的尝试实际会等 3×20=60s，4 次尝试就是 4 分钟
-    （实测 257s）。重试策略由本函数自己控制，不需要 SDK 再套一层。
     """
     ok = 0
     last_err = ""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            resp = chat_completion(
-                [{"role": "user", "content": "只回答两个字：正常"}],
-                temperature=0.0,
-                timeout=timeout,
-                max_retries=0,
-            )
+            resp = _probe(timeout)
             if resp.choices and resp.choices[0].message.content:
                 ok += 1
                 if verbose:
