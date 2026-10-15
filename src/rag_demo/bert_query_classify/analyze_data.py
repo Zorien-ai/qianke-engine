@@ -3,9 +3,11 @@
 """
 步骤 1：BERT 意图分类数据 —— 分析与清洗
 
-输入：data/1.jsonl                    （原始数据，只读不修改）
-      data/chitchat_generated.jsonl   （步骤 2.1 补充的长句闲聊，存在则自动合并）
-输出：data/cleaned.jsonl              （清洗后数据）
+输入：data/1.jsonl                          （原始数据，只读不修改）
+      data/chitchat_generated.jsonl         （步骤 2.1 长句闲聊，存在则合并）
+      data/chitchat_medium_generated.jsonl  （步骤 2.7 中段闲聊，存在则合并）
+      data/business_generated.jsonl         （步骤 2.7 短/中长/长句业务，存在则合并）
+输出：data/cleaned.jsonl                    （清洗后数据）
       outputs/data_analysis/class_distribution.png
       outputs/data_analysis/length_distribution.png
       outputs/data_analysis/duplicate_top10.png
@@ -22,11 +24,18 @@ import numpy as np
 
 # ---------------- 路径 ----------------
 BASE = os.path.dirname(os.path.abspath(__file__))
-SRC_JSONL = os.path.join(BASE, "data", "1.jsonl")
-GEN_JSONL = os.path.join(BASE, "data", "chitchat_generated.jsonl")
-CLEAN_JSONL = os.path.join(BASE, "data", "cleaned.jsonl")
+DATA_DIR = os.path.join(BASE, "data")
+SRC_JSONL = os.path.join(DATA_DIR, "1.jsonl")
+CLEAN_JSONL = os.path.join(DATA_DIR, "cleaned.jsonl")
 OUT_DIR = os.path.join(BASE, "outputs", "data_analysis")
 REPORT_JSON = os.path.join(OUT_DIR, "analysis_report.json")
+
+# 补充数据（按顺序合并，文件不存在则跳过）
+EXTRA_FILES = [
+    ("chitchat_generated.jsonl", "长句闲聊 步骤2.1"),
+    ("chitchat_medium_generated.jsonl", "中段闲聊 步骤2.7"),
+    ("business_generated.jsonl", "短/中长/长句业务 步骤2.7"),
+]
 
 LABELS = ["CHITCHAT", "BUSINESS"]
 LABEL_MAP = {"CHITCHAT": 0, "BUSINESS": 1}
@@ -34,6 +43,9 @@ LABEL_MAP = {"CHITCHAT": 0, "BUSINESS": 1}
 # 且把它们留在 CHITCHAT 里能削弱「短 = 闲聊」的伪关联（CHITCHAT 也可以是短的）。
 MAX_LEN = 100
 SHORT_LEN = 2      # 仅用于统计口径，不做删除
+
+# 长度对称性检查用的分桶
+BUCKETS = [(1, 3), (4, 6), (7, 9), (10, 12), (13, 15), (16, 18), (19, 24), (25, 40)]
 
 # 中文字体
 plt.rcParams["font.sans-serif"] = ["SimHei"]
@@ -48,6 +60,49 @@ def load_jsonl(path: str) -> list[dict]:
             if line:
                 rows.append(json.loads(line))
     return rows
+
+
+def length_symmetry(rows: list[dict]) -> dict:
+    """
+    长度对称性检查 —— 「模型会不会走长度捷径」的体检表
+
+    判定标准（任一不满足即认为存在长度捷径）：
+      1. 没有任何长度桶被单一类别垄断：每桶少数类占比 >= 20%
+      2. 两类最大长度差 <= 3 字
+      3. 两类平均长度差 <= 1.5 字
+
+    为什么要在训练前卡这个：偏置是「数据里长度和标签共变」造成的，
+    模型只是忠实地学到了它。补数据只能从数据侧解决，事后加 class_weight、
+    调阈值都治不了——所以这一项必须在上训练之前过。
+    """
+    lens = {lb: [len(r["query"]) for r in rows if r["label"] == lb] for lb in LABELS}
+    buckets, worst = [], 1.0
+    for lo, hi in BUCKETS:
+        ch = sum(1 for v in lens["CHITCHAT"] if lo <= v <= hi)
+        bu = sum(1 for v in lens["BUSINESS"] if lo <= v <= hi)
+        tot = ch + bu
+        minority = (min(ch, bu) / tot) if tot else 0.0
+        worst = min(worst, minority) if tot else worst
+        buckets.append({"range": f"{lo}-{hi}", "chitchat": ch, "business": bu,
+                        "minority_share": round(minority, 4),
+                        "empty": tot == 0,
+                        # 空桶（两类都没有样本）不构成捷径，不能算不合格
+                        "pass": True if tot == 0 else bool(minority >= 0.2)})
+    max_diff = abs(max(lens["CHITCHAT"]) - max(lens["BUSINESS"]))
+    mean_diff = abs(
+        sum(lens["CHITCHAT"]) / max(len(lens["CHITCHAT"]), 1)
+        - sum(lens["BUSINESS"]) / max(len(lens["BUSINESS"]), 1)
+    )
+    ok = worst >= 0.2 and max_diff <= 3 and mean_diff <= 1.5
+    return {
+        "buckets": buckets,
+        "worst_minority_share": round(worst, 4),
+        "max_len_diff": max_diff,
+        "mean_len_diff": round(mean_diff, 3),
+        "max_len": {lb: max(lens[lb]) for lb in LABELS},
+        "mean_len": {lb: round(sum(lens[lb]) / max(len(lens[lb]), 1), 2) for lb in LABELS},
+        "no_length_shortcut": ok,
+    }
 
 
 def pct(n: int, total: int) -> str:
@@ -69,12 +124,15 @@ def main() -> None:
     raw = load_jsonl(SRC_JSONL)
     n_src = len(raw)
     print(f"原始数据：{SRC_JSONL}  {n_src} 条")
-    n_gen = 0
-    if os.path.exists(GEN_JSONL):
-        gen = load_jsonl(GEN_JSONL)
-        n_gen = len(gen)
-        raw = raw + gen
-        print(f"补充数据：{GEN_JSONL}  {n_gen} 条（步骤 2.1 生成的长句闲聊）")
+    extra_info = {}
+    for fname, desc in EXTRA_FILES:
+        path = os.path.join(DATA_DIR, fname)
+        if not os.path.exists(path):
+            continue
+        rows = load_jsonl(path)
+        extra_info[fname] = len(rows)
+        raw = raw + rows
+        print(f"补充数据：{fname}  {len(rows)} 条（{desc}）")
     total = len(raw)
     print(f"合并后总样本数：{total}")
 
@@ -306,12 +364,32 @@ def main() -> None:
     ok = 0.9 <= ratio <= 1.1
     print(f"  类别比 CHITCHAT:BUSINESS = 1 : {ratio:.3f} "
           f"{'✓ 落在 1:0.9~1:1.1 目标区间' if ok else '✗ 超出 1:0.9~1:1.1 目标区间'}")
+
+    # ---------- 5. 长度对称性检查 ----------
+    print("\n" + "-" * 78)
+    print("【5. 长度分布对称性检查（防「长度 = 类别」捷径）】")
+    print("-" * 78)
+    sym = length_symmetry(cleaned)
+    print(f"  {'长度桶':<10}{'CHITCHAT':>10}{'BUSINESS':>10}{'少数类占比':>12}")
+    for b in sym["buckets"]:
+        if b["empty"]:
+            flag, share = "— 空桶", "     -"
+        else:
+            flag, share = ("✓" if b["pass"] else "✗ 单类垄断"), f"{b['minority_share'] * 100:.1f}%"
+        print(f"  {b['range']:<10}{b['chitchat']:>10}{b['business']:>10}{share:>12}  {flag}")
+    print(f"\n  最大长度 {sym['max_len']['CHITCHAT']} / {sym['max_len']['BUSINESS']} 字"
+          f"（差 {sym['max_len_diff']} 字）；平均长度 "
+          f"{sym['mean_len']['CHITCHAT']} / {sym['mean_len']['BUSINESS']} 字"
+          f"（差 {sym['mean_len_diff']} 字）")
+    print(f"  最差桶少数类占比 {sym['worst_minority_share'] * 100:.1f}%（阈值 20%）")
+    print(f"  判定：{'✓ 长度不再携带类别信息，可以进训练' if sym['no_length_shortcut'] else '✗ 仍存在长度捷径，需继续补数据'}")
     print(f"\n清洗结果已写入：{CLEAN_JSONL}")
 
     report = {
         "source": SRC_JSONL,
         "source_rows": n_src,
-        "generated_rows": n_gen,
+        "generated_rows": sum(extra_info.values()),
+        "extra_files": extra_info,
         "total_raw": total,
         "label_counts_raw": dict(label_cnt),
         "length_stats_raw": len_stats,
@@ -348,6 +426,7 @@ def main() -> None:
                 "p95": float(np.percentile(cl_len, 95)),
             },
         },
+        "length_symmetry": sym,
         "figures": [p for p in (p1, p2, p3) if os.path.exists(p)],
     }
     with open(REPORT_JSON, "w", encoding="utf-8") as f:

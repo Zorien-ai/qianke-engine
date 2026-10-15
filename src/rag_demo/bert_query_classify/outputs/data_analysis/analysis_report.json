@@ -1,39 +1,44 @@
 {
   "source": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\1.jsonl",
   "source_rows": 2197,
-  "generated_rows": 300,
-  "total_raw": 2497,
+  "generated_rows": 892,
+  "extra_files": {
+    "chitchat_generated.jsonl": 300,
+    "chitchat_medium_generated.jsonl": 250,
+    "business_generated.jsonl": 342
+  },
+  "total_raw": 3089,
   "label_counts_raw": {
-    "CHITCHAT": 1397,
-    "BUSINESS": 1100
+    "CHITCHAT": 1647,
+    "BUSINESS": 1442
   },
   "length_stats_raw": {
     "min": 1.0,
-    "max": 21.0,
-    "mean": 8.06087304765719,
-    "p50": 7.0,
-    "p95": 17.0,
+    "max": 22.0,
+    "mean": 8.502751699579152,
+    "p50": 8.0,
+    "p95": 18.0,
     "p99": 20.0
   },
   "per_label_length": {
     "CHITCHAT": {
-      "count": 1397,
-      "mean": 7.075876879026485,
+      "count": 1647,
+      "mean": 7.669095324833029,
       "max": 21.0,
       "p95": 18.0
     },
     "BUSINESS": {
-      "count": 1100,
-      "mean": 9.311818181818182,
-      "max": 18.0,
-      "p95": 14.0
+      "count": 1442,
+      "mean": 9.45492371705964,
+      "max": 22.0,
+      "p95": 19.0
     }
   },
   "duplicate": {
     "dup_query_kinds": 205,
     "dup_extra_rows": 366,
-    "normalized_dup_extra_rows": 363,
-    "unique_queries": 2131,
+    "normalized_dup_extra_rows": 376,
+    "unique_queries": 2723,
     "label_conflicts": 0
   },
   "pure_punctuation_rows": 14,
@@ -45,8 +50,8 @@
     "gt_max": 0
   },
   "length_overlap": {
-    "business_max_len": 18,
-    "chitchat_longer_than_business_max": 61
+    "business_max_len": 22,
+    "chitchat_longer_than_business_max": 0
   },
   "top10_duplicates": [
     {
@@ -96,21 +101,101 @@
   },
   "cleaned": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\cleaned.jsonl",
-    "total": 2120,
+    "total": 2712,
     "label_counts": {
-      "CHITCHAT": 1091,
-      "BUSINESS": 1029
+      "CHITCHAT": 1341,
+      "BUSINESS": 1371
     },
-    "class_ratio_chitchat_to_business": 0.9432,
+    "class_ratio_chitchat_to_business": 1.0224,
     "ratio_in_target_band": true,
     "short_samples_kept": 25,
     "length": {
       "min": 1,
-      "max": 21,
-      "mean": 8.592924528301888,
+      "max": 22,
+      "mean": 8.980088495575222,
       "p50": 8.0,
-      "p95": 18.0
+      "p95": 19.0
     }
+  },
+  "length_symmetry": {
+    "buckets": [
+      {
+        "range": "1-3",
+        "chitchat": 242,
+        "business": 87,
+        "minority_share": 0.2644,
+        "empty": false,
+        "pass": true
+      },
+      {
+        "range": "4-6",
+        "chitchat": 402,
+        "business": 259,
+        "minority_share": 0.3918,
+        "empty": false,
+        "pass": true
+      },
+      {
+        "range": "7-9",
+        "chitchat": 182,
+        "business": 399,
+        "minority_share": 0.3133,
+        "empty": false,
+        "pass": true
+      },
+      {
+        "range": "10-12",
+        "chitchat": 222,
+        "business": 353,
+        "minority_share": 0.3861,
+        "empty": false,
+        "pass": true
+      },
+      {
+        "range": "13-15",
+        "chitchat": 79,
+        "business": 110,
+        "minority_share": 0.418,
+        "empty": false,
+        "pass": true
+      },
+      {
+        "range": "16-18",
+        "chitchat": 153,
+        "business": 73,
+        "minority_share": 0.323,
+        "empty": false,
+        "pass": true
+      },
+      {
+        "range": "19-24",
+        "chitchat": 61,
+        "business": 90,
+        "minority_share": 0.404,
+        "empty": false,
+        "pass": true
+      },
+      {
+        "range": "25-40",
+        "chitchat": 0,
+        "business": 0,
+        "minority_share": 0.0,
+        "empty": true,
+        "pass": true
+      }
+    ],
+    "worst_minority_share": 0.2644,
+    "max_len_diff": 1,
+    "mean_len_diff": 0.99,
+    "max_len": {
+      "CHITCHAT": 21,
+      "BUSINESS": 22
+    },
+    "mean_len": {
+      "CHITCHAT": 8.48,
+      "BUSINESS": 9.47
+    },
+    "no_length_shortcut": true
   },
   "figures": [
     "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\outputs\\data_analysis\\class_distribution.png",

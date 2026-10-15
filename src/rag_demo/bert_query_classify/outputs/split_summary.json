@@ -1,227 +1,597 @@
 {
   "train": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\train.jsonl",
-    "n": 1696,
-    "ratio_of_total": 0.8,
+    "n": 2169,
+    "ratio_of_total": 0.7998,
     "label_counts": {
-      "BUSINESS": 823,
-      "CHITCHAT": 873
+      "BUSINESS": 1096,
+      "CHITCHAT": 1073
     },
-    "chitchat_to_business": 0.9427,
-    "mean_len": 8.511
+    "chitchat_to_business": 1.0214,
+    "mean_len": 8.981
   },
   "val": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\val.jsonl",
-    "n": 212,
-    "ratio_of_total": 0.1,
+    "n": 271,
+    "ratio_of_total": 0.0999,
     "label_counts": {
-      "BUSINESS": 103,
-      "CHITCHAT": 109
+      "BUSINESS": 138,
+      "CHITCHAT": 133
     },
-    "chitchat_to_business": 0.945,
-    "mean_len": 9.094
+    "chitchat_to_business": 1.0376,
+    "mean_len": 9.007
   },
   "test": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\test.jsonl",
-    "n": 212,
-    "ratio_of_total": 0.1,
+    "n": 272,
+    "ratio_of_total": 0.1003,
     "label_counts": {
-      "CHITCHAT": 109,
-      "BUSINESS": 103
+      "CHITCHAT": 135,
+      "BUSINESS": 137
     },
-    "chitchat_to_business": 0.945,
-    "mean_len": 8.745
+    "chitchat_to_business": 1.0148,
+    "mean_len": 8.945
   },
-  "short_business_test": {
-    "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\short_business_test.jsonl",
-    "n": 30,
-    "purpose": "分布外探针：极短业务 query，用于检验模型是否依赖长度捷径",
-    "mean_len": 3.6,
-    "probe_types": {
-      "fragment": 20,
-      "unseen": 10
-    },
-    "items": [
+  "length_buckets": {
+    "train": [
       {
-        "query": "美妆用户",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "1-3",
+        "chitchat": 194,
+        "business": 70,
+        "minority_share": 0.2652
       },
       {
-        "query": "风控",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "4-6",
+        "chitchat": 321,
+        "business": 207,
+        "minority_share": 0.392
       },
       {
-        "query": "积分",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "7-9",
+        "chitchat": 146,
+        "business": 319,
+        "minority_share": 0.314
       },
       {
-        "query": "等级",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "10-12",
+        "chitchat": 178,
+        "business": 282,
+        "minority_share": 0.387
       },
       {
-        "query": "画像",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "13-15",
+        "chitchat": 63,
+        "business": 88,
+        "minority_share": 0.4172
       },
       {
-        "query": "黑名单",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "16-18",
+        "chitchat": 122,
+        "business": 58,
+        "minority_share": 0.3222
       },
       {
-        "query": "白名单",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "19-24",
+        "chitchat": 49,
+        "business": 72,
+        "minority_share": 0.405
       },
       {
-        "query": "客单价",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "25-40",
+        "chitchat": 0,
+        "business": 0,
+        "minority_share": 0.0
+      }
+    ],
+    "val": [
+      {
+        "range": "1-3",
+        "chitchat": 24,
+        "business": 9,
+        "minority_share": 0.2727
       },
       {
-        "query": "复购率",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "4-6",
+        "chitchat": 40,
+        "business": 26,
+        "minority_share": 0.3939
       },
       {
-        "query": "留存率",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "7-9",
+        "chitchat": 18,
+        "business": 40,
+        "minority_share": 0.3103
       },
       {
-        "query": "活跃度",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "10-12",
+        "chitchat": 22,
+        "business": 35,
+        "minority_share": 0.386
       },
       {
-        "query": "人群包",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "13-15",
+        "chitchat": 8,
+        "business": 11,
+        "minority_share": 0.4211
       },
       {
-        "query": "转化漏斗",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
+        "range": "16-18",
+        "chitchat": 15,
+        "business": 8,
+        "minority_share": 0.3478
       },
       {
-        "query": "会员等级",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "19-24",
+        "chitchat": 6,
+        "business": 9,
+        "minority_share": 0.4
       },
       {
-        "query": "积分门槛",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
+        "range": "25-40",
+        "chitchat": 0,
+        "business": 0,
+        "minority_share": 0.0
+      }
+    ],
+    "test": [
+      {
+        "range": "1-3",
+        "chitchat": 24,
+        "business": 8,
+        "minority_share": 0.25
       },
       {
-        "query": "权益规则",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
+        "range": "4-6",
+        "chitchat": 41,
+        "business": 26,
+        "minority_share": 0.3881
       },
       {
-        "query": "消费分层",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
+        "range": "7-9",
+        "chitchat": 18,
+        "business": 40,
+        "minority_share": 0.3103
       },
       {
-        "query": "渠道来源",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "10-12",
+        "chitchat": 22,
+        "business": 36,
+        "minority_share": 0.3793
       },
       {
-        "query": "沉睡用户",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "13-15",
+        "chitchat": 8,
+        "business": 11,
+        "minority_share": 0.4211
       },
       {
-        "query": "高客单",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "16-18",
+        "chitchat": 16,
+        "business": 7,
+        "minority_share": 0.3043
       },
       {
-        "query": "标签体系",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
+        "range": "19-24",
+        "chitchat": 6,
+        "business": 9,
+        "minority_share": 0.4
       },
       {
-        "query": "等级权益",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
-      },
-      {
-        "query": "订单量",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
-      },
-      {
-        "query": "查U2765",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
-      },
-      {
-        "query": "U2765",
-        "label": "BUSINESS",
-        "probe_type": "fragment",
-        "in_train_exact": false
-      },
-      {
-        "query": "查A类用户",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
-      },
-      {
-        "query": "看下GMV",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
-      },
-      {
-        "query": "调下画像",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
-      },
-      {
-        "query": "美妆类目",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
-      },
-      {
-        "query": "风控标签",
-        "label": "BUSINESS",
-        "probe_type": "unseen",
-        "in_train_exact": false
+        "range": "25-40",
+        "chitchat": 0,
+        "business": 0,
+        "minority_share": 0.0
       }
     ]
+  },
+  "probes": {
+    "short_business_test": {
+      "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\short_business_test.jsonl",
+      "n": 30,
+      "purpose": "短端探针：检验模型是否「短就判闲聊」",
+      "mean_len": 3.6,
+      "probe_types": {
+        "fragment": 21,
+        "unseen": 9
+      },
+      "items": [
+        {
+          "query": "美妆用户",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "风控",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "积分",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "等级",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "画像",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "黑名单",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "白名单",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "客单价",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "复购率",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "留存率",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "活跃度",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "人群包",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "转化漏斗",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "会员等级",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "积分门槛",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "权益规则",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "消费分层",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "渠道来源",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "沉睡用户",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "高客单",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "标签体系",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "等级权益",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "订单量",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "查U2765",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "U2765",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "fragment",
+          "in_train_exact": false
+        },
+        {
+          "query": "查A类用户",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "看下GMV",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "调下画像",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "美妆类目",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "风控标签",
+          "label": "BUSINESS",
+          "probe_kind": "short",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        }
+      ]
+    },
+    "long_business_test": {
+      "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\long_business_test.jsonl",
+      "n": 25,
+      "purpose": "长端探针：检验模型是否「长就判闲聊」",
+      "mean_len": 20.72,
+      "probe_types": {
+        "unseen": 25
+      },
+      "items": [
+        {
+          "query": "帮我查一下最近三个月高客单用户的复购情况",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "上个月新增的钻石会员里有多少人已完成首单",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "广东地区消费金额排名前一百的女性用户有哪些",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "近半年从未下单但仍在推送名单里的用户有多少",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "把上周活动期间下单两次以上的用户名单导出来",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "想看下华东区高价值用户的年龄和城市分布情况",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "上季度投诉率最高的三个商品类目分别是哪些",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "帮我统计一下各个渠道新客的七天留存率对比",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "那些只买过一次就再没回来的人大概有多少",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "会员等级从白银升到黄金需要满足什么条件",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "最近一个月被风控拦截的订单主要集中在哪些品类",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "我想看一下不同消费层级用户的客单价差异大不大",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "沉睡超过九十天的用户里有多少曾经是高频消费者",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "麻烦列出所有领过优惠券但一直没有使用的用户",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "美妆类目下复购率最高的一批用户有什么共同特征",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "帮我把最近一周新增用户的来源渠道占比算一下",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "那些退过一次货的用户后来的复购情况怎么样",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "想看下各会员等级的人数分布以及对应的平均消费",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "上个月流失预警名单里最后真正流失的占多少",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "有没有既买过美妆又买过母婴的高价值用户名单",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "帮我查下这个用户最近半年的下单频次变化趋势",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "哪些渠道进来的用户转化率明显高于平均水平",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "请统计一下白名单用户在活动期间的参与度情况",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "我想知道这些高客单用户平时都偏好哪些品类",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        },
+        {
+          "query": "按城市统计一下钻石会员的客单价中位数是多少",
+          "label": "BUSINESS",
+          "probe_kind": "long",
+          "probe_type": "unseen",
+          "in_train_exact": false
+        }
+      ]
+    }
   }
 }
