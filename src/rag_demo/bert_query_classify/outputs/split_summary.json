@@ -1,0 +1,227 @@
+{
+  "train": {
+    "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\train.jsonl",
+    "n": 1696,
+    "ratio_of_total": 0.8,
+    "label_counts": {
+      "BUSINESS": 823,
+      "CHITCHAT": 873
+    },
+    "chitchat_to_business": 0.9427,
+    "mean_len": 8.511
+  },
+  "val": {
+    "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\val.jsonl",
+    "n": 212,
+    "ratio_of_total": 0.1,
+    "label_counts": {
+      "BUSINESS": 103,
+      "CHITCHAT": 109
+    },
+    "chitchat_to_business": 0.945,
+    "mean_len": 9.094
+  },
+  "test": {
+    "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\test.jsonl",
+    "n": 212,
+    "ratio_of_total": 0.1,
+    "label_counts": {
+      "CHITCHAT": 109,
+      "BUSINESS": 103
+    },
+    "chitchat_to_business": 0.945,
+    "mean_len": 8.745
+  },
+  "short_business_test": {
+    "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\short_business_test.jsonl",
+    "n": 30,
+    "purpose": "分布外探针：极短业务 query，用于检验模型是否依赖长度捷径",
+    "mean_len": 3.6,
+    "probe_types": {
+      "fragment": 20,
+      "unseen": 10
+    },
+    "items": [
+      {
+        "query": "美妆用户",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "风控",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "积分",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "等级",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "画像",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "黑名单",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "白名单",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "客单价",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "复购率",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "留存率",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "活跃度",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "人群包",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "转化漏斗",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "会员等级",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "积分门槛",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "权益规则",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "消费分层",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "渠道来源",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "沉睡用户",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "高客单",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "标签体系",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "等级权益",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "订单量",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "查U2765",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "U2765",
+        "label": "BUSINESS",
+        "probe_type": "fragment",
+        "in_train_exact": false
+      },
+      {
+        "query": "查A类用户",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "看下GMV",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "调下画像",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "美妆类目",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      },
+      {
+        "query": "风控标签",
+        "label": "BUSINESS",
+        "probe_type": "unseen",
+        "in_train_exact": false
+      }
+    ]
+  }
+}

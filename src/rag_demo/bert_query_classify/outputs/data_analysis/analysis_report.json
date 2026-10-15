@@ -1,24 +1,26 @@
 {
   "source": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\1.jsonl",
-  "total_raw": 2197,
+  "source_rows": 2197,
+  "generated_rows": 300,
+  "total_raw": 2497,
   "label_counts_raw": {
-    "CHITCHAT": 1097,
+    "CHITCHAT": 1397,
     "BUSINESS": 1100
   },
   "length_stats_raw": {
     "min": 1.0,
-    "max": 18.0,
-    "mean": 6.934456076467911,
+    "max": 21.0,
+    "mean": 8.06087304765719,
     "p50": 7.0,
-    "p95": 13.0,
-    "p99": 15.0
+    "p95": 17.0,
+    "p99": 20.0
   },
   "per_label_length": {
     "CHITCHAT": {
-      "count": 1097,
-      "mean": 4.550592525068368,
-      "max": 14.0,
-      "p95": 8.0
+      "count": 1397,
+      "mean": 7.075876879026485,
+      "max": 21.0,
+      "p95": 18.0
     },
     "BUSINESS": {
       "count": 1100,
@@ -30,15 +32,21 @@
   "duplicate": {
     "dup_query_kinds": 205,
     "dup_extra_rows": 366,
-    "unique_queries": 1831,
+    "normalized_dup_extra_rows": 363,
+    "unique_queries": 2131,
     "label_conflicts": 0
   },
+  "pure_punctuation_rows": 14,
   "blank_queries": 0,
   "null_queries": 0,
   "invalid_labels": {},
   "abnormal_length": {
     "lt_min": 30,
     "gt_max": 0
+  },
+  "length_overlap": {
+    "business_max_len": 18,
+    "chitchat_longer_than_business_max": 61
   },
   "top10_duplicates": [
     {
@@ -83,22 +91,25 @@
     }
   ],
   "drop_reasons": {
-    "长度 < 2": 30,
-    "完全重复": 361
+    "纯标点/无实义": 14,
+    "重复（含标点/空格变体）": 363
   },
   "cleaned": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\cleaned.jsonl",
-    "total": 1806,
+    "total": 2120,
     "label_counts": {
-      "CHITCHAT": 775,
-      "BUSINESS": 1031
+      "CHITCHAT": 1091,
+      "BUSINESS": 1029
     },
+    "class_ratio_chitchat_to_business": 0.9432,
+    "ratio_in_target_band": true,
+    "short_samples_kept": 25,
     "length": {
-      "min": 2,
-      "max": 18,
-      "mean": 7.389811738648948,
-      "p50": 7.0,
-      "p95": 13.0
+      "min": 1,
+      "max": 21,
+      "mean": 8.592924528301888,
+      "p50": 8.0,
+      "p95": 18.0
     }
   },
   "figures": [

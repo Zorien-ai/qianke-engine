@@ -3,8 +3,9 @@
 """
 步骤 1：BERT 意图分类数据 —— 分析与清洗
 
-输入：data/1.jsonl              （原始数据，只读不修改）
-输出：data/cleaned.jsonl        （清洗后数据）
+输入：data/1.jsonl                    （原始数据，只读不修改）
+      data/chitchat_generated.jsonl   （步骤 2.1 补充的长句闲聊，存在则自动合并）
+输出：data/cleaned.jsonl              （清洗后数据）
       outputs/data_analysis/class_distribution.png
       outputs/data_analysis/length_distribution.png
       outputs/data_analysis/duplicate_top10.png
@@ -22,13 +23,17 @@ import numpy as np
 # ---------------- 路径 ----------------
 BASE = os.path.dirname(os.path.abspath(__file__))
 SRC_JSONL = os.path.join(BASE, "data", "1.jsonl")
+GEN_JSONL = os.path.join(BASE, "data", "chitchat_generated.jsonl")
 CLEAN_JSONL = os.path.join(BASE, "data", "cleaned.jsonl")
 OUT_DIR = os.path.join(BASE, "outputs", "data_analysis")
 REPORT_JSON = os.path.join(OUT_DIR, "analysis_report.json")
 
 LABELS = ["CHITCHAT", "BUSINESS"]
 LABEL_MAP = {"CHITCHAT": 0, "BUSINESS": 1}
-MIN_LEN, MAX_LEN = 2, 100
+# 只截上限。**下限不剔除**：线上真实存在「好 / 赞 / 在」这类单字 query，
+# 且把它们留在 CHITCHAT 里能削弱「短 = 闲聊」的伪关联（CHITCHAT 也可以是短的）。
+MAX_LEN = 100
+SHORT_LEN = 2      # 仅用于统计口径，不做删除
 
 # 中文字体
 plt.rcParams["font.sans-serif"] = ["SimHei"]
@@ -49,15 +54,29 @@ def pct(n: int, total: int) -> str:
     return f"{n / total * 100:.2f}%" if total else "0.00%"
 
 
+PUNCT = set(" \t\r\n？?！!。.，,~～、；;：:「」“”\"'•·…—_-=+*/\\|@#$%^&()[]{}<>《》【】")
+# 去重键：抹掉空白与标点。"你好" 与 "你好？"、'U2765 是什么用户' 与
+# 'U2765是什么用户' 本质是同一条样本，按原文去重会漏掉它们（跨集泄漏的来源）。
+def dedupe_key(s) -> str:
+    return "".join(ch for ch in str(s) if ch not in PUNCT)
+
+
 def main() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
-    raw = load_jsonl(SRC_JSONL)
-    total = len(raw)
     print("=" * 78)
     print("步骤 1：数据分析与清洗")
     print("=" * 78)
-    print(f"原始数据：{SRC_JSONL}")
-    print(f"总样本数：{total}")
+    raw = load_jsonl(SRC_JSONL)
+    n_src = len(raw)
+    print(f"原始数据：{SRC_JSONL}  {n_src} 条")
+    n_gen = 0
+    if os.path.exists(GEN_JSONL):
+        gen = load_jsonl(GEN_JSONL)
+        n_gen = len(gen)
+        raw = raw + gen
+        print(f"补充数据：{GEN_JSONL}  {n_gen} 条（步骤 2.1 生成的长句闲聊）")
+    total = len(raw)
+    print(f"合并后总样本数：{total}")
 
     # ---------- 1. 基本统计 ----------
     print("\n" + "-" * 78)
@@ -102,6 +121,14 @@ def main() -> None:
             print(f"  {lb:10s} n={d['count']:5d}  mean={d['mean']:6.2f}  "
                   f"max={d['max']:5.0f}  p95={d['p95']:5.0f}")
 
+    # 长度区间重叠：补长句闲聊后要盯住「长 = 闲聊」这个反向偏置
+    bu_max = max((len(str(r.get("query", ""))) for r in raw if r.get("label") == "BUSINESS"),
+                 default=0)
+    ch_over = [len(str(r.get("query", ""))) for r in raw
+               if r.get("label") == "CHITCHAT" and len(str(r.get("query", ""))) > bu_max]
+    print(f"  长度区间重叠：BUSINESS 最长 {bu_max} 字；CHITCHAT 超出该长度的有 "
+          f"{len(ch_over)} 条 -> {'存在「长 = 闲聊」反向偏置风险' if ch_over else '无反向偏置'}")
+
     # ---------- 2. 数据质量检查 ----------
     print("\n" + "-" * 78)
     print("【2. 数据质量检查】")
@@ -113,6 +140,16 @@ def main() -> None:
     dup_extra = sum(c - 1 for _, c in dup_items)
     print(f"完全重复：{len(dup_items)} 个重复 query，多出 {dup_extra} 条"
           f"（去重后 {len(query_cnt)} 条，去重率 {pct(dup_extra, total)}）")
+
+    key_cnt = Counter(dedupe_key(q) for q in queries)
+    norm_dup_extra = sum(c - 1 for k, c in key_cnt.items() if c > 1)
+    punct_dup_extra = max(key_cnt.get("", 0) - 1, 0)
+    print(f"归一化重复（抹掉标点/空格后同形）：多出 {norm_dup_extra} 条"
+          f"（其中纯标点变体 {punct_dup_extra} 条，其余是真实标点/空格变体）")
+
+    n_punct = sum(1 for q in queries if dedupe_key(q) == "")
+    print(f"纯标点 / 无实义 query：{n_punct} 条（去重后 {len({q for q in queries if dedupe_key(q) == ''})} 条）"
+          f" -> 剔除（无意图可言，且标点变体本身就是跨集重复源）")
 
     # 同一 query 冲突标签
     q2labels: dict[str, set] = {}
@@ -130,9 +167,12 @@ def main() -> None:
 
     print(f"标签合法性：{'通过（仅 CHITCHAT / BUSINESS）' if not other else '存在非法标签 ' + str(other)}")
 
-    too_short = [q for q in queries if len(str(q)) < MIN_LEN]
+    too_short = [q for q in queries if len(str(q)) < SHORT_LEN]
     too_long = [q for q in queries if len(str(q)) > MAX_LEN]
-    print(f"长度异常：< {MIN_LEN} 字 {len(too_short)} 条；> {MAX_LEN} 字 {len(too_long)} 条")
+    print(f"长度异常：> {MAX_LEN} 字 {len(too_long)} 条（剔除）")
+    print(f"           < {SHORT_LEN} 字 {len(too_short)} 条（**保留**，作为长度锚点，不删）")
+    if too_short:
+        print(f"           短样本：{' / '.join(sorted(set(too_short)))}")
     for q in too_long[:5]:
         print(f"    [{len(q)}] {q[:60]}...")
 
@@ -228,16 +268,17 @@ def main() -> None:
             drop["query 为空白"] += 1
             continue
         q = " ".join(q.split())
-        if len(q) < MIN_LEN:
-            drop[f"长度 < {MIN_LEN}"] += 1
-            continue
         if len(q) > MAX_LEN:
             drop[f"长度 > {MAX_LEN}"] += 1
             continue
-        if q in seen:
-            drop["完全重复"] += 1
+        key = dedupe_key(q)
+        if key == "":
+            drop["纯标点/无实义"] += 1
             continue
-        seen.add(q)
+        if key in seen:
+            drop["重复（含标点/空格变体）"] += 1
+            continue
+        seen.add(key)
         cleaned.append({"query": q, "label": lb})
 
     for k, v in drop.items():
@@ -249,19 +290,28 @@ def main() -> None:
 
     cl_cnt = Counter(r["label"] for r in cleaned)
     cl_len = [len(r["query"]) for r in cleaned]
-    print(f"\n清洗后：{len(cleaned)} 条（原始 {total}，剔除 {total - len(cleaned)}，"
+    print(f"\n清洗后：{len(cleaned)} 条（合并原始 {total}，剔除 {total - len(cleaned)}，"
           f"保留率 {pct(len(cleaned), total)}）")
     for lb in LABELS:
         c = cl_cnt.get(lb, 0)
-        print(f"  {lb:10s} {c:5d}  ({pct(c, len(cleaned))})")
-    print(f"  长度：min={min(cl_len)} max={max(cl_len)} mean={np.mean(cl_len):.2f} "
+        sub = [len(r["query"]) for r in cleaned if r["label"] == lb]
+        print(f"  {lb:10s} {c:5d}  ({pct(c, len(cleaned))})   "
+              f"长度 mean={np.mean(sub):5.2f} max={max(sub):3d}")
+    n_short_kept = sum(1 for r in cleaned if len(r["query"]) < SHORT_LEN)
+    print(f"  < {SHORT_LEN} 字短样本保留：{n_short_kept} 条（长度锚点）")
+    print(f"  整体长度：min={min(cl_len)} max={max(cl_len)} mean={np.mean(cl_len):.2f} "
           f"p50={np.percentile(cl_len, 50):.0f} p95={np.percentile(cl_len, 95):.0f}")
-    ratio = cl_cnt.get("BUSINESS", 0) / max(cl_cnt.get("CHITCHAT", 1), 1)
-    print(f"  类别比 CHITCHAT:BUSINESS = 1 : {ratio:.3f}（越接近 1 越均衡）")
+    ch, bu = cl_cnt.get("CHITCHAT", 0), cl_cnt.get("BUSINESS", 0)
+    ratio = bu / max(ch, 1)
+    ok = 0.9 <= ratio <= 1.1
+    print(f"  类别比 CHITCHAT:BUSINESS = 1 : {ratio:.3f} "
+          f"{'✓ 落在 1:0.9~1:1.1 目标区间' if ok else '✗ 超出 1:0.9~1:1.1 目标区间'}")
     print(f"\n清洗结果已写入：{CLEAN_JSONL}")
 
     report = {
         "source": SRC_JSONL,
+        "source_rows": n_src,
+        "generated_rows": n_gen,
         "total_raw": total,
         "label_counts_raw": dict(label_cnt),
         "length_stats_raw": len_stats,
@@ -269,19 +319,28 @@ def main() -> None:
         "duplicate": {
             "dup_query_kinds": len(dup_items),
             "dup_extra_rows": dup_extra,
+            "normalized_dup_extra_rows": norm_dup_extra,
             "unique_queries": len(query_cnt),
             "label_conflicts": len(conflicts),
         },
+        "pure_punctuation_rows": n_punct,
         "blank_queries": len(blank),
         "null_queries": len(none_q),
         "invalid_labels": other,
         "abnormal_length": {"lt_min": len(too_short), "gt_max": len(too_long)},
+        "length_overlap": {
+            "business_max_len": bu_max,
+            "chitchat_longer_than_business_max": len(ch_over),
+        },
         "top10_duplicates": [{"query": q, "count": c} for q, c in top10],
         "drop_reasons": dict(drop),
         "cleaned": {
             "path": CLEAN_JSONL,
             "total": len(cleaned),
             "label_counts": dict(cl_cnt),
+            "class_ratio_chitchat_to_business": round(ratio, 4),
+            "ratio_in_target_band": bool(ok),
+            "short_samples_kept": n_short_kept,
             "length": {
                 "min": min(cl_len), "max": max(cl_len),
                 "mean": float(np.mean(cl_len)),
