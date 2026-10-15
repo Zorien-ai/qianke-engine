@@ -1,0 +1,109 @@
+{
+  "source": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\1.jsonl",
+  "total_raw": 2197,
+  "label_counts_raw": {
+    "CHITCHAT": 1097,
+    "BUSINESS": 1100
+  },
+  "length_stats_raw": {
+    "min": 1.0,
+    "max": 18.0,
+    "mean": 6.934456076467911,
+    "p50": 7.0,
+    "p95": 13.0,
+    "p99": 15.0
+  },
+  "per_label_length": {
+    "CHITCHAT": {
+      "count": 1097,
+      "mean": 4.550592525068368,
+      "max": 14.0,
+      "p95": 8.0
+    },
+    "BUSINESS": {
+      "count": 1100,
+      "mean": 9.311818181818182,
+      "max": 18.0,
+      "p95": 14.0
+    }
+  },
+  "duplicate": {
+    "dup_query_kinds": 205,
+    "dup_extra_rows": 366,
+    "unique_queries": 1831,
+    "label_conflicts": 0
+  },
+  "blank_queries": 0,
+  "null_queries": 0,
+  "invalid_labels": {},
+  "abnormal_length": {
+    "lt_min": 30,
+    "gt_max": 0
+  },
+  "top10_duplicates": [
+    {
+      "query": "你好",
+      "count": 5
+    },
+    {
+      "query": "早上好",
+      "count": 5
+    },
+    {
+      "query": "下午好",
+      "count": 5
+    },
+    {
+      "query": "晚上好",
+      "count": 5
+    },
+    {
+      "query": "嗨",
+      "count": 5
+    },
+    {
+      "query": "哈喽",
+      "count": 5
+    },
+    {
+      "query": "在吗",
+      "count": 5
+    },
+    {
+      "query": "你好呀",
+      "count": 5
+    },
+    {
+      "query": "晚安",
+      "count": 5
+    },
+    {
+      "query": "好久不见",
+      "count": 5
+    }
+  ],
+  "drop_reasons": {
+    "长度 < 2": 30,
+    "完全重复": 361
+  },
+  "cleaned": {
+    "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\cleaned.jsonl",
+    "total": 1806,
+    "label_counts": {
+      "CHITCHAT": 775,
+      "BUSINESS": 1031
+    },
+    "length": {
+      "min": 2,
+      "max": 18,
+      "mean": 7.389811738648948,
+      "p50": 7.0,
+      "p95": 13.0
+    }
+  },
+  "figures": [
+    "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\outputs\\data_analysis\\class_distribution.png",
+    "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\outputs\\data_analysis\\length_distribution.png",
+    "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\outputs\\data_analysis\\duplicate_top10.png"
+  ]
+}
