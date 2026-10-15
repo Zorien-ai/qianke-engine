@@ -26,7 +26,8 @@ client = OpenAI(api_key=API_KEY or "EMPTY", base_url=BASE_URL)
 # ==========================================
 
 
-def chat_completion(messages, model=None, temperature=0.0, stream=False, **kwargs):
+def chat_completion(messages, model=None, temperature=0.0, stream=False,
+                    deep_thinking: bool | None = None, **kwargs):
     """
     统一的 LLM 调用入口
 
@@ -34,11 +35,22 @@ def chat_completion(messages, model=None, temperature=0.0, stream=False, **kwarg
     公共参数（当前是思考模式）集中一处控制——麻烦的从来不是参数写错，
     而是散在 4 个调用点、改的时候漏掉一个，表现为「有的路快有的路慢」。
 
-    extra_body 允许调用方追加自己的参数，思考模式开关会合并进去；
-    调用方已显式指定的 thinking 优先（便于单点实验）。
+    deep_thinking：**本次调用**是否启用思考模式
+        None  -> 跟随全局 ENABLE_THINKING（缺省关闭），调用行为与改造前一致
+        True  -> 强制开启（模型先输出推理过程再给答案：更慢更贵，推理不进答案）
+        False -> 强制关闭（即使全局开着，也能单独关掉这一次）
+
+    为什么需要「按次」而不只是全局开关：思考模式的代价是实测慢 63%、token 涨 3.4 倍，
+    值不值得只有**最后一个生成调用**说了算——规划、Text2SQL 那些中间调用开思考
+    只是白白变慢，答案质量并不会因此提高。全局开关做不到这个区分。
+
+    优先级：调用方显式传入 > 全局 ENABLE_THINKING。全局关时用 setdefault，
+    保证调用方通过 extra_body 自己塞的 thinking 仍然优先（便于单点实验）。
     """
     extra = dict(kwargs.pop("extra_body", None) or {})
-    if not ENABLE_THINKING:
+    if deep_thinking is not None:
+        extra["thinking"] = {"type": "enabled" if deep_thinking else "disabled"}
+    elif not ENABLE_THINKING:
         extra.setdefault("thinking", {"type": "disabled"})
     return client.chat.completions.create(
         model=model or MODEL,
@@ -48,6 +60,28 @@ def chat_completion(messages, model=None, temperature=0.0, stream=False, **kwarg
         extra_body=extra or None,
         **kwargs,
     )
+
+
+def usage_of(resp) -> dict:
+    """
+    提取 token 用量（含 reasoning 明细）
+
+    思考模式的开销全在 completion_tokens 里、却**不进答案**——不看 reasoning_tokens
+    就分不清「答案写长了」和「预算被推理吃掉了」（实测开启时 reasoning 占 completion 的 75%）。
+    字段缺失时直接不返回该键，避免上游把 None 当成 0 统计。
+    """
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return {}
+    out = {
+        "prompt_tokens": getattr(u, "prompt_tokens", None),
+        "completion_tokens": getattr(u, "completion_tokens", None),
+        "total_tokens": getattr(u, "total_tokens", None),
+    }
+    details = getattr(u, "completion_tokens_details", None)
+    if details is not None:
+        out["reasoning_tokens"] = getattr(details, "reasoning_tokens", None)
+    return {k: v for k, v in out.items() if v is not None}
 
 
 def build_context(candidates, sql_result=None):
@@ -120,7 +154,14 @@ def _build_sources(candidates):
     ]
 
 
-def generate(query, candidates, sql_result=None, model=MODEL):
+def generate(query, candidates, sql_result=None, model=MODEL, deep_thinking=None):
+    """
+    非流式生成。deep_thinking 见 chat_completion——这是「最后一个 LLM」的开关，
+    只有这一次调用该不该慢下来多想，由它决定。
+
+    返回值多一个 usage（token 用量，含 reasoning 明细），供 A/B 与前端核算成本；
+    API 层不会透出它（permissions.render 只复制白名单字段）。
+    """
     has_sql = bool(sql_result and sql_result.get("rows"))
 
     if not candidates and not has_sql:
@@ -138,9 +179,10 @@ def generate(query, candidates, sql_result=None, model=MODEL):
         messages=[{"role": "user", "content": prompt}],
         model=model,
         temperature=0.3,
+        deep_thinking=deep_thinking,
     )
     answer = resp.choices[0].message.content
-    return {"answer": answer, "sources": _build_sources(candidates)}
+    return {"answer": answer, "sources": _build_sources(candidates), "usage": usage_of(resp)}
 
 
 # ---------- Text2SQL 结果自然语言化 ----------
@@ -151,7 +193,7 @@ def generate(query, candidates, sql_result=None, model=MODEL):
 #             但只有「结果 0 行」时才真正需要枚举信息。可改为按需注入。
 #             注意：这是修 OPT-06 时引入的必要代价，属可优化点而非缺陷。
 #             详见 bug/性能隐患台账.md
-def generate_stream(query, candidates, sql_result=None, model=MODEL):
+def generate_stream(query, candidates, sql_result=None, model=MODEL, deep_thinking=None):
     """
     流式生成：逐段产出文本片段
 
@@ -160,6 +202,11 @@ def generate_stream(query, candidates, sql_result=None, model=MODEL):
     用户从「盯着转圈十几秒」变成「几秒后文字开始逐字出现」。
 
     产出的是字符串片段（delta），调用方负责拼接与推送。
+
+    ⚠️ 开启 deep_thinking 时首字延迟会大幅劣化：推理过程不通过 delta 下发，
+    流在**推理跑完、开始吐答案**之前一直是空的。也就是说思考模式下「流式」
+    只是不用等全部答案，仍要等全部推理——这一点必须在界面上讲清楚，
+    否则用户看到的是「点了深度思考之后卡住不动」。
     """
     has_sql = bool(sql_result and sql_result.get("rows"))
     if not candidates and not has_sql:
@@ -173,6 +220,7 @@ def generate_stream(query, candidates, sql_result=None, model=MODEL):
         model=model,
         temperature=0.3,
         stream=True,
+        deep_thinking=deep_thinking,
     )
     for chunk in stream:
         if not chunk.choices:
