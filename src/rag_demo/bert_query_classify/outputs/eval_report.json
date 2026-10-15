@@ -194,6 +194,22 @@
       "length_max": 22
     }
   },
+  "phrase_overlap_summary": {
+    "short": {
+      "n": 30,
+      "mean_p_to_t": 0.9667,
+      "mean_t_to_p": 0.1274,
+      "full_lexical_cover": 28,
+      "max_4gram_jaccard": 0.4
+    },
+    "long": {
+      "n": 25,
+      "mean_p_to_t": 0.8892,
+      "mean_t_to_p": 0.6177,
+      "full_lexical_cover": 5,
+      "max_4gram_jaccard": 0.25
+    }
+  },
   "phrase_overlap": {
     "per_probe": [
       {
@@ -1464,10 +1480,10 @@
     "true_business": 5
   },
   "inference_speed": {
-    "single_ms_avg_100": 13.628,
-    "batch32_total_ms": 267.259,
-    "batch32_per_item_ms": 0.983,
-    "speedup_x": 13.87,
+    "single_ms_avg_100": 13.729,
+    "batch32_total_ms": 263.988,
+    "batch32_per_item_ms": 0.971,
+    "speedup_x": 14.15,
     "device": "cuda"
   }
 }

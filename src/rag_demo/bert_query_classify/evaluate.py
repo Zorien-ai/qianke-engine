@@ -369,6 +369,26 @@ def main() -> None:
             })
             print(f"    {q[:26]:<28}{p2t:>7.2f}{t2p:>7.2f}{best_j:>14.3f}  "
                   f"{'✓' if pred_ok else '✗ 判错':<8}")
+    # 双向重合度的整体画像
+    print("\n  重合度整体画像（p→t = 探针的词有多少在训练集出现过；"
+          "t→p = 匹配到的训练句有多少被探针复现）：")
+    overlap_summary = {}
+    for name in ("short", "long"):
+        sel = [o for o in overlap_rows if o["probe_kind"] == name]
+        if not sel:
+            continue
+        p2t = float(np.mean([o["p_to_t"] for o in sel]))
+        t2p = float(np.mean([o["t_to_p"] for o in sel]))
+        full = sum(1 for o in sel if o["p_to_t"] >= 0.999)
+        mx = max(o["max_4gram_jaccard"] for o in sel)
+        print(f"    [{name}] n={len(sel)}  平均 p→t={p2t:.3f}  平均 t→p={t2p:.3f}  "
+              f"词面全覆盖({full}/{len(sel)})  最高整句相似={mx:.3f}")
+        overlap_summary[name] = {"n": len(sel), "mean_p_to_t": round(p2t, 4),
+                                 "mean_t_to_p": round(t2p, 4),
+                                 "full_lexical_cover": full,
+                                 "max_4gram_jaccard": round(mx, 4)}
+    report["phrase_overlap_summary"] = overlap_summary
+
     # 按重合度分组看指标
     print("\n  按内容重合度分组（max 4-gram 相似度 ≥0.6 视为「内容也见过」）：")
     grouped = {}
@@ -384,6 +404,9 @@ def main() -> None:
             print(f"    [{name}] {tag:<14} {fmt_ci(ok, len(sub))}")
             grouped[f"{name}|{tag}"] = {"n": len(sub), "correct": ok,
                                         "accuracy": ok / len(sub), "acc_ci": [lo, hi]}
+    if not any(k.endswith("高重合(>=0.6)") for k in grouped):
+        print("    ⚠ 没有任何探针落在「高重合(>=0.6)」组 —— 缺少对照组，"
+              "分组对比本身不成立（见下方说明）")
     report["phrase_overlap"] = {"per_probe": overlap_rows, "grouped": grouped}
 
     # =====================================================================
