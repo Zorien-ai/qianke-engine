@@ -1,0 +1,1473 @@
+{
+  "model_dir": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\models\\bert-intent",
+  "low_conf_threshold": 0.6,
+  "test": {
+    "n": 272,
+    "correct": 271,
+    "accuracy": 0.9963235294117647,
+    "acc_ci": [
+      0.9794718943361663,
+      0.9993507343028786
+    ],
+    "errors": [
+      {
+        "query": "收到",
+        "true": "CHITCHAT",
+        "pred": "BUSINESS",
+        "p_true": 0.016399946063756943,
+        "p_pred": 0.9836000204086304
+      }
+    ],
+    "confusion_matrix": [
+      [
+        134,
+        1
+      ],
+      [
+        0,
+        137
+      ]
+    ]
+  },
+  "length_buckets_test": [
+    {
+      "bucket": "1-3",
+      "n": 32,
+      "chitchat": 24,
+      "business": 8,
+      "accuracy": 0.96875,
+      "acc_ci": [
+        0.8425539219962727,
+        0.9944622826374491
+      ],
+      "recall_chitchat": 0.9583333333333334,
+      "recall_business": 1.0
+    },
+    {
+      "bucket": "4-6",
+      "n": 67,
+      "chitchat": 41,
+      "business": 26,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.9457719757882374,
+        0.9999999999999999
+      ],
+      "recall_chitchat": 1.0,
+      "recall_business": 1.0
+    },
+    {
+      "bucket": "7-9",
+      "n": 58,
+      "chitchat": 18,
+      "business": 40,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.9378800031047062,
+        0.9999999999999999
+      ],
+      "recall_chitchat": 1.0,
+      "recall_business": 1.0
+    },
+    {
+      "bucket": "10-12",
+      "n": 58,
+      "chitchat": 22,
+      "business": 36,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.9378800031047062,
+        0.9999999999999999
+      ],
+      "recall_chitchat": 1.0,
+      "recall_business": 1.0
+    },
+    {
+      "bucket": "13-15",
+      "n": 19,
+      "chitchat": 8,
+      "business": 11,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.8318156346315496,
+        1.0
+      ],
+      "recall_chitchat": 1.0,
+      "recall_business": 1.0
+    },
+    {
+      "bucket": "16-18",
+      "n": 23,
+      "chitchat": 16,
+      "business": 7,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.8568788745827374,
+        1.0
+      ],
+      "recall_chitchat": 1.0,
+      "recall_business": 1.0
+    },
+    {
+      "bucket": "19-24",
+      "n": 15,
+      "chitchat": 6,
+      "business": 9,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.7961107336956521,
+        1.0
+      ],
+      "recall_chitchat": 1.0,
+      "recall_business": 1.0
+    }
+  ],
+  "probes": {
+    "short": {
+      "n": 30,
+      "correct": 28,
+      "accuracy": 0.9333333333333333,
+      "acc_ci": [
+        0.7867618227892791,
+        0.9815233646723066
+      ],
+      "wrong": [
+        {
+          "query": "U2765",
+          "true": "BUSINESS",
+          "pred": "CHITCHAT",
+          "p_true": 0.0037918484304100275,
+          "p_pred": 0.9962081909179688
+        },
+        {
+          "query": "看下GMV",
+          "true": "BUSINESS",
+          "pred": "CHITCHAT",
+          "p_true": 0.003096881089732051,
+          "p_pred": 0.996903121471405
+        }
+      ],
+      "by_probe_type": {
+        "fragment": {
+          "n": 21,
+          "correct": 20,
+          "accuracy": 0.9523809523809523,
+          "acc_ci": [
+            0.7733018341376452,
+            0.9915442305280766
+          ]
+        },
+        "unseen": {
+          "n": 9,
+          "correct": 8,
+          "accuracy": 0.8888888888888888,
+          "acc_ci": [
+            0.5649937852319399,
+            0.9801096286728695
+          ]
+        }
+      },
+      "length_min": 2,
+      "length_max": 6
+    },
+    "long": {
+      "n": 25,
+      "correct": 25,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.8668035060468213,
+        1.0
+      ],
+      "wrong": [],
+      "by_probe_type": {
+        "unseen": {
+          "n": 25,
+          "correct": 25,
+          "accuracy": 1.0,
+          "acc_ci": [
+            0.8668035060468213,
+            1.0
+          ]
+        }
+      },
+      "length_min": 19,
+      "length_max": 22
+    }
+  },
+  "phrase_overlap": {
+    "per_probe": [
+      {
+        "probe_kind": "short",
+        "query": "美妆用户",
+        "n_chars": 4,
+        "tokens": [
+          "用户",
+          "美妆"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.3333,
+        "nearest_train": "美妆用户数量",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "风控",
+        "n_chars": 2,
+        "tokens": [
+          "风控"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "积分",
+        "n_chars": 2,
+        "tokens": [
+          "积分"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "等级",
+        "n_chars": 2,
+        "tokens": [
+          "等级"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "画像",
+        "n_chars": 2,
+        "tokens": [
+          "画像"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "黑名单",
+        "n_chars": 3,
+        "tokens": [
+          "黑名单"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "白名单",
+        "n_chars": 3,
+        "tokens": [
+          "白名单"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "客单价",
+        "n_chars": 3,
+        "tokens": [
+          "单价",
+          "客"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "复购率",
+        "n_chars": 3,
+        "tokens": [
+          "复购",
+          "率"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "留存率",
+        "n_chars": 3,
+        "tokens": [
+          "率",
+          "留存"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "活跃度",
+        "n_chars": 3,
+        "tokens": [
+          "活跃度"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "人群包",
+        "n_chars": 3,
+        "tokens": [
+          "人群",
+          "包"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "转化漏斗",
+        "n_chars": 4,
+        "tokens": [
+          "漏斗",
+          "转化"
+        ],
+        "p_to_t": 0.5,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "会员等级",
+        "n_chars": 4,
+        "tokens": [
+          "会员",
+          "等级"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.6667,
+        "max_4gram_jaccard": 0.3333,
+        "nearest_train": "会员等级权益",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "积分门槛",
+        "n_chars": 4,
+        "tokens": [
+          "积分",
+          "门槛"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "权益规则",
+        "n_chars": 4,
+        "tokens": [
+          "权益",
+          "规则"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "消费分层",
+        "n_chars": 4,
+        "tokens": [
+          "分层",
+          "消费"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.25,
+        "max_4gram_jaccard": 0.0769,
+        "nearest_train": "按消费分层查看近三十天下单用户数",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "渠道来源",
+        "n_chars": 4,
+        "tokens": [
+          "来源",
+          "渠道"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.2857,
+        "max_4gram_jaccard": 0.1111,
+        "nearest_train": "新客和老客的渠道来源对比",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "沉睡用户",
+        "n_chars": 4,
+        "tokens": [
+          "沉睡",
+          "用户"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.2,
+        "nearest_train": "沉睡用户怎么定义",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "高客单",
+        "n_chars": 3,
+        "tokens": [
+          "单",
+          "高客"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "标签体系",
+        "n_chars": 4,
+        "tokens": [
+          "体系",
+          "标签"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.2857,
+        "max_4gram_jaccard": 0.1111,
+        "nearest_train": "标签体系里RFM怎么算的",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "等级权益",
+        "n_chars": 4,
+        "tokens": [
+          "权益",
+          "等级"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.6667,
+        "max_4gram_jaccard": 0.3333,
+        "nearest_train": "会员等级权益",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "订单量",
+        "n_chars": 3,
+        "tokens": [
+          "订单",
+          "量"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "查U2765",
+        "n_chars": 6,
+        "tokens": [
+          "U2765",
+          "查"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.3333,
+        "max_4gram_jaccard": 0.3333,
+        "nearest_train": "U2765的年龄",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "U2765",
+        "n_chars": 5,
+        "tokens": [
+          "U2765"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.3333,
+        "max_4gram_jaccard": 0.4,
+        "nearest_train": "U2765的年龄",
+        "correct": false
+      },
+      {
+        "probe_kind": "short",
+        "query": "查A类用户",
+        "n_chars": 5,
+        "tokens": [
+          "A",
+          "查",
+          "用户",
+          "类"
+        ],
+        "p_to_t": 0.5,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "看下GMV",
+        "n_chars": 5,
+        "tokens": [
+          "GMV",
+          "看下"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": false
+      },
+      {
+        "probe_kind": "short",
+        "query": "调下画像",
+        "n_chars": 4,
+        "tokens": [
+          "下",
+          "画像",
+          "调"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "美妆类目",
+        "n_chars": 4,
+        "tokens": [
+          "类目",
+          "美妆"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "short",
+        "query": "风控标签",
+        "n_chars": 4,
+        "tokens": [
+          "标签",
+          "风控"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.0,
+        "max_4gram_jaccard": 0.0,
+        "nearest_train": "",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "帮我查一下最近三个月高客单用户的复购情况",
+        "n_chars": 20,
+        "tokens": [
+          "一下",
+          "三个",
+          "单用户",
+          "复购",
+          "帮",
+          "情况",
+          "我查",
+          "最近",
+          "月",
+          "的",
+          "高客"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.75,
+        "max_4gram_jaccard": 0.1579,
+        "nearest_train": "高客单用户的标准",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "上个月新增的钻石会员里有多少人已完成首单",
+        "n_chars": 20,
+        "tokens": [
+          "上个月",
+          "人",
+          "会员",
+          "多少",
+          "完成",
+          "已",
+          "新增",
+          "有",
+          "的",
+          "里",
+          "钻石",
+          "首单"
+        ],
+        "p_to_t": 0.8333,
+        "t_to_p": 0.7778,
+        "max_4gram_jaccard": 0.2,
+        "nearest_train": "最近九十天新增的钻石会员有多少人",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "广东地区消费金额排名前一百的女性用户有哪些",
+        "n_chars": 21,
+        "tokens": [
+          "一百",
+          "前",
+          "哪些",
+          "女性",
+          "广东地区",
+          "排名",
+          "有",
+          "消费",
+          "用户",
+          "的",
+          "金额"
+        ],
+        "p_to_t": 0.9091,
+        "t_to_p": 0.7143,
+        "max_4gram_jaccard": 0.2273,
+        "nearest_train": "喜欢美妆的女性用户有哪些",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "近半年从未下单但仍在推送名单里的用户有多少",
+        "n_chars": 21,
+        "tokens": [
+          "下单",
+          "仍",
+          "从未",
+          "但",
+          "名单",
+          "在",
+          "多少",
+          "推送",
+          "有",
+          "用户",
+          "的",
+          "近半年",
+          "里"
+        ],
+        "p_to_t": 0.8462,
+        "t_to_p": 0.6667,
+        "max_4gram_jaccard": 0.1071,
+        "nearest_train": "在活动期间下单满三单的用户有多少",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "把上周活动期间下单两次以上的用户名单导出来",
+        "n_chars": 21,
+        "tokens": [
+          "上周",
+          "下单",
+          "两次",
+          "以上",
+          "名单",
+          "导出来",
+          "把",
+          "期间",
+          "活动",
+          "用户",
+          "的"
+        ],
+        "p_to_t": 0.9091,
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.1364,
+        "nearest_train": "加购过三次以上的用户",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "想看下华东区高价值用户的年龄和城市分布情况",
+        "n_chars": 21,
+        "tokens": [
+          "下",
+          "价值",
+          "分布",
+          "华东区",
+          "和",
+          "城市",
+          "年龄",
+          "情况",
+          "想",
+          "用户",
+          "的",
+          "看",
+          "高"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.25,
+        "nearest_train": "高价值用户的年龄分布",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "上季度投诉率最高的三个商品类目分别是哪些",
+        "n_chars": 20,
+        "tokens": [
+          "三个",
+          "上",
+          "分别",
+          "哪些",
+          "商品",
+          "季度",
+          "投诉率",
+          "是",
+          "最高",
+          "的",
+          "类目"
+        ],
+        "p_to_t": 0.9091,
+        "t_to_p": 0.4286,
+        "max_4gram_jaccard": 0.0417,
+        "nearest_train": "复购率最高的品类是哪个",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "帮我统计一下各个渠道新客的七天留存率对比",
+        "n_chars": 20,
+        "tokens": [
+          "一下",
+          "七天",
+          "各个",
+          "对比",
+          "帮",
+          "我",
+          "新客",
+          "渠道",
+          "率",
+          "留存",
+          "的",
+          "统计"
+        ],
+        "p_to_t": 0.9167,
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.0645,
+        "nearest_train": "麻烦统计最近九十天各渠道新客的留存情况",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "那些只买过一次就再没回来的人大概有多少",
+        "n_chars": 19,
+        "tokens": [
+          "一次",
+          "买",
+          "人",
+          "再",
+          "只",
+          "回来",
+          "多少",
+          "大概",
+          "就",
+          "有",
+          "没",
+          "的",
+          "过",
+          "那些"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.75,
+        "max_4gram_jaccard": 0.0909,
+        "nearest_train": "只买过一次的用户有哪些",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "会员等级从白银升到黄金需要满足什么条件",
+        "n_chars": 19,
+        "tokens": [
+          "什么",
+          "从",
+          "会员",
+          "到",
+          "升",
+          "条件",
+          "满足",
+          "白银",
+          "等级",
+          "需要",
+          "黄金"
+        ],
+        "p_to_t": 0.8182,
+        "t_to_p": 0.6667,
+        "max_4gram_jaccard": 0.0556,
+        "nearest_train": "会员等级权益",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "最近一个月被风控拦截的订单主要集中在哪些品类",
+        "n_chars": 22,
+        "tokens": [
+          "一个月",
+          "主要",
+          "品类",
+          "哪些",
+          "在",
+          "拦截",
+          "最近",
+          "的",
+          "被",
+          "订单",
+          "集中",
+          "风控"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.4,
+        "max_4gram_jaccard": 0.0606,
+        "nearest_train": "想看最近一个月品类销售额排名前十的数据",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "我想看一下不同消费层级用户的客单价差异大不大",
+        "n_chars": 22,
+        "tokens": [
+          "一下",
+          "不同",
+          "单价",
+          "大不大",
+          "客",
+          "层级",
+          "差异",
+          "想",
+          "我",
+          "消费",
+          "用户",
+          "的",
+          "看"
+        ],
+        "p_to_t": 0.9231,
+        "t_to_p": 0.6,
+        "max_4gram_jaccard": 0.2069,
+        "nearest_train": "想看近九十天不同消费层级用户的复购情况",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "沉睡超过九十天的用户里有多少曾经是高频消费者",
+        "n_chars": 22,
+        "tokens": [
+          "九十天",
+          "多少",
+          "是",
+          "曾经",
+          "有",
+          "沉睡",
+          "消费者",
+          "用户",
+          "的",
+          "超过",
+          "里",
+          "高频"
+        ],
+        "p_to_t": 0.8333,
+        "t_to_p": 0.2857,
+        "max_4gram_jaccard": 0.0385,
+        "nearest_train": "近30天的用户增长趋势",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "麻烦列出所有领过优惠券但一直没有使用的用户",
+        "n_chars": 21,
+        "tokens": [
+          "一直",
+          "优惠券",
+          "但",
+          "使用",
+          "列出",
+          "所有",
+          "没有",
+          "用户",
+          "的",
+          "领过",
+          "麻烦"
+        ],
+        "p_to_t": 0.9091,
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.12,
+        "nearest_train": "U9911 有没有领过优惠券",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "美妆类目下复购率最高的一批用户有什么共同特征",
+        "n_chars": 22,
+        "tokens": [
+          "一批",
+          "什么",
+          "共同",
+          "复购",
+          "最高",
+          "有",
+          "特征",
+          "率",
+          "用户",
+          "的",
+          "目下",
+          "美妆类"
+        ],
+        "p_to_t": 0.75,
+        "t_to_p": 0.5714,
+        "max_4gram_jaccard": 0.125,
+        "nearest_train": "复购率最高的品类是哪个",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "帮我把最近一周新增用户的来源渠道占比算一下",
+        "n_chars": 21,
+        "tokens": [
+          "一下",
+          "一周",
+          "占",
+          "帮",
+          "我",
+          "把",
+          "新增",
+          "最近",
+          "来源",
+          "比算",
+          "渠道",
+          "用户",
+          "的"
+        ],
+        "p_to_t": 0.9231,
+        "t_to_p": 0.4444,
+        "max_4gram_jaccard": 0.1034,
+        "nearest_train": "最近九十天首单用户来源渠道占比分析",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "那些退过一次货的用户后来的复购情况怎么样",
+        "n_chars": 20,
+        "tokens": [
+          "一次",
+          "后来",
+          "复购",
+          "怎么样",
+          "情况",
+          "用户",
+          "的",
+          "货",
+          "过",
+          "退",
+          "那些"
+        ],
+        "p_to_t": 0.8182,
+        "t_to_p": 0.6,
+        "max_4gram_jaccard": 0.08,
+        "nearest_train": "U2765的活跃情况怎么样",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "想看下各会员等级的人数分布以及对应的平均消费",
+        "n_chars": 22,
+        "tokens": [
+          "下",
+          "人数",
+          "以及",
+          "会员",
+          "分布",
+          "各",
+          "对应",
+          "平均",
+          "想",
+          "消费",
+          "的",
+          "看",
+          "等级"
+        ],
+        "p_to_t": 0.9231,
+        "t_to_p": 0.7143,
+        "max_4gram_jaccard": 0.2381,
+        "nearest_train": "各会员等级的人数占比",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "上个月流失预警名单里最后真正流失的占多少",
+        "n_chars": 20,
+        "tokens": [
+          "上个月",
+          "占",
+          "名单",
+          "多少",
+          "最后",
+          "流失",
+          "的",
+          "真正",
+          "里",
+          "预警"
+        ],
+        "p_to_t": 0.9,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.0588,
+        "nearest_train": "流失预警",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "有没有既买过美妆又买过母婴的高价值用户名单",
+        "n_chars": 21,
+        "tokens": [
+          "买",
+          "价值",
+          "又",
+          "名单",
+          "既",
+          "有没有",
+          "母婴",
+          "用户",
+          "的",
+          "美妆",
+          "过",
+          "高"
+        ],
+        "p_to_t": 0.9167,
+        "t_to_p": 0.5714,
+        "max_4gram_jaccard": 0.1304,
+        "nearest_train": "查一下北京的高价值用户",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "帮我查下这个用户最近半年的下单频次变化趋势",
+        "n_chars": 21,
+        "tokens": [
+          "下单",
+          "半年",
+          "变化趋势",
+          "帮",
+          "我",
+          "最近",
+          "查下",
+          "用户",
+          "的",
+          "这个",
+          "频次"
+        ],
+        "p_to_t": 0.8182,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.0556,
+        "nearest_train": "下单频次",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "哪些渠道进来的用户转化率明显高于平均水平",
+        "n_chars": 20,
+        "tokens": [
+          "哪些",
+          "平均水平",
+          "明显",
+          "渠道",
+          "用户",
+          "的",
+          "转化率",
+          "进来",
+          "高于"
+        ],
+        "p_to_t": 0.5556,
+        "t_to_p": 0.4286,
+        "max_4gram_jaccard": 0.037,
+        "nearest_train": "U1099是哪个渠道来的用户",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "请统计一下白名单用户在活动期间的参与度情况",
+        "n_chars": 21,
+        "tokens": [
+          "一下",
+          "参与度",
+          "在",
+          "情况",
+          "期间",
+          "活动",
+          "用户",
+          "白名单",
+          "的",
+          "统计",
+          "请"
+        ],
+        "p_to_t": 0.9091,
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.0909,
+        "nearest_train": "白名单用户怎么定义",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "我想知道这些高客单用户平时都偏好哪些品类",
+        "n_chars": 20,
+        "tokens": [
+          "偏好",
+          "单用户",
+          "品类",
+          "哪些",
+          "平时",
+          "想",
+          "我",
+          "知道",
+          "这些",
+          "都",
+          "高客"
+        ],
+        "p_to_t": 0.9091,
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.15,
+        "nearest_train": "高客单用户平均消费",
+        "correct": true
+      },
+      {
+        "probe_kind": "long",
+        "query": "按城市统计一下钻石会员的客单价中位数是多少",
+        "n_chars": 21,
+        "tokens": [
+          "一下",
+          "中位数",
+          "会员",
+          "单价",
+          "城市",
+          "多少",
+          "客",
+          "按",
+          "是",
+          "的",
+          "统计",
+          "钻石"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 0.5714,
+        "max_4gram_jaccard": 0.125,
+        "nearest_train": "会员和非会员的客单价对比",
+        "correct": true
+      }
+    ],
+    "grouped": {
+      "short|低重合(<0.6)": {
+        "n": 30,
+        "correct": 28,
+        "accuracy": 0.9333333333333333,
+        "acc_ci": [
+          0.7867618227892791,
+          0.9815233646723066
+        ]
+      },
+      "long|低重合(<0.6)": {
+        "n": 25,
+        "correct": 25,
+        "accuracy": 1.0,
+        "acc_ci": [
+          0.8668035060468213,
+          1.0
+        ]
+      }
+    }
+  },
+  "confidence": {
+    "test": {
+      "mean_max_prob": 0.9979764223098755,
+      "p05": 0.9977726340293884,
+      "min_max_prob": 0.7098166942596436,
+      "mean_confidence_chitchat": 0.9961885809898376,
+      "mean_confidence_business": 0.9997381567955017,
+      "count_lt_0.6": 0,
+      "count_lt_0.7": 0,
+      "count_lt_0.9": 1
+    },
+    "short": {
+      "mean_max_prob": 0.9989680647850037,
+      "p05": 0.9941474199295044,
+      "min_max_prob": 0.9907928109169006,
+      "mean_confidence_chitchat": null,
+      "mean_confidence_business": 0.9989680647850037,
+      "count_lt_0.6": 0,
+      "count_lt_0.7": 0,
+      "count_lt_0.9": 0
+    },
+    "long": {
+      "mean_max_prob": 0.9890807271003723,
+      "p05": 0.999642014503479,
+      "min_max_prob": 0.733021080493927,
+      "mean_confidence_chitchat": null,
+      "mean_confidence_business": 0.9890807271003723,
+      "count_lt_0.6": 0,
+      "count_lt_0.7": 0,
+      "count_lt_0.9": 1
+    }
+  },
+  "low_confidence_samples": [
+    {
+      "source": "test",
+      "query": "闰年是怎么回事",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.7098166942596436,
+      "p_chitchat": 0.7098166942596436,
+      "p_business": 0.29018327593803406,
+      "n_chars": 7
+    },
+    {
+      "source": "long",
+      "query": "那些只买过一次就再没回来的人大概有多少",
+      "true": "BUSINESS",
+      "pred": "BUSINESS",
+      "max_prob": 0.733021080493927,
+      "p_chitchat": 0.2669788897037506,
+      "p_business": 0.733021080493927,
+      "n_chars": 19
+    },
+    {
+      "source": "test",
+      "query": "收到",
+      "true": "CHITCHAT",
+      "pred": "BUSINESS",
+      "max_prob": 0.9836000204086304,
+      "p_chitchat": 0.016399946063756943,
+      "p_business": 0.9836000204086304,
+      "n_chars": 2
+    },
+    {
+      "source": "test",
+      "query": "testing",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9872623085975647,
+      "p_chitchat": 0.9872623085975647,
+      "p_business": 0.012737727724015713,
+      "n_chars": 7
+    },
+    {
+      "source": "short",
+      "query": "调下画像",
+      "true": "BUSINESS",
+      "pred": "BUSINESS",
+      "max_prob": 0.9907928109169006,
+      "p_chitchat": 0.009207134135067463,
+      "p_business": 0.9907928109169006,
+      "n_chars": 4
+    },
+    {
+      "source": "short",
+      "query": "查U2765",
+      "true": "BUSINESS",
+      "pred": "BUSINESS",
+      "max_prob": 0.9924613833427429,
+      "p_chitchat": 0.007538638077676296,
+      "p_business": 0.9924613833427429,
+      "n_chars": 6
+    },
+    {
+      "source": "test",
+      "query": "asdf",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9939807653427124,
+      "p_chitchat": 0.9939807653427124,
+      "p_business": 0.006019283551722765,
+      "n_chars": 4
+    },
+    {
+      "source": "test",
+      "query": "test test",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9961134195327759,
+      "p_chitchat": 0.9961134195327759,
+      "p_business": 0.003886587917804718,
+      "n_chars": 9
+    },
+    {
+      "source": "short",
+      "query": "U2765",
+      "true": "BUSINESS",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9962081909179688,
+      "p_chitchat": 0.9962081909179688,
+      "p_business": 0.0037918484304100275,
+      "n_chars": 5
+    },
+    {
+      "source": "short",
+      "query": "看下GMV",
+      "true": "BUSINESS",
+      "pred": "CHITCHAT",
+      "max_prob": 0.996903121471405,
+      "p_chitchat": 0.996903121471405,
+      "p_business": 0.003096881089732051,
+      "n_chars": 5
+    },
+    {
+      "source": "test",
+      "query": "你的功能是什么",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9969680905342102,
+      "p_chitchat": 0.9969680905342102,
+      "p_business": 0.0030319257639348507,
+      "n_chars": 7
+    },
+    {
+      "source": "test",
+      "query": "打算学拍点日常小视频记录",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9971070885658264,
+      "p_chitchat": 0.9971070885658264,
+      "p_business": 0.0028929144609719515,
+      "n_chars": 12
+    },
+    {
+      "source": "test",
+      "query": "随便",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9972047209739685,
+      "p_chitchat": 0.9972047209739685,
+      "p_business": 0.0027952776290476322,
+      "n_chars": 2
+    },
+    {
+      "source": "test",
+      "query": "你是AI吗",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9972354769706726,
+      "p_chitchat": 0.9972354769706726,
+      "p_business": 0.002764515345916152,
+      "n_chars": 5
+    },
+    {
+      "source": "test",
+      "query": "yes",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9973303079605103,
+      "p_chitchat": 0.9973303079605103,
+      "p_business": 0.002669714391231537,
+      "n_chars": 3
+    },
+    {
+      "source": "test",
+      "query": "弗洛伊德是谁",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9973898530006409,
+      "p_chitchat": 0.9973898530006409,
+      "p_business": 0.002610191237181425,
+      "n_chars": 6
+    },
+    {
+      "source": "test",
+      "query": "周末愉快",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9974616765975952,
+      "p_chitchat": 0.9974616765975952,
+      "p_business": 0.0025382554158568382,
+      "n_chars": 4
+    },
+    {
+      "source": "test",
+      "query": "1",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9974658489227295,
+      "p_chitchat": 0.9974658489227295,
+      "p_business": 0.0025342071894556284,
+      "n_chars": 1
+    },
+    {
+      "source": "test",
+      "query": "口红哪个色号好看",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9977389574050903,
+      "p_chitchat": 0.9977389574050903,
+      "p_business": 0.002261032350361347,
+      "n_chars": 8
+    },
+    {
+      "source": "test",
+      "query": "焦虑",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9978001713752747,
+      "p_chitchat": 0.9978001713752747,
+      "p_business": 0.0021997697185724974,
+      "n_chars": 2
+    }
+  ],
+  "low_confidence_label_mix": {
+    "true_chitchat": 15,
+    "true_business": 5
+  },
+  "inference_speed": {
+    "single_ms_avg_100": 13.628,
+    "batch32_total_ms": 267.259,
+    "batch32_per_item_ms": 0.983,
+    "speedup_x": 13.87,
+    "device": "cuda"
+  }
+}

@@ -1,0 +1,43 @@
+意图二分类 —— 错误样本与低置信样本分析
+======================================================================
+
+【test 集】错误样本 1 条
+  '收到'  真实=CHITCHAT 预测=BUSINESS P(真实)=0.0164
+        · 极短文本（2 字），可用的判别信息很少
+        · 与训练集最长公共片段很小（max 4-gram Jaccard 0.00）
+
+【短业务探针】错误样本 2 条
+  'U2765'  真实=BUSINESS 预测=CHITCHAT P(真实)=0.0038
+        · 含非中文字符（字母/数字/ID），训练集中同类样本极少
+        · 最接近的训练句：'U2765的年龄'（相似 0.40）
+  '看下GMV'  真实=BUSINESS 预测=CHITCHAT P(真实)=0.0031
+        · 含非中文字符（字母/数字/ID），训练集中同类样本极少
+        · 与训练集最长公共片段很小（max 4-gram Jaccard 0.00）
+
+【长业务探针】错误样本 0 条
+  （无）
+
+【置信度最低 Top 20】
+  来源       长度        真实        预测  max_prob  query
+  test      7  CHITCHAT  CHITCHAT    0.7098  闰年是怎么回事
+  long     19  BUSINESS  BUSINESS    0.7330  那些只买过一次就再没回来的人大概有多少
+  test      2  CHITCHAT  BUSINESS    0.9836  收到  <- 判错
+  test      7  CHITCHAT  CHITCHAT    0.9873  testing
+  short     4  BUSINESS  BUSINESS    0.9908  调下画像
+  short     6  BUSINESS  BUSINESS    0.9925  查U2765
+  test      4  CHITCHAT  CHITCHAT    0.9940  asdf
+  test      9  CHITCHAT  CHITCHAT    0.9961  test test
+  short     5  BUSINESS  CHITCHAT    0.9962  U2765  <- 判错
+  short     5  BUSINESS  CHITCHAT    0.9969  看下GMV  <- 判错
+  test      7  CHITCHAT  CHITCHAT    0.9970  你的功能是什么
+  test     12  CHITCHAT  CHITCHAT    0.9971  打算学拍点日常小视频记录
+  test      2  CHITCHAT  CHITCHAT    0.9972  随便
+  test      5  CHITCHAT  CHITCHAT    0.9972  你是AI吗
+  test      3  CHITCHAT  CHITCHAT    0.9973  yes
+  test      6  CHITCHAT  CHITCHAT    0.9974  弗洛伊德是谁
+  test      4  CHITCHAT  CHITCHAT    0.9975  周末愉快
+  test      1  CHITCHAT  CHITCHAT    0.9975  1
+  test      8  CHITCHAT  CHITCHAT    0.9977  口红哪个色号好看
+  test      2  CHITCHAT  CHITCHAT    0.9978  焦虑
+
+低置信 Top20 标签构成：真实闲聊 15 条 / 真实业务 5 条
