@@ -61,11 +61,16 @@ def main() -> None:
             f"- **耗时**: {r.get('elapsed_sec')}s",
             f"- **验收标准**: {r.get('acceptance')}",
         ]
-        if r.get("route") == "sql":
+        # 判据是「有没有真的跑过 SQL」，不是 route。
+        # SQL 现在是多路里的可选一路，route 只会是 rag / chitchat / error，
+        # 永远等不到 "sql" —— 原条件恒为假，评分清单里因此看不到 SQL 与结果行数。
+        if r.get("sql") or r.get("rows_count") is not None:
             lines += [
-                f"- **SQL**: `{(r.get('sql') or '').strip()}`",
+                f"- **SQL**: `{(r.get('sql') or '').strip() or '（无）'}`",
                 f"- **rows_count**: {r.get('rows_count')}",
             ]
+            if r.get("sql_error"):
+                lines += [f"- **SQL 错误**: {r['sql_error']}"]
         lines += [
             "",
             "**答案**：",
