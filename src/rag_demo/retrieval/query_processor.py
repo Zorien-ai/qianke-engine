@@ -39,7 +39,7 @@ from rag_demo.config import (
 from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import MULTI_QUERY_PROMPT
 from rag_demo.retrieval.hybrid_retriever import hybrid_search
-from rag_demo.retrieval.reranker import get_reranker, rerank_by_source
+from rag_demo.retrieval.reranker import get_reranker, rerank, rerank_by_source
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG
 
 logger = logging.getLogger(__name__)
@@ -275,6 +275,62 @@ def _retrieve_one(
     return hits
 
 
+def _offer_to_pool(pool: list[dict], index: dict[str, dict], item: dict) -> bool:
+    """
+    把一条候选放进池子；池里已有同 id 的，只合并 strategies（多路共识的依据）
+
+    返回是否**新增**（False = 重复命中，已并入既有那条的 strategies）。
+
+    共识标记必须保留到统一精排之后：它决定「这条资料是被几路独立召回的」，
+    去重时丢掉就再也补不回来（而候选本身在池里只有一份）。
+    """
+    cid = item["id"]
+    existing = index.get(cid)
+    if existing is not None:
+        for s in item.get("strategies") or []:
+            if s not in existing.setdefault("strategies", []):
+                existing["strategies"].append(s)
+        return False
+    index[cid] = item
+    pool.append(item)
+    return True
+
+
+def _dedupe_wikis_by_doc(items: list[dict]) -> list[dict]:
+    """
+    文档池按**文档名**再收敛一次：同一篇只留分数最高的那条（strategies 取并集）
+
+    为什么 id 级去重不够
+    -------------------
+    wiki 的 id 是 **chunk 级**的，而两条改写式命中的常常是同一篇文档的**不同分块**。
+    父块扩展（`_expand_to_full_doc`）会把它们各自展开成同一份全文——此时两条
+    **正文一字不差、来源名也相同**，却因 id 不同而各占一个名额，白占额度、白烧 token，
+    前端还会出现两个内容完全一样的 `[来源N]`。
+    （EDGE-02 实测：`analysis_report_template.md` 重复出现两条。）
+
+    `_expand_to_full_doc` 的注释写着「同一文档的多个 chunk 合并为一条，避免重复占名额」
+    ——那就是这个意图，只是它只在**单路内**生效；跨路要在这里补上。
+
+    只对文档池调用，**不能用于画像池**：所有画像的 source 都是 `user_profile`，
+    按 source 收敛会把 3 个用户并成 1 个。
+    """
+    by_doc: dict[str, dict] = {}
+    for c in items:
+        prev = by_doc.get(c["source"])
+        if prev is None:
+            by_doc[c["source"]] = c
+            continue
+        # 分数高的那条留在原位（正文 / id / from_query 都用它），低的只贡献 strategies
+        winner, loser = (
+            (c, prev) if c.get("rerank_score", 0) > prev.get("rerank_score", 0) else (prev, c)
+        )
+        for s in loser.get("strategies") or []:
+            if s not in winner.setdefault("strategies", []):
+                winner["strategies"].append(s)
+        by_doc[c["source"]] = winner
+    return list(by_doc.values())
+
+
 def search_variants(
     variants: list[tuple[str, str]],
     top_k: int = TOP_K_RRF,
@@ -282,20 +338,46 @@ def search_variants(
     keyword_mode: str | None = None,
     origin_query: str | None = None,
     trace_out: list[dict] | None = None,
+    top_k_profile: int = TOP_K_PROFILE,
 ) -> list[dict]:
     """
-    各路**并行**检索 → 各路 RRF 出 top30 → 各路**分来源精排** → 合并去重
+    各路**并行**检索 → 画像池跨路合并统一精排 / 文档池各路分池精排 → 合并去重
 
     链路（与设计约定一致）：
         每条改写 query 独立走 hybrid_search（向量 top20 + BM25 top20 → RRF → top30）；
-        该路 30 条按来源分池精排——画像池 rerank 取 Top-3、文档池取 Top-2
-        （wiki 入选项扩展为父块全文）——每路交出 5 条；
-        各路结果合并、按 id 去重后直接作为候选，**不再做第二次融合**。
-        3 路 + SQL 的场合进 LLM 的就是 15 条 + SQL 结果；子问题更多则按比例增加。
+        画像池：把所有路召回的画像候选**合并到一起、统一精排取全局 Top-K**（默认 3）；
+        文档池：**每路各自精排取 Top-M**（默认 2，含相关度阈值过滤与父块全文扩展）；
+        两池结果合并、按 id 去重后直接作为候选，**不再做第二次融合**。
 
-    为什么各路之间不再 RRF：各路 top5 已经是「该路检索式下最好的 5 条」，
-    再按名次融合等于让它们重新竞争——弱路的第 5 名仅凭名次就能挤掉强路的
-    第 1 名。合并去重只解决「同一条被多路选中」，不改变各路的选择结果。
+    为什么两个池的取舍方式不一样（这是本函数最容易被改错的地方）
+    --------------------------------------------------------
+    两个池要的东西不同，所以不能套用同一套合并策略：
+
+      画像池要的是「**全局最相关的 N 个用户**」——候选之间是**竞争**关系。
+        多路只是召回手段，同一个用户在几条改写式下都命中，只会重复占名额。
+        分路各取 3 个再合并，等于让「弱路的第 1 名」和「强路的第 1 名」并列：
+        3 路就能交回 9 条画像，而其中大部分是各路的凑数项。
+      文档池要的是「**覆盖**」——不同改写式（尤其子问题分解）命中的业务规则
+        常常是不同文件。分路保名额才能保证「每个子问题的口径都进上下文」；
+        若也合并成一个大池统一精排，名额会被其中一路的文档整片占满，
+        另一个子问题对应的口径直接消失。
+
+    一句话：**画像求相关性（跨路统一竞争），文档求覆盖度（分路各自保名额）。**
+
+    为什么画像池的统一精排用「原问题」打分：
+        改写式是为召回而生成的近似表达，拿它当相关性基准等于用手段去评判目的。
+        统一精排时用**用户真正问的那句**（origin_query；缺省取首路检索式，
+        即「直接检索」的原句）给所有候选打分，跨路候选才在同一把尺子上比较。
+
+    为什么各路之间不再 RRF：不再按名次融合让它们重新竞争——弱路的第 5 名
+    仅凭名次就能挤掉强路的第 1 名。合并去重只解决「同一条被多路选中」，
+    不改变各池的选择结果。
+
+    top_k_profile 是**画像池的全局名额**（不是每路名额）——接口层的
+    「返回多少个用户」调的就是它；评测 / 工具脚本不传，用 config 默认值。
+
+    单路时本函数与改造前完全等价：只有一路时「跨路合并」等于「本路候选」，
+    画像仍是该路精排取 Top-K，不引入任何行为变化。
 
     为什么精排串行、检索并行：检索是 DB + BM25，线程池并发安全且收益直接；
     精排是 GPU 前向，多线程同时 predict 同一 CrossEncoder 会争抢 CUDA，
@@ -305,7 +387,7 @@ def search_variants(
     找出来的」（原始提问 vs 某条改写），避免 LLM 拿到一份无法溯源的扁平清单。
 
     trace_out 传入列表时，每路的摘要会追加进去（策略名 / 检索式 / 召回数 /
-    精排后保留数 / 前几条来源），供前端展示检索过程；不传则不留痕。
+    该路画像入池数 / 该路保留的文档数 / 来源），供前端展示检索过程；不传则不留痕。
     """
     if not variants:
         return []
@@ -332,45 +414,70 @@ def search_variants(
                 logger.warning("策略「%s」检索失败，跳过: %s", key[0], e)
                 errors[key] = str(e)
 
-    # ② 各路串行精排（分来源：画像 Top-3 + 文档 Top-2）
-    #    ③ 合并去重：同一条资料被多路选中时合并 strategies，保留先出现的那份
-    merged: list[dict] = []
-    seen: dict[str, dict] = {}
+    # ② 分池取舍：画像**只入池不淘汰**（跨路合并后统一精排），
+    #    文档**本路精排取 Top-M**（分路保覆盖）
+    profile_pool: list[dict] = []
+    pool_index: dict[str, dict] = {}
+    wiki_kept: list[dict] = []
     for strategy, text in variants:
         key = (strategy, text)
         if key in errors:
             if trace_out is not None:
                 trace_out.append({
                     "strategy": strategy, "query": text,
-                    "hit_count": 0, "kept_count": 0, "sources": [], "error": errors[key],
+                    "hit_count": 0, "profile_candidates": 0,
+                    "kept_count": 0, "sources": [], "error": errors[key],
                 })
             continue
         hits = per_variant_hits.get(key) or []
-        hit_count = len(hits)
+
+        # 画像：本路**不做取舍**，全部入池，等所有路收完再统一精排。
+        # 同一条被多路命中只占一个池内名额（strategies 合并，留下共识依据）
+        profiles_in_route = 0
+        for c in hits:
+            if not c["source"].endswith(".md"):
+                if _offer_to_pool(profile_pool, pool_index, c):
+                    profiles_in_route += 1
+
+        # 文档：**保持每路分池精排**（相关度阈值过滤 + 父块全文扩展都在这里做）。
         # 精排失败不按「跳过该路」处理——精排是整个链路的基础能力，
         # 它挂了应该整体暴露，而不是静默退化成一个只有部分资料的回答
+        wikis_in_route = [c for c in hits if c["source"].endswith(".md")]
         kept = (
-            rerank_by_source(text, hits, top_k_profile=TOP_K_PROFILE, top_k_wiki=TOP_K_WIKI)
-            if hits else []
+            rerank_by_source(text, wikis_in_route, top_k_wiki=TOP_K_WIKI)
+            if wikis_in_route else []
         )
+        kept_in_route = 0
+        for c in kept:
+            # 跨路去重：同一篇文档被两路同时选中时只留一份
+            if _offer_to_pool(wiki_kept, pool_index, c):
+                kept_in_route += 1
+
         if trace_out is not None:
             trace_out.append({
                 "strategy": strategy,
                 "query": text,
-                "hit_count": hit_count,
-                "kept_count": len(kept),
+                "hit_count": len(hits),
+                # 该路给画像池送了几个候选（不在本路淘汰）、本路文档留了几条
+                "profile_candidates": profiles_in_route,
+                "kept_count": kept_in_route,
                 "sources": [h["source"] for h in kept[:8]],
             })
-        for c in kept:
-            cid = c["id"]
-            if cid in seen:
-                # 多路共识：把命中它的各路名字都记上（这正是「共识」的依据）
-                for s in c.get("strategies") or []:
-                    if s not in seen[cid]["strategies"]:
-                        seen[cid]["strategies"].append(s)
-                continue
-            seen[cid] = c
-            merged.append(c)
+
+    # ③ 画像池统一精排：用**原问题**给跨路候选打分，取全局 Top-K。
+    #    缺省取首路检索式——首路恒为「直接检索」，它的检索式就是原问题
+    rerank_query = origin_query or variants[0][1]
+    kept_profiles = (
+        rerank(rerank_query, profile_pool, top_k=top_k_profile) if profile_pool else []
+    )
+
+    # 文档池按文档名再收敛一次：同一篇被两路命中不同 chunk 时，id 不同、
+    # 展开父块后正文却完全相同，只按 id 去重会留下重复占位
+    wiki_kept = _dedupe_wikis_by_doc(wiki_kept)
+
+    # 画像在前、文档在后：两池分数出自**不同 query**，横向比大小没有意义，
+    # 不再按分数混排（那等于拿两把尺子量出来的数排序）
+    merged: list[dict] = kept_profiles + wiki_kept
 
     if not merged:
         # 注意区分两种「空」：
@@ -392,13 +499,17 @@ def multi_query_search(
     top_k: int = TOP_K_RRF,
     dept: str | None = None,
     keyword_mode: str | None = None,
+    top_k_profile: int = TOP_K_PROFILE,
 ) -> QueryPlan:
     """
-    多路并行检索 + 各路分来源精排 + 合并去重（一步到位）
+    多路并行检索 + 分池取舍（画像跨路统一精排 / 文档各路保名额）+ 合并去重
 
     返回 QueryPlan：调用方应先看 plan.route——若被复核改道成 chitchat，
     说明这个问题本就不该走检索，此时 candidates 为空且**检索已被跳过**（省一次白跑）。
     plan.need_sql 为真时，调用方还需自行追加一条结构化查询路。
+
+    top_k_profile 是画像池的**全局**名额，透传给 search_variants；接口层的
+    「返回多少个用户」就是它。
     """
     plan = plan_queries(question)
 
@@ -409,7 +520,7 @@ def multi_query_search(
     plan.candidates = search_variants(
         plan.variants, top_k=top_k, dept=dept,
         keyword_mode=keyword_mode, origin_query=question,
-        trace_out=per_variant,
+        trace_out=per_variant, top_k_profile=top_k_profile,
     )
     plan.trace = {
         # 原问题一起带走：前端要对照「原问题 vs 改写后的检索式」才看得出改写做了什么
@@ -419,7 +530,19 @@ def multi_query_search(
         "variants": per_variant,
         # 合并去重后的候选总数（不是各路之和——同一条被多路选中只算一份）
         "fused_count": len(plan.candidates),
-        # 每路精排的分池配额：前端据此展示「各路精排 画像3 + 文档2」
-        "kept_per_route": {"profile": TOP_K_PROFILE, "wiki": TOP_K_WIKI},
+        # 两个池的名额口径**不同**，字段名必须分开，否则前端会当成同一套配额：
+        # profile_pool  = 画像池全局名额（跨路合并统一精排后取 K）
+        # wiki_per_route = 文档池每路名额（分路各自保覆盖）
+        # （改造前是 kept_per_route={"profile","wiki"}，那是「每路各自」的配额）
+        "limits": {"profile_pool": top_k_profile, "wiki_per_route": TOP_K_WIKI},
+        # 画像池入池总数（跨路去重后、精排前）：前端展示「N 条画像候选 → 精排取 K」
+        "profile_pool_count": sum(v.get("profile_candidates", 0) for v in per_variant),
+        # 文档池被「同文档收敛」丢掉的重复杂数（同一篇被多路命中不同 chunk）。
+        # 正常情况为 0 或 1；持续 >0 说明多路改写撞到同一篇文档，属正常现象，
+        # 留个数是为了排查时能看出「到底丢了几条」，而不是只能怀疑
+        "wiki_doc_dedup": (
+            sum(v.get("kept_count", 0) for v in per_variant)
+            - sum(1 for c in plan.candidates if c["source"].endswith(".md"))
+        ),
     }
     return plan

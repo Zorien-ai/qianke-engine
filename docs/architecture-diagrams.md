@@ -28,7 +28,7 @@ flowchart TB
 
     subgraph L3["③ 检索层"]
         R1["hybrid_retriever.py<br/>向量 + BM25 → RRF 融合"]
-        R2["reranker.py<br/>rerank_by_source<br/>画像 Top-3 / 文档 Top-2"]
+        R2["reranker.py<br/>rerank / rerank_by_source<br/>分池取舍：画像全局 3 / 文档每路 2"]
     end
 
     subgraph L2["② 模型层"]
@@ -122,9 +122,9 @@ flowchart TD
     C30["Top-30 候选<br/>每条含 id / source / text"]
 
     RS["rerank_by_source<br/>分来源精排 · 核心设计"]
-    RP["画像候选 user_profile<br/>CrossEncoder → Top-3"]
+    RP["画像候选 user_profile（多路时先合并）<br/>CrossEncoder → 全局 Top-3"]
     RW["文档候选 *.md<br/>CrossEncoder → Top-2"]
-    MG["合并 · 按 rerank_score 降序<br/>各自保名额，wiki 不被画像挤掉"]
+    MG["合并 · 画像在前、文档在后<br/>两池分数不同源，不横向排序"]
 
     GEN["generator<br/>Prompt 组装 · 带来源编号"]
     LLM["DeepSeek API 调用<br/>temperature = 0.3"]
@@ -177,7 +177,8 @@ flowchart TD
 
 1. **双轨并行**：向量与 BM25 两路**独立召回**，各取 Top-20，互不影响。
 2. **RRF 免归一化**：两路原始分数（cosine 距离 / BM25 分）量纲不同，用**排名**而非分数融合，规避归一化。
-3. **分来源精排（核心设计）**：`rerank_by_source` 先把候选按 `source` 是否以 `.md` 结尾拆成两池，**画像池取 Top-3、文档池取 Top-2**，再合并重排。这样业务规则（wiki）不会被 8110 条画像在数量上整体挤掉。
+3. **分池取舍（核心设计）**：本图是**单路**视角。候选按 `source` 是否以 `.md` 结尾拆成两池——**画像池取 Top-3、文档池取 Top-2**，这样业务规则（wiki）不会被 8110 条画像在数量上整体挤掉。
+   **多路时两池的取舍方式不同**：画像池把各路候选**合并后统一精排**再取全局 Top-3（画像之间是竞争关系，分路各取 3 个再合并会带回 9 条凑数项；统一精排用**原问题**打分——改写式只负责召回，不参与评判）；文档池仍是**每路各取 Top-2**（不同改写式命中的常是不同文件，分路才保得住覆盖）。单路时两者完全等价：只有一路，「跨路合并」就是本路候选。
 4. **引用可回溯**：候选全程携带 `id / source / text`，生成后映射回原文，`sources` 字段返回编号、来源类型与原文片段（截断 100 字）。
 
 ---
@@ -337,7 +338,7 @@ flowchart TB
 
 | # | 设计点 | 落点 | 解决什么问题 |
 |---|---|---|---|
-| 1 | **双轨召回** | `rerank_by_source` | 画像与业务规则**分来源精排、各自保名额**，避免 wiki 被 8110 条画像在数量上挤掉 |
+| 1 | **双轨召回** | `rerank_by_source` | 画像与业务规则**分池取舍**：画像池跨路合并统一精排（全局 3 条），文档池每路保名额（各 2 条），避免 wiki 被 8110 条画像在数量上挤掉 |
 | 2 | **RRF 融合** | `rrf_fusion(k=60)` | 两路分数无需归一化，按排名累加，双路命中获得奖励 |
 | 3 | **引用溯源** | 候选携带 `id / source / text` | 生成后映射回原文，`sources` 返回编号 + 类型 + 片段 |
 | 4 | **探活重连** | `db/connection.get_conn()` | 每次调用先 `SELECT 1`，失败自动重连（规避服务端 kill 后 `closed` 仍为 0 的坑） |

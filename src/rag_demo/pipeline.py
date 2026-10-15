@@ -9,9 +9,10 @@
 
     闲聊 / 域外  -> 固定回复（不检索、不调模型）
     其余全部     -> 多路聚合
-                    ├─ 检索路 1~N（**并行**检索，各路 RRF 出 top30 后
-                    │            分来源精排：画像 Top-3 + 文档 Top-2）
-                    ├─ 各路结果合并去重（不再二次融合，不按名次重新竞争）
+                    ├─ 检索路 1~N（**并行**检索，各路 RRF 出 top30 后分池取舍：
+                    │            画像池跨路合并统一精排取全局 Top-3，
+                    │            文档池每路精排各取 Top-2）
+                    ├─ 两池结果合并去重（不再二次融合，不按名次重新竞争）
                     ├─ SQL 路（多路规划判定需要时才追加）
                     └─ 聚合后**一次**生成
 
@@ -37,7 +38,7 @@ import logging
 from openai import APIError
 
 from rag_demo.cache import answer_cache
-from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_RRF
+from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF
 from rag_demo.generation.generator import generate
 from rag_demo.prompts import CHITCHAT_REPLY, LLM_UNAVAILABLE_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
 from rag_demo.retrieval.query_processor import (
@@ -68,9 +69,9 @@ def answer_question(
     参数:
         keyword_mode:  关键词召回策略 bm25 / sparse / both，缺省读 config
         use_cache:     评测对比不同策略时应传 False，否则会拿到上一次的结果
-        profile_limit: 「返回多少个用户」的上限（画像条数），None = 不额外截断。
-                       由接口层按角色放行后传入（permissions.clamp_top_k）；
-                       评测/工具脚本不传，行为与改造前完全一致。
+        profile_limit: 「返回多少个用户」（画像池的全局名额），None = 用 config
+                       默认值 TOP_K_PROFILE(3)。由接口层按角色放行后传入
+                       （permissions.clamp_top_k）；评测/工具脚本不传即默认行为。
 
     注意：本函数返回的是**完整结果**，不做任何按角色的裁剪——裁剪统一在
     api 层的 permissions.render() 做。这样评测脚本直接调它拿到的仍是全量字段，
@@ -147,34 +148,11 @@ def brief_rows(rows: list[tuple], limit: int = 20) -> list[list[str]]:
     return [[str(v)[:60] for v in r] for r in rows[:limit]]
 
 
-def apply_profile_limit(candidates: list[dict], limit: int | None) -> list[dict]:
-    """
-    把画像候选条数截到 limit（文档候选不受影响）
-
-    为什么只截画像：这个参数在界面上叫「返回多少个用户」，用户想控制的是
-    "给我看几个用户"，不是"少给我几条业务规则"——把 wiki 一起截掉会直接
-    损害答案质量（口径定义没了，数字就没人能解释）。
-
-    候选本身已按精排分数降序，所以截断等价于"保留最相关的 N 个用户"。
-    """
-    if not limit or limit <= 0:
-        return candidates
-
-    kept: list[dict] = []
-    seen_profiles = 0
-    for c in candidates:
-        if c.get("source") == "user_profile":
-            seen_profiles += 1
-            if seen_profiles > limit:
-                continue
-        kept.append(c)
-    return kept
-
-
 def _plan_and_retrieve(
     question: str,
     dept: str | None = None,
     keyword_mode: str | None = None,
+    profile_limit: int | None = None,
 ) -> QueryPlan:
     """
     多路规划 + 检索路执行
@@ -182,23 +160,31 @@ def _plan_and_retrieve(
     返回的 QueryPlan 中：
         route     可能被 LLM 复核改道成 chitchat（捞关键词路由的漏判）
         need_sql  是否需要再追加一条结构化查询路
-        candidates 各路并行检索 + 分来源精排 + 合并去重后的候选（带溯源字段）
+        candidates 各路并行检索 + 分池取舍 + 合并去重后的候选（带溯源字段）
+
+    profile_limit 是「返回多少个用户」——画像池的**全局名额**，None 用 config
+    默认值。它必须在检索阶段就生效（画像池统一精排时取 Top-k），而不是取完再截：
+    候选池的取舍口径本身就该由这个数决定，事后再砍等于「先按 3 个挑完再扔」。
 
     关闭 ENABLE_MULTI_QUERY 时没有那次 LLM 调用，退化为单路检索、无 SQL 判定
-    ——这是该开关的固有代价，不是缺陷。单路同样走「RRF top30 → 分来源精排」，
-    与多路时每路的行为一致。
+    ——这是该开关的固有代价，不是缺陷。单路同样走「RRF top30 → 分池取舍」，
+    且与改造前的分路精排**完全等价**（只有一路时「跨路合并」就是本路候选）。
     """
+    top_k_profile = profile_limit or TOP_K_PROFILE
+
     if not ENABLE_MULTI_QUERY:
         return QueryPlan(
             route=ROUTE_RAG,
             candidates=search_variants(
                 [(STRATEGY_DIRECT, question)], top_k=TOP_K_RRF,
                 dept=dept, keyword_mode=keyword_mode,
+                top_k_profile=top_k_profile,
             ),
         )
 
     return multi_query_search(
-        question, top_k=TOP_K_RRF, dept=dept, keyword_mode=keyword_mode
+        question, top_k=TOP_K_RRF, dept=dept, keyword_mode=keyword_mode,
+        top_k_profile=top_k_profile,
     )
 
 
@@ -220,7 +206,7 @@ def _answer_uncached(
         return _chitchat_result()
 
     try:
-        plan = _plan_and_retrieve(question, dept, keyword_mode)
+        plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit)
     except RetrievalUnavailableError as e:
         # 数据库挂了不能伪装成「资料里没有」——明确报「服务不可用」
         logger.error("检索不可用: %s", e)
@@ -230,14 +216,16 @@ def _answer_uncached(
         logger.info("路由复核改道 -> chitchat: %s", question)
         return _chitchat_result()
 
-    # 「返回多少个用户」：在进生成之前收窄画像条数，wiki 不动
-    candidates = apply_profile_limit(plan.candidates, profile_limit)
+    # 「返回多少个用户」不在这里截断：画像池的全局名额在检索阶段
+    # （search_variants 统一精排取 Top-k）就已生效，拿到的已是最终份数。
+    # 事后再截一次不但多余，还会让「候选池按 3 个挑」和「展现 3 个」变成两套口径
+    candidates = plan.candidates
 
     # SQL 路：与检索路并行产出，最终一起进 context
     sql_result = _run_sql(question) if plan.need_sql else None
 
-    # 检索路已在 multi_query_search 内完成「各路 RRF top30 → 各路分来源精排
-    # → 合并去重」，这里直接进生成，不再做整体终选（否则等于三层精排）
+    # 检索路已在 multi_query_search 内完成「各路 RRF top30 → 分池取舍 → 合并去重」，
+    # 这里直接进生成，不再做整体终选（否则等于三层精排）
     result = generate(question, candidates, sql_result=sql_result)
     result["route"] = ROUTE_RAG
 
@@ -276,7 +264,7 @@ def prepare(
         return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
 
     try:
-        plan = _plan_and_retrieve(question, dept, keyword_mode)
+        plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit)
     except RetrievalUnavailableError as e:
         logger.error("检索不可用: %s", e)
         return {
@@ -292,10 +280,10 @@ def prepare(
         logger.info("路由复核改道 -> chitchat: %s", question)
         return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
 
-    # 「返回多少个用户」：在进生成之前收窄画像条数，wiki 不动。
-    # sources 与 candidates 必须用**同一份**结果——否则会出现
-    # 「答案里提到 5 个用户，来源列里却有 9 条」的不一致。
-    candidates = apply_profile_limit(plan.candidates, profile_limit)
+    # candidates 已是最终份数（画像池名额在检索阶段就已生效），
+    # 下方 sources 与它用的是**同一份**结果——不会出现
+    # 「答案里提到 5 个用户，来源列里却有 9 条」的不一致
+    candidates = plan.candidates
 
     sql_result = _run_sql(question) if plan.need_sql else None
 

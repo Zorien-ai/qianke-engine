@@ -336,7 +336,7 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace })
       <div class="tp-variant">
         <div class="tp-variant-head">
           <span class="tp-strategy">${escapeHtml(v.strategy || "-")}</span>
-          <span class="tp-count">召回 ${v.hit_count ?? 0} 条 · 精排留 ${v.kept_count ?? 0} 条</span>
+          <span class="tp-count">召回 ${v.hit_count ?? 0} 条 · 画像入池 ${v.profile_candidates ?? 0} · 文档留 ${v.kept_count ?? 0} 条</span>
         </div>
         <div class="tp-query-block">
           <span class="tp-qlabel">检索式</span>
@@ -351,18 +351,25 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace })
       )
       .join("") || `<div class="tp-empty">（无）</div>`;
 
-  // 3) 收敛链路：各路并行召回 → 各路分来源精排 → 合并去重 → 入上下文
+  // 3) 收敛链路：各路并行召回 → 画像池统一精排 + 文档池每路精排 → 合并去重 → 入上下文
+  //    两个池的名额口径不同（画像全局、文档每路），必须分开显示：
+  //    并成一个"精排 画像3+文档2"会让人以为画像也是每路各取 3 个
   const totalHits = variants.reduce((n, v) => n + (v.hit_count ?? 0), 0);
   const merged = (trace && trace.fused_count) ?? 0;
-  const kept = (trace && trace.kept_per_route) || {};
-  const keptText =
-    kept.profile != null && kept.wiki != null
-      ? `画像<b>${kept.profile}</b>+文档<b>${kept.wiki}</b>`
-      : "分来源";
+  const limits = (trace && trace.limits) || {};
+  const poolCount = (trace && trace.profile_pool_count) ?? 0;
+  const profileText =
+    limits.profile_pool != null
+      ? `画像池统一精排 ${poolCount}→<b>${limits.profile_pool}</b>`
+      : "画像池统一精排";
+  const wikiText =
+    limits.wiki_per_route != null
+      ? `文档池每路 <b>${limits.wiki_per_route}</b>`
+      : "文档池每路";
   el("trace-flow").innerHTML = `
     <span class="tp-node">各路并行召回 <b>${totalHits}</b></span>
     <span class="tp-arrow">→</span>
-    <span class="tp-node">各路精排 ${keptText}</span>
+    <span class="tp-node">${profileText} · ${wikiText}</span>
     <span class="tp-arrow">→</span>
     <span class="tp-node">合并去重 <b>${merged}</b></span>
     <span class="tp-arrow">→</span>

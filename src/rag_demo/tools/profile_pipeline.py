@@ -13,9 +13,10 @@
 
 链路（与 pipeline 实际执行顺序一致）：
     ① 多路规划   1 次 LLM —— 路由复核 + SQL 判定 + 变体生成，三合一
-    ② 各路并行检索 + 各路精排   hybrid_search × N（并行）→ 各路 RRF top30
-                                → 各路分来源精排（画像 Top-3 + 文档 Top-2）
-    ③ 合并去重   各路 top5 按 id 去重，直接作为候选（无二次融合、无整体终选）
+    ② 各路并行检索 + 分池取舍   hybrid_search × N（并行）→ 各路 RRF top30
+                                → 画像池跨路合并统一精排取全局 Top-3
+                                → 文档池每路精排各取 Top-2
+    ③ 合并去重   两池结果按 id 去重，直接作为候选（无二次融合、无整体终选）
     ④ Text2SQL   1 次 LLM（仅 need_sql 时）
     ⑤ SQL 执行   PostgreSQL
     ⑥ 答案生成   1 次 LLM（流式，计时含全部 chunk）
@@ -56,7 +57,7 @@ def run_once(qid: str, question: str, label: str) -> dict:
     for name, text in plan.variants:
         print(f"      └ [{name:<8}] {text[:52]}")
 
-    # ② 各路并行检索 + 各路分来源精排 + 合并去重（一次调用内完成）
+    # ② 各路并行检索 + 分池取舍（画像跨路统一精排 / 文档各路保名额）+ 合并去重
     trace = []
     t = time.time()
     candidates = search_variants(
@@ -64,9 +65,12 @@ def run_once(qid: str, question: str, label: str) -> dict:
     )
     s["search"] = time.time() - t
     hit_total = sum(v["hit_count"] for v in trace)
-    kept_total = sum(v.get("kept_count", 0) for v in trace)
-    print(f"② 并行检索+各路精排+去重（{len(plan.variants)} 路）: {s['search']:6.2f}s   "
-          f"召回 {hit_total} → 各路精排后 {kept_total} → 去重后 {len(candidates)} 条")
+    profile_pool = sum(v.get("profile_candidates", 0) for v in trace)
+    wiki_kept = sum(v.get("kept_count", 0) for v in trace)
+    # candidates = 画像池精排结果 + 文档池各路结果，减去文档就是画像实际留下的条数
+    print(f"② 并行检索+分池取舍+去重（{len(plan.variants)} 路）: {s['search']:6.2f}s   "
+          f"召回 {hit_total} → 画像池 {profile_pool} 精排留 {len(candidates) - wiki_kept}、"
+          f"文档各路留 {wiki_kept} → 去重后 {len(candidates)} 条")
 
     # ⑤⑥ SQL 路：生成 + 执行（仅 need_sql 时）
     sql_result = None

@@ -139,7 +139,7 @@ flowchart TB
 
     subgraph L3["③ 检索层"]
         R1["hybrid_retriever.py<br/>向量 + BM25 → RRF 融合"]
-        R2["reranker.py<br/>rerank_by_source<br/>画像 Top-3 / 文档 Top-2"]
+        R2["reranker.py<br/>rerank / rerank_by_source<br/>分池取舍：画像全局 3 / 文档每路 2"]
     end
 
     subgraph L2["② 模型层"]
@@ -233,10 +233,10 @@ flowchart TD
     RRF["RRF 融合<br/>k = 60 · 无需分数归一化"]
     C30["Top-30 候选<br/>每条含 id / source / text"]
 
-    RS["rerank_by_source<br/>分来源精排 · 核心设计"]
-    RP["画像候选 user_profile<br/>CrossEncoder → Top-3"]
+    RS["rerank_by_source<br/>分池取舍 · 核心设计"]
+    RP["画像候选 user_profile（多路时先合并）<br/>CrossEncoder → 全局 Top-3"]
     RW["文档候选 *.md<br/>CrossEncoder → Top-2"]
-    MG["合并 · 按 rerank_score 降序<br/>各自保名额，wiki 不被画像挤掉"]
+    MG["合并 · 画像在前、文档在后<br/>两池分数不同源，不横向排序"]
 
     GEN["generator<br/>Prompt 组装 · 带来源编号"]
     LLM["DeepSeek API 调用<br/>temperature = 0.3"]
@@ -289,14 +289,14 @@ flowchart TD
       <tr><td>向量召回</td><td>query → 1024 维向量</td><td><b>Top-20</b></td><td>pgvector cosine 相似度</td></tr>
       <tr><td>BM25 召回</td><td>jieba 分词后 query</td><td><b>Top-20</b></td><td>关键词精确匹配，补向量语义盲区</td></tr>
       <tr><td>RRF 融合</td><td>2 × 20</td><td><b>Top-30</b></td><td>按排名累加，免归一化</td></tr>
-      <tr><td><b>分来源精排</b></td><td>30</td><td><b>3 + 2 = 5</b></td><td>画像与 wiki 分池，各自保名额</td></tr>
+      <tr><td><b>分池取舍</b></td><td>30</td><td><b>3 + 2 = 5</b></td><td>画像与 wiki 分池；多路时画像池合并后统一精排取全局 3</td></tr>
       <tr><td>生成</td><td>5 条候选</td><td>answer + sources</td><td>带编号引用、区分事实/推断、脱敏</td></tr>
     </table>
     <h4 class="sec">读图要点</h4>
     <ol class="pts">
       <li><b>双轨并行</b>：向量与 BM25 两路独立召回，各取 Top-20，互不影响，任何一路失效另一路仍可用。</li>
       <li><b>RRF 免归一化</b>：cosine 距离与 BM25 分数量纲不同，用<b>排名</b>而非分数融合，规避归一化调参；同一文档双路命中则分数累加，天然奖励"双路共识"。</li>
-      <li><b>分来源精排（核心）</b>：先按 <span class="mono">source</span> 是否以 <span class="mono">.md</span> 结尾拆成两池，<b>画像池取 Top-3、文档池取 Top-2</b>，再合并重排。若单池精排，8110 条画像在数量上会整体挤掉 29 个业务规则分块，SOP / 标签口径类问题将无据可依。</li>
+      <li><b>分池取舍（核心）</b>：本图是<b>单路</b>视角。候选按 <span class="mono">source</span> 是否以 <span class="mono">.md</span> 结尾拆成两池——<b>画像池取 Top-3、文档池取 Top-2</b>。若单池精排，8110 条画像在数量上会整体挤掉 29 个业务规则分块，SOP / 标签口径类问题将无据可依。<br/>　<b>多路时两池取舍不同</b>：画像池把各路候选<b>合并后统一精排</b>再取全局 Top-3（画像之间是竞争关系，分路各取 3 个再合并会带回 9 条凑数项；统一精排用<b>原问题</b>打分——改写式只负责召回，不参与评判）；文档池仍是<b>每路各取 Top-2</b>（不同改写式命中的常是不同文件，分路才保得住覆盖）。单路时两者完全等价。</li>
       <li><b>引用可回溯</b>：候选全程携带 <span class="mono">id / source / text</span>，生成后映射回原文，<span class="mono">sources</span> 返回编号、来源类型与原文片段（截断 100 字）。</li>
     </ol>
   </section>
@@ -473,7 +473,7 @@ flowchart TB
     </div>
     <table>
       <tr><th>#</th><th>设计点</th><th>落点</th><th>解决什么问题</th></tr>
-      <tr><td>1</td><td><b>双轨召回</b></td><td class="mono">rerank_by_source</td><td>画像与业务规则分来源精排、各自保名额，避免 wiki 被 8110 条画像在数量上挤掉</td></tr>
+      <tr><td>1</td><td><b>双轨召回</b></td><td class="mono">rerank_by_source</td><td>画像与业务规则<b>分池取舍</b>：画像池跨路合并统一精排（全局 3 条），文档池每路保名额（各 2 条），避免 wiki 被 8110 条画像在数量上挤掉</td></tr>
       <tr><td>2</td><td><b>RRF 融合</b></td><td class="mono">rrf_fusion(k=60)</td><td>两路分数无需归一化，按排名累加，双路命中获得奖励</td></tr>
       <tr><td>3</td><td><b>引用溯源</b></td><td class="mono">候选带 id/source/text</td><td>生成后映射回原文，sources 返回编号 + 类型 + 片段</td></tr>
       <tr><td>4</td><td><b>探活重连</b></td><td class="mono">get_conn()</td><td>每次调用先 SELECT 1，失败自动重连（规避服务端 kill 后 closed 仍为 0 的坑）</td></tr>
