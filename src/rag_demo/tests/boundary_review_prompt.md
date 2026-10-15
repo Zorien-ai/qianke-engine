@@ -1,6 +1,6 @@
 # 边界问题集 · 专用评审提示词
 
-> **用途**：评审 `eval_boundary_questions.json`（20 条：CPLX-01~09 + ODD-01~11）。
+> **用途**：评审 `eval_boundary_questions.json`（21 条：CPLX-01~09 + ODD-01~11 + ODD-01b）。
 > **为什么单独写一套**：上一轮用通用三维模板（可答性 / HF 有用性 / 独立性）评这套题，
 > 其中两个维度口径错位，8 条"设计使然"的探针被打了低分，差点被误删。
 > 本提示词是针对**边界能力探针集**重写的，维度与判废规则都换过。
@@ -53,7 +53,7 @@
 | CPLX-04 | `ingest_data.py`：`top_cat = g.groupby("category")["amount"].sum().idxmax()` 取的是 top1 品类 |
 | CPLX-05 | `tag_definitions.md` 流失预警定义 vs `user_profile_vectors.days_since_last_buy` |
 | CPLX-06 | `tag_definitions.md` 高价值定义（近90天前20% + 近30天活跃）vs 累计快照字段 |
-| CPLX-07 | `reranker.rerank_by_source` + `config.TOP_K_WIKI=2` |
+| CPLX-07 | `reranker.rerank_by_source` + `config.TOP_K_WIKI=2`；must_include_sources=3 > 名额，溢出必现 |
 | CPLX-08 | `MULTI_QUERY_PROMPT` 第二步 need_sql 判定 + `RAG_ANSWER_PROMPT` 第 4/5 条 |
 | CPLX-09 | `tag_definitions.md` 用户标签 vs `ingest_data.py` COLUMN_MAP `category → top_category` |
 | ODD-01 | `router.is_chitchat`：纯标点不命中关键词、也不命中域外名词+疑问形态 |
@@ -67,6 +67,7 @@
 | ODD-09 | `vector_search` 的 `AND dept = %s` + `splitter.DEPT_PROFILE="sales"` / `DEPT_WIKI="all"` |
 | ODD-10 | `prompts.SQL_SCHEMA`：快照日 2024-12-30，数据仅覆盖 2024 全年 |
 | ODD-11 | `router.is_chitchat` 不拦（无寒暄关键词）→ 真走多路聚合 → 检索无命中 |
+| ODD-01b | `route("")` 返回 rag → 空 query 走完整链路 → 候选为空 → `generator` 的 `not candidates` 短路 |
 
 ### 2.3 与主集的关系
 
@@ -121,7 +122,12 @@
 **豁免清单**（这些题考的就是依赖本身，低分属设计使然，不得建议删改）：
 `ODD-01`（无效输入）、`ODD-03`（无上下文指代）、`ODD-07`（引用"以上指令"）、
 `ODD-11`（问系统自身）、`ODD-06` / `ODD-09`（显式引用内部字段名）、
-`CPLX-02` / `CPLX-04`（依赖内部标签口径）。
+`CPLX-02` / `CPLX-04` / `CPLX-05` / `CPLX-06`（依赖内部标签口径与快照字段）、
+`CPLX-09`（依赖内部标签库资产）。
+
+> 2026-10-15 补充：`CPLX-05`/`06`/`09` 是首轮评审后发现漏列的——它们与
+> `CPLX-02`/`04` 同属"依赖内部口径"，却因题面看起来通用而被漏掉。
+> **判据是"是否依赖内部口径/资产才能理解题意"，不是"题面是否出现内部名词"。**
 
 ### D5 覆盖面增量（1-5）
 
@@ -163,8 +169,9 @@ A. expected_outcome 为 partial 或 refuse 时，可答性低是设计意图，�
 B. severity=高 的含义是「会静默给出错误答案」，不是「答不出来」。
    系统拒答不算失败。
 C. 禁止以「系统答不出」为由提议删题。
-D. D4 自足性有豁免清单：ODD-01/03/07/11、ODD-06/09、CPLX-02/04
-   考的就是依赖本身，低分属设计使然。
+D. D4 自足性有豁免清单：ODD-01/03/07/11、ODD-06/09、CPLX-02/04/05/06/09
+   考的就是依赖本身，低分属设计使然。判据是「是否依赖内部口径/资产才能理解题意」，
+   不是「题面是否出现内部名词」——CPLX-05/06/09 就是漏在这点上。
 
 【被评题目】
 {单题 JSON}
@@ -207,10 +214,10 @@ D. D4 自足性有豁免清单：ODD-01/03/07/11、ODD-06/09、CPLX-02/04
 
 ---
 
-## 六、整套一致性检查提示词（20 条全评完后跑一次）
+## 六、整套一致性检查提示词（全部评完后跑一次）
 
 ```text
-下面是一套边界探针集（20 条）的逐题评审结果 JSON 数组。
+下面是一套边界探针集（当前 21 条）的逐题评审结果 JSON 数组。
 请做交叉一致性检查，只报告问题，不要重新打分：
 
 1. 维度间自相矛盾：例如 D1=5（探针精准）却建议删除，或 D2=1（失败不可观测）
@@ -231,6 +238,15 @@ D. D4 自足性有豁免清单：ODD-01/03/07/11、ODD-06/09、CPLX-02/04
 
 - 单题结果收成 JSON 数组，文件名建议 `boundary_review_<日期>.json`，放 `tests/` 下。
 - 汇总表建议列：`题目ID, D1, D2, D3, D4, D5, 可答性(记录), 隐藏缺陷, 建议, 修订后题面`。
+- **低可观测性题目（D2≤3）必须附内部字段核查步骤**，否则只看答案文本会漏判。
+  2026-10-15 首轮实测有三题落在这一档，核查项固定如下：
+
+  | 题 ID | 除答案文本外还必须看什么 |
+  |---|---|
+  | CPLX-03 | 生成的 `sql` 是否含 `GROUP BY city`（不含即已偷换成全体均值） |
+  | CPLX-07 | `sources` 里实际进了几篇 `.md`、缺哪几篇；`trace.variants` 的检索路数 |
+  | ODD-08 | `wiki_vectors` 表是否仍存在且行数不变；`sql_error` 是否非空 |
+
 - **不要再用上一轮那种「可答性 / HF 有用性 / 独立性」三维 CSV**——那套口径对本题集无效。
 - 评审结论只有两种落地方式：改 `eval_boundary_questions.json`，或改被测系统。
   纯粹的"分数"不留档。
