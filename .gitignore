@@ -11,3 +11,6 @@ wheels/
 
 # 运行期日志（按天轮转，不入库）
 logs/
+
+# 微调后的模型权重（约 390MB，train.py 一分钟内可重训复现，不入库）
+src/rag_demo/bert_query_classify/models/
