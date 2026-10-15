@@ -1,3 +1,14 @@
+"""
+评测执行入口（评测集可切换）
+
+两个评测集并存，结果文件必须分开，否则后跑的会覆盖先跑的：
+
+    eval_questions.json          → eval_results.json           主集（33 题）
+    eval_boundary_questions.json → eval_results_boundary.json  边界能力集
+
+结果文件名由评测集名推导（`--out` 可覆盖），归档快照也会带上集合名，
+避免两个集的归档混在一起分不清哪份是哪份。
+"""
 import argparse
 import os
 import json
@@ -10,19 +21,59 @@ from rag_demo.config import BASE_DIR
 from rag_demo.pipeline import answer_question
 
 TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
-QUESTIONS_PATH = os.path.join(TESTS_DIR, "eval_questions.json")
-RESULTS_PATH = os.path.join(TESTS_DIR, "eval_results.json")
+DEFAULT_QUESTIONS = "eval_questions.json"
 
 # SQL 失败的典型措辞（旧归档无 rows_count 字段时的启发式依据）
 SQL_FAIL_HINTS = ("没有符合", "查询未能完成", "查询失败", "无法确定", "无法判断")
+
+
+def resolve_path(name: str) -> str:
+    """裸文件名按 tests/ 解析，绝对路径原样使用"""
+    return name if os.path.isabs(name) else os.path.join(TESTS_DIR, name)
+
+
+def set_stem(questions_path: str) -> str:
+    """
+    评测集标识，用于推导结果与归档文件名
+
+        eval_questions.json          -> ""          （保持原命名，不动既有归档）
+        eval_boundary_questions.json -> "boundary"
+    """
+    stem = os.path.splitext(os.path.basename(questions_path))[0]
+    if stem.startswith("eval_"):
+        stem = stem[len("eval_"):]
+    # 两个后缀都要试：eval_questions 剥掉 eval_ 后只剩 questions，
+    # 它不带前导下划线，只匹配 "_questions" 会漏掉，结果文件会变成
+    # eval_results_questions.json —— 那就没有保持原有命名了。
+    for suffix in ("_questions", "questions"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    return stem
+
+
+def derive_results_path(questions_path: str) -> str:
+    """按评测集名推导结果文件名（主集保持 eval_results.json 不变）"""
+    stem = set_stem(questions_path)
+    return os.path.join(TESTS_DIR, f"eval_results_{stem}.json" if stem else "eval_results.json")
 
 
 def parse_args() -> argparse.Namespace:
     """命令行参数"""
     parser = argparse.ArgumentParser(description="用户画像 RAG 评测")
     parser.add_argument(
+        "--questions", default=DEFAULT_QUESTIONS,
+        help=f"评测集文件（文件名或绝对路径），默认 {DEFAULT_QUESTIONS}",
+    )
+    parser.add_argument(
+        "--out", default="",
+        help="结果文件（文件名或绝对路径）。不传则按评测集名推导："
+             "eval_questions.json -> eval_results.json、"
+             "eval_boundary_questions.json -> eval_results_boundary.json",
+    )
+    parser.add_argument(
         "--tag", default="",
-        help="归档标签，如 gpu_v3；指定后额外输出 eval_results_<tag>_<日期>.json",
+        help="归档标签，如 gpu_v3；指定后额外输出 eval_results_[<集合名>_]<tag>_<日期>.json",
     )
     parser.add_argument(
         "--recalc", default="",
@@ -104,6 +155,9 @@ def run_one(item: dict, repeat: int = 1) -> dict:
         "sql": result.get("sql", ""),
         "rows_count": result.get("rows_count"),
         "error": result.get("error"),
+        # SQL 路的执行错误是单独一个字段（pipeline 写入 result["sql_error"]），
+        # 不接出来的话，「SQL 报错」和「根本没走 SQL」在结果里长得一模一样。
+        "sql_error": result.get("sql_error"),
         "answer": result.get("answer", ""),
         "sources_count": len(result.get("sources", [])),
         # 向后兼容：仍是单值，但取中位数而非「最后那一次」
@@ -249,14 +303,22 @@ def main() -> None:
         recalc(args.recalc)
         return
 
-    with open(QUESTIONS_PATH, "r", encoding="utf-8") as f:
+    questions_path = resolve_path(args.questions)
+    if not os.path.isfile(questions_path):
+        raise SystemExit(f"[中止] 评测集不存在: {questions_path}")
+
+    results_path = resolve_path(args.out) if args.out else derive_results_path(questions_path)
+    stem = set_stem(questions_path)
+
+    with open(questions_path, "r", encoding="utf-8") as f:
         questions = json.load(f)
 
     # TODO(perf): [P6] 逐题串行执行，20 题约 8 分钟。并发会撞 GPU（见 P3），
     #             若要并发建议限流为 2 并先解决 P3。详见 bug/性能隐患台账.md
     rounds = max(1, args.repeat)
     suffix = f"，每题跑 {rounds} 轮（取中位数）" if rounds > 1 else ""
-    print(f"共 {len(questions)} 条评测问题{suffix}\n")
+    print(f"评测集: {os.path.basename(questions_path)} | 共 {len(questions)} 条评测问题{suffix}")
+    print(f"结果文件: {os.path.basename(results_path)}\n")
 
     # 预热：首次调用要把 bge-m3 与 reranker 加载进显存（十几秒），
     # 不预热的话这笔一次性开销会算在第一道题的第一轮上，把统计带偏。
@@ -289,24 +351,27 @@ def main() -> None:
             print(f"  [FAIL] {e}")
             results.append({**item, "error": str(e)})
 
-    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+    with open(results_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    # 带 tag 时额外输出归档快照，便于对比不同配置
+    # 带 tag 时额外输出归档快照，便于对比不同配置。
+    # 归档名带集合标识：两个评测集都打 v20 这种标签时，不会互相覆盖。
     archive_path = ""
     if args.tag:
+        prefix = f"eval_results_{stem}_" if stem else "eval_results_"
         archive_path = os.path.join(
-            TESTS_DIR, f"eval_results_{args.tag}_{date.today().isoformat()}.json"
+            TESTS_DIR, f"{prefix}{args.tag}_{date.today().isoformat()}.json"
         )
         with open(archive_path, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
 
     summarize(results)
 
-    print(f"\n结果已保存: {RESULTS_PATH}")
+    print(f"\n结果已保存: {results_path}")
     if archive_path:
         print(f"归档快照: {archive_path}")
     print("\n下一步：给每条填 manual_score（0/1），负样本与语义正确性需人工判断")
+    print(f"    uv run python src/rag_demo/tests/gen_review.py {os.path.basename(results_path)}")
 
 
 if __name__ == "__main__":
