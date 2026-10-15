@@ -38,7 +38,7 @@ from rag_demo.config import (
 )
 from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import MULTI_QUERY_PROMPT
-from rag_demo.retrieval.hybrid_retriever import hybrid_search
+from rag_demo.retrieval.hybrid_retriever import get_model, hybrid_search
 from rag_demo.retrieval.reranker import get_reranker, rerank, rerank_by_source
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG
 
@@ -392,9 +392,19 @@ def search_variants(
     if not variants:
         return []
 
-    # 预热精排模型：确保在进入线程池之前已加载完，
-    # 否则并发首次调用可能触发重复加载（get_reranker 无锁）
+    # 预热两个模型：确保在进入线程池之前都已加载完。
+    # get_reranker / get_model 都是「无锁的懒加载」——线程池里第一次多路检索会
+    # 让多个线程同时看到 `_model is None`，于是各自构造一个 SentenceTransformer。
+    #
+    # 这里的代价**不是慢一点，而是报错**：某个线程会拿到正在转 fp16 的模型，
+    # 抛 "expected scalar type Half but found Float"，该路被当作「检索失败」静默跳过。
+    # 表现是「明明规划了 3 路，trace 里只有 2 路」（2026-10-15 实测撞到 3 次，
+    # 全部发生在进程冷启动后的第一个多路问题上）。
+    #
+    # 生产不受影响（api/main.py 的 lifespan 启动时已 get_model()），
+    # 但评测脚本、tools 下的脚本都没有这个保护。
     get_reranker()
+    get_model()
 
     # ① 各路并行检索
     per_variant_hits: dict[tuple[str, str], list[dict]] = {}
