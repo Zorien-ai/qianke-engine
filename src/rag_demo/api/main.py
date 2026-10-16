@@ -47,6 +47,7 @@ from rag_demo.config import (
     TOP_K_PROFILE_MIN,
 )
 from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.db.schema import index_freshness
 from rag_demo.generation.generator import (
     EVENT_ANSWER,
     EVENT_REASONING,
@@ -146,6 +147,24 @@ async def lifespan(app: FastAPI):
     # 离线脚本（bench / smoke / 评测）的记录不能被当成线上分布。
     intent_telemetry.set_source("api")
     logger.info("意图路由埋点已启用：%s", intent_telemetry.stats())
+
+    # 索引新鲜度检查：**只告警、不阻断启动**。
+    # 过期不该让服务起不来（那是把「数据没更新」升级成「服务不可用」），
+    # 但必须留下痕迹——这套失效没有任何自动机制，静默用旧索引是最难查的一类问题。
+    # 与上面 bert_intent 的处置原则一致：降级可用 + 日志可查。
+    try:
+        fresh = index_freshness()
+        if fresh["status"] == "fresh":
+            logger.info("检索索引新鲜度: fresh（%s）", fresh["reason"])
+        else:
+            logger.warning(
+                "检索索引新鲜度: %s（%s）—— 重建命令：\n"
+                "    uv run python src/rag_demo/tools/build_search_index.py",
+                fresh["status"], fresh["reason"],
+            )
+    except Exception as e:  # noqa: BLE001  检查失败不影响启动
+        logger.warning("索引新鲜度检查跳过: %s: %s", type(e).__name__, e)
+
     logger.info("预加载完成")
 
     # 稀疏索引放后台预热：不拖慢启动，但让首个 sparse 请求即热态
@@ -371,6 +390,24 @@ def stats(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
         "profiles_columns": columns,
         "diamond_ratio": f"{levels.get('钻石', 0) / total * 100:.1f}%",
     }
+
+
+@app.get("/admin/index-status")
+def index_status(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
+    """
+    检索索引新鲜度：索引是否已经落后于源表
+
+    为什么不做进 /health：
+        /health 是**不鉴权**的存活探针，要求快、且不依赖数据库；
+        而本检查要扫三张表做 md5 聚合、还会暴露画像与文档规模，
+        所以放在需要 CAP_STATS 的管理端点上（与 /stats 同级）。
+
+    为什么需要它：索引与源表之间没有自动失效机制，画像重导后不重建索引
+    会**静默**用旧索引检索（详见 data/new-dianshuang/README.md 6.4）。
+    status: fresh（一致）/ stale（源表变了）/ unknown（无基线指纹）
+    """
+    _require(_role(x_role), permissions.CAP_STATS)
+    return index_freshness()
 
 
 def _sse(event: str, data: dict) -> str:

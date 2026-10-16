@@ -3,7 +3,7 @@
 """
 @Author  : Vincent
 @File    : schema.py
-@Function: 检索索引表 search_index 的建表与状态查询
+@Function: 检索索引表 search_index 的建表、状态查询与新鲜度判定
 
 为什么单独建表，而不是往 user_profile_vectors / wiki_vectors 加列：
   bm25_tokens 与 sparse_weights 都是**派生数据**，随时可由源表重建。
@@ -12,8 +12,12 @@
 
 稀疏权重用 pgvector 原生 sparsevec 类型（而非 JSONB），
 这样稀疏检索能直接在库内完成，不必把 8146 条权重拉进内存。
+
+附：search_index_meta 表记录**构建时的语料指纹**，用来回答
+「索引是不是已经落后于源表了」。理由见本文末「语料指纹」一节。
 """
 import logging
+from datetime import datetime
 
 from rag_demo.config import SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
 from rag_demo.db.connection import get_conn
@@ -35,6 +39,16 @@ CREATE_INDEX_SQL = [
     f"CREATE INDEX IF NOT EXISTS idx_{SEARCH_INDEX_TABLE}_source "
     f"ON {SEARCH_INDEX_TABLE} (source)",
 ]
+
+# 索引构建时的语料指纹（键值对，行数很少，不需要额外类型设计）
+META_TABLE = f"{SEARCH_INDEX_TABLE}_meta"
+
+CREATE_META_SQL = f"""
+CREATE TABLE IF NOT EXISTS {META_TABLE} (
+    key   VARCHAR(32) PRIMARY KEY,
+    value TEXT        NOT NULL
+)
+"""
 
 # 运行期是否用 HNSW 近邻索引加速稀疏检索。
 # 当前语料 8146 条，精确全表扫描已足够快；HNSW 是近似算法，
@@ -58,6 +72,7 @@ def ensure_schema() -> None:
     cur = conn.cursor()
     try:
         cur.execute(CREATE_TABLE_SQL)
+        cur.execute(CREATE_META_SQL)
         for sql in CREATE_INDEX_SQL:
             cur.execute(sql)
         if ENABLE_SPARSE_HNSW:
@@ -106,4 +121,167 @@ def index_stats() -> dict:
         "updated_to": updated_to,
         "missing_sparse": missing_sparse,
         "missing_bm25": missing_bm25,
+    }
+
+
+# ==================== 语料指纹：判定「索引是否落后于源表」 ====================
+#
+# 背景：索引与源表之间**没有自动失效机制**，一致性由「显式重建」保证。
+# 画像重导后忘了跑 build_search_index.py，检索会静默使用旧索引——不报错，
+# 表现是「数据明明更新了，回答还是旧的」（见 data/new-dianshuang/README.md 6.4）。
+#
+# 为什么不能只比条数：重导画像后**条数不变**（还是 8110 条），但文本已经变了，
+# 条数比对完全看不见这种情况。所以对「内容」做摘要：把每行的
+# (主键, md5(文本)) 排序后拼接、再取一次 md5——对顺序不敏感、对内容敏感。
+#
+# 为什么在 SQL 里算：8110 条画像文本不必拉进 Python；库内 md5 聚合在毫秒级。
+
+_PROFILE_FP_SQL = """
+    SELECT COUNT(*)::text,
+           COALESCE(md5(string_agg(user_id || ':' || md5(profile_text), '|'
+                                   ORDER BY user_id)), '')
+    FROM user_profile_vectors
+"""
+
+_WIKI_FP_SQL = """
+    SELECT COUNT(*)::text,
+           COALESCE(md5(string_agg(id::text || ':' || md5(doc_name || '|' || chunk_text), '|'
+                                   ORDER BY id)), '')
+    FROM wiki_vectors
+"""
+
+# status 取值
+FRESH = "fresh"      # 索引与源表一致
+STALE = "stale"      # 源表变了、索引没重建
+UNKNOWN = "unknown"  # 没有基线指纹（旧索引 / 从未构建）
+
+
+def current_fingerprint() -> dict:
+    """
+    源表**当前**的语料指纹
+
+    与构建索引时写入的指纹用同一套算法；两者不一致 = 索引已过期。
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(_PROFILE_FP_SQL)
+        p_count, p_hash = cur.fetchone()
+        cur.execute(_WIKI_FP_SQL)
+        w_count, w_hash = cur.fetchone()
+    finally:
+        conn.rollback()
+        cur.close()
+
+    return {
+        "profile_count": int(p_count),
+        "wiki_count": int(w_count),
+        "profile_hash": p_hash,
+        "wiki_hash": w_hash,
+    }
+
+
+def write_fingerprint(cur, fingerprint: dict) -> None:
+    """
+    把指纹写进 meta 表（**复用调用方的 cursor 与事务**）
+
+    必须与索引行同一个事务提交：否则可能留下「行写进去了、指纹没写」的中间态，
+    下次检查会误报 unknown，反而把真正的问题盖住。
+    """
+    rows = [("built_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))]
+    rows += [
+        (k, str(fingerprint[k]))
+        for k in ("profile_count", "wiki_count", "profile_hash", "wiki_hash")
+    ]
+    for key, value in rows:
+        cur.execute(
+            f"INSERT INTO {META_TABLE} (key, value) VALUES (%s, %s) "
+            f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (key, value),
+        )
+
+
+def read_fingerprint() -> dict | None:
+    """
+    读回构建时记录的指纹
+
+    meta 表不存在（老库第一次检查）或没有 profile_hash 时返回 None——
+    「没有基线」必须与「基线不匹配」区分开，否则老库一上线就报 stale。
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT to_regclass(%s)", (META_TABLE,))
+        if cur.fetchone()[0] is None:
+            return None
+        cur.execute(f"SELECT key, value FROM {META_TABLE}")
+        raw = dict(cur.fetchall())
+    finally:
+        conn.rollback()
+        cur.close()
+
+    if not raw.get("profile_hash"):
+        return None
+
+    out: dict = {"built_at": raw.get("built_at")}
+    for k in ("profile_count", "wiki_count"):
+        try:
+            out[k] = int(raw[k])
+        except (KeyError, TypeError, ValueError):
+            out[k] = None
+    for k in ("profile_hash", "wiki_hash"):
+        out[k] = raw.get(k)
+    return out
+
+
+def classify_freshness(stored: dict | None, current: dict) -> tuple[str, str]:
+    """
+    比对「构建时指纹」与「源表当前指纹」——**纯函数，不碰数据库**
+
+    返回 (status, reason)，status ∈ {fresh, stale, unknown}。
+
+    单独抽出来的原因：这段判断是本次改动的全部业务逻辑，抽成纯函数才**不需要
+    PostgreSQL** 就能验证（本机 PG / Docker 未启动，DB 路径无法端到端跑）。
+    """
+    if not stored or not stored.get("profile_hash"):
+        return UNKNOWN, (
+            "索引未记录语料指纹（旧索引或从未构建过），无法判定新鲜度；"
+            "跑一次 build_search_index.py 即可建立基线"
+        )
+
+    diffs: list[str] = []
+    if stored.get("profile_count") != current["profile_count"]:
+        diffs.append(
+            f"画像条数 {stored.get('profile_count')} -> {current['profile_count']}"
+        )
+    if stored.get("wiki_count") != current["wiki_count"]:
+        diffs.append(
+            f"文档分块数 {stored.get('wiki_count')} -> {current['wiki_count']}"
+        )
+    # 下面两条才是关键：条数没变、内容变了（重导画像的典型情况）
+    if stored.get("profile_hash") != current["profile_hash"]:
+        diffs.append("画像文本内容已变（条数可能未变）")
+    if stored.get("wiki_hash") != current["wiki_hash"]:
+        diffs.append("文档分块内容已变")
+
+    if not diffs:
+        return FRESH, "索引与源表一致"
+    return STALE, "索引已过期：" + "；".join(diffs)
+
+
+def index_freshness() -> dict:
+    """
+    索引新鲜度总入口：stored / current / status / reason
+
+    调用方据此决定「告警」「拒绝服务」还是「展示」——本函数只做判定，不做处置。
+    """
+    stored = read_fingerprint()
+    current = current_fingerprint()
+    status, reason = classify_freshness(stored, current)
+    return {
+        "status": status,
+        "reason": reason,
+        "stored": stored,
+        "current": current,
+        "meta_table": META_TABLE,
     }

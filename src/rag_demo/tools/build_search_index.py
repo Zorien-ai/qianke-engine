@@ -27,7 +27,13 @@ from psycopg2.extras import execute_values
 
 from rag_demo.config import BASE_DIR, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
 from rag_demo.db.connection import close_conn, get_conn
-from rag_demo.db.schema import ensure_schema
+from rag_demo.db.schema import (
+    FRESH,
+    current_fingerprint,
+    ensure_schema,
+    index_freshness,
+    write_fingerprint,
+)
 from rag_demo.retrieval.hybrid_retriever import _tokenize
 from rag_demo.retrieval.sparse_retriever import encode_sparse, weights_to_sparsevec
 
@@ -92,6 +98,10 @@ def main() -> None:
         for c, tokens, weights in zip(corpus, tokenized, weights_list)
     ]
 
+    # 本次构建对应的语料指纹：落库后据此判断「索引是否落后于源表」。
+    # 在开写事务之前取，避免在事务里再开一条连接读源表。
+    fingerprint = current_fingerprint()
+
     conn = get_conn()
     cur = conn.cursor()
 
@@ -106,6 +116,9 @@ def main() -> None:
             rows[i:i + BATCH],
             template="(%s, %s, %s, %s, %s::sparsevec)",
         )
+    # 指纹与索引行**同一事务**提交：写指纹失败就整体回滚，
+    # 不留「行在、指纹没写」的中间态（那会让下次检查误报 unknown）
+    write_fingerprint(cur, fingerprint)
     conn.commit()
     dt_db = time.time() - t
     logger.info("写入完成: %.2fs（%d 行）", dt_db, len(rows))
@@ -130,6 +143,12 @@ def main() -> None:
     lines.append(f"sparse_weights 缺失: {missing_sparse}")
     lines.append(f"bm25_tokens 缺失: {missing_bm25}")
     lines.append(f"bm25_tokens 为空数组: {empty_tokens}")
+
+    # ---------- 4.5 新鲜度自检：刚写入的指纹应立刻与源表一致 ----------
+    # 不一致说明构建期间源表被改了（并发重导），本次索引可能已经落后
+    fresh = index_freshness()
+    lines.append(f"索引新鲜度: {fresh['status']}（{fresh['reason']}）")
+    logger.info("索引新鲜度: %s（%s）", fresh["status"], fresh["reason"])
 
     # ---------- 5. 稀疏检索自测（确认库内算子可用） ----------
     probe = corpus[0]["text"][:20]
@@ -158,6 +177,12 @@ def main() -> None:
     print(f"written: {OUT}")
     for line in lines:
         print(line)
+
+    # 自检没过就返回非零：本脚本是**显式**执行的，失败要让调用方（CI / 人）
+    # 立刻知道，而不是只在日志里留一行
+    if fresh["status"] != FRESH:
+        logger.error("索引自检未通过：%s", fresh["reason"])
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
