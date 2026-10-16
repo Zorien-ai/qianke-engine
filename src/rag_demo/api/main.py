@@ -46,7 +46,7 @@ from rag_demo.config import (
     TOP_K_PROFILE_MAX,
     TOP_K_PROFILE_MIN,
 )
-from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.db.connection import close_conn, current_dataset, get_conn
 from rag_demo.db.schema import index_freshness
 from rag_demo.generation.generator import (
     EVENT_ANSWER,
@@ -456,7 +456,7 @@ def qa_stream(req: QueryRequest, x_role: str | None = Header(default=None, alias
             # 缓存里**不存思维链**——它只是展示物、不进答案，存下来让缓存翻倍不划算；
             # 代价是命中缓存时前端拿不到思维链（此时下面也不会发 reasoning 事件）。
             key = answer_cache.make_key(req.question, dept, req.retriever, limit,
-                                        req.deep_thinking)
+                                        req.deep_thinking, dataset=current_dataset())
             hit = answer_cache.get(key)
             if hit is not None:
                 yield meta({

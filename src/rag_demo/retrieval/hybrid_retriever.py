@@ -23,7 +23,7 @@ from rag_demo.config import (
     TOP_K_RRF,
     TOP_K_VECTOR,
 )
-from rag_demo.db.connection import get_conn
+from rag_demo.db.connection import current_dataset, get_conn
 
 # 稀疏检索依赖 FlagEmbedding；未安装时降级为仅 BM25，不影响主流程
 try:
@@ -55,8 +55,15 @@ SYNONYMS = {"女性": "女", "男性": "男", "女士": "女", "男士": "男", 
 
 # 模型与内存索引进程级常驻；数据库连接统一由 rag_demo.db.connection 管理
 _model = None
-_bm25 = None
-_bm25_corpus = []
+
+# BM25 内存索引**按数据集各存一份**（键 = 数据集名，见 config.DATASETS）。
+#
+# 改造前这里是单个全局变量。分库之后继续共用会出新问题：用户构建完调用
+# reload_bm25() 会用**用户库**的语料把 demo 的内存索引顶掉，而 demo 的向量检索
+# 仍在查 demo 库——于是「两者组合」变成一半数据来自 demo、一半来自用户数据，
+# 且**不报任何错**。这类"静默串数据"正是分库要防的东西，所以内存态必须跟着分。
+_bm25: dict[str, "BM25Okapi"] = {}
+_bm25_corpus: dict[str, list[dict]] = {}
 
 
 # TODO(perf): [P3] 模型单例常驻不释放——两个模型约占 6GB 显存的 73%，
@@ -90,7 +97,7 @@ def _tokenize(text):
 # TODO(perf): [P5] 全量语料 + 分词结果常驻内存。当前规模（8146 条）无感知，
 #             属预防性记录；语料涨到十万级时需考虑分片或持久化倒排。
 #             详见 bug/性能隐患台账.md
-def _load_bm25_corpus(force=False):
+def _load_bm25_corpus(force=False, dataset: str | None = None):
     """
     从 search_index 表加载语料与分词结果，构建 BM25 索引
 
@@ -99,12 +106,14 @@ def _load_bm25_corpus(force=False):
 
     与旧实现的差别仅在数据来源：以前是「查源表 + 现场分词」，
     现在是「查索引表，分词结果现成」。语料口径完全一致。
+
+    dataset 不传 = 当前 contextvar 里的数据集；缓存也按它分开存。
     """
-    global _bm25, _bm25_corpus
-    if _bm25 is not None and not force:
+    name = dataset or current_dataset()
+    if name in _bm25 and not force:
         return
 
-    conn = get_conn()
+    conn = get_conn(name)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -118,28 +127,34 @@ def _load_bm25_corpus(force=False):
 
     if not rows:
         raise RuntimeError(
-            f"检索索引表 {SEARCH_INDEX_TABLE} 为空，请先运行 "
+            f"数据集 {name} 的检索索引表 {SEARCH_INDEX_TABLE} 为空，请先运行 "
             f"python src/rag_demo/tools/build_search_index.py 构建索引"
         )
 
-    _bm25_corpus = [
+    _bm25_corpus[name] = [
         {"id": corpus_id, "text": text, "source": source}
         for corpus_id, source, text, _ in rows
     ]
     tokenized = [list(tokens) for _, _, _, tokens in rows]
-    _bm25 = BM25Okapi(tokenized)
+    _bm25[name] = BM25Okapi(tokenized)
 
     # 分词结果既然来自库，本函数就不再调用 jieba——但查询侧的 bm25_search 仍要用，
     # 而 jieba 首次调用要加载词典（实测约 1.2s）。这里主动触发一次，
     # 免得这 1.2s 落到第一个用户请求上（改成库内索引后新引入的坑）。
     _tokenize("预热")
 
-    logger.info("BM25 索引加载完成: %d 条（来自 %s 表）", len(_bm25_corpus), SEARCH_INDEX_TABLE)
+    logger.info("BM25 索引加载完成: %d 条（来自 %s 表，数据集 %s）",
+                len(_bm25_corpus[name]), SEARCH_INDEX_TABLE, name)
 
 
-def reload_bm25():
-    """强制重建 BM25 内存索引（数据更新后调用）"""
-    _load_bm25_corpus(force=True)
+def reload_bm25(dataset: str | None = None):
+    """
+    强制重建 BM25 内存索引（数据更新后调用）
+
+    dataset 不传 = 当前数据集。**只影响这一个数据集的缓存**，
+    动 demo 不会碰到 user 的内存索引（反之亦然）。
+    """
+    _load_bm25_corpus(force=True, dataset=dataset)
 
 
 def vector_search(query, top_k=TOP_K_VECTOR, dept=None, sensitivity_max=3):
@@ -202,16 +217,18 @@ def vector_search(query, top_k=TOP_K_VECTOR, dept=None, sensitivity_max=3):
 
 
 def bm25_search(query, top_k=TOP_K_BM25):
-    """BM25 关键词召回"""
+    """BM25 关键词召回（走当前数据集的内存索引）"""
+    name = current_dataset()
     _load_bm25_corpus()
+    corpus = _bm25_corpus[name]
     tokenized_query = _tokenize(query)
-    scores = _bm25.get_scores(tokenized_query)
+    scores = _bm25[name].get_scores(tokenized_query)
     top_idx = np.argsort(scores)[::-1][:top_k]
     return [
         {
-            "id": _bm25_corpus[i]["id"],
-            "text": _bm25_corpus[i]["text"],
-            "source": _bm25_corpus[i]["source"],
+            "id": corpus[i]["id"],
+            "text": corpus[i]["text"],
+            "source": corpus[i]["source"],
             "score": float(scores[i]),
         }
         for i in top_idx if scores[i] > 0

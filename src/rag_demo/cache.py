@@ -12,14 +12,19 @@
 
 键的设计
 --------
-缓存键包含 question + dept + 检索模式。**必须带检索模式**，否则切换
+缓存键包含 数据集 + question + dept + 检索模式。**必须带检索模式**，否则切换
 BM25 / 稀疏向量后会拿到另一套策略的结果，看起来像「策略没生效」。
+
+**必须带数据集**（M2 起 demo 与 user 分库）：同一个问题在两个库里答案完全不同，
+不进键就会「用户刚构建完自己的数据，提问却秒回 demo 的旧答案」。
 
 失效策略
 --------
 - TTL：默认 1 小时。库里画像和文档会随 ingest 更新，缓存不宜永久有效。
 - 容量：LRU 上限 256 条，超出淘汰最久未用的。
-- 手动：`clear()` 供数据更新后清空。
+- 手动：`clear()` 供数据更新后清空。它是**整体清空**而不是按数据集清——
+  键里虽然带了数据集，但存的是哈希、事后无法按数据集筛。构建完成后整体清空
+  的代价只是让 demo 的缓存也重算一遍，不值得为它把哈希改成带前缀的复合键。
 """
 import hashlib
 import threading
@@ -43,11 +48,17 @@ class AnswerCache:
 
     @staticmethod
     def make_key(question: str, dept: str | None = None, keyword_mode: str | None = None,
-                 profile_limit: int | None = None, deep_thinking: bool | None = None) -> str:
+                 profile_limit: int | None = None, deep_thinking: bool | None = None,
+                 *, dataset: str) -> str:
         """
         生成缓存键
 
         显式拼接各维度再哈希，避免不同参数组合互相覆盖。
+
+        **`dataset` 是必填的关键字参数**，这是有意的：分库之后，同一个问题
+        在 demo 库和 user 库的答案完全不同，不进键就会出现「用户刚构建完自己的数据，
+        提问却秒回 demo 的旧答案」。做成必填而不是给默认值，是为了让它不可能被
+        悄悄漏掉——漏了就是 TypeError，而不是安静地返回错答案。
 
         **不含角色**：缓存里存的是完整结果，裁剪发生在响应序列化那一刻
         （permissions.render）。若把角色拼进来，同一个人问题会按角色重复算一遍，
@@ -61,7 +72,7 @@ class AnswerCache:
 
         None 与 False 归一到同一个键（都表示不思考），避免两种写法各占一份缓存。
         """
-        raw = (f"{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
+        raw = (f"{dataset}|{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
                f"|{profile_limit if profile_limit else '-'}"
                f"|{1 if deep_thinking else 0}")
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()

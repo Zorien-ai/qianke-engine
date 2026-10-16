@@ -19,13 +19,41 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "bge-m3")
 RERANKER_PATH = os.path.join(BASE_DIR, "models", "bge-reranker-v2-m3")
 
 # ---------- 数据库 ----------
-DB_CONFIG = {
+_DB_BASE = {
     "host": "localhost",
     "port": 5432,
     "user": "postgres",
     "password": "123456",
-    "dbname": "vec_db",
 }
+
+# demo：仓库自带的示例数据。它**同时是评测基线**（33 题、F1 等都跑在这份上），
+#       所以任何时候都不能被用户上传的数据覆盖——覆盖了评测记录无法复现，
+#       Demo 演示也失去底座。
+DB_CONFIG = {**_DB_BASE, "dbname": "vec_db"}
+
+# user：M2 起用户自己上传并构建的数据。可以随便覆盖、随便清空，与 demo 互不影响。
+USER_DB_CONFIG = {**_DB_BASE, "dbname": "vec_db_user"}
+
+# 数据集注册表：**这是「数据分开存」这件事的唯一真源**。
+#
+# 为什么按「数据库」分，而不是按表前缀 / 独立 schema 分：
+#   分表名或分 schema 都要逐个记得改表名，而 search_index 这种派生表最容易漏——
+#   一旦漏了，构建会用 TRUNCATE 把 demo 的 BM25 索引清掉，而向量检索路径还好着，
+#   表现是「demo 的 BM25 半瘫」，属于最难看懂的一类故障。
+#   分库则「分」这个动作只发生在连接层一处，所有表（含派生表）自动跟着走。
+#
+# 另一个好处是失败模式：忘切库会**连不上/找不到表并明确报错**；
+#   而忘 SET search_path 或漏改表名，只会安静地打到 demo 表上，查出错数据还不报错。
+#   宁可明确失败，不要静默用错数据。
+DATASETS = {
+    "demo": DB_CONFIG,
+    "user": USER_DB_CONFIG,
+}
+
+# 默认数据集：**保持 demo**。pipeline / hybrid_retriever / sql_tool 里几十处
+# get_conn() 都不传参数，因此它们的默认行为与改造前完全一致——评测脚本不用改，
+# 这正是保住既有评测基线的前提。向导的路由会显式切到 user。
+DEFAULT_DATASET = "demo"
 
 # ---------- 检索参数 ----------
 TOP_K_VECTOR = 20   # 向量单路召回数量
@@ -76,6 +104,11 @@ KEYWORD_RETRIEVER = "bm25"
 #   3. 多实例共享同一份索引，一致性由数据库保证（不再依赖内容指纹）
 SEARCH_INDEX_TABLE = "search_index"
 SPARSE_VEC_DIM = 250002   # BGE-M3 词表大小，即 sparsevec 的维度上限
+
+# 稠密向量的维度：bge-m3 输出 1024 维，建表时用来声明 embedding vector(1024)。
+# 单独提出来是因为它同时出现在建表 DDL 和检索 SQL 的 %s::vector 转换里，
+# 散着写迟早对不上。
+EMBED_DIM = 1024
 
 # 五路 query 检索（直接/分解/简化/关键词/HyDE）
 # 开启后每次问答多一次 LLM 调用（4 个变体一起生成）与 4 次额外检索，RQ 更稳但更慢。

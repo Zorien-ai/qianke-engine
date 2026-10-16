@@ -3,9 +3,18 @@
 """
 @Author  : Vincent
 @File    : schema.py
-@Function: 检索索引表 search_index 的建表、状态查询与新鲜度判定
+@Function: 建表（两张源数据表 + 检索索引表）与索引新鲜度判定
 
-为什么单独建表，而不是往 user_profile_vectors / wiki_vectors 加列：
+本文档管两类表：
+  1. **源数据表** user_profile_vectors / wiki_vectors —— 由 ensure_base_tables 建。
+     改造前它们的建表 DDL **不在仓库里**（ingest 只做 ALTER ADD COLUMN + TRUNCATE，
+     默认表已存在），于是「全新环境」根本跑不起来。M2 要建新库，顺手把 DDL 补上：
+     结构是按活库反推的（列类型、长度、默认值、HNSW 索引都逐一对齐）。
+     注意结构化字段的 btree 索引不在这里，在 ingest_data.INDEX_SQL —— 因为
+     那些列是 ingest 用 ALTER 加的，索引跟着列走，避免同一份定义散在两个文件里。
+  2. **检索索引表** search_index / search_index_meta —— 由 ensure_schema 建。
+
+为什么单独建 search_index，而不是往源表加列：
   bm25_tokens 与 sparse_weights 都是**派生数据**，随时可由源表重建。
   独立存放的好处是——不会被 ingest 脚本的 TRUNCATE 连带清掉，
   且可单独重建、单独监控，源表保持"业务数据"的纯粹语义。
@@ -19,10 +28,98 @@
 import logging
 from datetime import datetime
 
-from rag_demo.config import SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
+from rag_demo.config import EMBED_DIM, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
 from rag_demo.db.connection import get_conn
 
 logger = logging.getLogger(__name__)
+
+# ================= 源数据表（user_profile_vectors / wiki_vectors） =================
+# 结构按活库反推，逐列对齐（含默认值与长度限制）；建表语句幂等，
+# 已有表的环境执行它是 no-op，所以可以放心在 ingest 前无条件调用。
+
+USER_PROFILE_DDL = f"""
+CREATE TABLE IF NOT EXISTS user_profile_vectors (
+    id                   SERIAL PRIMARY KEY,
+    user_id              VARCHAR(50)  NOT NULL,
+    profile_text         TEXT         NOT NULL,
+    embedding            vector({EMBED_DIM}),
+    dept                 VARCHAR(50),
+    sensitivity          INT          DEFAULT 1,
+    update_time          TIMESTAMP    DEFAULT NOW(),
+    metadata             JSONB,
+    age                  INT,
+    gender               VARCHAR(4),
+    city                 VARCHAR(50),
+    member_level         VARCHAR(20),
+    order_count          INT,
+    total_amount         NUMERIC,
+    avg_amount           NUMERIC,
+    top_category         VARCHAR(50),
+    days_since_last_buy  INT,
+    platforms            VARCHAR(200)
+)
+"""
+
+WIKI_DDL = f"""
+CREATE TABLE IF NOT EXISTS wiki_vectors (
+    id           SERIAL PRIMARY KEY,
+    doc_name     VARCHAR(100),
+    chunk_text   TEXT      NOT NULL,
+    embedding    vector({EMBED_DIM}),
+    dept         VARCHAR(50),
+    sensitivity  INT       DEFAULT 1,
+    update_time  TIMESTAMP DEFAULT NOW(),
+    metadata     JSONB
+)
+"""
+
+# 稠密向量的 HNSW 近邻索引。
+# 为什么这里给 wiki 也建、而活库的 wiki_vectors 没有：活库里 wiki 只有 36 条，
+# 顺序扫描完全够用；但 M2 的用户可能上传几十篇文档、切出上千块，那时没索引会明显变慢。
+# 稠密向量用 HNSW 是既有选择（user_profile_vectors 本来就带这个索引）；
+# 只有**稀疏**向量默认不建 HNSW，理由见下面 ENABLE_SPARSE_HNSW。
+USER_PROFILE_EMBED_INDEX = (
+    "CREATE INDEX IF NOT EXISTS user_profile_vectors_embedding_idx "
+    "ON user_profile_vectors USING hnsw (embedding vector_cosine_ops)"
+)
+WIKI_EMBED_INDEX = (
+    "CREATE INDEX IF NOT EXISTS wiki_vectors_embedding_idx "
+    "ON wiki_vectors USING hnsw (embedding vector_cosine_ops)"
+)
+
+BASE_TABLE_SQL = [
+    USER_PROFILE_DDL,
+    WIKI_DDL,
+    USER_PROFILE_EMBED_INDEX,
+    WIKI_EMBED_INDEX,
+]
+
+
+def ensure_base_tables(cur=None) -> None:
+    """
+    幂等建两张源数据表与它们的向量索引
+
+    cur 传了就用调用方的 cursor、不提交（复用其事务）；不传则自己开连接并 **立即提交**——
+    提交的理由与 ensure_schema 相同：get_conn() 每次探活都会 rollback 未提交事务，
+    不提交的话建表会被后续任何一次取连接悄悄冲掉。
+
+    为什么允许传入 cursor：ingest 的写库流程里，建表要和 TRUNCATE、INSERT 在
+    同一个连接/事务序列上，中间夹一次 get_conn() 探活反而会打断它。
+    """
+    if cur is not None:
+        for sql in BASE_TABLE_SQL:
+            cur.execute(sql)
+        return
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        for sql in BASE_TABLE_SQL:
+            cur.execute(sql)
+        conn.commit()
+        logger.info("源数据表 user_profile_vectors / wiki_vectors 已就绪")
+    finally:
+        cur.close()
 
 CREATE_TABLE_SQL = f"""
 CREATE TABLE IF NOT EXISTS {SEARCH_INDEX_TABLE} (

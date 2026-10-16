@@ -39,6 +39,7 @@ from openai import APIError
 
 from rag_demo.cache import answer_cache
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF
+from rag_demo.db.connection import current_dataset
 from rag_demo.generation.generator import generate
 from rag_demo.prompts import CHITCHAT_REPLY, LLM_UNAVAILABLE_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
 from rag_demo.retrieval.query_processor import (
@@ -84,7 +85,9 @@ def answer_question(
     api 层的 permissions.render() 做。这样评测脚本直接调它拿到的仍是全量字段，
     不会因为加了权限而失能。
     """
-    key = answer_cache.make_key(question, dept, keyword_mode, profile_limit, deep_thinking)
+    # 数据集必须进键：demo 与 user 是两个库，同一问题答案不同（见 cache.make_key）
+    key = answer_cache.make_key(question, dept, keyword_mode, profile_limit, deep_thinking,
+                                dataset=current_dataset())
 
     if use_cache:
         hit = answer_cache.get(key)

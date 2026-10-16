@@ -33,6 +33,7 @@ from sentence_transformers import SentenceTransformer
 
 from rag_demo.config import DOCS_DIR, MODEL_PATH, SEARCH_INDEX_TABLE
 from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.db.schema import ensure_base_tables
 from rag_demo.splitter import DOC_TYPE_WIKI, split
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,10 @@ def ingest_documents(
     conn = get_conn()
     cur = conn.cursor()
     try:
+        # 先建表（M2 的 user 库是空的；已有表的环境这一步是 no-op），
+        # 否则下面的 ALTER 会报「relation does not exist」
+        ensure_base_tables(cur)
+
         # 补 metadata 列以对齐 user_profile_vectors，用于存放切分阶段的结构信息
         # （标题路径 / 块序位 / 来源类型）。原先这些信息在切分后被丢掉了。
         cur.execute("ALTER TABLE wiki_vectors ADD COLUMN IF NOT EXISTS metadata JSONB")

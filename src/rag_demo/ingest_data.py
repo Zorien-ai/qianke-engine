@@ -33,6 +33,7 @@ from sentence_transformers import SentenceTransformer
 
 from rag_demo.config import DATA_DIR, DEVICE, DTYPE, MODEL_PATH, SEARCH_INDEX_TABLE
 from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.db.schema import ensure_base_tables
 from rag_demo.splitter import DOC_TYPE_PROFILE, split
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -428,6 +429,10 @@ def write_to_db(
     conn = get_conn()
     cur = conn.cursor()
 
+    # 先保证表存在，再 ALTER 加结构化字段。顺序不能反：ensure_schema 里全是
+    # ALTER TABLE ... ADD COLUMN，表不存在时会直接报「relation does not exist」，
+    # 而 M2 的 user 库是空的，第一次构建就会踩到。
+    ensure_base_tables(cur)
     ensure_schema(cur)
     cur.execute("TRUNCATE user_profile_vectors RESTART IDENTITY;")
     conn.commit()
