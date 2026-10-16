@@ -63,6 +63,18 @@ uv run uvicorn rag_demo.api.main:app --reload --port 8000
 
 访问 <http://127.0.0.1:8000>（交互页面） / `/docs`（API 文档）
 
+### 3. 起 M1 原型（冻结快照，内测环境 8001）
+
+```bash
+uv run uvicorn m1_mock.app:app --port 8001 --app-dir prototype
+```
+
+访问 <http://127.0.0.1:8001>（四步向导，全假数据）。
+
+这份快照**不依赖数据库与模型**，启动毫秒级，可离线演示；它不 import `rag_demo`
+的任何模块，因此 M2 在 `src/` 里的迭代不会影响它。详见
+`prototype/m1_mock/README.md`（含冻结纪律：不要改这份快照，要改请改 `src/rag_demo/mvp/`）。
+
 ### 排错
 
 **数据库没起来时，表现是「所有问题都答『根据现有资料无法确定』」**——

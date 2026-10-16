@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>搭建我的查询助手</title>
+  <link rel="stylesheet" href="/static/wizard.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>搭建我的查询助手</h1>
+      <p class="hero-sub">
+        上传你的交易数据和规则文档，系统会生成一个能用中文提问的助手。全程在这个页面里完成，不用敲命令。
+      </p>
+      <!-- 步骤条：既是进度指示，也是「随时回退改一下」的入口 -->
+      <ol class="stepper" id="stepper">
+        <li data-step="1" class="is-active"><span class="dot">1</span><span class="lbl">上传数据</span></li>
+        <li data-step="2"><span class="dot">2</span><span class="lbl">确认字段</span></li>
+        <li data-step="3"><span class="dot">3</span><span class="lbl">一键构建</span></li>
+        <li data-step="4"><span class="dot">4</span><span class="lbl">开始提问</span></li>
+      </ol>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ============ 第 1 步：上传 ============ -->
+    <section class="panel step-panel" data-step="1">
+      <div class="panel-head">
+        <h2><span class="step-no">1</span> 上传数据</h2>
+        <span class="panel-tag">CSV 交易数据 + Markdown 规则文档</span>
+      </div>
+      <p class="guide">
+        左边放你的订单/会员数据（CSV，可多个文件），右边放业务规则文档（.md，可多个文件）。
+        两个都拖进对应的框里就行，<strong>不用改文件名、不用管编码</strong>，UTF-8 和 GBK 都能读。
+      </p>
+
+      <div class="dropzones">
+        <div class="dropzone" id="dz-csv" data-kind="csv" tabindex="0" role="button">
+          <div class="dz-icon">CSV</div>
+          <div class="dz-title">交易数据</div>
+          <div class="dz-hint">拖到这里，或点击选择文件（可多选）</div>
+          <input type="file" id="file-csv" accept=".csv,.txt" multiple hidden>
+        </div>
+        <div class="dropzone" id="dz-md" data-kind="md" tabindex="0" role="button">
+          <div class="dz-icon is-md">.md</div>
+          <div class="dz-title">规则文档</div>
+          <div class="dz-hint">拖到这里，或点击选择文件（可多选）</div>
+          <input type="file" id="file-md" accept=".md,.markdown,.txt" multiple hidden>
+        </div>
+      </div>
+
+      <div class="file-lists">
+        <div class="file-list-box">
+          <div class="fl-head">已选交易数据<span class="fl-count" id="csv-count">0 个</span></div>
+          <ul class="fl-body" id="csv-list"><li class="fl-empty">还没有文件</li></ul>
+        </div>
+        <div class="file-list-box">
+          <div class="fl-head">已选规则文档<span class="fl-count" id="md-count">0 个</span></div>
+          <ul class="fl-body" id="md-list"><li class="fl-empty">还没有文件</li></ul>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="btn ghost" id="btn-sample">用示例数据填满（没有文件也能试）</button>
+        <button type="button" class="btn ghost" id="btn-template">下载规则文档模板</button>
+        <button type="button" class="btn primary" id="btn-to-step2">下一步：确认字段</button>
+      </div>
+      <div class="inline-msg" id="msg-step1" hidden></div>
+    </section>
+
+    <!-- ============ 第 2 步：字段确认 + 文档结构校验 ============ -->
+    <section class="panel step-panel" data-step="2" hidden>
+      <div class="panel-head">
+        <h2><span class="step-no">2</span> 确认字段</h2>
+        <span class="panel-tag">识别不准可以直接改</span>
+      </div>
+      <p class="guide">
+        系统按常见叫法自动认了一遍列名。<strong>认对的不用管，认错的下拉改一下</strong>，
+        用不上的字段留空就行——不会影响构建。
+      </p>
+      <div class="summary-bar" id="analyze-summary"></div>
+
+      <h3 class="sec-title">字段映射</h3>
+      <div class="field-table" id="field-table"></div>
+
+      <h3 class="sec-title">文档结构校验</h3>
+      <p class="section-note">
+        只统计标题结构，<strong>不会拦截构建</strong>——没有标题的文档也能用，只是检索定位会粗一些。
+      </p>
+      <div class="doc-table" id="doc-table"></div>
+
+      <div class="warn-list" id="warn-list" hidden></div>
+
+      <div class="actions">
+        <button type="button" class="btn ghost" id="btn-back-1">上一步</button>
+        <button type="button" class="btn primary" id="btn-build">一键构建</button>
+      </div>
+      <div class="inline-msg" id="msg-step2" hidden></div>
+    </section>
+
+    <!-- ============ 第 3 步：构建 ============ -->
+    <section class="panel step-panel" data-step="3" hidden>
+      <div class="panel-head">
+        <h2><span class="step-no">3</span> 一键构建</h2>
+        <span class="panel-tag">清洗 → 聚合 → 向量化 → 分块 → 建索引</span>
+      </div>
+      <p class="guide" id="build-intro">
+        点下面的按钮就行，中间不用做任何操作。构建期间可以留在这个页面，完成后会自动跳到提问页。
+      </p>
+
+      <div class="actions">
+        <button type="button" class="btn primary" id="btn-start-build">开始构建</button>
+        <label class="fail-toggle" title="勾上后构建会在「生成画像向量」这一步故意失败，用来看看失败时提示长什么样">
+          <input type="checkbox" id="sim-fail">
+          <span>模拟一次失败（看错误提示）</span>
+        </label>
+      </div>
+
+      <div class="progress-wrap" id="progress-wrap" hidden>
+        <div class="progress-top">
+          <span class="progress-note" id="progress-note">准备中…</span>
+          <span class="progress-pct" id="progress-pct">0%</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-meta" id="progress-meta"></div>
+        <ul class="step-list" id="step-list"></ul>
+      </div>
+
+      <div class="error-box" id="build-error" hidden></div>
+
+      <div class="actions" id="build-retry" hidden>
+        <button type="button" class="btn primary" id="btn-retry">重试构建</button>
+        <button type="button" class="btn ghost" id="btn-back-2">返回修改字段</button>
+      </div>
+    </section>
+
+    <!-- ============ 第 4 步：查询 ============ -->
+    <section class="panel step-panel" data-step="4" hidden>
+      <div class="panel-head">
+        <h2><span class="step-no">4</span> 开始提问</h2>
+        <span class="panel-tag">用大白话问，答案会带上出处</span>
+      </div>
+      <p class="guide">
+        直接问你的业务规则或人群特征。答案下面会列出引用到的文档和章节，方便你核对。
+      </p>
+
+      <form id="query-form" class="query-form">
+        <textarea id="query-input" rows="2" autocomplete="off"
+                  placeholder="例如：高价值用户是怎么定义的"></textarea>
+        <div class="query-actions">
+          <span class="hint">按 Ctrl / Cmd + Enter 快速提交</span>
+          <button type="submit" id="query-btn" class="btn primary">
+            <span class="spinner" hidden></span>
+            <span class="btn-text">提问</span>
+          </button>
+        </div>
+      </form>
+
+      <div class="examples">
+        <span class="examples-label">试试这样问</span>
+        <div class="examples-list" id="examples-list"></div>
+      </div>
+
+      <div class="result" id="result" hidden>
+        <div class="result-head">
+          <span class="result-title">回答</span>
+          <span class="result-meta" id="result-meta"></span>
+        </div>
+        <div class="answer" id="answer-body"></div>
+        <div class="sources" id="sources-box" hidden>
+          <div class="sources-title">引用来源（点答案里的 <code>[来源N]</code> 可跳到对应那条）</div>
+          <div class="sources-list" id="sources-list"></div>
+        </div>
+      </div>
+
+      <div class="history-box" id="history-box" hidden>
+        <div class="hb-head">
+          <span>历史提问</span>
+          <button type="button" class="link" id="btn-clear-history">清空</button>
+        </div>
+        <ul class="hb-list" id="history-list"></ul>
+      </div>
+
+      <div class="inline-msg" id="msg-step4" hidden></div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span>本页面是流程原型（M1），字段识别与构建进度均为模拟结果，暂不接入真实后端。</span>
+  </footer>
+
+  <script src="/static/wizard.js"></script>
+</body>
+</html>
