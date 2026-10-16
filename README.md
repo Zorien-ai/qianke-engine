@@ -3,6 +3,34 @@
 基于 pgvector + bge-m3 + bge-reranker-v2-m3 的用户画像问答：
 多路检索 + RRF 融合 + Cross-Encoder 精排，意图路由分流 Text2SQL。
 
+## 数据口径（重要，先读这段）
+
+本 Demo 用的是**模拟数据集**（`data/dianshuang`，21000 条交易记录 → 聚合出
+**8110 个画像样本**）。其中 `user_id` **不是用户实体键**：它逐行独立随机生成，
+同一个 ID 在不同记录里的姓名 / 年龄 / 城市互不相同。
+
+实测依据（2026-10-16）：
+
+| 检验 | 结果 |
+|---|---|
+| 跨平台同名 ID 的属性一致性 | 抽样 2000 个，**2000 个全部冲突** |
+| 平台内重复 ID 的属性一致性 | 同样 100% 冲突（天猫 52/52、1688 55/55） |
+| `(用户ID, 用户姓名)` 组合数 | = 21000 = 总行数（ID 不携带身份信息） |
+| 每个 ID 的行数分布 | 与「21000 次随机抽样落在 9000 个 ID 上」的理论分布几乎重合（实际 distinct 8110 vs 理论 8127） |
+
+因此：
+
+- 「**8110 个用户**」= 21000 次随机抽样在 `U1000~U9999` 上的去重数，**不是 8110 个真实个体**
+- 「用户累计订单 N 笔」= 同一个随机 ID 被抽中 N 次；且 CSV 无订单号，`order_count` 实为**购买记录行数**
+- 「用户偏好美妆」= 被抽中的那几行里，美妆金额恰好最高
+
+**这不影响链路价值**——意图路由、混合检索、分来源精排、按需 SQL、引用溯源、
+评测驱动这条链路每一环都是真的，换真实数据集照样成立。受影响的是「用户画像」
+这个**措辞**：前端与文档统一按**聚合样本口径**表述。
+
+> 落地位置：页面上结果区的常驻「数据口径」提示（`api/static/index.html`）；
+> 数据侧的平台名白名单见 `ingest_data.py::KNOWN_PLATFORMS`。
+
 ## 启动
 
 ### 1. 起数据库（PostgreSQL + pgvector）
@@ -18,7 +46,7 @@ docker compose ps          # 状态显示 (healthy) 才算真的好了
 首次使用需要导入数据：
 
 ```bash
-uv run python src/rag_demo/ingest_data.py                  # 用户画像 8110 条
+uv run python src/rag_demo/ingest_data.py                  # 画像样本 8110 条（口径见上）
 uv run python src/rag_demo/ingest_docs.py                  # 知识库文档分块
 uv run python src/rag_demo/tools/build_search_index.py     # BM25 分词 + 稀疏权重落库
 ```

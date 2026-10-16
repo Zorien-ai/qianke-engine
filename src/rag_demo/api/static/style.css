@@ -401,6 +401,41 @@ button#ask-btn:disabled { opacity: .62; cursor: not-allowed; }
 .badge.sql { background: var(--sql-soft); color: var(--sql); }
 .badge.time { background: #f3f4f6; color: var(--muted); }
 
+/* ---------- 数据口径提示（结果区常驻） ---------- */
+/* 与思维链块同类：都属于「回答之外、但必须让人看见」的信息。
+   用中性灰而非告警色——它是长期口径说明，不是出错了。 */
+.data-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 8px;
+  background: #fafbfc;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.data-scope-tag {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eceef3;
+  color: #4b5563;
+  font-weight: 600;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.data-scope code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #eceef3;
+  font-size: 11.5px;
+}
+.data-scope strong { color: #4b5563; }
+
 /* ---------- 思维链（仅开启深度思考时出现） ---------- */
 .reasoning {
   margin-bottom: 14px;

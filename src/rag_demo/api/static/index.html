@@ -96,6 +96,18 @@
         <h2>回答</h2>
         <div class="badges" id="result-badges"></div>
       </div>
+      <!-- 数据口径常驻提示：本 Demo 的数据集里 user_id 是**逐行随机标识**，
+           不同平台甚至同一平台内的同一个 ID 都不是同一个人（实测见 README「数据口径」）。
+           不加这句，页面上出现的每个「用户」都会被读成真实个体。 -->
+      <div class="data-scope">
+        <span class="data-scope-tag">数据口径</span>
+        <span>
+          本 Demo 使用模拟数据集（21000 条交易记录）。其中的 <code>user_id</code>
+          是逐行随机生成的标识——同一个 ID 在不同记录里的姓名 / 年龄 / 城市并不相同，
+          <strong>不代表同一个真实用户</strong>。因此回答中的「用户」「累计订单」「平均客单价」
+          均为<strong>聚合样本口径</strong>，不是真实个体画像。
+        </span>
+      </div>
       <!-- 思维链：只在开启深度思考时出现。它是模型的推理过程，**不属于回答**——
            不参与 [来源N] 引用，也不进「数据来源」，所以单独一块、默认可折叠。 -->
       <details class="reasoning" id="reasoning-box" hidden>

@@ -1,7 +1,8 @@
 # 用户画像 RAG 系统 · 架构图与流程图
 
-> **版本：v1.0 / 2026-10**
-> 项目：用户画像分析助手 Demo ｜ 数据规模：8110 条用户画像 + 29 个知识文档分块
+> **版本：v1.0 / 2026-10**（部分内容已落后于当前实现：缺 `/qa/stream`、入口 BERT 路由、
+> `search_index` 表、深度思考链路，待刷新）
+> 项目：用户画像分析助手 Demo ｜ 数据规模：8110 个画像样本（聚合口径，见 README「数据口径」）+ 知识文档分块
 > 部署形态：FastAPI 单进程 + pgvector 容器（:5432）
 > 本文档为 Mermaid 源码，可直接渲染；配套渲染预览见 `architecture-diagrams.html`
 
@@ -40,7 +41,7 @@ flowchart TB
 
     subgraph L1["① 数据层"]
         D1["PostgreSQL 16 + pgvector<br/>:5432 · vec_db"]
-        D2["user_profile_vectors<br/>8110 条画像 · 1024 维"]
+        D2["user_profile_vectors<br/>8110 个画像样本 · 1024 维"]
         D3["wiki_vectors<br/>29 分块 · 5 篇 Markdown"]
         D4["原始数据源<br/>dianshuang/*.csv · docs/*.md"]
     end
