@@ -7,6 +7,8 @@
       data/chitchat_generated.jsonl         （步骤 2.1 长句闲聊，存在则合并）
       data/chitchat_medium_generated.jsonl  （步骤 2.7 中段闲聊，存在则合并）
       data/business_generated.jsonl         （步骤 2.7 短/中长/长句业务，存在则合并）
+      data/business_id_abbrev.jsonl         （步骤 2.9 字母数字ID/业务缩写难样本，存在则合并）
+      data/chitchat_alnum_short.jsonl       （步骤 2.9 字母数字闲聊负样本，存在则合并）
 输出：data/cleaned.jsonl                    （清洗后数据）
       outputs/data_analysis/class_distribution.png
       outputs/data_analysis/length_distribution.png
@@ -35,6 +37,11 @@ EXTRA_FILES = [
     ("chitchat_generated.jsonl", "长句闲聊 步骤2.1"),
     ("chitchat_medium_generated.jsonl", "中段闲聊 步骤2.7"),
     ("business_generated.jsonl", "短/中长/长句业务 步骤2.7"),
+    # 步骤 2.9：字母数字类极短输入（ID / 业务缩写）。补它的原因是入口路由实测
+    # 在这类形态上误伤（U2765、看下GMV 被判成闲聊 -> 拒答），详见
+    # bug/bert意图路由误伤修复-难样本重训.md
+    ("business_id_abbrev.jsonl", "字母数字ID/业务缩写难样本 步骤2.9"),
+    ("chitchat_alnum_short.jsonl", "字母数字闲聊负样本 步骤2.9（守住边界）"),
 ]
 
 LABELS = ["CHITCHAT", "BUSINESS"]

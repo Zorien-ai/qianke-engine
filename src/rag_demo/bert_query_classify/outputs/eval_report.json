@@ -2,82 +2,74 @@
   "model_dir": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\models\\bert-intent",
   "low_conf_threshold": 0.6,
   "test": {
-    "n": 272,
-    "correct": 271,
-    "accuracy": 0.9963235294117647,
+    "n": 290,
+    "correct": 290,
+    "accuracy": 1.0,
     "acc_ci": [
-      0.9794718943361663,
-      0.9993507343028786
+      0.9869262895383091,
+      1.0
     ],
-    "errors": [
-      {
-        "query": "收到",
-        "true": "CHITCHAT",
-        "pred": "BUSINESS",
-        "p_true": 0.016399946063756943,
-        "p_pred": 0.9836000204086304
-      }
-    ],
+    "errors": [],
     "confusion_matrix": [
       [
-        134,
-        1
+        138,
+        0
       ],
       [
         0,
-        137
+        152
       ]
     ]
   },
   "length_buckets_test": [
     {
       "bucket": "1-3",
-      "n": 32,
-      "chitchat": 24,
-      "business": 8,
-      "accuracy": 0.96875,
+      "n": 36,
+      "chitchat": 25,
+      "business": 11,
+      "accuracy": 1.0,
       "acc_ci": [
-        0.8425539219962727,
-        0.9944622826374491
+        0.9035781695514236,
+        1.0
       ],
-      "recall_chitchat": 0.9583333333333334,
+      "recall_chitchat": 1.0,
       "recall_business": 1.0
     },
     {
       "bucket": "4-6",
-      "n": 67,
-      "chitchat": 41,
-      "business": 26,
+      "n": 77,
+      "chitchat": 44,
+      "business": 33,
       "accuracy": 1.0,
       "acc_ci": [
-        0.9457719757882374,
-        0.9999999999999999
+        0.9524799113327793,
+        1.0
       ],
       "recall_chitchat": 1.0,
       "recall_business": 1.0
     },
     {
       "bucket": "7-9",
-      "n": 58,
+      "n": 62,
       "chitchat": 18,
-      "business": 40,
+      "business": 44,
       "accuracy": 1.0,
       "acc_ci": [
-        0.9378800031047062,
-        0.9999999999999999
+        0.9416539087749995,
+        1.0
       ],
       "recall_chitchat": 1.0,
       "recall_business": 1.0
     },
     {
       "bucket": "10-12",
-      "n": 58,
+      "n": 59,
       "chitchat": 22,
-      "business": 36,
+      "business": 37,
       "accuracy": 1.0,
       "acc_ci": [
-        0.9378800031047062,
-        0.9999999999999999
+        0.938868520215908,
+        1.0
       ],
       "recall_chitchat": 1.0,
       "recall_business": 1.0
@@ -97,12 +89,12 @@
     },
     {
       "bucket": "16-18",
-      "n": 23,
-      "chitchat": 16,
+      "n": 22,
+      "chitchat": 15,
       "business": 7,
       "accuracy": 1.0,
       "acc_ci": [
-        0.8568788745827374,
+        0.8513404742740388,
         1.0
       ],
       "recall_chitchat": 1.0,
@@ -125,45 +117,30 @@
   "probes": {
     "short": {
       "n": 30,
-      "correct": 28,
-      "accuracy": 0.9333333333333333,
+      "correct": 30,
+      "accuracy": 1.0,
       "acc_ci": [
-        0.7867618227892791,
-        0.9815233646723066
+        0.8864829086095221,
+        1.0
       ],
-      "wrong": [
-        {
-          "query": "U2765",
-          "true": "BUSINESS",
-          "pred": "CHITCHAT",
-          "p_true": 0.0037918484304100275,
-          "p_pred": 0.9962081909179688
-        },
-        {
-          "query": "看下GMV",
-          "true": "BUSINESS",
-          "pred": "CHITCHAT",
-          "p_true": 0.003096881089732051,
-          "p_pred": 0.996903121471405
-        }
-      ],
+      "wrong": [],
       "by_probe_type": {
         "fragment": {
           "n": 21,
-          "correct": 20,
-          "accuracy": 0.9523809523809523,
+          "correct": 21,
+          "accuracy": 1.0,
           "acc_ci": [
-            0.7733018341376452,
-            0.9915442305280766
+            0.8453561767357979,
+            0.9999999999999999
           ]
         },
         "unseen": {
           "n": 9,
-          "correct": 8,
-          "accuracy": 0.8888888888888888,
+          "correct": 9,
+          "accuracy": 1.0,
           "acc_ci": [
-            0.5649937852319399,
-            0.9801096286728695
+            0.7008472464490407,
+            1.0
           ]
         }
       },
@@ -197,16 +174,16 @@
   "phrase_overlap_summary": {
     "short": {
       "n": 30,
-      "mean_p_to_t": 0.9667,
-      "mean_t_to_p": 0.1274,
-      "full_lexical_cover": 28,
+      "mean_p_to_t": 0.9639,
+      "mean_t_to_p": 0.1512,
+      "full_lexical_cover": 27,
       "max_4gram_jaccard": 0.4
     },
     "long": {
       "n": 25,
-      "mean_p_to_t": 0.8892,
-      "mean_t_to_p": 0.6177,
-      "full_lexical_cover": 5,
+      "mean_p_to_t": 0.8903,
+      "mean_t_to_p": 0.6405,
+      "full_lexical_cover": 4,
       "max_4gram_jaccard": 0.25
     }
   },
@@ -467,8 +444,8 @@
         ],
         "p_to_t": 1.0,
         "t_to_p": 0.5,
-        "max_4gram_jaccard": 0.2,
-        "nearest_train": "沉睡用户怎么定义",
+        "max_4gram_jaccard": 0.25,
+        "nearest_train": "沉睡用户有哪些",
         "correct": true
       },
       {
@@ -494,9 +471,9 @@
           "标签"
         ],
         "p_to_t": 1.0,
-        "t_to_p": 0.2857,
-        "max_4gram_jaccard": 0.1111,
-        "nearest_train": "标签体系里RFM怎么算的",
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.25,
+        "nearest_train": "标签体系是什么",
         "correct": true
       },
       {
@@ -538,7 +515,7 @@
         "p_to_t": 1.0,
         "t_to_p": 0.3333,
         "max_4gram_jaccard": 0.3333,
-        "nearest_train": "U2765的年龄",
+        "nearest_train": "U2765的城市",
         "correct": true
       },
       {
@@ -551,8 +528,8 @@
         "p_to_t": 1.0,
         "t_to_p": 0.3333,
         "max_4gram_jaccard": 0.4,
-        "nearest_train": "U2765的年龄",
-        "correct": false
+        "nearest_train": "U2765的城市",
+        "correct": true
       },
       {
         "probe_kind": "short",
@@ -564,7 +541,7 @@
           "用户",
           "类"
         ],
-        "p_to_t": 0.5,
+        "p_to_t": 0.75,
         "t_to_p": 0.0,
         "max_4gram_jaccard": 0.0,
         "nearest_train": "",
@@ -579,10 +556,10 @@
           "看下"
         ],
         "p_to_t": 1.0,
-        "t_to_p": 0.0,
-        "max_4gram_jaccard": 0.0,
-        "nearest_train": "",
-        "correct": false
+        "t_to_p": 0.5,
+        "max_4gram_jaccard": 0.3333,
+        "nearest_train": "拉下GMV",
+        "correct": true
       },
       {
         "probe_kind": "short",
@@ -593,7 +570,7 @@
           "画像",
           "调"
         ],
-        "p_to_t": 1.0,
+        "p_to_t": 0.6667,
         "t_to_p": 0.0,
         "max_4gram_jaccard": 0.0,
         "nearest_train": "",
@@ -764,7 +741,7 @@
           "看",
           "高"
         ],
-        "p_to_t": 1.0,
+        "p_to_t": 0.9231,
         "t_to_p": 1.0,
         "max_4gram_jaccard": 0.25,
         "nearest_train": "高价值用户的年龄分布",
@@ -788,9 +765,9 @@
           "类目"
         ],
         "p_to_t": 0.9091,
-        "t_to_p": 0.4286,
-        "max_4gram_jaccard": 0.0417,
-        "nearest_train": "复购率最高的品类是哪个",
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.0588,
+        "nearest_train": "商品类目",
         "correct": true
       },
       {
@@ -1028,7 +1005,7 @@
           "退",
           "那些"
         ],
-        "p_to_t": 0.8182,
+        "p_to_t": 0.9091,
         "t_to_p": 0.6,
         "max_4gram_jaccard": 0.08,
         "nearest_train": "U2765的活跃情况怎么样",
@@ -1053,7 +1030,7 @@
           "看",
           "等级"
         ],
-        "p_to_t": 0.9231,
+        "p_to_t": 0.8462,
         "t_to_p": 0.7143,
         "max_4gram_jaccard": 0.2381,
         "nearest_train": "各会员等级的人数占比",
@@ -1122,7 +1099,7 @@
           "这个",
           "频次"
         ],
-        "p_to_t": 0.8182,
+        "p_to_t": 0.9091,
         "t_to_p": 1.0,
         "max_4gram_jaccard": 0.0556,
         "nearest_train": "下单频次",
@@ -1223,11 +1200,11 @@
     "grouped": {
       "short|低重合(<0.6)": {
         "n": 30,
-        "correct": 28,
-        "accuracy": 0.9333333333333333,
+        "correct": 30,
+        "accuracy": 1.0,
         "acc_ci": [
-          0.7867618227892791,
-          0.9815233646723066
+          0.8864829086095221,
+          1.0
         ]
       },
       "long|低重合(<0.6)": {
@@ -1243,31 +1220,31 @@
   },
   "confidence": {
     "test": {
-      "mean_max_prob": 0.9979764223098755,
-      "p05": 0.9977726340293884,
-      "min_max_prob": 0.7098166942596436,
-      "mean_confidence_chitchat": 0.9961885809898376,
-      "mean_confidence_business": 0.9997381567955017,
+      "mean_max_prob": 0.9993398785591125,
+      "p05": 0.9983992576599121,
+      "min_max_prob": 0.9910945892333984,
+      "mean_confidence_chitchat": 0.9990009069442749,
+      "mean_confidence_business": 0.9996476173400879,
       "count_lt_0.6": 0,
       "count_lt_0.7": 0,
-      "count_lt_0.9": 1
+      "count_lt_0.9": 0
     },
     "short": {
-      "mean_max_prob": 0.9989680647850037,
-      "p05": 0.9941474199295044,
-      "min_max_prob": 0.9907928109169006,
+      "mean_max_prob": 0.9996155500411987,
+      "p05": 0.9987401962280273,
+      "min_max_prob": 0.9978514909744263,
       "mean_confidence_chitchat": null,
-      "mean_confidence_business": 0.9989680647850037,
+      "mean_confidence_business": 0.9996155500411987,
       "count_lt_0.6": 0,
       "count_lt_0.7": 0,
       "count_lt_0.9": 0
     },
     "long": {
-      "mean_max_prob": 0.9890807271003723,
-      "p05": 0.999642014503479,
-      "min_max_prob": 0.733021080493927,
+      "mean_max_prob": 0.991462230682373,
+      "p05": 0.9997392296791077,
+      "min_max_prob": 0.79159015417099,
       "mean_confidence_chitchat": null,
-      "mean_confidence_business": 0.9890807271003723,
+      "mean_confidence_business": 0.991462230682373,
       "count_lt_0.6": 0,
       "count_lt_0.7": 0,
       "count_lt_0.9": 1
@@ -1275,63 +1252,113 @@
   },
   "low_confidence_samples": [
     {
-      "source": "test",
-      "query": "闰年是怎么回事",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.7098166942596436,
-      "p_chitchat": 0.7098166942596436,
-      "p_business": 0.29018327593803406,
-      "n_chars": 7
-    },
-    {
       "source": "long",
       "query": "那些只买过一次就再没回来的人大概有多少",
       "true": "BUSINESS",
       "pred": "BUSINESS",
-      "max_prob": 0.733021080493927,
-      "p_chitchat": 0.2669788897037506,
-      "p_business": 0.733021080493927,
+      "max_prob": 0.79159015417099,
+      "p_chitchat": 0.2084098756313324,
+      "p_business": 0.79159015417099,
       "n_chars": 19
     },
     {
       "source": "test",
-      "query": "收到",
-      "true": "CHITCHAT",
+      "query": "日活",
+      "true": "BUSINESS",
       "pred": "BUSINESS",
-      "max_prob": 0.9836000204086304,
-      "p_chitchat": 0.016399946063756943,
-      "p_business": 0.9836000204086304,
+      "max_prob": 0.9910945892333984,
+      "p_chitchat": 0.008905415423214436,
+      "p_business": 0.9910945892333984,
       "n_chars": 2
     },
     {
       "source": "test",
-      "query": "testing",
+      "query": "赞",
       "true": "CHITCHAT",
       "pred": "CHITCHAT",
-      "max_prob": 0.9872623085975647,
-      "p_chitchat": 0.9872623085975647,
-      "p_business": 0.012737727724015713,
+      "max_prob": 0.9924788475036621,
+      "p_chitchat": 0.9924788475036621,
+      "p_business": 0.007521144580096006,
+      "n_chars": 1
+    },
+    {
+      "source": "test",
+      "query": "额",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9944309592247009,
+      "p_chitchat": 0.9944309592247009,
+      "p_business": 0.005569030065089464,
+      "n_chars": 1
+    },
+    {
+      "source": "test",
+      "query": "0",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9948357343673706,
+      "p_chitchat": 0.9948357343673706,
+      "p_business": 0.005164334550499916,
+      "n_chars": 1
+    },
+    {
+      "source": "test",
+      "query": "光合作用是什么",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9950751662254333,
+      "p_chitchat": 0.9950751662254333,
+      "p_business": 0.004924875218421221,
       "n_chars": 7
     },
     {
-      "source": "short",
-      "query": "调下画像",
-      "true": "BUSINESS",
-      "pred": "BUSINESS",
-      "max_prob": 0.9907928109169006,
-      "p_chitchat": 0.009207134135067463,
-      "p_business": 0.9907928109169006,
-      "n_chars": 4
+      "source": "test",
+      "query": "1",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9955229759216309,
+      "p_chitchat": 0.9955229759216309,
+      "p_business": 0.004477089736610651,
+      "n_chars": 1
     },
     {
-      "source": "short",
-      "query": "查U2765",
+      "source": "test",
+      "query": "种草文案怎么写",
       "true": "BUSINESS",
       "pred": "BUSINESS",
-      "max_prob": 0.9924613833427429,
-      "p_chitchat": 0.007538638077676296,
-      "p_business": 0.9924613833427429,
+      "max_prob": 0.9955644607543945,
+      "p_chitchat": 0.0044356221333146095,
+      "p_business": 0.9955644607543945,
+      "n_chars": 7
+    },
+    {
+      "source": "test",
+      "query": "衣柜该整理一下换季了",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9957082271575928,
+      "p_chitchat": 0.9957082271575928,
+      "p_business": 0.0042917439714074135,
+      "n_chars": 10
+    },
+    {
+      "source": "test",
+      "query": "社群运营有什么玩法",
+      "true": "BUSINESS",
+      "pred": "BUSINESS",
+      "max_prob": 0.9966732263565063,
+      "p_chitchat": 0.003326730104163289,
+      "p_business": 0.9966732263565063,
+      "n_chars": 9
+    },
+    {
+      "source": "test",
+      "query": "弗洛伊德是谁",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9974219799041748,
+      "p_chitchat": 0.9974219799041748,
+      "p_business": 0.0025780629366636276,
       "n_chars": 6
     },
     {
@@ -1339,79 +1366,29 @@
       "query": "asdf",
       "true": "CHITCHAT",
       "pred": "CHITCHAT",
-      "max_prob": 0.9939807653427124,
-      "p_chitchat": 0.9939807653427124,
-      "p_business": 0.006019283551722765,
+      "max_prob": 0.9974932670593262,
+      "p_chitchat": 0.9974932670593262,
+      "p_business": 0.0025067732203751802,
+      "n_chars": 4
+    },
+    {
+      "source": "short",
+      "query": "调下画像",
+      "true": "BUSINESS",
+      "pred": "BUSINESS",
+      "max_prob": 0.9978514909744263,
+      "p_chitchat": 0.0021485157776623964,
+      "p_business": 0.9978514909744263,
       "n_chars": 4
     },
     {
       "source": "test",
-      "query": "test test",
+      "query": "你是客服吗",
       "true": "CHITCHAT",
       "pred": "CHITCHAT",
-      "max_prob": 0.9961134195327759,
-      "p_chitchat": 0.9961134195327759,
-      "p_business": 0.003886587917804718,
-      "n_chars": 9
-    },
-    {
-      "source": "short",
-      "query": "U2765",
-      "true": "BUSINESS",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9962081909179688,
-      "p_chitchat": 0.9962081909179688,
-      "p_business": 0.0037918484304100275,
-      "n_chars": 5
-    },
-    {
-      "source": "short",
-      "query": "看下GMV",
-      "true": "BUSINESS",
-      "pred": "CHITCHAT",
-      "max_prob": 0.996903121471405,
-      "p_chitchat": 0.996903121471405,
-      "p_business": 0.003096881089732051,
-      "n_chars": 5
-    },
-    {
-      "source": "test",
-      "query": "你的功能是什么",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9969680905342102,
-      "p_chitchat": 0.9969680905342102,
-      "p_business": 0.0030319257639348507,
-      "n_chars": 7
-    },
-    {
-      "source": "test",
-      "query": "打算学拍点日常小视频记录",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9971070885658264,
-      "p_chitchat": 0.9971070885658264,
-      "p_business": 0.0028929144609719515,
-      "n_chars": 12
-    },
-    {
-      "source": "test",
-      "query": "随便",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9972047209739685,
-      "p_chitchat": 0.9972047209739685,
-      "p_business": 0.0027952776290476322,
-      "n_chars": 2
-    },
-    {
-      "source": "test",
-      "query": "你是AI吗",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9972354769706726,
-      "p_chitchat": 0.9972354769706726,
-      "p_business": 0.002764515345916152,
+      "max_prob": 0.9979684948921204,
+      "p_chitchat": 0.9979684948921204,
+      "p_business": 0.002031519776210189,
       "n_chars": 5
     },
     {
@@ -1419,71 +1396,71 @@
       "query": "yes",
       "true": "CHITCHAT",
       "pred": "CHITCHAT",
-      "max_prob": 0.9973303079605103,
-      "p_chitchat": 0.9973303079605103,
-      "p_business": 0.002669714391231537,
+      "max_prob": 0.9980806112289429,
+      "p_chitchat": 0.9980806112289429,
+      "p_business": 0.001919431146234274,
       "n_chars": 3
     },
     {
       "source": "test",
-      "query": "弗洛伊德是谁",
+      "query": "zxcv",
       "true": "CHITCHAT",
       "pred": "CHITCHAT",
-      "max_prob": 0.9973898530006409,
-      "p_chitchat": 0.9973898530006409,
-      "p_business": 0.002610191237181425,
-      "n_chars": 6
-    },
-    {
-      "source": "test",
-      "query": "周末愉快",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9974616765975952,
-      "p_chitchat": 0.9974616765975952,
-      "p_business": 0.0025382554158568382,
+      "max_prob": 0.998313307762146,
+      "p_chitchat": 0.998313307762146,
+      "p_business": 0.0016867209924384952,
       "n_chars": 4
     },
     {
       "source": "test",
-      "query": "1",
+      "query": "失陪了",
       "true": "CHITCHAT",
       "pred": "CHITCHAT",
-      "max_prob": 0.9974658489227295,
-      "p_chitchat": 0.9974658489227295,
-      "p_business": 0.0025342071894556284,
-      "n_chars": 1
+      "max_prob": 0.9983256459236145,
+      "p_chitchat": 0.9983256459236145,
+      "p_business": 0.0016743387095630169,
+      "n_chars": 3
     },
     {
-      "source": "test",
-      "query": "口红哪个色号好看",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9977389574050903,
-      "p_chitchat": 0.9977389574050903,
-      "p_business": 0.002261032350361347,
-      "n_chars": 8
-    },
-    {
-      "source": "test",
-      "query": "焦虑",
-      "true": "CHITCHAT",
-      "pred": "CHITCHAT",
-      "max_prob": 0.9978001713752747,
-      "p_chitchat": 0.9978001713752747,
-      "p_business": 0.0021997697185724974,
+      "source": "short",
+      "query": "等级",
+      "true": "BUSINESS",
+      "pred": "BUSINESS",
+      "max_prob": 0.9983378648757935,
+      "p_chitchat": 0.0016621232498437166,
+      "p_business": 0.9983378648757935,
       "n_chars": 2
+    },
+    {
+      "source": "test",
+      "query": "法语和西班牙语哪个对新手更友好一些",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.998489260673523,
+      "p_chitchat": 0.998489260673523,
+      "p_business": 0.0015106933424249291,
+      "n_chars": 17
+    },
+    {
+      "source": "test",
+      "query": "你的工作原理是什么",
+      "true": "CHITCHAT",
+      "pred": "CHITCHAT",
+      "max_prob": 0.9985254406929016,
+      "p_chitchat": 0.9985254406929016,
+      "p_business": 0.0014746112283319235,
+      "n_chars": 9
     }
   ],
   "low_confidence_label_mix": {
-    "true_chitchat": 15,
-    "true_business": 5
+    "true_chitchat": 14,
+    "true_business": 6
   },
   "inference_speed": {
-    "single_ms_avg_100": 13.729,
-    "batch32_total_ms": 263.988,
-    "batch32_per_item_ms": 0.971,
-    "speedup_x": 14.15,
+    "single_ms_avg_100": 21.763,
+    "batch32_total_ms": 334.764,
+    "batch32_per_item_ms": 1.154,
+    "speedup_x": 18.85,
     "device": "cuda"
   }
 }

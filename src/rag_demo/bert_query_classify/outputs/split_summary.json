@@ -1,62 +1,62 @@
 {
   "train": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\train.jsonl",
-    "n": 2169,
-    "ratio_of_total": 0.7998,
+    "n": 2314,
+    "ratio_of_total": 0.7999,
     "label_counts": {
-      "BUSINESS": 1096,
-      "CHITCHAT": 1073
+      "BUSINESS": 1205,
+      "CHITCHAT": 1109
     },
-    "chitchat_to_business": 1.0214,
-    "mean_len": 8.981
+    "chitchat_to_business": 1.0866,
+    "mean_len": 8.765
   },
   "val": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\val.jsonl",
-    "n": 271,
+    "n": 289,
     "ratio_of_total": 0.0999,
     "label_counts": {
-      "BUSINESS": 138,
-      "CHITCHAT": 133
+      "CHITCHAT": 139,
+      "BUSINESS": 150
     },
-    "chitchat_to_business": 1.0376,
-    "mean_len": 9.007
+    "chitchat_to_business": 1.0791,
+    "mean_len": 8.761
   },
   "test": {
     "path": "F:\\workspace\\python\\rag-demo\\src\\rag_demo\\bert_query_classify\\data\\test.jsonl",
-    "n": 272,
-    "ratio_of_total": 0.1003,
+    "n": 290,
+    "ratio_of_total": 0.1002,
     "label_counts": {
-      "CHITCHAT": 135,
-      "BUSINESS": 137
+      "CHITCHAT": 138,
+      "BUSINESS": 152
     },
-    "chitchat_to_business": 1.0148,
-    "mean_len": 8.945
+    "chitchat_to_business": 1.1014,
+    "mean_len": 8.686
   },
   "length_buckets": {
     "train": [
       {
         "range": "1-3",
-        "chitchat": 194,
-        "business": 70,
-        "minority_share": 0.2652
+        "chitchat": 204,
+        "business": 86,
+        "minority_share": 0.2966
       },
       {
         "range": "4-6",
-        "chitchat": 321,
-        "business": 207,
-        "minority_share": 0.392
+        "chitchat": 347,
+        "business": 258,
+        "minority_share": 0.4264
       },
       {
         "range": "7-9",
         "chitchat": 146,
-        "business": 319,
-        "minority_share": 0.314
+        "business": 352,
+        "minority_share": 0.2932
       },
       {
         "range": "10-12",
         "chitchat": 178,
-        "business": 282,
-        "minority_share": 0.387
+        "business": 290,
+        "minority_share": 0.3803
       },
       {
         "range": "13-15",
@@ -67,8 +67,8 @@
       {
         "range": "16-18",
         "chitchat": 122,
-        "business": 58,
-        "minority_share": 0.3222
+        "business": 59,
+        "minority_share": 0.326
       },
       {
         "range": "19-24",
@@ -86,71 +86,21 @@
     "val": [
       {
         "range": "1-3",
-        "chitchat": 24,
-        "business": 9,
-        "minority_share": 0.2727
-      },
-      {
-        "range": "4-6",
-        "chitchat": 40,
-        "business": 26,
-        "minority_share": 0.3939
-      },
-      {
-        "range": "7-9",
-        "chitchat": 18,
-        "business": 40,
-        "minority_share": 0.3103
-      },
-      {
-        "range": "10-12",
-        "chitchat": 22,
-        "business": 35,
-        "minority_share": 0.386
-      },
-      {
-        "range": "13-15",
-        "chitchat": 8,
+        "chitchat": 26,
         "business": 11,
-        "minority_share": 0.4211
-      },
-      {
-        "range": "16-18",
-        "chitchat": 15,
-        "business": 8,
-        "minority_share": 0.3478
-      },
-      {
-        "range": "19-24",
-        "chitchat": 6,
-        "business": 9,
-        "minority_share": 0.4
-      },
-      {
-        "range": "25-40",
-        "chitchat": 0,
-        "business": 0,
-        "minority_share": 0.0
-      }
-    ],
-    "test": [
-      {
-        "range": "1-3",
-        "chitchat": 24,
-        "business": 8,
-        "minority_share": 0.25
+        "minority_share": 0.2973
       },
       {
         "range": "4-6",
-        "chitchat": 41,
-        "business": 26,
-        "minority_share": 0.3881
+        "chitchat": 43,
+        "business": 32,
+        "minority_share": 0.4267
       },
       {
         "range": "7-9",
         "chitchat": 18,
-        "business": 40,
-        "minority_share": 0.3103
+        "business": 44,
+        "minority_share": 0.2903
       },
       {
         "range": "10-12",
@@ -169,6 +119,56 @@
         "chitchat": 16,
         "business": 7,
         "minority_share": 0.3043
+      },
+      {
+        "range": "19-24",
+        "chitchat": 6,
+        "business": 9,
+        "minority_share": 0.4
+      },
+      {
+        "range": "25-40",
+        "chitchat": 0,
+        "business": 0,
+        "minority_share": 0.0
+      }
+    ],
+    "test": [
+      {
+        "range": "1-3",
+        "chitchat": 25,
+        "business": 11,
+        "minority_share": 0.3056
+      },
+      {
+        "range": "4-6",
+        "chitchat": 44,
+        "business": 33,
+        "minority_share": 0.4286
+      },
+      {
+        "range": "7-9",
+        "chitchat": 18,
+        "business": 44,
+        "minority_share": 0.2903
+      },
+      {
+        "range": "10-12",
+        "chitchat": 22,
+        "business": 37,
+        "minority_share": 0.3729
+      },
+      {
+        "range": "13-15",
+        "chitchat": 8,
+        "business": 11,
+        "minority_share": 0.4211
+      },
+      {
+        "range": "16-18",
+        "chitchat": 15,
+        "business": 7,
+        "minority_share": 0.3182
       },
       {
         "range": "19-24",
