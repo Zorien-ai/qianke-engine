@@ -9,8 +9,14 @@ wheels/
 # Virtual environments
 .venv
 
-# 运行期日志（按天轮转，不入库）
+# 运行期日志与一次性调试产物（不入库）
 logs/
+*.log
+*.err
 
 # 微调后的模型权重（约 390MB，train.py 一分钟内可重训复现，不入库）
 src/rag_demo/bert_query_classify/models/
+
+# 预训练基座模型权重（本地下发，不入库）
+# 注意：models/bge-m3、models/bge-reranker-v2-m3 为有意入库，故只忽略本目录而非整个 models/
+models/bert-base-chinese/

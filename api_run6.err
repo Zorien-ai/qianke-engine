@@ -1,35 +1,0 @@
-INFO:     Started server process [19240]
-INFO:     Waiting for application startup.
-INFO:rag_demo.api.main:预加载模型和 BM25 语料...
-INFO:rag_demo.retrieval.hybrid_retriever:正在加载 bge-m3 模型（device=cuda, dtype=torch.float16）...
-INFO:sentence_transformers.base.model:Loading SentenceTransformer model from F:\workspace\python\rag-demo\models\bge-m3.
-Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights:   1%|▏         | 5/391 [00:01<02:25,  2.66it/s]Loading weights: 100%|██████████| 391/391 [00:01<00:00, 205.40it/s]
-INFO:rag_demo.db.connection:建立新数据库连接...
-INFO:rag_demo.retrieval.hybrid_retriever:BM25 语料加载完成: 8146 条
-INFO:rag_demo.api.main:预加载完成
-INFO:rag_demo.api.main:稀疏索引正在后台预热...
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:rag_demo.retrieval.sparse_retriever:稀疏向量索引已从缓存加载: 8146 条
-INFO:rag_demo.api.main:稀疏索引预热完成
-INFO:rag_demo.api.main:问答缓存已清空
-INFO:rag_demo.tools.router:意图路由 -> rag: 高客单、喜欢美妆的女性用户有哪些
-INFO:httpx2:HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:rag_demo.retrieval.query_processor:检索策略: 直接检索=高客单、喜欢美妆的女性用户有哪些 | 关键词扩写=高客单 美妆 女性用户（LLM 判定=['关键词']，实际执行=2）
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00,  1.51it/s]Batches: 100%|██████████| 1/1 [00:00<00:00,  1.51it/s]
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00, 40.44it/s]
-INFO:rag_demo.retrieval.reranker:正在加载本地 bge-reranker-v2-m3（device=cuda, dtype=torch.float16）...
-INFO:sentence_transformers.base.model:No modules.json found for F:\workspace\python\rag-demo\models\bge-reranker-v2-m3, initializing a new CrossEncoder model.
-Loading weights:   0%|          | 0/393 [00:00<?, ?it/s]Loading weights:   2%|▏         | 9/393 [00:00<00:10, 35.97it/s]Loading weights:  12%|█▏        | 47/393 [00:00<00:02, 160.58it/s]Loading weights:  18%|█▊        | 71/393 [00:00<00:01, 185.42it/s]Loading weights:  24%|██▍       | 95/393 [00:00<00:01, 193.89it/s]Loading weights:  30%|███       | 118/393 [00:00<00:01, 201.62it/s]Loading weights:  37%|███▋      | 145/393 [00:00<00:01, 211.63it/s]Loading weights:  43%|████▎     | 168/393 [00:00<00:01, 216.71it/s]Loading weights:  49%|████▊     | 191/393 [00:01<00:00, 215.14it/s]Loading weights:  55%|█████▍    | 216/393 [00:01<00:00, 224.50it/s]Loading weights:  61%|██████    | 240/393 [00:01<00:00, 228.96it/s]Loading weights:  67%|██████▋   | 265/393 [00:01<00:00, 229.68it/s]Loading weights:  74%|███████▍  | 290/393 [00:01<00:00, 234.35it/s]Loading weights:  80%|███████▉  | 314/393 [00:01<00:00, 232.63it/s]Loading weights:  86%|████████▌ | 338/393 [00:01<00:00, 220.75it/s]Loading weights:  93%|█████████▎| 367/393 [00:01<00:00, 232.24it/s]Loading weights: 100%|██████████| 393/393 [00:01<00:00, 213.07it/s]
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00,  5.63it/s]Batches: 100%|██████████| 1/1 [00:00<00:00,  5.63it/s]
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00, 33.46it/s]
-INFO:httpx2:HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:rag_demo.api.main:问答缓存已清空
-INFO:rag_demo.tools.router:意图路由 -> rag: 高客单、喜欢美妆的女性用户有哪些
-INFO:httpx2:HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
-INFO:rag_demo.retrieval.query_processor:检索策略: 直接检索=高客单、喜欢美妆的女性用户有哪些 | 关键词扩写=高客单 美妆 女性用户（LLM 判定=['关键词']，实际执行=2）
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00, 43.13it/s]
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00, 41.20it/s]
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00, 33.47it/s]
-Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:00<00:00, 37.07it/s]
-INFO:httpx2:HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"

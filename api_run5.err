@@ -1,15 +1,0 @@
-INFO:     Started server process [22204]
-INFO:     Waiting for application startup.
-INFO:rag_demo.api.main:预加载模型和 BM25 语料...
-INFO:rag_demo.retrieval.hybrid_retriever:正在加载 bge-m3 模型（device=cuda, dtype=torch.float16）...
-INFO:sentence_transformers.base.model:Loading SentenceTransformer model from F:\workspace\python\rag-demo\models\bge-m3.
-Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights:   1%|▏         | 5/391 [00:03<04:12,  1.53it/s]Loading weights: 100%|██████████| 391/391 [00:03<00:00, 118.33it/s]
-INFO:rag_demo.db.connection:建立新数据库连接...
-INFO:rag_demo.retrieval.hybrid_retriever:BM25 语料加载完成: 8146 条
-INFO:rag_demo.api.main:预加载完成
-INFO:rag_demo.api.main:稀疏索引正在后台预热...
-INFO:     Application startup complete.
-ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000): 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
-INFO:     Waiting for application shutdown.
-WARNING:rag_demo.api.main:稀疏索引预热失败（不影响使用，首次调用时会重试）: cursor already closed
-INFO:     Application shutdown complete.
