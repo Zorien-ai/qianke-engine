@@ -22,6 +22,7 @@
   那里必须显式 use_dataset("user")，否则它会安静地连回默认的 demo 库，
   而构建的第一步就是 TRUNCATE——那正好会把评测基线和 demo 一起清掉。
 """
+import contextlib
 import contextvars
 import logging
 import threading
@@ -55,6 +56,16 @@ class UnknownDataset(ValueError):
     """
 
 
+class UnsafeWriteError(RuntimeError):
+    """写操作没有显式声明目标数据集 —— 直接拒绝执行。
+
+    为什么是异常而不是「警告 + 用默认值」：写操作的第一步往往是 TRUNCATE，
+    落到默认数据集上就是把它清空。而 demo 同时是演示底座和评测基线，
+    清掉不可逆。所以「忘记声明」必须是一个立刻炸出来的错误，
+    而不是一次安静的误写。
+    """
+
+
 def _resolve(name: str | None) -> str:
     """把 None 解析成「当前数据集」，并校验名字合法"""
     target = name or _current.get()
@@ -83,6 +94,85 @@ def use_dataset(name: str):
 def reset_dataset(token) -> None:
     """还原到 use_dataset 之前的数据集"""
     _current.reset(token)
+
+
+# ================= 写操作守卫 =================
+# 与「数据集」分开的一个 contextvar：_current 决定**读**去哪，_WRITE_SCOPE 只表示
+# 「有人显式承诺过这段是写 user 的」。读允许回落到默认值，写不允许。
+_WRITE_SCOPE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "rag_write_dataset", default=None
+)
+
+
+class writes_to(contextlib.ContextDecorator):
+    """
+    声明「这一段的写操作属于哪个数据集」
+
+    两种用法（同一套语义，按场景选）：
+
+        with writes_to("user"):
+            ingest_documents(docs)
+
+        @writes_to("user")
+        def _run_build(task_id, ...):
+            ...            # 后台线程用这个：线程入口就带着声明，中间不会漏
+
+    为什么要有这个东西，而不是靠注释提醒调用方：
+        写操作的第一步往往是 TRUNCATE。自己 new 的线程**不继承 contextvar**，
+        忘了显式声明就会安静地回落到默认数据集（demo）并把它清空——
+        demo 同时是演示底座和评测基线，清掉不可逆。
+        所以把「忘记声明」变成一个立刻抛出的 UnsafeWriteError（见 require_write_scope），
+        而不是一次安静的误写。
+
+    进入作用域时会**同时**设置 _current：这样作用域内部更深处的库代码
+    （ensure_base_tables、write_fingerprint 等直接调 get_conn() 的地方）
+    也跟着走同一个数据集，不必逐层传参。
+    """
+
+    def __init__(self, dataset: str):
+        self.dataset = _resolve(dataset)
+        self._write_token = None
+        self._data_token = None
+
+    def __enter__(self) -> str:
+        self._write_token = _WRITE_SCOPE.set(self.dataset)
+        self._data_token = _current.set(self.dataset)
+        logger.info("进入写作用域: %s", self.dataset)
+        return self.dataset
+
+    def __exit__(self, *exc) -> None:
+        # 先还 _current 再还 _WRITE_SCOPE：顺序反了会让「退出过程中」的日志
+        # 报出一个已经失效的数据集
+        if self._data_token is not None:
+            _current.reset(self._data_token)
+        if self._write_token is not None:
+            _WRITE_SCOPE.reset(self._write_token)
+        self._write_token = self._data_token = None
+
+    def _recreate_cm(self):
+        # 作为装饰器复用时，contextlib 会调用它拿一个「新的」上下文管理器。
+        # 不复用同一个实例，否则并发进入时 token 会互相覆盖。
+        return type(self)(self.dataset)
+
+
+def require_write_scope(operation: str) -> str:
+    """
+    写操作入口的第一行调用；返回本次要写入的数据集名
+
+    没有显式声明就抛 UnsafeWriteError。**不给默认值是有意的**——
+    默认值会让「忘记声明」表现为「安静地写进 demo」，而这正是要防的事。
+    """
+    name = _WRITE_SCOPE.get()
+    if name is None:
+        raise UnsafeWriteError(
+            f"{operation} 是写操作（会先清空目标数据集），必须显式声明目标数据集，例如：\n"
+            f"    with writes_to('user'):\n"
+            f"        {operation}(...)\n"
+            f"或给线程入口加装饰器 @writes_to('user')。\n"
+            f"当前默认数据集是 {DEFAULT_DATASET}，它同时是演示底座与评测基线——"
+            f"不声明就执行会把它清空，所以这里直接拒绝而不是替你选。"
+        )
+    return name
 
 
 def get_conn(dataset: str | None = None):

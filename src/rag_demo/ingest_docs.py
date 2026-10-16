@@ -31,8 +31,13 @@ from typing import Callable
 
 from sentence_transformers import SentenceTransformer
 
-from rag_demo.config import DOCS_DIR, MODEL_PATH, SEARCH_INDEX_TABLE
-from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.config import DEFAULT_DATASET, DOCS_DIR, MODEL_PATH, SEARCH_INDEX_TABLE
+from rag_demo.db.connection import (
+    close_conn,
+    get_conn,
+    require_write_scope,
+    writes_to,
+)
 from rag_demo.db.schema import ensure_base_tables
 from rag_demo.splitter import DOC_TYPE_WIKI, split
 
@@ -81,18 +86,24 @@ def ingest_documents(
     注意这里**不关连接**：服务与脚本共用 db.connection 的进程级单例，
     函数内 close_conn() 会把别的线程正在用的连接一起关掉（改造前 main() 结尾就是这么干的）。
     连接的生命周期由调用方负责。
+
+    ⚠ 会写库（先 TRUNCATE 再全量写入），因此**必须在 writes_to(...) 作用域内调用**：
+    后台构建线程不继承 contextvar，漏声明会落到默认数据集（demo）上把它清空。
     """
     if not docs:
         # 空输入直接拦下，不能走到 TRUNCATE——那会把已有知识库清空还不报错。
         # 改造前脚本没有这道闸，DOCS_DIR 为空时会静默清库。
         raise ValueError("没有可导入的 .md 文档")
 
+    # 写操作守卫：放在加载模型之前，否则「忘记声明」要等几十秒模型加载完才报出来。
+    dataset = require_write_scope("ingest_documents")
+
     if model is None:
         logger.info("正在加载 bge-m3 模型...")
         model = SentenceTransformer(MODEL_PATH) if os.path.exists(MODEL_PATH) \
             else SentenceTransformer("BAAI/bge-m3")
 
-    conn = get_conn()
+    conn = get_conn(dataset)
     cur = conn.cursor()
     try:
         # 先建表（M2 的 user 库是空的；已有表的环境这一步是 no-op），
@@ -162,7 +173,10 @@ def main() -> None:
         logger.error("data/docs 下没有 .md 文档，已中止（不会清空 wiki_vectors）")
         return
 
-    result = ingest_documents(docs)
+    # 显式声明写作用域：脚本入口是「明确知道自己在写哪个库」的地方。不声明的话
+    # ingest_documents 的第一行就会抛 UnsafeWriteError（空输入之外的第二道闸）。
+    with writes_to(DEFAULT_DATASET):
+        result = ingest_documents(docs)
     logger.info("所有文档已入库，共 %d 个分块（%d 篇）", result["chunks"], result["docs"])
 
     close_conn()

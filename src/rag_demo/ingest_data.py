@@ -31,8 +31,20 @@ import pandas as pd
 from langchain_core.documents import Document
 from sentence_transformers import SentenceTransformer
 
-from rag_demo.config import DATA_DIR, DEVICE, DTYPE, MODEL_PATH, SEARCH_INDEX_TABLE
-from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.config import (
+    DATA_DIR,
+    DEFAULT_DATASET,
+    DEVICE,
+    DTYPE,
+    MODEL_PATH,
+    SEARCH_INDEX_TABLE,
+)
+from rag_demo.db.connection import (
+    close_conn,
+    get_conn,
+    require_write_scope,
+    writes_to,
+)
 from rag_demo.db.schema import ensure_base_tables
 from rag_demo.splitter import DOC_TYPE_PROFILE, split
 
@@ -426,7 +438,11 @@ def write_to_db(
         # 否则「用户上传的文件一行都没解析出来」会变成「原有画像被清空」。
         raise ValueError("没有可写入的用户画像")
 
-    conn = get_conn()
+    # 写操作守卫：函数体第一行就校验，不能等到 TRUNCATE 前面——
+    # 这中间已经花了时间（模型加载、向量化），报错越晚越像「跑了一半崩了」。
+    dataset = require_write_scope("write_to_db")
+
+    conn = get_conn(dataset)
     cur = conn.cursor()
 
     # 先保证表存在，再 ALTER 加结构化字段。顺序不能反：ensure_schema 里全是
@@ -499,7 +515,13 @@ def ingest_transactions(
     否则进程里会同时存在两份 bge-m3（config 已警示 fp32 双模型约 4.4GB，会 OOM）。
 
     这里同样**不关连接**，连接生命周期归调用方。
+
+    ⚠ 会写库（链路末端是 TRUNCATE + 全量重写），因此**必须在 writes_to(...) 作用域内调用**。
     """
+    # 早于模型加载就校验：加载 bge-m3 要几十秒、聚合画像也要时间，等这些都跑完
+    # 才报「没声明写作用域」，用户看到的就是「跑了一半崩了」。
+    require_write_scope("ingest_transactions")
+
     if model is None:
         logger.info("正在加载 bge-m3 模型（device=%s, dtype=%s）...", DEVICE, DTYPE)
         model = SentenceTransformer(
@@ -546,12 +568,18 @@ def main() -> None:
     """脚本入口：扫 data/dianshuang 全量重建（与改造前行为一致）"""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 
-    # 不传参数 = 沿用改造前的口径（DATA_DIR + COLUMN_MAP）
-    ingest_transactions()
+    # 显式声明写作用域：脚本入口是「明确知道自己在写哪个库」的地方，在这里声明一次，
+    # 下面的写入与校验查询就都落在同一个库上（作用域会**同时**设置当前数据集）。
+    # 不声明则 write_to_db / ingest_transactions 的第一行就抛 UnsafeWriteError——
+    # 「忘记声明」正是要防的那件事，所以宁可当场炸，也不替调用方猜。
+    with writes_to(DEFAULT_DATASET):
+        # 不传参数 = 沿用改造前的口径（DATA_DIR + COLUMN_MAP）
+        ingest_transactions()
 
-    cur = get_conn().cursor()
-    verify(cur)
-    cur.close()
+        cur = get_conn().cursor()
+        verify(cur)
+        cur.close()
+
     close_conn()
     logger.info("数据导入与结构化字段回填完成")
 

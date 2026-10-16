@@ -25,8 +25,13 @@ import time
 
 from psycopg2.extras import execute_values
 
-from rag_demo.config import BASE_DIR, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
-from rag_demo.db.connection import close_conn, get_conn
+from rag_demo.config import BASE_DIR, DEFAULT_DATASET, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
+from rag_demo.db.connection import (
+    close_conn,
+    get_conn,
+    require_write_scope,
+    writes_to,
+)
 from rag_demo.db.schema import (
     FRESH,
     current_fingerprint,
@@ -63,6 +68,11 @@ def load_corpus() -> list[dict]:
 
 
 def main() -> None:
+    # 写操作守卫：本脚本会 TRUNCATE search_index，属于破坏性写操作，必须由入口显式
+    # 声明目标数据集（见文件末尾的 __main__）。import 后直接调 main() 会当场抛
+    # UnsafeWriteError——索引表与源表同库这件事，靠「声明」保证，不靠调用方记得。
+    require_write_scope("build_search_index")
+
     lines = ["检索索引构建（search_index）", "=" * 70]
     t_all = time.time()
 
@@ -186,4 +196,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # 显式声明写作用域：脚本入口写 demo 库（与改造前行为一致）。
+    # 作用域会同时设置当前数据集，因此语料读取（user_profile_vectors / wiki_vectors）
+    # 与索引写入落在同一个库上——索引一旦与源表不同库，检索结果是错的且不报错。
+    with writes_to(DEFAULT_DATASET):
+        main()
