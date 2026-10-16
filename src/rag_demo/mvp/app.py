@@ -3,28 +3,35 @@
 """
 @Author  : Vincent
 @File    : app.py
-@Function: MVP M1 交互原型服务 —— 假数据跑通「上传 → 确认 → 构建 → 查询」
+@Function: MVP 向导 —— 四步「上传 → 确认 → 构建 → 查询」的接口实现（M2 迭代区）
 
-⚠ 8001 已不从这里启动（2026-10-16）。
-  M1 验收通过后，本文件连同 static/ 已**整体冻结**到 `prototype/m1_mock/`，
-  内测环境（http://127.0.0.1:8001）从那份快照启动：
+本模块对外提供两样东西：
 
+    router —— `/api/wizard/*` 的接口实现。**8000 的正式服务直接挂它**
+              （见 api/wizard.py），所以这套向导接口全服务只有一份实现，
+              不存在「demo 版一份、正式版一份」的漂移。
+
+    app    —— 一个自包含的独立服务，给「只想看界面」时用：不 import
+              config / torch / 数据库，启动毫秒级，离线也能演示。
+
+启动（项目根目录下执行；正式入口是 8000 的 `/wizard`，这里只是调试用）：
+    uv run uvicorn rag_demo.mvp.app:app --port 8002
+
+访问：
+    http://127.0.0.1:8002/          四步向导页
+    http://127.0.0.1:8002/health    存活探针
+
+⚠ 8001 不从这里启动（2026-10-16）。内测环境 8001 由冻结快照提供：
       uv run uvicorn m1_mock.app:app --port 8001 --app-dir prototype
+  原因：本包是 M2 的迭代区，M2 第一天就会改到这里；冻结一份出去，
+  8001 便与 M2 的迭代完全解耦，测试者手上的链接不会断。
 
-  原因：本包按原设计是「M2 把 mock 实现换成真实实现」，也就是 M2 第一天就会改到
-  真人测试环境正在跑的文件。冻结一份出去，8001 便与 M2 的迭代完全解耦——
-  这里的改动不会再影响任何测试者。
-
-  本包自此是 **M2 的迭代区**：把 mock 实现逐步换成真实实现（真实上传落盘、
-  真实字段识别、真实构建任务）。若要再起一个本地服务看效果，请用别的端口。
-
-与 rag_demo.api.main 的关系（重要）：
-    这两个是**并列的两个服务**，不是同一份代码的两条路。
-    api/main.py 是现有 Demo，启动要加载 bge-m3 / 精排 / 意图模型，还要连库；
-    MVP 只想验证界面流程，不该被 2GB 显存和数据库挡在门外，
-    所以这里刻意**不 import config / torch / 数据库**，启动是毫秒级的。
-
-    前端（static/）与 mock 后端都在这一个目录里，M2 换后端时前端一行不用改。
+路径约定（两个宿主必须完全一致，前端才只有一份）：
+    页面  /wizard（8000）或 /（独立调试服务）
+    资源  /static/wizard/wizard.{css,js}
+    接口  /api/wizard/*
+  8000 上 `/static/wizard` 与既有 `/static` 是两个挂载点，注册顺序有讲究，
+  见 api/wizard.py 的说明。
 """
 import logging
 import os
@@ -34,7 +41,7 @@ import time
 import uuid
 from copy import deepcopy
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -58,8 +65,12 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
-app = FastAPI(title="MVP M1 交互原型", version="0.1.0")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# 接口前缀只在这里写一次：8000 与独立调试服务共用同一个 router，
+# 前端因此只需要认一套路径（见模块 docstring 的路径约定）。
+router = APIRouter(prefix="/api/wizard", tags=["wizard"])
+
+app = FastAPI(title="MVP 向导（独立调试服务）", version="0.2.0")
+app.mount("/static/wizard", StaticFiles(directory=STATIC_DIR), name="wizard-static")
 
 
 # ================= 会话态（MVP 单用户，进程内即可） =================
@@ -248,13 +259,13 @@ def health() -> dict:
 
 
 # ================= 1. 上传 =================
-@app.get("/api/mvp/sample")
+@router.get("/sample")
 def sample() -> dict:
     """示例数据 manifest：让运营不用准备文件就能先走一遍流程"""
     return {"csv_files": SAMPLE_CSV_FILES, "md_files": SAMPLE_MD_FILES}
 
 
-@app.post("/api/mvp/analyze")
+@router.post("/analyze")
 def analyze(req: AnalyzeRequest) -> dict:
     """分析上传文件：字段识别 + 文档结构校验（对应步骤 2 的内容）"""
     if not req.csv_files and not req.md_files:
@@ -366,7 +377,7 @@ def _run_build(task_id: str, req: BuildRequest) -> None:
         task["note"] = "构建完成，可以开始提问了"
 
 
-@app.post("/api/mvp/build")
+@router.post("/build")
 def build(req: BuildRequest) -> dict:
     """启动构建任务，返回 task_id；前端随后轮询 /api/mvp/build/{id}"""
     if not req.csv_files and not req.md_files:
@@ -409,7 +420,7 @@ def build(req: BuildRequest) -> dict:
     return {"task_id": task_id}
 
 
-@app.get("/api/mvp/build/{task_id}")
+@router.get("/build/{task_id}")
 def build_progress(task_id: str) -> dict:
     task = _BUILD_TASKS.get(task_id)
     if not task:
@@ -429,7 +440,7 @@ def _pick_answer(question: str) -> dict:
     return best or FALLBACK_ANSWER
 
 
-@app.post("/api/mvp/query")
+@router.post("/query")
 def query(req: QueryRequest) -> dict:
     """
     假查询：返回带引用来源的答案
@@ -471,7 +482,7 @@ def query(req: QueryRequest) -> dict:
     }
 
 
-@app.get("/api/mvp/examples")
+@router.get("/examples")
 def examples() -> dict:
     """
     示例问题：根据**已确认的字段**动态生成
@@ -501,3 +512,10 @@ def examples() -> dict:
         "based_on_fields": sorted(fields),
         "doc_count": len(doc_names),
     }
+
+
+# 接口在**文件末尾**统一挂到独立调试服务上：router 上的路由是靠上面的 @router.xxx
+# 装饰器在导入期逐个注册的，include 必须发生在它们之后。
+# 8000 的正式服务不走这里，而是自己 include 同一个 router（见 api/wizard.py）——
+# 两个宿主共用一份实现，这是本模块拆出 router 的全部意义。
+app.include_router(router)

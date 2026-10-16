@@ -11,7 +11,7 @@ const el = (id) => document.getElementById(id);
 const state = {
   csvFiles: [],      // {name, size, encoding, rowCount, columns}
   mdFiles: [],       // {name, size, encoding, text}
-  analysis: null,    // /api/mvp/analyze 的结果
+  analysis: null,    // /api/wizard/analyze 的结果
   taskId: null,
   pollTimer: null,
   history: [],       // {question, answer, sources, time}
@@ -249,7 +249,7 @@ async function goAnalyze() {
   btn.disabled = true;
   btn.textContent = "正在识别…";
   try {
-    const data = await api("/api/mvp/analyze", {
+    const data = await api("/api/wizard/analyze", {
       method: "POST",
       body: JSON.stringify({
         csv_files: state.csvFiles.map((f) => ({
@@ -353,7 +353,7 @@ async function startBuild() {
   btn.disabled = true;
   btn.textContent = "启动中…";
   try {
-    const res = await api("/api/mvp/build", { method: "POST", body: JSON.stringify(buildPayload()) });
+    const res = await api("/api/wizard/build", { method: "POST", body: JSON.stringify(buildPayload()) });
     state.taskId = res.task_id;
     el("progress-wrap").hidden = false;
     el("build-intro").hidden = true;
@@ -372,7 +372,7 @@ function pollBuild() {
   // M2 接真实任务时改回 2000ms 的节奏（进度本来就更新不了那么快）。
   state.pollTimer = setTimeout(async () => {
     try {
-      const task = await api(`/api/mvp/build/${state.taskId}`);
+      const task = await api(`/api/wizard/build/${state.taskId}`);
       renderProgress(task);
       if (task.status === "running") {
         pollBuild();
@@ -451,7 +451,7 @@ async function retryBuild() {
 
 async function loadExamples() {
   try {
-    const data = await api("/api/mvp/examples");
+    const data = await api("/api/wizard/examples");
     el("examples-list").innerHTML = (data.questions || [])
       .map((q) => `<button type="button" class="ex-chip">${escapeHtml(q)}</button>`).join("");
   } catch (e) {
@@ -478,7 +478,7 @@ async function ask(question) {
   btnText.textContent = "思考中…";
 
   try {
-    const data = await api("/api/mvp/query", { method: "POST", body: JSON.stringify({ question: q }) });
+    const data = await api("/api/wizard/query", { method: "POST", body: JSON.stringify({ question: q }) });
     renderAnswer(q, data);
     pushHistory(q, data);
   } catch (e) {
@@ -620,7 +620,7 @@ function bindEvents() {
     const btn = el("btn-sample");
     btn.disabled = true;
     try {
-      const data = await api("/api/mvp/sample");
+      const data = await api("/api/wizard/sample");
       state.csvFiles = data.csv_files.map((f) => ({
         name: f.name, size: f.size, encoding: f.encoding,
         rowCount: f.row_count, columns: f.columns,

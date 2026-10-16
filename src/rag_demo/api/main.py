@@ -38,6 +38,7 @@ from openai import APIError
 from pydantic import BaseModel
 
 from rag_demo import permissions
+from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache
 from rag_demo.config import (
     DEFAULT_API_ROLE,
@@ -228,6 +229,11 @@ class StatusResponse(BaseModel):
 
 
 # ================= 静态资源与页面 =================
+# 向导（M2）先注册：它自带 /static/wizard 挂载点，必须排在下面那个 /static 之前，
+# 否则 /static/wizard/* 会被 /static 吃掉并 404（Starlette 按注册顺序匹配前缀）。
+# 页面在 /wizard，接口在 /api/wizard/*，实现见 rag_demo/mvp/app.py。
+register_wizard(app)
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

@@ -61,7 +61,11 @@ $env:DEEPSEEK_API_KEY="sk-你的key"
 uv run uvicorn rag_demo.api.main:app --reload --port 8000
 ```
 
-访问 <http://127.0.0.1:8000>（交互页面） / `/docs`（API 文档）
+访问 <http://127.0.0.1:8000>（问答交互页） / `/wizard`（四步向导） / `/docs`（API 文档）
+
+> 向导（上传 → 确认 → 构建 → 查询）是 M2 新增的入口：页面在 `/wizard`，
+> 接口在 `/api/wizard/*`，实现见 `src/rag_demo/mvp/app.py`，
+> 接入方式见 `src/rag_demo/api/wizard.py`（**挂载顺序有讲究**，别调换）。
 
 ### 3. 起 M1 原型（冻结快照，内测环境 8001）
 
