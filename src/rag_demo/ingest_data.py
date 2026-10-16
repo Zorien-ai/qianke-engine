@@ -3,8 +3,23 @@
 """
 @Author  : Vincent
 @File    : ingest_data.py
-@Function: 多平台 CSV → 聚合用户画像 → 写入结构化字段 + 向量
+@Function: 多来源 CSV → 聚合画像样本 → 写入结构化字段 + 向量
            结构化字段供 Text2SQL 聚合使用，profile_text 供 RAG 检索使用
+
+数据口径（2026-10-16 实测，必读）
+--------------------------------
+本数据集（`data/dianshuang`）的 `user_id` **不是用户实体键**：它逐行独立随机生成，
+同一个 ID 在不同行、不同平台上的姓名 / 年龄 / 城市互不相同。实测证据：
+
+  · 跨平台同名 ID 抽样 2000 个，四项属性全部冲突 —— 2000 / 2000（100%）
+  · 平台内部重复 ID 同样 100% 冲突（天猫 52/52、1688 55/55、ecommerce_data 4441/4441）
+  · `(用户ID, 用户姓名)` 组合数 = 21000 = 总行数（ID 不携带身份信息）
+  · 每个 ID 的行数分布与「21000 次随机抽样落在 9000 个 ID 上」的理论分布几乎重合
+    （实际 distinct 8110 vs 理论 8127；2049 vs 2036.4、2319 vs 2375.8 …）
+
+因此本脚本聚合出的「8110 个用户」是**聚合样本**，不是 8110 个真实个体；
+`order_count` / `avg_amount` / `top_category` 也都是样本口径（且 CSV 无订单号，
+`order_count` 实为「购买记录行数」）。详见 README「数据口径」一节。
 """
 import glob
 import json
@@ -78,6 +93,20 @@ COLUMN_MAP = {
     "购买数量": "quantity",
     "消费金额": "amount",
 }
+
+# 数据集说明书（data/dianshuang/数据集详情.md）登记的 6 个平台。
+#
+# 为什么需要白名单：**文件名 ≠ 平台名**。目录里还有 `ecommerce_data.csv`，
+# 它不在说明书登记的平台之列。实测（2026-10-16）：
+#   · 与 6 个平台文件的行级重叠（用户ID+商品ID+购买时间）= 0 / 1000，
+#     即它不是这些平台的合并或超集（不存在重复计数）
+#   · 15000 行，占全量 21000 行的 71%；唯一商品 13802，而平台文件各约 994
+#     （SKU 空间大一个量级），时间窗同为 2024 全年
+# 此前按「文件名即平台」处理，它被当成第 7 个平台，并以
+# 「活跃平台：ecommerce_data」写进了绝大多数画像文本——对用户是误导（它不是平台）。
+# 未登记的来源统一记为 UNKNOWN_PLATFORM，原文件名只留在日志里以便追溯。
+KNOWN_PLATFORMS = {"天猫", "淘宝", "京东", "拼多多", "苏宁易购", "1688"}
+UNKNOWN_PLATFORM = "未标注来源"
 # ==========================================
 
 
@@ -116,17 +145,39 @@ def build_profile_text(row: pd.Series) -> str:
 
 
 def load_transactions() -> pd.DataFrame:
-    """读取并合并所有平台 CSV"""
+    """
+    读取并合并所有来源 CSV
+
+    经 KNOWN_PLATFORMS 白名单识别平台名；未登记的文件统一记为 UNKNOWN_PLATFORM，
+    原文件名只留在日志里——不能让文件名冒充平台名写进画像文本（原因见常量处注释）。
+    """
     csv_files = sorted(glob.glob(os.path.join(DATA_DIR, "*.csv")))
     logger.info("正在读取 %s 下的 CSV...", DATA_DIR)
 
     frames = []
+    unregistered: list[tuple[str, int]] = []
     for f in csv_files:
-        platform = os.path.splitext(os.path.basename(f))[0]
+        stem = os.path.splitext(os.path.basename(f))[0]
+        registered = stem in KNOWN_PLATFORMS
+        platform = stem if registered else UNKNOWN_PLATFORM
         df = pd.read_csv(f, encoding="utf-8-sig")  # 注意 BOM
         df["platform"] = platform
         frames.append(df)
-        logger.info("  %s: %d 条", platform, len(df))
+        if registered:
+            logger.info("  [平台] %s: %d 条", stem, len(df))
+        else:
+            unregistered.append((stem, len(df)))
+            logger.warning(
+                "  [未登记来源] %s: %d 条 -> 记为「%s」（不在数据集说明书的平台清单内）",
+                stem, len(df), UNKNOWN_PLATFORM,
+            )
+
+    if unregistered:
+        logger.warning(
+            "未登记来源共 %d 个文件 / %d 行，已统一记为「%s」。"
+            "若其中确有需要参与画像的平台，请显式加进 KNOWN_PLATFORMS。",
+            len(unregistered), sum(n for _, n in unregistered), UNKNOWN_PLATFORM,
+        )
 
     df_all = pd.concat(frames, ignore_index=True)
     df_all = df_all.rename(columns=COLUMN_MAP)
