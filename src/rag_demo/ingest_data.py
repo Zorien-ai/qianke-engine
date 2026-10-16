@@ -133,6 +133,13 @@ REQUIRED_COLUMNS = ("user_id",)
 # 进度回调：(已完成, 总数, 阶段说明)
 ProgressFn = Callable[[int, int, str], None]
 
+# 阶段回调：(阶段名, 该阶段的真实数量)
+# 与 ProgressFn 分开的原因：ProgressFn 报的是「写入循环里的进度」，而清洗/聚合
+# 这两步**没有可切分的循环**（一次读全部、一次聚合全部），只有「做完了、数量是多少」。
+# 构建任务的进度条要覆盖它们，就必须能收到这个「阶段完成」的信号——
+# 否则进度条会在最耗时的前两步上一直停在 0%，最后突然跳到一半。
+PhaseFn = Callable[[str, dict], None]
+
 
 def _present(value: Any) -> bool:
     """
@@ -503,6 +510,7 @@ def ingest_transactions(
     column_map: dict[str, str] | None = None,
     model: SentenceTransformer | None = None,
     progress: ProgressFn | None = None,
+    on_phase: PhaseFn | None = None,
 ) -> dict:
     """
     端到端：CSV → 清洗 → 聚合画像 → 切分 → 向量化 → 写入 user_profile_vectors
@@ -513,6 +521,9 @@ def ingest_transactions(
 
     model 不传则自行加载（脚本/离线场景）；服务路径必须传检索侧单例，
     否则进程里会同时存在两份 bge-m3（config 已警示 fp32 双模型约 4.4GB，会 OOM）。
+
+    progress: 写入画像的批进度（每 commit 一批回调一次）。
+    on_phase: 清洗/聚合/切分三步的完成信号，带真实数量（见 PhaseFn 的注释）。
 
     这里同样**不关连接**，连接生命周期归调用方。
 
@@ -529,8 +540,16 @@ def ingest_transactions(
         )
 
     df_all = load_transactions(csv_paths, column_map)
+    if on_phase:
+        # 只回报阶段与**真实数量**（行数/用户数），不回报时间预估——
+        # 进度条最容易骗人的地方就是「按时间猜」，而这里的数量都是算出来的
+        on_phase("load_done", {"rows": len(df_all)})
     profiles = build_profiles(df_all)
+    if on_phase:
+        on_phase("profile_done", {"profiles": len(profiles)})
     documents = split(DOC_TYPE_PROFILE, {"profiles": profiles})
+    if on_phase:
+        on_phase("split_done", {"documents": len(documents)})
     count = write_to_db(documents, model, progress)
     logger.info("成功导入 %d 条用户画像（含结构化字段）", count)
     return {"rows": len(df_all), "profiles": count}

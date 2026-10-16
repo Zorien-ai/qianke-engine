@@ -283,6 +283,10 @@ select:focus { outline: 2px solid var(--primary-soft); border-color: var(--prima
 .step-list li.done .sl-mark { background: var(--ok-soft); color: var(--ok); }
 .step-list li.failed { color: var(--danger); font-weight: 600; }
 .step-list li.failed .sl-mark { background: var(--danger-soft); color: var(--danger); }
+/* 跳过：本次上传没提供这一步需要的数据（如只传文档时不重建画像）。
+   既不能画成完成（骗人），也不能留成待处理（永远不会动）。 */
+.step-list li.skipped { color: #b6bccd; }
+.step-list li.skipped .sl-bar > i { background: #d9dde8; }
 .sl-bar { height: 6px; border-radius: 999px; background: #eef1f8; overflow: hidden; }
 .sl-bar > i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .35s ease; }
 .step-list li.done .sl-bar > i { background: var(--ok); }

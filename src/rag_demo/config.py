@@ -34,6 +34,17 @@ DB_CONFIG = {**_DB_BASE, "dbname": "vec_db"}
 # user：M2 起用户自己上传并构建的数据。可以随便覆盖、随便清空，与 demo 互不影响。
 USER_DB_CONFIG = {**_DB_BASE, "dbname": "vec_db_user"}
 
+# test：M2 真实构建的**首跑库**。
+#
+# 为什么要有它：writes_to（写作用域守卫）与 dataset_lock（并发互斥）第一次接上真实
+# ingest 的那一刻，是「以为有保护」和「保护真的生效」之间差距最大的时刻。若直接在
+# user 上试、而守卫恰好没生效，写操作会静默落到默认数据集 demo 上把它清空——
+# demo 同时是评测基线，清掉不可逆。先在 test 上把整条链路（含守卫与并发）跑通，
+# 再去碰 user。
+#
+# 它脏了可以随便删库重建，不承载任何需要保留的数据。
+TEST_DB_CONFIG = {**_DB_BASE, "dbname": "vec_db_test"}
+
 # 数据集注册表：**这是「数据分开存」这件事的唯一真源**。
 #
 # 为什么按「数据库」分，而不是按表前缀 / 独立 schema 分：
@@ -48,6 +59,7 @@ USER_DB_CONFIG = {**_DB_BASE, "dbname": "vec_db_user"}
 DATASETS = {
     "demo": DB_CONFIG,
     "user": USER_DB_CONFIG,
+    "test": TEST_DB_CONFIG,
 }
 
 # 默认数据集：**保持 demo**。pipeline / hybrid_retriever / sql_tool 里几十处

@@ -364,7 +364,9 @@ function pollBuild() {
       el("btn-start-build").disabled = false;
       el("btn-start-build").textContent = "重新开始构建";
     }
-  }, 800);
+    // 真实构建是分钟级的（要跑模型与入库），2 秒一次足够；
+    // 原型阶段用 800ms 是因为假构建总共才几秒，看不出运动
+  }, 2000);
 }
 
 function renderProgress(task) {
@@ -376,12 +378,16 @@ function renderProgress(task) {
 
   if (!task.steps || !task.steps.length) return;
   el("step-list").innerHTML = task.steps.map((s) => {
-    const mark = s.status === "done" ? "✓" : s.status === "failed" ? "!" : s.status === "running" ? "…" : "";
+    // skipped 是真实存在的状态：只上传文档时不重建画像，那三步就没跑。
+    // 标成「完成」会骗人，标成待处理又永远不动——所以单独一档。
+    const mark = s.status === "done" ? "✓" : s.status === "failed" ? "!"
+      : s.status === "skipped" ? "–" : s.status === "running" ? "…" : "";
+    const pct = s.status === "done" ? "完成" : s.status === "skipped" ? "已跳过" : (s.percent || 0) + "%";
     return `<li class="${s.status}">
       <span class="sl-mark">${mark}</span>
       <span>${escapeHtml(s.label)}</span>
       <span class="sl-bar"><i style="width:${s.percent || 0}%"></i></span>
-      <span class="sl-pct">${s.status === "done" ? "完成" : (s.percent || 0) + "%"}</span>
+      <span class="sl-pct">${pct}</span>
     </li>`;
   }).join("");
 }
@@ -496,8 +502,9 @@ function jumpToSource(idx) {
 function renderAnswer(question, data) {
   const sources = data.sources || [];
   el("result").hidden = false;
-  el("result-meta").textContent =
-    `${(data.elapsed_ms / 1000).toFixed(1)} 秒 · 检索类问题` + (data.degraded ? " · 无引用来源" : "");
+  el("result-meta").textContent = data.busy
+    ? "构建进行中 · 本次查询已被拒绝"
+    : `${(data.elapsed_ms / 1000).toFixed(1)} 秒 · 检索类问题` + (data.degraded ? " · 无引用来源" : "");
   el("answer-body").innerHTML = formatAnswer(data.answer, sources.length > 0);
 
   const box = el("sources-box");

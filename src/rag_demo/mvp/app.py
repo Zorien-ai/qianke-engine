@@ -17,8 +17,16 @@
 M2 进度（哪一步是真的，哪一步还是假的）：
     第 1 步 上传   **真的**：multipart 落盘 → 统一转 UTF-8 → pandas 真读出行数与列名
     第 2 步 字段   **真的**：同义词字典匹配，key 与入库口径同一套（FIELD_DEFS）
-    第 3 步 构建   假的：进度仍是模拟的，但每步的**总量取自真实文件**（行数、分块数）
-    第 4 步 查询   假的：答案来自内置样例。接真实检索链路是下一步
+    第 3 步 构建   **真的**：真 ingest 写库（writes_to 守卫 + dataset_lock 互斥 +
+                   真实进度事件）。编排在 builder.py，那里有完整说明
+    第 4 步 查询   答案还是内置样例（下一步接真实检索链路），
+                   但「构建期间谢绝查询」是真判断（同数据集试探锁）
+
+写库前的纪律（M2 首次真实构建的约束）：
+    真实构建只允许写 user / test 两个数据集（builder.BUILDABLE_DATASETS）；
+    **demo 永远不在白名单**——它是演示底座 + 评测基线，只由仓库自带数据重建。
+    第一次跑真实链路请用 test（`POST /build {"dataset": "test"}`）先验证守卫与并发，
+    再动 user。理由见 config.TEST_DB_CONFIG 的注释。
 
 启动（项目根目录下执行；正式入口是 8000 的 `/wizard`，这里只是调试用）：
     uv run uvicorn rag_demo.mvp.app:app --port 8002
@@ -275,6 +283,9 @@ def _analyze_fields(csv_files: list[dict]) -> tuple[list[dict], list[str]]:
 class BuildRequest(BaseModel):
     upload_id: str
     fields: dict[str, str | None] = Field(default_factory=dict)
+    # 目标数据集：只接受 builder.BUILDABLE_DATASETS 里的名字（user / test）。
+    # 默认 user —— 运营上传的数据进用户库；test 是首跑试验库。demo 不在白名单内。
+    dataset: str = "user"
     # 演示用：勾选后在「生成画像向量」这一步故意失败，
     # 用来验证「失败有可读中文提示 + 可重试」这条验收项。
     simulate_failure: bool = False
@@ -290,6 +301,9 @@ class QueryRequest(BaseModel):
     # 查询要知道这批上传里有哪些规则文档（答案的引用来源），
     # 但不该由前端把文档清单再报一遍——那是可以伪造的重复信息
     upload_id: str | None = None
+    # 查哪个数据集的数据（与构建同一个白名单）：决定「构建期间谢绝查询」这条规则
+    # 该对谁生效——构建 user 不该挡住查 demo 的人
+    dataset: str = "user"
 
 
 # ================= 页面 =================
@@ -433,78 +447,149 @@ def _build_step_state() -> list[dict]:
     ]
 
 
-def _run_build(task_id: str, req: BuildRequest, totals: dict) -> None:
+_STEP_INDEX = {s["key"]: i for i, s in enumerate(BUILD_STEPS)}
+
+
+def _recalc_percent(task: dict) -> int:
     """
-    **仍然是假构建**：按步骤推进进度，节奏刻意放慢到几秒
+    按步骤权重折算总进度
 
-    但每个步骤的「总量」已经是真的了（`totals` 由 build 从落盘文件算出来）：
-    清洗 N 行、切分 M 块都对着用户自己上传的那批文件，不再是前端报上来的数字。
-    下一步（真实入库）只需把进度来源从 sleep 换成 ingest 的回调，前端一行不用改。
-
-    totals 由调用方算好再传进来：它要读磁盘、跑切分器，属于「请求线程干的活」，
-    不该在构建线程里做——否则「进度 0%」的那几秒其实是在算总量，看着像卡住。
+    跳过的步骤按完成算：本次没上传 CSV 时，清洗/聚合/向量化三步永远不会执行，
+    若按 0% 算，进度条在最末尾会卡在 78% 而任务已经 done——那种「完成了但没到 100%」
+    比不准更让人怀疑。
+    上限压到 99：真正的 100% 只由「任务状态变 done」给出，
+    否则最后一步刚跑完 99% 与「索引还没重建」会看起来一样。
     """
-    task = _BUILD_TASKS[task_id]
-    # 每步的 tick 数：与权重成正比，让进度条的推进速度看起来均匀
-    ticks = {"clean": 11, "profile": 9, "embed": 12, "chunk": 8, "index": 10}
-    done_weight = 0
+    total = 0.0
+    for spec, st in zip(BUILD_STEPS, task["steps"]):
+        if st["status"] in ("done", "skipped"):
+            frac = 1.0
+        elif st["status"] == "running":
+            frac = (st["processed"] / st["total"]) if st["total"] else 0.0
+        else:
+            frac = 0.0
+        total += spec["weight"] * frac
+    return min(99, int(total))
 
-    for i, step in enumerate(BUILD_STEPS):
-        key = step["key"]
-        total = totals.get(key, 0)
-        tick_count = ticks.get(key, 8)
 
+def _apply_event(task: dict, event: dict) -> None:
+    """
+    把构建线程的事件翻译成任务状态
+
+    这一层存在的意义：前端只认一份结构（steps/percent/note），而构建线程只知道
+    「哪个阶段跑完了、多少条」。翻译只在这里做一次，前端与 ingest 层因此互不知道对方。
+    """
+    kind, key = event.get("kind"), event.get("step")
+    if kind == "note":
         with _BUILD_LOCK:
-            task["step_index"] = i
-            task["steps"][i]["status"] = "running"
-            task["steps"][i]["total"] = total
+            task["note"] = event["text"]
+        return
 
-        for t in range(tick_count):
-            time.sleep(0.12)
-            with _BUILD_LOCK:
-                if task["status"] == "cancelled":
-                    return
-
-            within = (t + 1) / tick_count
-
-            if req.simulate_failure and key == "embed" and within >= 0.6:
-                with _BUILD_LOCK:
-                    task["status"] = "failed"
-                    task["steps"][i]["status"] = "failed"
-                    task["error"] = (
-                        "生成画像向量时显存不足（CUDA out of memory）。\n"
-                        "处理办法：关掉其他占用显卡的程序后重试；"
-                        "如果数据量较大，可以先只上传一部分 CSV 再试。"
-                    )
-                    task["note"] = "构建在第 3 步失败，已处理的数据不会污染索引，可以直接重试。"
-                logger.warning("构建任务 %s 按演示开关失败于 %s", task_id, key)
-                return
-
-            processed = int(total * within)
-            with _BUILD_LOCK:
-                task["steps"][i]["percent"] = round(within * 100)
-                task["steps"][i]["processed"] = processed
-                task["percent"] = round(done_weight + step["weight"] * within)
-                task["processed"] = processed
-                task["total"] = total
-                task["note"] = f"{step['label']}：已处理 {processed:,} {step['unit']}" if total else step["label"]
-
-        with _BUILD_LOCK:
-            task["steps"][i]["status"] = "done"
-            task["steps"][i]["percent"] = 100
-            task["steps"][i]["processed"] = total
-        done_weight += step["weight"]
+    i = _STEP_INDEX.get(key)
+    if i is None:
+        return
 
     with _BUILD_LOCK:
-        task["status"] = "done"
-        task["percent"] = 100
-        task["step_index"] = len(BUILD_STEPS)
-        task["note"] = "构建完成，可以开始提问了"
+        st = task["steps"][i]
+        if kind == "step_start":
+            task["step_index"] = i
+            st["status"] = "running"
+            if event.get("total"):
+                st["total"] = event["total"]
+            task["note"] = f"{st['label']}…"
+        elif kind == "step_progress":
+            st["status"] = "running"
+            if event.get("total") is not None:
+                st["total"] = event["total"]
+            if event.get("processed") is not None:
+                st["processed"] = event["processed"]
+            st["percent"] = round(100 * st["processed"] / st["total"]) if st["total"] else 0
+        elif kind == "step_done":
+            if event.get("total") is not None:
+                st["total"] = event["total"]
+            st["processed"] = st["total"]
+            st["percent"] = 100
+            st["status"] = "done"
+            task["note"] = (f"{st['label']}：完成（{st['processed']:,} {st['unit']}）"
+                            if st["total"] else f"{st['label']}：完成")
+        elif kind == "step_skip":
+            st["status"] = "skipped"
+            st["percent"] = 100
+            task["note"] = event.get("text") or f"{st['label']}：已跳过"
+
+        task["percent"] = _recalc_percent(task)
+        running = next((s for s in task["steps"] if s["status"] == "running"), None)
+        task["processed"] = running["processed"] if running else 0
+        task["total"] = running["total"] if running else 0
+
+
+def _run_build(task_id: str, req: BuildRequest, csv_paths: list[str], md_paths: list[str]) -> None:
+    """
+    真实构建线程：写作用域、数据集锁、ingest 编排全在 builder.run_build 里
+
+    这里只做三件事：转发事件、把异常翻译成人话、把没跑到的步骤收尾成「跳过」。
+    builder.run_build 的模块 docstring 里有完整说明（含「失败会留下部分数据」这条）。
+    """
+    from rag_demo.mvp.builder import BuildInputs, run_build
+
+    task = _BUILD_TASKS[task_id]
+    try:
+        inputs = BuildInputs(
+            dataset=req.dataset,
+            csv_paths=csv_paths,
+            md_paths=md_paths,
+            fields=req.fields,
+            simulate_failure=req.simulate_failure,
+        )
+        result = run_build(inputs, lambda ev: _apply_event(task, ev))
+    except Exception as e:  # noqa: BLE001 构建失败必须变成任务状态，而不是打死线程
+        logger.exception("构建任务 %s 失败", task_id)
+        with _BUILD_LOCK:
+            task["status"] = "failed"
+            failed = next((s for s in task["steps"] if s["status"] == "running"), None)
+            if failed:
+                failed["status"] = "failed"
+                failed["note"] = str(e)
+            task["error"] = str(e)
+            task["note"] = (
+                "构建失败。注意：画像/文档是**边写边提交**的，失败时库里可能是部分数据；"
+                "重试会先清空再重写，所以直接重试即可。检索索引是最后一步，本次没重建，"
+                "查询仍会看到上一版结果。"
+            )
+    else:
+        with _BUILD_LOCK:
+            for st in task["steps"]:
+                if st["status"] == "pending":
+                    st["status"] = "skipped"   # 兜底：没参与本次构建的步骤不该停在待处理
+            task["status"] = "done"
+            task["percent"] = 100
+            task["step_index"] = len(BUILD_STEPS)
+            task["note"] = (
+                f"构建完成：画像 {result.get('rows', 0):,} 行、索引 {result.get('index_total', 0):,} 条，"
+                f"用时 {result.get('elapsed_s')}s，索引新鲜度 {result.get('freshness')}。可以开始提问了"
+            )
+            task["result"] = result
 
 
 @router.post("/build")
 def build(req: BuildRequest) -> dict:
-    """启动构建任务，返回 task_id；前端随后轮询 /build/{id}"""
+    """
+    启动**真实构建**任务，返回 task_id；前端随后轮询 /build/{id}
+
+    真实构建会写数据库（TRUNCATE + 全量重写），所以这里有两道前置检查：
+      1. 目标数据集必须在白名单内（demo 永远不在）——防「写错库」；
+      2. 该数据集当前没有构建在跑——同一时刻两路写会被锁挡住，与其让用户
+         看着进度条不动，不如立刻说清楚。
+    """
+    from rag_demo.db.connection import dataset_lock
+    from rag_demo.mvp.builder import resolve_dataset
+
+    try:
+        dataset = resolve_dataset(req.dataset)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    req.dataset = dataset
+
     try:
         csv_paths, md_paths = uploads.paths(req.upload_id)
     except uploads.UploadError as e:
@@ -515,38 +600,46 @@ def build(req: BuildRequest) -> dict:
         raise HTTPException(status_code=400, detail="没有可构建的数据，请回到第 1 步上传文件。")
 
     # 必填但没映射的字段：**只警告不拦截**——MVP 明确要求「允许跳过不重要字段」，
-    # 用户的判断优先于我们的规则。真正拦下来只会让人卡在这一步。
+    # 用户的判断优先于我们去替他决定。真正拦下来只会让人卡在这一步。
+    # 唯一硬性的是 user_id：没有它就没有「一个用户」这个聚合单位（ingest 会自己报错）。
     missing = [
         spec["label"] for spec in FIELD_DEFS
         if spec["required"] and not req.fields.get(spec["key"])
     ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"「{missing[0]}」还没选对应的列。没有它就无法把订单聚合到人身上，请回到上一步选择。",
+        )
     # 只传文档、没有交易数据：仍允许构建（文档问答本来就不需要画像），
     # 但必须说清楚「这次构建不出画像」，否则用户会以为查不到人群是自己的问题。
     if not csv_paths:
-        missing.append("全部交易数据（本次只构建规则文档，无法回答人群类问题）")
         logger.info("构建任务不含 CSV，仅文档问答")
 
-    # 每步的「总量」在这里算好交给构建线程：数字全部来自落盘文件，
-    # 不再由前端报上来（前端报的数字是可以被改的，也不该由它负责统计）。
+    # 非阻塞试探：拿不到锁说明该数据集正在构建。
+    # 这里**只试探不放锁**——RLock 只能由持有它的线程释放，
+    # 请求线程替构建线程放锁会直接抛 RuntimeError。真正的持锁发生在构建线程里。
+    lock = dataset_lock(dataset)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail=f"数据集 {dataset} 正在构建中，请等这次构建完成再开始新的构建。",
+        )
+    lock.release()
+
+    # 起始总量只用**已知的真值**（清洗的行数、文档篇数）：剩下的（用户数/画像数/索引条数）
+    # 必须等 ingest 真跑出来才知道，事件到达时再填——不预估、不假装。
+    # 清洗与聚合是一次性操作（一次读全部、一次聚合全部），没有可切分的进度，
+    # 因此这两步只在完成时跳变，这是它们的真实粒度，不是显示问题。
     scanned = uploads.scan(req.upload_id)
     rows = sum(f["row_count"] for f in scanned["csv_files"])
-    docs, _ = _analyze_docs(md_paths)
-    chunk_total = sum(d["est_chunks"] for d in docs)
-    totals = {
-        "clean": rows,
-        # 用户数是**估**的：真实去重发生在入库那一步（一行用户 = 一条画像），
-        # 现在还没走到那里，所以这里带一个明确的经验比例，不假装是真值
-        "profile": int(rows * 0.62),
-        "embed": int(rows * 0.62),
-        "chunk": len(md_paths),
-        "index": chunk_total or len(md_paths),
-    }
 
     task_id = uuid.uuid4().hex[:12]
     with _BUILD_LOCK:
         _BUILD_TASKS[task_id] = {
             "task_id": task_id,
             "upload_id": req.upload_id,
+            "dataset": dataset,
             "status": "running",
             "percent": 0,
             "step_index": 0,
@@ -555,19 +648,23 @@ def build(req: BuildRequest) -> dict:
             "total": 0,
             "note": "正在准备…",
             "error": None,
-            "missing_required": missing,
             "started_at": time.time(),
         }
+        # 起始总量只用**已知的真值**：清洗几行（落盘时 pandas 读过）
+        if rows:
+            _BUILD_TASKS[task_id]["steps"][_STEP_INDEX["clean"]]["total"] = rows
+        if md_paths:
+            _BUILD_TASKS[task_id]["steps"][_STEP_INDEX["chunk"]]["total"] = len(md_paths)
         # 只保留最近的任务，避免长时间开着进程内存无限涨
         for old in sorted(_BUILD_TASKS, key=lambda k: _BUILD_TASKS[k]["started_at"])[:-5]:
             _BUILD_TASKS.pop(old, None)
         with _STATE_LOCK:
             _CONFIRMED_FIELDS[req.upload_id] = dict(req.fields)
 
-    threading.Thread(target=_run_build, args=(task_id, req, totals), daemon=True).start()
-    logger.info("构建任务已启动: %s（批次 %s：CSV %d 个 / 文档 %d 篇，清洗 %d 行 / 切分 %d 块）",
-                task_id, req.upload_id, len(csv_paths), len(md_paths), rows, chunk_total)
-    return {"task_id": task_id}
+    threading.Thread(target=_run_build, args=(task_id, req, csv_paths, md_paths), daemon=True).start()
+    logger.info("构建任务已启动: %s（数据集 %s，批次 %s：CSV %d 个 / 文档 %d 篇，清洗 %d 行）",
+                task_id, dataset, req.upload_id, len(csv_paths), len(md_paths), rows)
+    return {"task_id": task_id, "dataset": dataset}
 
 
 @router.get("/build/{task_id}")
@@ -593,16 +690,39 @@ def _pick_answer(question: str) -> dict:
 @router.post("/query")
 def query(req: QueryRequest) -> dict:
     """
-    假查询：返回带引用来源的答案
+    假答案 + **真的互斥判断**：构建期间谢绝查询
 
-    刻意保留 1 秒以上的耗时——MVP 验收里「5~20 秒内返回」是真实链路的目标，
-    原型阶段如果答案瞬间弹出，等待态（加载中、禁用重复提交）就没机会被检验。
+    答案本身还是内置样例（第 4 步的真实链路是下一步），但「构建中不能查」这条
+    不是模拟的：构建线程持有该数据集的锁，这里用 acquire(blocking=False) 试探。
+    为什么必须有这道闸——psycopg2 连接不是线程安全的，构建每批 INSERT 时另一个
+    线程查询会撞「another command is already in progress」；而且画像与索引
+    正在被重写，此刻的答案对应的是「改到一半的数据」，说不清是新的还是旧的。
+
+    只挡**同一个数据集**：构建 user 不该影响查 demo 的人（锁是按数据集分的）。
     """
     question = (req.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="请输入一个问题再提交。")
     if len(question) > 200:
         raise HTTPException(status_code=400, detail="问题太长了（超过 200 字），请精简后再问。")
+
+    from rag_demo.db.connection import dataset_lock
+
+    lock = dataset_lock(req.dataset)
+    if not lock.acquire(blocking=False):
+        return {
+            "answer": (
+                "数据集正在重建（画像与检索索引都在重写），构建期间不提供查询。\n"
+                "这样避免回答到「改到一半的数据」。等第 3 步的进度到 100% 再问即可。"
+            ),
+            "sources": [],
+            "kind": "busy",
+            "busy": True,
+            "degraded": True,
+            "elapsed_ms": 0,
+            "used_fields": [],
+        }
+    lock.release()
 
     started = time.time()
     time.sleep(1.2)
