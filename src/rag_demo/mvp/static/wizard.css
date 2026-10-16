@@ -119,6 +119,9 @@ body {
 }
 .dropzone:hover, .dropzone:focus { border-color: var(--primary); background: var(--primary-soft); outline: none; }
 .dropzone.is-over { border-color: var(--primary); background: var(--primary-soft); }
+/* 上传中：文件要真的走一趟网络再解析，不是瞬间返回。
+   挡住再次点击/拖入，避免用户在等待期间连点出好几个批次。 */
+.dropzone.is-uploading { opacity: .55; pointer-events: none; }
 .dz-icon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 46px; height: 46px; border-radius: 10px;

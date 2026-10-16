@@ -1,17 +1,24 @@
-/* 搭建向导（MVP M1）—— 上传 → 确认字段 → 一键构建 → 提问
+/* 搭建向导 —— 上传 → 确认字段 → 一键构建 → 提问
  *
- * 这一层只做「取数据 + 渲染」，不写业务规则：
- * 字段怎么认、进度怎么算、答案从哪来，全在服务端（现在的 mock，M2 换真实实现）。
- * 前端唯一自己做的事是**读取本地文件**——这不是绕过后端，
- * 而是上传前就能给出「几行、什么编码」的即时反馈，避免先把 10MB 传上去再告诉用户格式不对。
+ * 这一层只做「取数据 + 渲染」，不写业务规则：字段怎么认、几行、什么编码、
+ * 进度怎么算、答案从哪来，全部由服务端给出（见 rag_demo/mvp/app.py）。
+ *
+ * M2 改动：**文件不再在浏览器里解析**。
+ *   M1 是自己解码文件、按换行数行数、按逗号数列名，再把结果发给服务端——
+ *   服务端从头到尾没见过文件本身，行数只能写「约」，编码判断还散在前端。
+ *   现在文件直接 multipart 上传，服务端统一转 UTF-8 后用 pandas 真读一遍，
+ *   返回**真实行数**与列名；页面只负责把服务端的话渲染出来。
  */
 
 const el = (id) => document.getElementById(id);
 
+const UPLOAD_KEY = "wizard-upload-id";   // 刷新页面后据此恢复上传批次（内容在服务端磁盘上）
+
 const state = {
+  uploadId: null,    // 服务端的上传批次号（内容已落盘，这里是唯一需要记住的东西）
   csvFiles: [],      // {name, size, encoding, rowCount, columns}
-  mdFiles: [],       // {name, size, encoding, text}
-  analysis: null,    // /api/wizard/analyze 的结果
+  mdFiles: [],       // {name, size, encoding, chars}
+  analysis: null,    // 上传接口返回的完整状态（字段识别 + 文档结构 + 汇总）
   taskId: null,
   pollTimer: null,
   history: [],       // {question, answer, sources, time}
@@ -36,14 +43,18 @@ function fmtSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(2) + " MB";
 }
 
-/* 统一请求封装：把后端/网络错误一律翻译成一句能看懂的中文，绝不把异常抛到页面上 */
+/* 统一请求封装：把后端/网络错误一律翻译成一句能看懂的中文，绝不把异常抛到页面上
+ *
+ * 注意 FormData 分支：上传文件时**不能**手动设 Content-Type——
+ * multipart 的 boundary 由浏览器生成，自己写死会变成「服务端解析不出任何文件字段」。
+ */
 async function api(url, options = {}) {
   let resp;
+  const headers = options.body instanceof FormData
+      ? {}
+      : { "Content-Type": "application/json" };
   try {
-    resp = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
+    resp = await fetch(url, { headers, ...options });
   } catch (e) {
     throw new Error("连接不上服务，请确认服务还在运行（终端窗口别关掉），然后重试。");
   }
@@ -56,79 +67,49 @@ async function api(url, options = {}) {
   return data;
 }
 
-/* ================= 文件读取（在浏览器里完成） ================= */
-
-/* 编码识别：先看 BOM，再试 UTF-8 严格解码，失败才退回 GBK。
- * 顺序不能反——GBK 几乎能解码任意字节流，先试 GBK 会把 UTF-8 中文读成乱码。 */
-function decodeBuffer(buf) {
-  const bytes = new Uint8Array(buf);
-  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    return { text: new TextDecoder("utf-8").decode(buf), encoding: "utf-8(BOM)" };
-  }
-  try {
-    return { text: new TextDecoder("utf-8", { fatal: true }).decode(buf), encoding: "utf-8" };
-  } catch (e) {
-    try {
-      return { text: new TextDecoder("gbk").decode(buf), encoding: "gbk" };
-    } catch (e2) {
-      return { text: new TextDecoder("utf-8").decode(buf), encoding: "未知(可能乱码)" };
-    }
-  }
-}
-
-function detectDelimiter(line) {
-  let best = ",", bestCount = 0;
-  for (const d of [",", "\t", ";", "|"]) {
-    const n = line.split(d).length - 1;
-    if (n > bestCount) { best = d; bestCount = n; }
-  }
-  return best;
-}
-
-/* 逐字符切一行，处理引号包裹的逗号——"深圳市,南山区" 不能被当成两列 */
-function splitCsvLine(line, delim) {
-  const out = [];
-  let cur = "", inQuote = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuote) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; } else { inQuote = false; }
-      } else { cur += ch; }
-    } else if (ch === '"') {
-      inQuote = true;
-    } else if (ch === delim) {
-      out.push(cur); cur = "";
-    } else { cur += ch; }
-  }
-  out.push(cur);
-  return out;
-}
-
-async function parseCsv(file) {
-  const { text, encoding } = decodeBuffer(await file.arrayBuffer());
-  const lines = text.split(/\r\n|\n|\r/);
-  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
-  const header = lines[0] || "";
-  const delim = detectDelimiter(header);
-  const columns = splitCsvLine(header, delim).map((s) => s.trim()).filter((s) => s !== "");
-  return {
-    name: file.name,
-    size: file.size,
-    encoding,
-    // 行数是**估算**：带换行的引号字段会被多算，页面上也如实写「约」
-    rowCount: Math.max(0, lines.length - 1),
-    columns,
-  };
-}
-
-async function parseMd(file) {
-  const { text, encoding } = decodeBuffer(await file.arrayBuffer());
-  return { name: file.name, size: file.size, encoding, text };
-}
+/* ================= 上传前的本地校验（不做解析） =================
+ * 这里只判「该不该收」，解析一律交给服务端。
+ * 保留这一步是因为它能在**选中文件的瞬间**给出反馈（拖错框、拖了 .xlsx），
+ * 不用等一个 15MB 的文件传完再说「格式不对」。
+ */
 
 function isMdFile(file) {
   return /\.(md|markdown)$/i.test(file.name);
+}
+
+function isCsvFile(file) {
+  return /\.(csv|txt)$/i.test(file.name);
+}
+
+/* 服务端状态 → 页面模型。上传、删文件、示例填满、刷新恢复都走这一个函数，
+ * 于是「刚上传」与「恢复到一半」不存在两套渲染逻辑。 */
+function applyState(data) {
+  state.uploadId = data.upload_id || null;
+  state.analysis = data;
+  state.csvFiles = (data.csv_files || []).map((f) => ({
+    name: f.name,
+    size: f.size,
+    encoding: f.encoding || "",
+    rowCount: f.row_count || 0,
+    columns: f.columns || [],
+  }));
+  state.mdFiles = (data.md_files || []).map((f) => ({
+    name: f.name,
+    size: f.size,
+    encoding: f.encoding || "",
+    chars: f.chars || 0,
+  }));
+  try {
+    if (state.uploadId) localStorage.setItem(UPLOAD_KEY, state.uploadId);
+    else localStorage.removeItem(UPLOAD_KEY);
+  } catch (e) { /* 隐私模式写不了，忽略 */ }
+  renderFileLists();
+}
+
+/* 原始编码 → 展示话术：用户不需要知道 gbk 是什么，只需要知道「不用自己转」 */
+function encodingLabel(encoding) {
+  if (!encoding) return "";
+  return /^utf-8/i.test(encoding) ? "UTF-8" : `原始 ${encoding} → 已转 UTF-8`;
 }
 
 /* ================= 第 1 步：上传 ================= */
@@ -137,28 +118,43 @@ async function addFiles(fileList, kind) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
 
+  // 本地只做「该不该收」的判断；真正的解析在服务端（见模块头注释）
   const rejected = [];
+  const form = new FormData();
   for (const f of files) {
-    try {
-      if (isMdFile(f)) {
-        if (state.mdFiles.some((x) => x.name === f.name)) { rejected.push(`${f.name}（已存在，跳过）`); continue; }
-        state.mdFiles.push(await parseMd(f));
-      } else if (/\.csv$/i.test(f.name)) {
-        if (kind === "md") { rejected.push(`${f.name}（不是 .md 文档）`); continue; }
-        if (state.csvFiles.some((x) => x.name === f.name)) { rejected.push(`${f.name}（已存在，跳过）`); continue; }
-        state.csvFiles.push(await parseCsv(f));
-      } else {
-        rejected.push(`${f.name}（只支持 .csv 和 .md）`);
-      }
-    } catch (e) {
-      rejected.push(`${f.name}（读取失败：${e.message}）`);
-    }
+    if (kind === "md" && !isMdFile(f)) { rejected.push(`${f.name}（要放到左边「交易数据」）`); continue; }
+    if (kind === "csv" && isMdFile(f)) { rejected.push(`${f.name}（这是文档，要放到右边）`); continue; }
+    if (!isMdFile(f) && !isCsvFile(f)) { rejected.push(`${f.name}（只支持 .csv/.txt 与 .md）`); continue; }
+    if (f.size === 0) { rejected.push(`${f.name}（空文件）`); continue; }
+    form.append("files", f);
   }
 
-  renderFileLists();
   clearMsg(el("msg-step1"));
-  if (rejected.length) {
+  if (!form.has("files")) {
     showMsg(el("msg-step1"), "以下文件没有被加入：\n· " + rejected.join("\n· "), "is-warn");
+    return;
+  }
+  // 追加到同一批次；服务端的批次号就是「这次会话上传了什么」的唯一凭据
+  if (state.uploadId) form.append("upload_id", state.uploadId);
+
+  const zone = el(kind === "csv" ? "dz-csv" : "dz-md");
+  zone.classList.add("is-uploading");
+  try {
+    const data = await api("/api/wizard/upload", { method: "POST", body: form });
+    applyState(data);
+    const all = rejected.concat(data.rejected || []);
+    if (all.length) {
+      showMsg(el("msg-step1"), "以下文件没有被加入：\n· " + all.join("\n· "), "is-warn");
+    } else {
+      const s = data.summary || {};
+      showMsg(el("msg-step1"),
+        `已上传并读取：交易数据 ${s.csv_count || 0} 个（共 ${(s.total_rows || 0).toLocaleString()} 行）`
+        + ` / 规则文档 ${s.md_count || 0} 篇。点「下一步：确认字段」继续。`, "is-info");
+    }
+  } catch (e) {
+    showMsg(el("msg-step1"), e.message, "is-error");
+  } finally {
+    zone.classList.remove("is-uploading");
   }
 }
 
@@ -172,10 +168,11 @@ function renderFileLists() {
   if (!state.csvFiles.length) {
     csvList.innerHTML = '<li class="fl-empty">还没有文件</li>';
   } else {
+    // 行数是服务端真读出来的，不再写「约」
     csvList.innerHTML = state.csvFiles.map((f, i) => `
       <li>
         <span class="fl-name">${escapeHtml(f.name)}</span>
-        <span class="fl-meta">约 ${f.rowCount.toLocaleString()} 行 · ${f.columns.length} 列 · ${escapeHtml(f.encoding)} · ${fmtSize(f.size)}</span>
+        <span class="fl-meta">${f.rowCount.toLocaleString()} 行 · ${f.columns.length} 列 · ${escapeHtml(encodingLabel(f.encoding))} · ${fmtSize(f.size)}</span>
         <button type="button" class="fl-remove" data-kind="csv" data-index="${i}" title="移除">×</button>
       </li>`).join("");
   }
@@ -186,7 +183,7 @@ function renderFileLists() {
     mdList.innerHTML = state.mdFiles.map((f, i) => `
       <li>
         <span class="fl-name">${escapeHtml(f.name)}</span>
-        <span class="fl-meta">${escapeHtml(f.encoding)} · ${fmtSize(f.size)}</span>
+        <span class="fl-meta">${f.chars.toLocaleString()} 字 · ${escapeHtml(encodingLabel(f.encoding))} · ${fmtSize(f.size)}</span>
         <button type="button" class="fl-remove" data-kind="md" data-index="${i}" title="移除">×</button>
       </li>`).join("");
   }
@@ -237,37 +234,17 @@ function showStep(n) {
 
 /* ================= 第 2 步：字段确认 ================= */
 
-async function goAnalyze() {
-  const btn = el("btn-to-step2");
+function goAnalyze() {
   clearMsg(el("msg-step1"));
 
-  if (!state.csvFiles.length && !state.mdFiles.length) {
+  if (!state.uploadId || (!state.csvFiles.length && !state.mdFiles.length)) {
     showMsg(el("msg-step1"), "还没有文件。请先拖入文件，或点「用示例数据填满」直接体验流程。", "is-warn");
     return;
   }
-
-  btn.disabled = true;
-  btn.textContent = "正在识别…";
-  try {
-    const data = await api("/api/wizard/analyze", {
-      method: "POST",
-      body: JSON.stringify({
-        csv_files: state.csvFiles.map((f) => ({
-          name: f.name, size: f.size, encoding: f.encoding,
-          row_count: f.rowCount, columns: f.columns,
-        })),
-        md_files: state.mdFiles.map((f) => ({ name: f.name, size: f.size, text: f.text })),
-      }),
-    });
-    state.analysis = data;
-    renderAnalysis(data);
-    showStep(2);
-  } catch (e) {
-    showMsg(el("msg-step1"), e.message, "is-error");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "下一步：确认字段";
-  }
+  // 字段识别与文档结构在**上传时就已算好**（服务端返回的 state 里），
+  // 这一步只做本地校验 + 渲染，所以不再发请求、也不会出现「点了没反应」的等待
+  renderAnalysis(state.analysis);
+  showStep(2);
 }
 
 function renderAnalysis(data) {
@@ -333,13 +310,11 @@ function collectFields() {
 /* ================= 第 3 步：构建 ================= */
 
 function buildPayload() {
+  // 只报「哪一批上传 + 用户确认的列映射」：文件本身已经在服务端磁盘上，
+  // 前端不再需要（也无法）把数据搬过去——顺带堵掉了「前端报什么就构建什么」的口子
   return {
+    upload_id: state.uploadId,
     fields: collectFields(),
-    csv_files: state.csvFiles.map((f) => ({
-      name: f.name, size: f.size, encoding: f.encoding,
-      row_count: f.rowCount, columns: f.columns,
-    })),
-    md_files: state.mdFiles.map((f) => ({ name: f.name, size: f.size, text: f.text })),
     simulate_failure: el("sim-fail").checked,
   };
 }
@@ -451,7 +426,8 @@ async function retryBuild() {
 
 async function loadExamples() {
   try {
-    const data = await api("/api/wizard/examples");
+    const q = state.uploadId ? `?upload_id=${encodeURIComponent(state.uploadId)}` : "";
+    const data = await api("/api/wizard/examples" + q);
     el("examples-list").innerHTML = (data.questions || [])
       .map((q) => `<button type="button" class="ex-chip">${escapeHtml(q)}</button>`).join("");
   } catch (e) {
@@ -478,7 +454,10 @@ async function ask(question) {
   btnText.textContent = "思考中…";
 
   try {
-    const data = await api("/api/wizard/query", { method: "POST", body: JSON.stringify({ question: q }) });
+    const data = await api("/api/wizard/query", {
+      method: "POST",
+      body: JSON.stringify({ question: q, upload_id: state.uploadId }),
+    });
     renderAnswer(q, data);
     pushHistory(q, data);
   } catch (e) {
@@ -620,16 +599,14 @@ function bindEvents() {
     const btn = el("btn-sample");
     btn.disabled = true;
     try {
+      // 服务端把仓库自带的真实数据复制进上传目录，走与真人上传**完全相同**的
+      // 落盘/解析路径——所以这里的响应结构与上传接口完全一致，直接套用同一个渲染
       const data = await api("/api/wizard/sample");
-      state.csvFiles = data.csv_files.map((f) => ({
-        name: f.name, size: f.size, encoding: f.encoding,
-        rowCount: f.row_count, columns: f.columns,
-      }));
-      state.mdFiles = data.md_files.map((f) => ({
-        name: f.name, size: f.size, encoding: "utf-8", text: f.text,
-      }));
-      renderFileLists();
-      showMsg(el("msg-step1"), "示例数据已填好，直接点「下一步：确认字段」即可。", "is-info");
+      applyState(data);
+      const s = data.summary || {};
+      showMsg(el("msg-step1"),
+        `示例数据已填好（${s.csv_count || 0} 个 CSV / ${s.md_count || 0} 篇文档，共 ${(s.total_rows || 0).toLocaleString()} 行）。`
+        + "直接点「下一步：确认字段」即可。", "is-info");
     } catch (e) {
       showMsg(el("msg-step1"), e.message, "is-error");
     } finally {
@@ -687,15 +664,50 @@ function bindEvents() {
   });
 }
 
-function onRemoveFile(e) {
+async function onRemoveFile(e) {
   const btn = e.target.closest(".fl-remove");
   if (!btn) return;
   const idx = Number(btn.dataset.index);
-  if (btn.dataset.kind === "csv") state.csvFiles.splice(idx, 1);
-  else state.mdFiles.splice(idx, 1);
-  renderFileLists();
+  const list = btn.dataset.kind === "csv" ? state.csvFiles : state.mdFiles;
+  const target = list[idx];
+  if (!target || !state.uploadId) return;
+
+  // 移除要同步到服务端：文件已经落盘，只从页面列表里划掉的话，
+  // 第 2 步的构建仍然会把这份数据算进去——「界面上没有」和「实际没有」必须一致。
+  clearMsg(el("msg-step1"));
+  try {
+    const data = await api("/api/wizard/upload/remove", {
+      method: "POST",
+      body: JSON.stringify({ upload_id: state.uploadId, name: target.name }),
+    });
+    applyState(data);
+  } catch (err) {
+    showMsg(el("msg-step1"), err.message, "is-error");
+  }
+}
+
+/* 刷新页面后恢复上传批次：内容在服务端磁盘上，这里只需要记着批次号。
+ * 上一次的会话历史也一并恢复，用户不必从第 1 步重新开始。 */
+async function restoreUpload() {
+  let saved = null;
+  try { saved = localStorage.getItem(UPLOAD_KEY); } catch (e) { /* 忽略 */ }
+  if (!saved) return;
+  try {
+    const data = await api(`/api/wizard/upload/${encodeURIComponent(saved)}`);
+    applyState(data);
+    const s = data.summary || {};
+    if (s.csv_count || s.md_count) {
+      showMsg(el("msg-step1"),
+        `已恢复上次的上传（交易数据 ${s.csv_count || 0} 个 / 规则文档 ${s.md_count || 0} 篇）。`
+        + "如需换一批数据，请先移除或重新上传。", "is-info");
+    }
+  } catch (e) {
+    // 服务端已清（比如重启时清了临时目录）：静默丢弃，别拿一句「恢复失败」打扰用户
+    try { localStorage.removeItem(UPLOAD_KEY); } catch (e2) { /* 忽略 */ }
+  }
 }
 
 bindEvents();
 renderFileLists();
 restoreHistory();
+restoreUpload();
