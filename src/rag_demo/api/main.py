@@ -42,6 +42,7 @@ from rag_demo.cache import answer_cache
 from rag_demo.config import (
     DEFAULT_API_ROLE,
     ENABLE_API_DOCS,
+    INTENT_ROUTER,
     TOP_K_PROFILE_MAX,
     TOP_K_PROFILE_MIN,
 )
@@ -62,6 +63,7 @@ from rag_demo.retrieval.hybrid_retriever import (
     reload_bm25,
     sparse_search,  # 可能为 None（FlagEmbedding 未安装时降级）
 )
+from rag_demo.tools import bert_intent
 
 # 控制台 + logs/rag_demo.log 双通道（此前只打屏，服务跑后台日志就丢了）
 setup_logging()
@@ -130,6 +132,16 @@ async def lifespan(app: FastAPI):
     # 具体触发条件是「加载模型的同时还有其他 CUDA 活动」（请求里的 embed 编码、
     # 或下面那个后台稀疏预热线程），所以这里把它挪到启动阶段，与 get_model 同一批。
     get_reranker()
+    # 意图分类模型同理，必须在这一批里加载，不能等第一个请求（原因见上）。
+    # 与上面两个不同：它加载失败**不影响可用性**——router 会回退关键词规则，
+    # 所以这里不抛异常，只把状态记进日志（漏判变多 vs 服务起不来，后者不可接受）。
+    if bert_intent.preload():
+        logger.info("意图分类模型预加载完成（INTENT_ROUTER=%s）", INTENT_ROUTER)
+    else:
+        logger.warning(
+            "意图分类模型不可用，入口路由回退关键词规则（INTENT_ROUTER=%s）: %s",
+            INTENT_ROUTER, bert_intent.load_info().get("error"),
+        )
     logger.info("预加载完成")
 
     # 稀疏索引放后台预热：不拖慢启动，但让首个 sparse 请求即热态

@@ -139,3 +139,36 @@ SQL_CELL_MAX_CHARS = 40            # 单个单元格最长字符数
 # 故 cuda 下统一用 fp16（约 2.2GB）；cpu 下保持 fp32（CPU 不支持 fp16 算子）。
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+
+# ---------- 意图路由（闲聊 / 业务）----------
+# 改造前：关键词规则（tools/router.py 的 CHITCHAT_KEYWORDS）。规则只拦得住
+#         「你好 / 谢谢 / 天气怎么样」这类显式寒暄，漏判的闲聊要继续走
+#         「多路规划 LLM(3.8s) + 检索(0.5s) + 答案生成(20.9s)」——为拦一句闲聊
+#         付约 25s（耗时数据见 bug/10.14/2026-10-14_性能逐模块计时与方案A实验.md）。
+# 改造后：BERT 二分类（bert_query_classify 微调产物）在入口层判掉，单条约 13ms。
+#         数值对比（准确率 / 逐条延迟 / 代价换算）见
+#         bug/bert意图路由替换-延迟与准确率对比.md
+#
+#   "bert"   BERT 判定（默认）
+#   "hybrid" 规则先短路（命中即拦截，省掉 13ms），未命中再交 BERT
+#   "rule"   强制关键词规则（回退开关 / 对照实验用）
+# 三种模式在 BERT 不可用时（模型目录缺失、加载失败）一律回退规则，服务不中断。
+INTENT_ROUTER = "bert"
+
+# 微调产物目录。注意它在 .gitignore 里（不入库），新环境需先跑 train.py——
+# 缺失时 router 自动回退规则，只是漏判变多。
+INTENT_MODEL_PATH = os.path.join(
+    BASE_DIR, "src", "rag_demo", "bert_query_classify", "models", "bert-intent"
+)
+
+# 判闲聊的概率门槛：**故意取高值**。
+# 两个方向的代价不对称：
+#   业务→闲聊（误伤）= 拒答真问题，且 BERT 这一层没有兜底——query_processor 的
+#                       路由复核只能捞「漏判」（它只在 RAG 分支里才有机会改道）
+#   闲聊→业务（漏判）= 多走一次检索 + 生成，约 25s 白花，但**答得出来**
+# 所以宁可漏判。门槛扫描实测（0.5~0.99 的误伤/漏判曲线）见上述对比文档。
+INTENT_CHITCHAT_THRESHOLD = 0.9
+
+# 与训练时的 max_length 一致（bert_query_classify/train.py MAX_LENGTH=64）。
+# 超长截断：闲聊判断不看长尾，截断能省 forward 时间且不影响结果。
+INTENT_MAX_LENGTH = 64

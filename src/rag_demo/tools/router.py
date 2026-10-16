@@ -3,28 +3,40 @@
 """
 @Author  : Vincent
 @File    : router.py
-@Function: 轻量意图路由（二分类）——只负责筛掉闲聊
+@Function: 入口层意图路由（二分类）——只负责筛掉闲聊
 
 走向只有两条：
     chitchat  闲聊 / 域外问题 -> 直接返回固定回复，不检索、不调模型
     rag       其余全部        -> 进入多路聚合链路
 
-为什么不再判 SQL
-----------------
-原先这里用 SQL_KEYWORDS 做「闲聊 / 聚合 / 检索」三分类，但关键词判聚合的
-漏判率实测达 50%——8 个统计类问法里 4 个没命中（如「上海和北京的用户哪个多」
-「用户里买母婴的多不多」）。口语化的聚合问法靠词表覆盖不住，而一旦漏判，
-问题就再也进不了 SQL 链路。
+判定器在 2026-10-16 从「关键词规则」换成「BERT 二分类」
+---------------------------------------------------------
+换的原因（不是"规则不好"，是规则覆盖不住）：
+    规则只能拦「句子短 + 含寒暄词」和「域外话题名词 + 疑问形态」这两类。
+    而「闰年是怎么回事」「口红哪个色号好看」「你是AI吗」既没有寒暄词，
+    也没有命中域外话题表，全被漏判 —— 实测 test 集 135 条闲聊里规则只拦住
+    40 条（详见 bug/bert意图路由替换-延迟与准确率对比.md）。
+    漏判的闲聊会继续走「多路规划 LLM(3.8s) + 检索(0.5s) + 生成(20.9s)」约 25s，
+    为拦一句话付这种代价没有道理。
 
-现在 SQL 不再是独立分支，而是「多路聚合」里的一路，由 query_processor 的
-多路规划统一决定是否追加——那次 LLM 调用本来就存在（用于判断检索路数），
-所以追加 SQL 判断不产生额外成本，而且比关键词准得多。
+为什么不是「交给 LLM 判」
+    那样闲聊也要付一次模型往返，而「闲聊省掉两次推理」正是这一层存在的理由。
+    本地小模型（102M，单条约 13ms）才能同时满足「判得准」和「判得便宜」。
 
-本模块因此收窄为只做一件事：**筛掉闲聊**。这件事必须留在规则层：
-一旦交给 LLM，闲聊也要付一次模型往返，「闲聊省掉两次推理」的初衷就没了。
-漏判（该拦没拦）由 query_processor 的路由复核兜底，代价可接受。
+为什么保留规则（且不是死代码）
+    1. 模型目录不入库（.gitignore），新环境未训练时自动回退规则，服务不中断
+    2. INTENT_ROUTER 可切 "rule" / "hybrid"，规则是回退开关与对照基线
+    3. hybrid 模式下规则先短路，能省掉命中的那部分 13ms
+
+漏判仍然由 query_processor 的路由复核兜底（复用已有 LLM 调用，零额外成本）。
+但要注意方向性：那次复核只能在「已判 RAG」的分支里改道成闲聊，也就是**只能捞漏判、
+捞不回误伤**。所以门槛宁可偏高——把业务问题误判成闲聊是拒答真问题，
+比多走一次检索严重得多（见 config.INTENT_CHITCHAT_THRESHOLD）。
 """
 import logging
+
+from rag_demo import config
+from rag_demo.tools import bert_intent
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +78,9 @@ OFFTOPIC_QUESTION_HINTS = [
 CHITCHAT_MAX_LEN = 12
 
 
-def is_chitchat(question: str) -> bool:
+def rule_is_chitchat(question: str) -> bool:
     """
-    判断是否为闲聊 / 域外问题
+    关键词规则判定（改造前的线上逻辑，现在是回退与对照基线）
 
     规则优先：快、免费、可控。宁可漏判（走正常链路），也不要误伤真业务问题——
     漏判的代价是浪费一次检索，误伤的代价是把该答的问题拒之门外。
@@ -91,6 +103,47 @@ def is_chitchat(question: str) -> bool:
     return False
 
 
+def _bert_is_chitchat(question: str) -> bool | None:
+    """
+    BERT 判定；模型不可用返回 None（交由调用方回退规则）
+
+    单条推理异常（例如显存被别的进程挤爆）也不能把请求打挂：捕获后退回规则。
+    """
+    try:
+        prob = bert_intent.chitchat_prob(question)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("意图分类推理失败，本次回退关键词规则: %s: %s", type(e).__name__, e)
+        return None
+    if prob is None:
+        return None
+    return prob >= config.INTENT_CHITCHAT_THRESHOLD
+
+
+def is_chitchat(question: str) -> bool:
+    """
+    按 config.INTENT_ROUTER 选择判定器（bert / hybrid / rule）
+
+    BERT 不可用（模型缺失、加载失败、推理异常）时一律回退规则：
+    闲聊判定是优化项，不该成为服务可用性的依赖。
+    """
+    if not question:
+        return False
+
+    mode = config.INTENT_ROUTER
+
+    if mode == "rule":
+        return rule_is_chitchat(question)
+
+    if mode == "hybrid" and rule_is_chitchat(question):
+        # 规则已命中，省掉这次 BERT 前向（约 13ms）
+        return True
+
+    verdict = _bert_is_chitchat(question)
+    if verdict is None:
+        return rule_is_chitchat(question)
+    return verdict
+
+
 def route(question: str) -> str:
     """
     判断问题走向，返回 "chitchat" / "rag"
@@ -102,8 +155,8 @@ def route(question: str) -> str:
         return ROUTE_RAG
 
     if is_chitchat(question):
-        logger.info("意图路由 -> chitchat: %s", question)
+        logger.info("意图路由(%s) -> chitchat: %s", config.INTENT_ROUTER, question)
         return ROUTE_CHITCHAT
 
-    logger.info("意图路由 -> 多路聚合: %s", question)
+    logger.info("意图路由(%s) -> 多路聚合: %s", config.INTENT_ROUTER, question)
     return ROUTE_RAG
