@@ -490,17 +490,45 @@ async function ask(question) {
   }
 }
 
+/* 答案正文里的 [来源N] 变成可点击的小标签，点一下跳到下方对应的来源卡片。
+ * 与 Demo 页（api/static/app.js 的 formatAnswer）是同一套标记约定，只多了一层跳转。 */
+function formatAnswer(text, hasSources) {
+  let html = escapeHtml(text);
+  // 没有来源列表时，[来源N] 指向一个不存在的东西——去掉比留着好，
+  // 否则用户点了没反应，会以为页面坏了。
+  if (!hasSources) return html.replace(/\[来源\s*\d+\]/g, "");
+  return html.replace(
+    /\[来源\s*(\d+)\]/g,
+    '<button type="button" class="cite" data-cite="$1" title="跳转到第 $1 条来源">[来源$1]</button>'
+  );
+}
+
+function jumpToSource(idx) {
+  const node = el("src-" + idx);
+  if (!node) return;
+  node.scrollIntoView({ block: "center", behavior: "smooth" });
+  // 先摘掉再重排：连续点同一条引用时，不这么做动画不会重放，看起来像没响应
+  node.classList.remove("is-flash");
+  void node.offsetWidth;
+  node.classList.add("is-flash");
+  setTimeout(() => node.classList.remove("is-flash"), 1600);
+}
+
 function renderAnswer(question, data) {
+  const sources = data.sources || [];
   el("result").hidden = false;
   el("result-meta").textContent =
     `${(data.elapsed_ms / 1000).toFixed(1)} 秒 · 检索类问题` + (data.degraded ? " · 无引用来源" : "");
-  el("answer-body").textContent = data.answer;
+  el("answer-body").innerHTML = formatAnswer(data.answer, sources.length > 0);
 
   const box = el("sources-box");
-  if (data.sources && data.sources.length) {
-    el("sources-list").innerHTML = data.sources.map((s) => `
-      <div class="source-item">
-        <div class="source-head">[来源] ${escapeHtml(s.doc)} · ${escapeHtml(s.section)}</div>
+  if (sources.length) {
+    // id 用 1 起始，与正文里的 [来源N] 直接对应
+    el("sources-list").innerHTML = sources.map((s, i) => `
+      <div class="source-item" id="src-${i + 1}">
+        <div class="source-head">
+          <span class="source-idx">[来源${i + 1}]</span>${escapeHtml(s.doc)} · ${escapeHtml(s.section)}
+        </div>
         <div class="source-snippet">${escapeHtml(s.snippet)}</div>
       </div>`).join("");
     box.hidden = false;
@@ -633,6 +661,10 @@ function bindEvents() {
       e.preventDefault();
       ask(el("query-input").value);
     }
+  });
+  el("answer-body").addEventListener("click", (e) => {
+    const cite = e.target.closest(".cite");
+    if (cite) jumpToSource(cite.dataset.cite);
   });
   el("examples-list").addEventListener("click", (e) => {
     const chip = e.target.closest(".ex-chip");
