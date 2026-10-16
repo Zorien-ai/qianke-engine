@@ -1,21 +1,30 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-步骤 2.5 / 2.6 / 2.8：数据集划分 + 两端分布外探针集
+步骤 2.5 / 2.6 / 2.8 / 2.10：数据集划分 + 分布外探针集
 
-2.5 划分：train 80% / val 10% / test 10%，**分层抽样**，seed=42
-2.6 短业务探针：2~6 字的极简业务输入（「美妆用户」「风控」「查U2765」）
-2.8 长业务探针：19~30 字的口语化业务提问（「帮我查一下最近三个月高客单用户的复购情况」）
+2.5  划分：train 80% / val 10% / test 10%，**分层抽样**，seed=42
+2.6  短业务探针：2~6 字的极简业务输入（「美妆用户」「风控」「查U2765」）
+2.8  长业务探针：19~30 字的口语化业务提问（「帮我查一下最近三个月高客单用户的复购情况」）
+2.10 高重合对照组探针：从训练句做最小改写，整句 4-gram 相似度 ≥0.7
 
-两端探针的意义：长度这条捷径有两个方向——「短 = 闲聊」和「长 = 闲聊」。
+短/长两端探针的意义：长度这条捷径有两个方向——「短 = 闲聊」和「长 = 闲聊」。
 普通测试集无法分别定位它们，只有把长/短业务各自单独拎出来打分才能看见。
 （探针清单放在 probes.py，gen_supplement.py 用同一份清单把探针排除在训练集外，
   否则探针会被「训练时见过」，指标虚高、问题被掩盖。）
+
+2.10 的意义：只有「字面没见过」的探针，回答不了「模型的成绩有多少来自词面记忆」。
+需要一组「内容见过」的对照，才能让 evaluate.py 的按重合度分组对比成立。
+
+⚠ 2.10 **必须在划分之后**执行，而且每次重新划分都要重跑（本脚本已内置）：
+旧的高重合探针在新划分里可能落进训练集，那一刻它就从对照组变成泄漏，
+指标只会更好看、不会报错。
 
 输入：data/cleaned.jsonl
 输出：data/train.jsonl / val.jsonl / test.jsonl
       data/short_business_test.jsonl
       data/long_business_test.jsonl
+      data/high_overlap_business_test.jsonl
       outputs/split_summary.json
 
 独立运行：uv run python src/rag_demo/bert_query_classify/split_data.py
@@ -26,6 +35,7 @@ from collections import Counter
 
 from sklearn.model_selection import train_test_split
 
+import overlap_probes
 from probes import LONG_BIZ_PROBES, SHORT_BIZ_PROBES, norm
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -237,6 +247,23 @@ def main() -> None:
           f"(min {min(tr_chi)} max {max(tr_chi)})")
     print(f"  已写入：{short_path}\n         {long_path}")
 
+    # ---------- 2.10 高重合对照组探针 ----------
+    #
+    # 放在划分**之后**执行，且每次划分都重跑：这批探针是从 train 句改写来的，
+    # 换一次划分它们的"归属"就可能变（旧探针落进新训练集 = 静默泄漏）。
+    print("\n" + "=" * 78)
+    print("步骤 2.10：高重合对照组探针（补上「内容见过」这一组）")
+    print("=" * 78)
+    train_rows = [r for r in rows_with_split if r["_split"] == "train"]
+    high_items, high_stats = overlap_probes.build_and_write(train_rows, rows_with_split)
+    high_path = overlap_probes.HIGH_OUT
+    print(f"  high       {len(high_items):2d} 条  相似度 {high_stats['sim_min']:.3f}~"
+          f"{high_stats['sim_max']:.3f} (mean {high_stats['sim_mean']:.3f})  "
+          f"长度 {high_stats['len_min']}~{high_stats['len_max']}  "
+          f"改写方式 {high_stats['by_edit']}")
+    print(f"             与清洗集重合 0 条（否则是泄漏）-> 已自检")
+    print(f"  已写入：{high_path}")
+
     summary["probes"] = {
         "short_business_test": {
             "path": short_path, "n": len(short_items),
@@ -253,6 +280,12 @@ def main() -> None:
                               / max(len(long_items), 1), 3),
             "probe_types": dict(Counter(i["probe_type"] for i in long_items)),
             "items": long_items,
+        },
+        "high_overlap_business_test": {
+            "path": high_path, "n": len(high_items),
+            "purpose": "高重合对照组：内容「见过」时是否仍判得对——用来分离词面记忆与语义泛化",
+            "stats": high_stats,
+            "items": high_items,
         },
     }
     with open(SPLIT_JSON, "w", encoding="utf-8") as f:

@@ -63,7 +63,7 @@ from rag_demo.retrieval.hybrid_retriever import (
     reload_bm25,
     sparse_search,  # 可能为 None（FlagEmbedding 未安装时降级）
 )
-from rag_demo.tools import bert_intent
+from rag_demo.tools import bert_intent, intent_telemetry
 
 # 控制台 + logs/rag_demo.log 双通道（此前只打屏，服务跑后台日志就丢了）
 setup_logging()
@@ -142,6 +142,10 @@ async def lifespan(app: FastAPI):
             "意图分类模型不可用，入口路由回退关键词规则（INTENT_ROUTER=%s）: %s",
             INTENT_ROUTER, bert_intent.load_info().get("error"),
         )
+    # 标记埋点来源：只有经 API 进来的才算「真实流量」，
+    # 离线脚本（bench / smoke / 评测）的记录不能被当成线上分布。
+    intent_telemetry.set_source("api")
+    logger.info("意图路由埋点已启用：%s", intent_telemetry.stats())
     logger.info("预加载完成")
 
     # 稀疏索引放后台预热：不拖慢启动，但让首个 sparse 请求即热态

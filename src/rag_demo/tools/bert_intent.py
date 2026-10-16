@@ -139,10 +139,27 @@ def load(device: str | None = None, dtype=None, force: bool = False):
 
 def preload() -> bool:
     """
-    服务启动时预热。返回是否可用——不可用不抛异常：路由会回退规则，
+    服务启动时预热：加载权重 **并跑一次真实前向**。返回是否可用。
+
+    为什么必须跑一次前向（2026-10-16 真实流量回放实测）：
+        只 load 不 forward，CUDA 的 kernel 选择/autotune 会推迟到**第一次请求**，
+        代价是那次判定 607.9 ms，而此后 p50 只有 25.7 ms。入口路由在**每个请求**
+        的关键路径上，把这 0.6s 留给真实用户没有任何理由。
+        （同一批加载的检索模型也有同样的前向预热动作，保持一致。）
+
+    不可用时返回 False 且不抛异常：路由会回退关键词规则，
     没有理由让整个服务起不来（闲聊判定是优化项，不是功能依赖）。
     """
-    return load() is not None
+    if load() is None:
+        return False
+    try:
+        # 预热用的句子选一句典型短业务输入：既能走通 padding 分支，
+        # 又避免长句在启动阶段多做无谓计算
+        predict(["预热"], batch_size=1)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("意图分类预热前向失败（不影响可用性，首次请求会略慢）: %s: %s",
+                       type(e).__name__, e)
+    return True
 
 
 def is_ready() -> bool:

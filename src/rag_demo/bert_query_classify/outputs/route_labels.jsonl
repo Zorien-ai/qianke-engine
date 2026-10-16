@@ -1,0 +1,8 @@
+{"query": "深圳的钻石会员都是什么特征", "label": "BUSINESS", "p_chitchat": 0.000325, "route": "rag", "labeled_at": "2026-10-16T16:52:54", "labeler": "llm-proxy"}
+{"query": "流失预警的判定标准", "label": "BUSINESS", "p_chitchat": 0.000206, "route": "rag", "labeled_at": "2026-10-16T16:52:55", "labeler": "llm-proxy"}
+{"query": "北京和上海的钻石会员，在客单价和品类偏好上有什么差异", "label": "BUSINESS", "p_chitchat": 0.000191, "route": "rag", "labeled_at": "2026-10-16T16:52:56", "labeler": "llm-proxy"}
+{"query": "高价值用户怎么定义的", "label": "BUSINESS", "p_chitchat": 0.00019, "route": "rag", "labeled_at": "2026-10-16T16:52:57", "labeler": "llm-proxy"}
+{"query": "各会员等级的用户人数分别是多少", "label": "BUSINESS", "p_chitchat": 0.000184, "route": "rag", "labeled_at": "2026-10-16T16:52:58", "labeler": "llm-proxy"}
+{"query": "高客单、喜欢美妆的女性用户有哪些", "label": "BUSINESS", "p_chitchat": 0.000183, "route": "rag", "labeled_at": "2026-10-16T16:52:59", "labeler": "llm-proxy"}
+{"query": "流失预警用户里钻石会员有多少人？他们主要分布在哪些城市、偏好什么品类？针对这类用户该怎么召回？", "label": "BUSINESS", "p_chitchat": 0.000176, "route": "rag", "labeled_at": "2026-10-16T16:53:00", "labeler": "llm-proxy"}
+{"query": "你好", "label": "CHITCHAT", "p_chitchat": 0.999234, "route": "chitchat", "labeled_at": "2026-10-16T16:53:01", "labeler": "llm-proxy"}

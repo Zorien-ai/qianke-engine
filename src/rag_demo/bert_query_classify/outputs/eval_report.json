@@ -169,6 +169,29 @@
       },
       "length_min": 19,
       "length_max": 22
+    },
+    "high": {
+      "n": 17,
+      "correct": 17,
+      "accuracy": 1.0,
+      "acc_ci": [
+        0.8156763396284354,
+        1.0
+      ],
+      "wrong": [],
+      "by_probe_type": {
+        "high_overlap": {
+          "n": 17,
+          "correct": 17,
+          "accuracy": 1.0,
+          "acc_ci": [
+            0.8156763396284354,
+            1.0
+          ]
+        }
+      },
+      "length_min": 7,
+      "length_max": 24
     }
   },
   "phrase_overlap_summary": {
@@ -185,6 +208,13 @@
       "mean_t_to_p": 0.6405,
       "full_lexical_cover": 4,
       "max_4gram_jaccard": 0.25
+    },
+    "high": {
+      "n": 17,
+      "mean_p_to_t": 1.0,
+      "mean_t_to_p": 1.0,
+      "full_lexical_cover": 17,
+      "max_4gram_jaccard": 0.9474
     }
   },
   "phrase_overlap": {
@@ -1195,6 +1225,320 @@
         "max_4gram_jaccard": 0.125,
         "nearest_train": "会员和非会员的客单价对比",
         "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "F值怎么定义呢",
+        "n_chars": 7,
+        "tokens": [
+          "F",
+          "值",
+          "呢",
+          "定义",
+          "怎么"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.75,
+        "nearest_train": "F值怎么定义",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "M值怎么定义呢",
+        "n_chars": 7,
+        "tokens": [
+          "M",
+          "值",
+          "呢",
+          "定义",
+          "怎么"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.75,
+        "nearest_train": "M值怎么定义",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "R值怎么定义呢",
+        "n_chars": 7,
+        "tokens": [
+          "R",
+          "值",
+          "呢",
+          "定义",
+          "怎么"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.75,
+        "nearest_train": "R值怎么定义",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "价保申请流程呢",
+        "n_chars": 7,
+        "tokens": [
+          "价保",
+          "呢",
+          "流程",
+          "申请"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.75,
+        "nearest_train": "价保申请流程",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "企微添加流程呢",
+        "n_chars": 7,
+        "tokens": [
+          "企微",
+          "呢",
+          "流程",
+          "添加"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.75,
+        "nearest_train": "企微添加流程",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "618大促的拉新方案呢",
+        "n_chars": 11,
+        "tokens": [
+          "618",
+          "呢",
+          "大促",
+          "拉",
+          "新",
+          "方案",
+          "的"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.875,
+        "nearest_train": "618大促的拉新方案",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "请问，App用户的定义范围",
+        "n_chars": 13,
+        "tokens": [
+          "App",
+          "定义",
+          "用户",
+          "的",
+          "范围",
+          "请问"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.7,
+        "nearest_train": "App用户的定义范围",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "U2765的价值分层呢",
+        "n_chars": 11,
+        "tokens": [
+          "U2765",
+          "价值",
+          "分层",
+          "呢",
+          "的"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.875,
+        "nearest_train": "U2765的价值分层",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "U2765的会员等级呢",
+        "n_chars": 11,
+        "tokens": [
+          "U2765",
+          "会员",
+          "呢",
+          "的",
+          "等级"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.875,
+        "nearest_train": "U2765的会员等级",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "请问，U2765的加购商品",
+        "n_chars": 13,
+        "tokens": [
+          "U2765",
+          "加购",
+          "商品",
+          "的",
+          "请问"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.7,
+        "nearest_train": "U2765的加购商品",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "U1234 的最近一次登录时间呢",
+        "n_chars": 16,
+        "tokens": [
+          "U1234",
+          "一次",
+          "呢",
+          "时间",
+          "最近",
+          "登录",
+          "的"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.9167,
+        "nearest_train": "U1234 的最近一次登录时间",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "请问，U3344 上次消费是什么时候",
+        "n_chars": 18,
+        "tokens": [
+          "U3344",
+          "上次",
+          "什么",
+          "时候",
+          "是",
+          "消费",
+          "请问"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.7857,
+        "nearest_train": "U3344 上次消费是什么时候",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "U4466 一般在什么时候下单呢",
+        "n_chars": 16,
+        "tokens": [
+          "U4466",
+          "一般",
+          "下单",
+          "什么",
+          "呢",
+          "在",
+          "时候"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.9167,
+        "nearest_train": "U4466 一般在什么时候下单",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "U4812 偏好什么价位的商品呢",
+        "n_chars": 16,
+        "tokens": [
+          "U4812",
+          "什么",
+          "价位",
+          "偏好",
+          "呢",
+          "商品",
+          "的"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.9167,
+        "nearest_train": "U4812 偏好什么价位的商品",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "请问，U5432 是价格敏感型用户吗",
+        "n_chars": 18,
+        "tokens": [
+          "U5432",
+          "价格",
+          "吗",
+          "型",
+          "敏感",
+          "是",
+          "用户",
+          "请问"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.7857,
+        "nearest_train": "U5432 是价格敏感型用户吗",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "麻烦帮我查最近九十天各渠道新客首单转化情况呢",
+        "n_chars": 22,
+        "tokens": [
+          "九十天",
+          "各",
+          "呢",
+          "帮",
+          "情况",
+          "我查",
+          "新客",
+          "最近",
+          "渠道",
+          "转化",
+          "首单",
+          "麻烦"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.9474,
+        "nearest_train": "麻烦帮我查最近九十天各渠道新客首单转化情况",
+        "correct": true
+      },
+      {
+        "probe_kind": "high",
+        "query": "请问，麻烦调取近一个月风控名单命中的用户注册来源",
+        "n_chars": 24,
+        "tokens": [
+          "一个月",
+          "名单",
+          "命中",
+          "来源",
+          "用户注册",
+          "的",
+          "请问",
+          "调取",
+          "近",
+          "风控",
+          "麻烦"
+        ],
+        "p_to_t": 1.0,
+        "t_to_p": 1.0,
+        "max_4gram_jaccard": 0.8571,
+        "nearest_train": "麻烦调取近一个月风控名单命中的用户注册来源",
+        "correct": true
       }
     ],
     "grouped": {
@@ -1213,6 +1557,15 @@
         "accuracy": 1.0,
         "acc_ci": [
           0.8668035060468213,
+          1.0
+        ]
+      },
+      "high|高重合(>=0.6)": {
+        "n": 17,
+        "correct": 17,
+        "accuracy": 1.0,
+        "acc_ci": [
+          0.8156763396284354,
           1.0
         ]
       }
@@ -1248,6 +1601,16 @@
       "count_lt_0.6": 0,
       "count_lt_0.7": 0,
       "count_lt_0.9": 1
+    },
+    "high": {
+      "mean_max_prob": 0.9997112154960632,
+      "p05": 0.9994211196899414,
+      "min_max_prob": 0.9994211196899414,
+      "mean_confidence_chitchat": null,
+      "mean_confidence_business": 0.9997112154960632,
+      "count_lt_0.6": 0,
+      "count_lt_0.7": 0,
+      "count_lt_0.9": 0
     }
   },
   "low_confidence_samples": [
@@ -1457,10 +1820,10 @@
     "true_business": 6
   },
   "inference_speed": {
-    "single_ms_avg_100": 21.763,
-    "batch32_total_ms": 334.764,
-    "batch32_per_item_ms": 1.154,
-    "speedup_x": 18.85,
+    "single_ms_avg_100": 22.443,
+    "batch32_total_ms": 358.535,
+    "batch32_per_item_ms": 1.236,
+    "speedup_x": 18.15,
     "device": "cuda"
   }
 }

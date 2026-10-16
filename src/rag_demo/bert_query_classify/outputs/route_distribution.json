@@ -1,0 +1,178 @@
+{
+  "n_requests": 44,
+  "n_distinct": 8,
+  "time_range": [
+    "2026-10-14T12:07:40",
+    "2026-10-16T16:54:07"
+  ],
+  "sources": {
+    "backfill-log": 36,
+    "replay": 8
+  },
+  "modes": {
+    "rule(改造前)": 36,
+    "bert": 8
+  },
+  "route_by_request": {
+    "rag": 42,
+    "chitchat": 2
+  },
+  "route_by_distinct": {
+    "rag": 7,
+    "chitchat": 1
+  },
+  "blocked_share_requests": 0.0455,
+  "blocked_share_distinct": 0.125,
+  "p_chitchat_coverage": 1.0,
+  "p_chitchat_stats": {
+    "mean": 0.0456,
+    "min": 0.000176,
+    "max": 0.999236,
+    "median": 0.0002
+  },
+  "buckets": [
+    {
+      "bucket": "0.00-0.10",
+      "n": 42,
+      "share_of_requests": 0.9545,
+      "blocked_as_chitchat": 0,
+      "n_distinct": 7,
+      "blocked_distinct": 0
+    },
+    {
+      "bucket": "0.10-0.30",
+      "n": 0,
+      "share_of_requests": 0.0,
+      "blocked_as_chitchat": 0,
+      "n_distinct": 0,
+      "blocked_distinct": 0
+    },
+    {
+      "bucket": "0.30-0.50",
+      "n": 0,
+      "share_of_requests": 0.0,
+      "blocked_as_chitchat": 0,
+      "n_distinct": 0,
+      "blocked_distinct": 0
+    },
+    {
+      "bucket": "0.50-0.70",
+      "n": 0,
+      "share_of_requests": 0.0,
+      "blocked_as_chitchat": 0,
+      "n_distinct": 0,
+      "blocked_distinct": 0
+    },
+    {
+      "bucket": "0.70-0.90",
+      "n": 0,
+      "share_of_requests": 0.0,
+      "blocked_as_chitchat": 0,
+      "n_distinct": 0,
+      "blocked_distinct": 0
+    },
+    {
+      "bucket": "0.90-0.99",
+      "n": 0,
+      "share_of_requests": 0.0,
+      "blocked_as_chitchat": 0,
+      "n_distinct": 0,
+      "blocked_distinct": 0
+    },
+    {
+      "bucket": "0.99-1.00",
+      "n": 2,
+      "share_of_requests": 0.0455,
+      "blocked_as_chitchat": 2,
+      "n_distinct": 1,
+      "blocked_distinct": 1
+    }
+  ],
+  "ambiguous_band": {
+    "range": [
+      0.5,
+      0.9
+    ],
+    "n": 0,
+    "share": 0.0,
+    "by_length": {},
+    "samples": []
+  },
+  "router_latency": {
+    "n": 8,
+    "mean_ms": 27.403,
+    "p50_ms": 27.686,
+    "p95_ms": 43.382,
+    "max_ms": 43.382
+  },
+  "recheck_miss": {
+    "n": 0,
+    "rate_on_rag": 0.0,
+    "samples": []
+  },
+  "top_queries": [
+    {
+      "query": "各会员等级的用户人数分别是多少",
+      "count": 19
+    },
+    {
+      "query": "流失预警用户里钻石会员有多少人？他们主要分布在哪些城市、偏好什么品类？针对这类用户该怎么召回？",
+      "count": 5
+    },
+    {
+      "query": "北京和上海的钻石会员，在客单价和品类偏好上有什么差异",
+      "count": 4
+    },
+    {
+      "query": "高客单、喜欢美妆的女性用户有哪些",
+      "count": 4
+    },
+    {
+      "query": "深圳的钻石会员都是什么特征",
+      "count": 4
+    },
+    {
+      "query": "高价值用户怎么定义的",
+      "count": 4
+    },
+    {
+      "query": "流失预警的判定标准",
+      "count": 2
+    },
+    {
+      "query": "你好",
+      "count": 2
+    }
+  ],
+  "decision": {
+    "sufficient": false,
+    "thresholds": {
+      "min_requests": 200,
+      "min_distinct": 50,
+      "miss_rate_alert": 0.05,
+      "ambiguous_share_alert": 0.05
+    },
+    "actions": [
+      {
+        "priority": "blocked",
+        "action": "样本不足，不产出补充决策",
+        "why": "真实请求 44 条 / 去重 8 条，门槛是 ≥200 / ≥50。继续用构造个例驱动补数据会引入采样偏差——等真实流量积累。"
+      }
+    ]
+  },
+  "proxy_labeling": {
+    "n_labeled": 8,
+    "tp": 1,
+    "fp_misblock": 0,
+    "fn_missed": 0,
+    "tn": 7,
+    "accuracy": 1.0,
+    "labeler": "llm-proxy（同源于 recheck 的模型家族，有同向偏差）",
+    "samples_needing_data": []
+  },
+  "label_stats": {
+    "cached": 8,
+    "called": 0,
+    "failed": 0
+  }
+}

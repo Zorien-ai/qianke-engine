@@ -8,7 +8,15 @@
     好模型、差模型、过拟合模型在这个集上都是 1.0，无法据此区分。所以 test 集在这里只承担
     「确认没跑飞」的角色，真正的评估信号来自三处：
 
-      1. 分布外探针（30 条极短业务 + 25 条长句业务）—— 长度捷径的定向探针
+      1. 分布外探针 —— 三组，各回答一个不同的问题：
+         a. 短端 30 条（2~6 字）：模型是否「短就判闲聊」
+         b. 长端 25 条（19~22 字）：模型是否「长就判闲聊」
+         c. 高重合对照组 17 条：由训练句最小改写而来（整句 4-gram 相似度 ≥0.7），
+            回答「成绩里有多少来自词面记忆、多少来自语义泛化」。
+            没有 c 组时，a/b 两组全是「字面没见过」的样本，按重合度分组对比只剩一个组，
+            比较无从谈起（2026-10-16 之前就是这种状态，见 outputs 里的告警）。
+            ⚠ 短端**构造不出**高重合对照：句长 L 追加 1 字后相似度 =(L-3)/(L-2)，
+            L=4 时只有 0.5。所以 c 组天然由中长句构成，短端只能靠 unseen/fragment 测。
       2. 置信度分布 —— F1 只说「判对了」，置信度说「有多确定」；
          同为 1.0 的两个模型，平均置信度 0.99 与 0.65 的鲁棒性完全不同
       3. 逐长度桶指标 —— 看模型是不是靠长度做题
@@ -165,10 +173,26 @@ def main() -> None:
     train = load_jsonl(os.path.join(DATA, "train.jsonl"))
     short_probe = load_jsonl(os.path.join(DATA, "short_business_test.jsonl"))
     long_probe = load_jsonl(os.path.join(DATA, "long_business_test.jsonl"))
+    # 对照组由 split_data.py 的 2.10 步骤生成（未生成时降级：跳过该组并告警，
+    # 而不是让整个评估挂掉——它是「补充证据」，不是评估的前提）
+    high_path = os.path.join(DATA, "high_overlap_business_test.jsonl")
+    high_probe = load_jsonl(high_path) if os.path.exists(high_path) else []
 
     r_test = eval_block(pred, test)
     r_short = eval_block(pred, short_probe)
     r_long = eval_block(pred, long_probe)
+
+    # (组名, 结果, 样本) —— 后面【3】【4】都遍历它，避免三处各写一份清单
+    probe_sets = [("short", r_short, short_probe), ("long", r_long, long_probe)]
+    r_high = None
+    if high_probe:
+        r_high = eval_block(pred, high_probe)
+        probe_sets.append(("high", r_high, high_probe))
+    else:
+        print("\n⚠ 未找到 high_overlap_business_test.jsonl —— 缺少高重合对照组，"
+              "按重合度分组的对比不成立")
+        print("  生成：uv run python src/rag_demo/bert_query_classify/overlap_probes.py"
+              "（或直接重跑 split_data.py）")
 
     # 训练集词表（用于短语重合度 + 最近邻）
     train_tokens = [set(tokenize_zh(r["query"])) for r in train]
@@ -310,7 +334,7 @@ def main() -> None:
     print("【3】分布外探针（监控项③：注意样本量小，一律报 Wilson 区间）")
     print("-" * 78)
     probes = {}
-    for name, res, rows in (("short", r_short, short_probe), ("long", r_long, long_probe)):
+    for name, res, rows in probe_sets:
         print(f"\n  [{name}] {res['n']} 条，长度 "
               f"{min(len(t) for t in res['texts'])}~{max(len(t) for t in res['texts'])}"
               f"；类别全为 BUSINESS，所以准确率 = 业务召回率")
@@ -345,7 +369,7 @@ def main() -> None:
     print("-" * 78)
     train_token_union = set().union(*train_tokens)
     overlap_rows = []
-    for name, res, rows in (("short", r_short, short_probe), ("long", r_long, long_probe)):
+    for name, res, rows in probe_sets:
         print(f"\n  [{name}]")
         print(f"    {'探针':<28}{'p→t':>7}{'t→p':>7}{'最大4gram相似':>14}  {'结果':<8}")
         for i, row in enumerate(rows):
@@ -373,7 +397,7 @@ def main() -> None:
     print("\n  重合度整体画像（p→t = 探针的词有多少在训练集出现过；"
           "t→p = 匹配到的训练句有多少被探针复现）：")
     overlap_summary = {}
-    for name in ("short", "long"):
+    for name in [s[0] for s in probe_sets]:
         sel = [o for o in overlap_rows if o["probe_kind"] == name]
         if not sel:
             continue
@@ -392,7 +416,7 @@ def main() -> None:
     # 按重合度分组看指标
     print("\n  按内容重合度分组（max 4-gram 相似度 ≥0.6 视为「内容也见过」）：")
     grouped = {}
-    for name in ("short", "long"):
+    for name in [s[0] for s in probe_sets]:
         sel = [o for o in overlap_rows if o["probe_kind"] == name]
         for tag, fn in (("高重合(>=0.6)", lambda o: o["max_4gram_jaccard"] >= 0.6),
                         ("低重合(<0.6)", lambda o: o["max_4gram_jaccard"] < 0.6)):
@@ -406,7 +430,30 @@ def main() -> None:
                                         "accuracy": ok / len(sub), "acc_ci": [lo, hi]}
     if not any(k.endswith("高重合(>=0.6)") for k in grouped):
         print("    ⚠ 没有任何探针落在「高重合(>=0.6)」组 —— 缺少对照组，"
-              "分组对比本身不成立（见下方说明）")
+              "分组对比本身不成立")
+        print("      修法：跑 split_data.py 的 2.10 步骤（overlap_probes.py）"
+              "生成高重合对照探针")
+    else:
+        # 对照组存在的意义就是把「记忆」与「泛化」分开，所以这里要给出读法，
+        # 而不是只甩两组数字让人自己猜。
+        hi = [v for k, v in grouped.items() if k.endswith("高重合(>=0.6)") and "|" in k]
+        lo = [v for k, v in grouped.items() if k.endswith("低重合(<0.6)") and "|" in k]
+        if hi and lo:
+            n_hi = sum(v["n"] for v in hi)
+            k_hi = sum(v["correct"] for v in hi)
+            n_lo = sum(v["n"] for v in lo)
+            k_lo = sum(v["correct"] for v in lo)
+            d_hi, d_lo = k_hi / n_hi, k_lo / n_lo
+            print(f"\n    读法：高重合组 {k_hi}/{n_hi}={d_hi:.1%}，"
+                  f"低重合组 {k_lo}/{n_lo}={d_lo:.1%}（差 {d_hi - d_lo:+.1%}）。")
+            if d_lo >= d_hi:
+                print("      低重合组不低于高重合组 -> **没有证据**表明成绩来自词面记忆；")
+                print("      低重合组的分数本身就是泛化能力的下界。")
+            else:
+                print("      高重合组更高 -> 差值部分即词面记忆的贡献（模型对见过的内容更稳），")
+                print("      此时**低重合组**的数字才代表真实泛化能力，对外报指标应报它。")
+            print(f"      ⚠ 两组样本量都小（{n_hi} / {n_lo}），差值未做显著性检验：")
+            print("        这只是「有没有记忆迹象」的定性判断，不能当精确的能力差值。")
     report["phrase_overlap"] = {"per_probe": overlap_rows, "grouped": grouped}
 
     # =====================================================================
@@ -415,8 +462,9 @@ def main() -> None:
     print("\n" + "-" * 78)
     print("【5】置信度分布（F1 只说判对，置信度说有多确定）")
     print("-" * 78)
-    conf = {"test": {}, "short": {}, "long": {}}
-    for name, res in (("test", r_test), ("short", r_short), ("long", r_long)):
+    conf_sets = [("test", r_test)] + [(n, r) for n, r, _ in probe_sets]
+    conf = {}
+    for name, res in conf_sets:
         mp = res["probs"].max(axis=1)
         yt = res["y_true"]
         conf[name] = {
@@ -443,7 +491,7 @@ def main() -> None:
     # 阈值取法在这里会得到空表（所有样本都 >0.7），而空表是没有信息的——
     # 模型确实存在犹豫的样本，只是整体置信度高位运行，必须按排名才看得见。
     all_conf_rows = []
-    for name, res in (("test", r_test), ("short", r_short), ("long", r_long)):
+    for name, res in conf_sets:
         mp = res["probs"].max(axis=1)
         for i in range(res["n"]):
             all_conf_rows.append({
@@ -476,7 +524,8 @@ def main() -> None:
     mp_t = r_test["probs"].max(axis=1)
     mp_short = r_short["probs"].max(axis=1)
     mp_long = r_long["probs"].max(axis=1)
-    mp_p = np.concatenate([mp_short, mp_long])
+    mp_high = r_high["probs"].max(axis=1) if r_high else np.zeros(0)
+    mp_p = np.concatenate([mp_short, mp_long] + ([mp_high] if high_probe else []))
 
     fig = plt.figure(figsize=(12, 10))
     gs = fig.add_gridspec(2, 2, hspace=0.32, wspace=0.22)
@@ -506,9 +555,14 @@ def main() -> None:
     ax1.legend()
     ax1.grid(alpha=0.3)
 
-    for vals, label, col in ((mp_t, f"测试集 (n={len(mp_t)})", "#6FCF97"),
-                             (mp_short, f"短业务探针 (n={len(mp_short)})", "#EB5757"),
-                             (mp_long, f"长业务探针 (n={len(mp_long)})", "#9B51E0")):
+    curves = [
+        (mp_t, f"测试集 (n={len(mp_t)})", "#6FCF97"),
+        (mp_short, f"短业务探针 (n={len(mp_short)})", "#EB5757"),
+        (mp_long, f"长业务探针 (n={len(mp_long)})", "#9B51E0"),
+    ]
+    if r_high:
+        curves.append((mp_high, f"高重合对照 (n={len(mp_high)})", "#F2C94C"))
+    for vals, label, col in curves:
         ax2.plot(np.arange(1, len(vals) + 1), np.sort(vals), marker="o", ms=3,
                  lw=1.4, color=col, label=label)
     ax2.axhline(0.99, ls=":", lw=1.2, color="gray", label="0.99 参考线")
@@ -533,7 +587,10 @@ def main() -> None:
     print("【6】错误与低置信样本分析（两级：test 错误可能为空，低置信一定有内容）")
     print("-" * 78)
     print(f"  test 集错误样本：{len(r_test['errors'])} 条")
-    print(f"  探针集错误样本：{len(r_short['errors']) + len(r_long['errors'])} 条")
+    print(f"  探针集错误样本："
+          f"{sum(len(r['errors']) for _, r, _ in probe_sets)} 条"
+          f"（短 {len(r_short['errors'])} / 长 {len(r_long['errors'])}"
+          f" / 高重合对照 {len(r_high['errors']) if r_high else '—'}）")
 
     err_lines = ["意图二分类 —— 错误样本与低置信样本分析", "=" * 70, ""]
 
@@ -557,6 +614,8 @@ def main() -> None:
     dump_errors("test 集", r_test, err_lines)
     dump_errors("短业务探针", r_short, err_lines)
     dump_errors("长业务探针", r_long, err_lines)
+    if r_high:
+        dump_errors("高重合对照探针", r_high, err_lines)
 
     print(f"\n  置信度最低的 Top {len(low_conf_rows)} 条（按排名取，不设阈值——"
           f"阈值筛选会得到空表）：")

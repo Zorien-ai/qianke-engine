@@ -172,3 +172,15 @@ INTENT_CHITCHAT_THRESHOLD = 0.9
 # 与训练时的 max_length 一致（bert_query_classify/train.py MAX_LENGTH=64）。
 # 超长截断：闲聊判断不看长尾，截断能省 forward 时间且不影响结果。
 INTENT_MAX_LENGTH = 64
+
+# ---------- 入口路由回流埋点 ----------
+# 「还要不要再补数据」只能由**线上真实 query 分布**回答，而真实流量是没有标签的：
+# 用户不会告诉你他问的是闲聊还是业务。所以必须先把每次判定记下来
+# （query / 判定 / P(闲聊) / 门槛 / 耗时），事后才能补标签、看分布，再决定补什么形态。
+#
+# 落盘在 logs/（不入库）——这是运行期数据，不是仓库数据。
+# 分析脚本：src/rag_demo/bert_query_classify/analyze_routes.py
+INTENT_TELEMETRY = True
+INTENT_TELEMETRY_PATH = os.path.join(BASE_DIR, "logs", "intent_routes.jsonl")
+# 高流量场景按比例采样；1.0 = 全量。当前量级很小，全量记，样本才够看分布。
+INTENT_TELEMETRY_SAMPLE_RATE = 1.0

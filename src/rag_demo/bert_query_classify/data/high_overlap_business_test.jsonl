@@ -1,0 +1,17 @@
+{"query": "F值怎么定义呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "F值怎么定义", "max_4gram_jaccard": 0.75}
+{"query": "M值怎么定义呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "M值怎么定义", "max_4gram_jaccard": 0.75}
+{"query": "R值怎么定义呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "R值怎么定义", "max_4gram_jaccard": 0.75}
+{"query": "价保申请流程呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "价保申请流程", "max_4gram_jaccard": 0.75}
+{"query": "企微添加流程呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "企微添加流程", "max_4gram_jaccard": 0.75}
+{"query": "618大促的拉新方案呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "618大促的拉新方案", "max_4gram_jaccard": 0.875}
+{"query": "请问，App用户的定义范围", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "前置「请问，」", "source_train": "App用户的定义范围", "max_4gram_jaccard": 0.7}
+{"query": "U2765的价值分层呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "U2765的价值分层", "max_4gram_jaccard": 0.875}
+{"query": "U2765的会员等级呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "U2765的会员等级", "max_4gram_jaccard": 0.875}
+{"query": "请问，U2765的加购商品", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "前置「请问，」", "source_train": "U2765的加购商品", "max_4gram_jaccard": 0.7}
+{"query": "U1234 的最近一次登录时间呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "U1234 的最近一次登录时间", "max_4gram_jaccard": 0.9167}
+{"query": "请问，U3344 上次消费是什么时候", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "前置「请问，」", "source_train": "U3344 上次消费是什么时候", "max_4gram_jaccard": 0.7857}
+{"query": "U4466 一般在什么时候下单呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "U4466 一般在什么时候下单", "max_4gram_jaccard": 0.9167}
+{"query": "U4812 偏好什么价位的商品呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "U4812 偏好什么价位的商品", "max_4gram_jaccard": 0.9167}
+{"query": "请问，U5432 是价格敏感型用户吗", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "前置「请问，」", "source_train": "U5432 是价格敏感型用户吗", "max_4gram_jaccard": 0.7857}
+{"query": "麻烦帮我查最近九十天各渠道新客首单转化情况呢", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "追加语气词「呢」", "source_train": "麻烦帮我查最近九十天各渠道新客首单转化情况", "max_4gram_jaccard": 0.9474}
+{"query": "请问，麻烦调取近一个月风控名单命中的用户注册来源", "label": "BUSINESS", "probe_kind": "high", "probe_type": "high_overlap", "edit": "前置「请问，」", "source_train": "麻烦调取近一个月风控名单命中的用户注册来源", "max_4gram_jaccard": 0.8571}

@@ -34,9 +34,10 @@
 比多走一次检索严重得多（见 config.INTENT_CHITCHAT_THRESHOLD）。
 """
 import logging
+import time
 
 from rag_demo import config
-from rag_demo.tools import bert_intent
+from rag_demo.tools import bert_intent, intent_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -103,20 +104,37 @@ def rule_is_chitchat(question: str) -> bool:
     return False
 
 
-def _bert_is_chitchat(question: str) -> bool | None:
+def decide(question: str) -> tuple[bool, float | None, str]:
     """
-    BERT 判定；模型不可用返回 None（交由调用方回退规则）
+    一次判定，返回 (是否闲聊, P(闲聊), 判定来源)
 
-    单条推理异常（例如显存被别的进程挤爆）也不能把请求打挂：捕获后退回规则。
+    判定来源 via：
+        rule          配置强制走规则（INTENT_ROUTER="rule"）或 hybrid 下规则短路
+        bert          模型判定
+        rule_fallback 模型不可用（目录缺失 / 加载失败 / 推理异常）回退规则
+
+    为什么要把 via 带出来：埋点必须能区分「模型判的」和「规则兜的」。
+    混在一起统计会把模型能力算错——规则回退期间的真实流量不代表模型水平。
     """
+    mode = config.INTENT_ROUTER
+
+    if mode == "rule":
+        return rule_is_chitchat(question), None, "rule"
+
+    if mode == "hybrid" and rule_is_chitchat(question):
+        # 规则已命中，省掉这次 BERT 前向（约 13ms）
+        return True, None, "rule"
+
     try:
         prob = bert_intent.chitchat_prob(question)
     except Exception as e:  # noqa: BLE001
         logger.warning("意图分类推理失败，本次回退关键词规则: %s: %s", type(e).__name__, e)
-        return None
+        prob = None
+
     if prob is None:
-        return None
-    return prob >= config.INTENT_CHITCHAT_THRESHOLD
+        return rule_is_chitchat(question), None, "rule_fallback"
+
+    return prob >= config.INTENT_CHITCHAT_THRESHOLD, prob, "bert"
 
 
 def is_chitchat(question: str) -> bool:
@@ -128,35 +146,38 @@ def is_chitchat(question: str) -> bool:
     """
     if not question:
         return False
-
-    mode = config.INTENT_ROUTER
-
-    if mode == "rule":
-        return rule_is_chitchat(question)
-
-    if mode == "hybrid" and rule_is_chitchat(question):
-        # 规则已命中，省掉这次 BERT 前向（约 13ms）
-        return True
-
-    verdict = _bert_is_chitchat(question)
-    if verdict is None:
-        return rule_is_chitchat(question)
-    return verdict
+    return decide(question)[0]
 
 
 def route(question: str) -> str:
     """
-    判断问题走向，返回 "chitchat" / "rag"
+    判断问题走向，返回 "chitchat" / "rag"（并落一条回流埋点）
 
     只做二分类：拦掉闲聊，其余一律进入多路聚合链路。
     「是否需要 SQL 路」「需要哪几路检索」都由 query_processor.plan_queries 统一决定。
+
+    埋点在这层做（不是 pipeline 层）：这里才有 P(闲聊)、门槛和判定耗时，
+    而 P(闲聊) 正是后续决定「门槛要不要调、数据要不要补」的唯一依据。
     """
     if not question:
         return ROUTE_RAG
 
-    if is_chitchat(question):
-        logger.info("意图路由(%s) -> chitchat: %s", config.INTENT_ROUTER, question)
-        return ROUTE_CHITCHAT
+    t0 = time.perf_counter()
+    hit, prob, via = decide(question)
+    latency_ms = (time.perf_counter() - t0) * 1000
+    result = ROUTE_CHITCHAT if hit else ROUTE_RAG
 
-    logger.info("意图路由(%s) -> 多路聚合: %s", config.INTENT_ROUTER, question)
-    return ROUTE_RAG
+    # best-effort：埋点自己吞异常，绝不因它让请求失败
+    intent_telemetry.record_route(
+        query=question, route=result, mode=config.INTENT_ROUTER,
+        p_chitchat=prob, threshold=config.INTENT_CHITCHAT_THRESHOLD,
+        latency_ms=latency_ms,
+    )
+
+    logger.info(
+        "意图路由(%s/%s, p=%.4f, %.1fms) -> %s: %s",
+        config.INTENT_ROUTER, via,
+        -1.0 if prob is None else prob, latency_ms,
+        "chitchat" if hit else "多路聚合", question,
+    )
+    return result

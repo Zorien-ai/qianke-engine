@@ -40,6 +40,7 @@ from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import MULTI_QUERY_PROMPT
 from rag_demo.retrieval.hybrid_retriever import get_model, hybrid_search
 from rag_demo.retrieval.reranker import get_reranker, rerank, rerank_by_source
+from rag_demo.tools import intent_telemetry
 from rag_demo.tools.router import ROUTE_CHITCHAT, ROUTE_RAG
 
 logger = logging.getLogger(__name__)
@@ -236,7 +237,10 @@ def plan_queries(question: str) -> QueryPlan:
         sql_blocked = True
 
     if route != ROUTE_RAG:
-        logger.info("路由复核改道 -> %s（关键词路由原判 RAG）: %s", route, question)
+        logger.info("路由复核改道 -> %s（入口路由原判 RAG）: %s", route, question)
+        # 这是**带免费标签**的一次数据：入口判 RAG、LLM 复核说 chitchat = 一次漏判。
+        # 记下来，线上就不必为「该不该走检索」再花一次标注成本。
+        intent_telemetry.record_recheck(question, route)
     else:
         logger.info(
             "多路规划: %s | SQL=%s",
