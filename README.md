@@ -61,15 +61,18 @@ $env:DEEPSEEK_API_KEY="sk-你的key"
 uv run uvicorn rag_demo.api.main:app --reload --port 8000
 ```
 
-访问 <http://127.0.0.1:8000>（问答交互页） / `/wizard`（四步向导） / `/docs`（API 文档）
+访问 <http://127.0.0.1:8000>（旧版问答页） / <http://127.0.0.1:8000/v2/>（新版工作台）
+/ <http://127.0.0.1:8000/v2/#/setup>（新版四步向导） / `/docs`（API 文档）
 
 > **M3 起需要登录**：首次启动会创建系统管理员 `admin` / `admin123`
 > （用 `RAG_ADMIN_USER` / `RAG_ADMIN_PASSWORD` 覆盖；正式使用前请改掉）。
-> 未登录访问首页或 `/wizard` 会跳 `/login`。账号体系见下文「登录、账号与企业隔离」。
+> 未登录访问首页会跳 `/login`。账号体系见下文「登录、账号与企业隔离」。
 >
-> 向导（上传 → 确认 → 构建 → 查询）是 M2 新增的入口：页面在 `/wizard`，
-> 接口在 `/api/wizard/*`，实现见 `src/rag_demo/mvp/app.py`，
-> 接入方式见 `src/rag_demo/api/wizard.py`（**挂载顺序有讲究**，别调换）。
+> 四步向导（上传 → 确认 → 构建 → 查询）页面已迁到 Vue 3 的 **`/v2/#/setup`**
+> （M3 收口时从 `mvp/static` 的原生页重写，视觉与 /v2 其余页面统一）；
+> 老入口 `/wizard` 现在 302 到新版，老书签/旧侧边栏入口继续可用。
+> 接口仍是 `/api/wizard/*`，实现见 `src/rag_demo/mvp/app.py`，
+> 接入方式见 `src/rag_demo/api/wizard.py`。
 >
 > 上传的文件落在 `data/uploads/<批次号>/`，落盘时统一转成 UTF-8（列名/行数由服务端
 > 用 pandas 真读一遍，不再由浏览器解析）。属运行期数据，不入库。

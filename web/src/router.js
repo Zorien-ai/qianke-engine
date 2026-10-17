@@ -6,6 +6,7 @@ import Chat from "./views/Chat.vue";
 import Kb from "./views/Kb.vue";
 import Staff from "./views/Staff.vue";
 import Settings from "./views/Settings.vue";
+import Setup from "./views/Setup.vue";
 
 /**
  * 用 hash 路由：后端把 web/dist 静态挂到 /v2/，没有服务端 fallback，
@@ -17,6 +18,8 @@ const routes = [
   { path: "/kb", name: "kb", component: Kb, meta: { title: "知识库" } },
   { path: "/staff", name: "staff", component: Staff, meta: { title: "员工管理" } },
   { path: "/settings", name: "settings", component: Settings, meta: { title: "权限配置" } },
+  // 四步导入向导（替代老 /wizard 页面；老路径由后端 302 到 /v2/#/setup）
+  { path: "/setup", name: "setup", component: Setup, meta: { title: "数据导入" } },
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 
@@ -38,6 +41,11 @@ router.beforeEach(async (to) => {
   }
   if (to.name === "settings" && !hasCap("ops")) {
     toast("当前账号没有权限配置能力（仅系统管理员可用）", "error");
+    return { name: "dashboard" };
+  }
+  // 导入向导会构建数据（写库），仅管理员可进；后端还会再拦截一次
+  if (to.name === "setup" && !isManager()) {
+    toast("只有企业管理员可以导入或重建数据", "error");
     return { name: "dashboard" };
   }
   return true;

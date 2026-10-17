@@ -134,10 +134,17 @@ function closeDrawer() {
         </nav>
 
         <div class="sidebar-foot">
-          <a href="/wizard" class="nav-item nav-external" title="数据导入向导（独立页面）">
+          <RouterLink
+            v-if="isManager()"
+            to="/setup"
+            class="nav-item"
+            :class="{ 'is-active': route.path === '/setup' }"
+            title="数据导入 · 四步向导"
+            @click="closeDrawer"
+          >
             <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.wizard}</svg>`" />
             <span class="nav-label">数据导入</span>
-          </a>
+          </RouterLink>
           <button class="collapse-btn" type="button" @click="collapsed = !collapsed" :title="collapsed ? '展开侧边栏' : '折叠侧边栏'">
             <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.collapse}</svg>`" />
             <span class="nav-label">收起侧边栏</span>

@@ -483,9 +483,11 @@ class UserStatusIn(BaseModel):
 
 
 # ================= 静态资源与页面 =================
-# 向导（M2）先注册：它自带 /static/wizard 挂载点，必须排在下面那个 /static 之前，
-# 否则 /static/wizard/* 会被 /static 吃掉并 404（Starlette 按注册顺序匹配前缀）。
-# 页面在 /wizard，接口在 /api/wizard/*，实现见 rag_demo/mvp/app.py。
+# 向导（M3 收口后）：`/wizard` 页面 302 到 Vue 新版 `/v2/#/setup`，
+# `/api/wizard/*` 接口照旧；本模块已不再挂 `/static/wizard`（老静态资源只在
+# 8002 独立调试服务里保留），所以下面这个注册顺序不再敏感——但保持原位置，
+# 避免以后再加静态挂载点时又踩「先通用后特殊」的坑。
+# 接口实现见 rag_demo/mvp/app.py，页面接管见 web/src/views/Setup.vue。
 register_wizard(app)
 
 # 企业后台（M3）：/api/kb/* 与 /admin/enterprises、邀请码重置。

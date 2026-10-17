@@ -102,3 +102,15 @@ export function putJson(url, body) {
 export function del(url) {
   return apiJson(url, { method: "DELETE" });
 }
+
+/**
+ * 上传 multipart 表单（文件上传专用）。
+ * 不手动设 Content-Type：boundary 由浏览器生成，写死会变成"服务端解析不出文件字段"。
+ */
+export async function postForm(url, formData) {
+  const res = await apiFetch(url, { method: "POST", body: formData });
+  const data = await readBody(res);
+  if (!res.ok) throw new ApiError(res.status, detailMessage(data, res.status), data);
+  return data;
+}
+

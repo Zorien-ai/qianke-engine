@@ -3,38 +3,35 @@
 """
 @Author  : Vincent
 @File    : wizard.py
-@Function: 把四步向导挂到 8000 的正式服务上（M2）
+@Function: 把四步向导的**接口**挂到 8000 的正式服务上（M3 收口：页面迁到 Vue）
 
 分工：
-    实现 在 rag_demo/mvp/app.py（M2 的迭代区：mock 逐步换成真实实现）
-    挂载 在本文件（正式服务的接入点）
+    接口实现 在 rag_demo/mvp/app.py（上传 / 字段识别 / 构建 / 问答 的同一套真实现）
+    挂载     在本文件（正式服务的接入点）
 
-为什么拆开而不是让 main.py 直接 include：
-    main.py 已经很长（问答、检索、权限、缓存全在里面）。向导是**另一条业务线**
-    （上传 → 确认 → 构建 → 查询），它跟问答共用服务，但不共用逻辑。
-    单独一个接入模块，既让 main.py 只多一行，也给 M2 后续的向导专用配置
-    （CORS、上传大小限制、任务队列开关）留了落点。
+页面去哪了（M3 收口）：
+    老的四步向导页（mvp/static/wizard.html，原生 JS + 紫色大色块）已冻结，
+    页面重写为 Vue 3 的 `/v2/#/setup`（web/src/views/Setup.vue），视觉与交互
+    跟 /v2 其余页面统一。所以本模块的 `/wizard` 只剩一个 302：
+    老链接、旧 SPA 侧边栏的「数据导入」、书签都还能用，但不再渲染老页面。
+    `/api/wizard/*` 一个字段都没变，新页面直接对接同一套接口。
 
-静态资源挂载顺序（**别调换**）：
-    main.py 里已有 `app.mount("/static", api/static)`。Starlette 按注册顺序匹配
-    前缀，且 Mount 命中后不会再落给后面的路由——也就是说，若先注册了 `/static`，
-    那么 `/static/wizard/wizard.css` 会被 api/static 那个挂载点吃掉并 404。
-    所以本模块的 `/static/wizard` 必须**先**注册，main.py 里那一行
-    `register_wizard(app)` 因此放在既有静态挂载之前。
-
-与 8001 的关系：
-    8001 跑的是冻结快照（prototype/m1_mock/），与本文件无关。
-    本文件只服务 8000，改这里不会影响任何测试者。
+静态挂载：
+    M3 收口后本模块**不再挂** `/static/wizard`（老页面的静态资源只在 8002
+    独立调试服务里还留着，见 mvp/app.py 自己的 mount）。main.py 里仍保持
+    `register_wizard(app)` 在既有 `/static` 挂载之前的位置——现在没有自己的
+    静态挂载点了，顺序不再敏感，但保持原顺序，避免以后再加挂载点时又踩
+    「先通用后特殊」的坑。
 """
-import os
-
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 
 from rag_demo import auth
-from rag_demo.mvp.app import STATIC_DIR as WIZARD_STATIC_DIR
 from rag_demo.mvp.app import router as wizard_api
+
+# 老页面 → Vue 新版向导。hash 路由的 fragment 在 Location 里浏览器会照常跳转，
+# 服务端不需要为 /v2/#/setup 单独注册路由（静态挂载 + 前端路由接管）。
+NEW_WIZARD_URL = "/v2/#/setup"
 
 
 def require_login(request: Request) -> None:
@@ -62,20 +59,17 @@ _page = APIRouter()
 
 
 @_page.get("/wizard", include_in_schema=False)
-def wizard_page() -> Response:
-    """四步向导页（上传 → 确认 → 构建 → 查询）；未登录先登录"""
-    if auth.AUTH_ENABLED and auth.current_account() is None:
-        return RedirectResponse("/login", status_code=302)
-    return FileResponse(os.path.join(WIZARD_STATIC_DIR, "wizard.html"))
+def wizard_page() -> RedirectResponse:
+    """四步向导页：M3 收口后由 Vue 接管（/v2/#/setup），老链接 302 过去
+
+    登录校验交给新版页面的路由守卫：未登录时 /v2/#/setup 会跳 /login，
+    这里不重复判断——多一处判断就多一处「两边不一致」的可能。
+    """
+    return RedirectResponse(NEW_WIZARD_URL, status_code=302)
 
 
 def register_wizard(app: FastAPI) -> None:
-    """把向导的页面、静态资源与接口注册到正式服务上（调用顺序见模块 docstring）"""
-    app.mount(
-        "/static/wizard",
-        StaticFiles(directory=WIZARD_STATIC_DIR),
-        name="wizard-static",
-    )
+    """把向导的页面（302）与接口注册到正式服务上"""
     app.include_router(_page)
-    # 登录闸门：`/api/wizard/*` 全部要求登录态（独立调试服务 8002 不走这里）
+    # 登录闸门：`/api/wizard/*` 全部要求登录态（8002 独立调试服务不走这里）
     app.include_router(wizard_api, dependencies=[Depends(require_login)])

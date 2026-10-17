@@ -21,7 +21,7 @@
     <nav class="nav-list">
       <a href="#/home" class="nav-item" data-nav="home"><span class="nav-ico">▤</span>首页</a>
       <a href="#/chat" class="nav-item" data-nav="chat"><span class="nav-ico">◈</span>对话</a>
-      <a href="/wizard" class="nav-item" data-nav="import"><span class="nav-ico">⇪</span>数据导入</a>
+      <a href="/v2/#/setup" class="nav-item" data-nav="import"><span class="nav-ico">⇪</span>数据导入</a>
       <!-- 「知识库管理」入口已冻结（M3 收口）：该视图迁到 Vue 新版 /v2/#/kb，
            旧 hash #/kb 会在 nav.js 里直接跳转过去。全量迁移后连这个视图一起删。 -->
       <a href="#/staff" class="nav-item" data-nav="staff" data-cap="accounts" hidden>
@@ -63,7 +63,7 @@
         </div>
         <p class="perm-intro" id="welcome-text">正在读取账号信息…</p>
         <div class="welcome-actions">
-          <a class="perm-btn is-primary" href="/wizard">去导入数据</a>
+          <a class="perm-btn is-primary" href="/v2/#/setup">去导入数据</a>
           <a class="perm-btn" href="#/chat">开始提问</a>
         </div>
       </section>
@@ -446,7 +446,7 @@
           <div class="console-empty-title" id="kb-empty-title"></div>
           <p class="console-empty-text" id="kb-empty-text"></p>
           <div class="welcome-actions">
-            <a class="perm-btn is-primary" href="/wizard">去导入数据</a>
+            <a class="perm-btn is-primary" href="/v2/#/setup">去导入数据</a>
             <button type="button" class="perm-btn" id="kb-empty-retry">刷新概况</button>
           </div>
         </div>
