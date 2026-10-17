@@ -57,7 +57,7 @@ DEFAULT_UI_ROLE = ROLE_CS
 
 CAP_ANSWER = "answer"          # 能提问（业务问答）
 CAP_SOURCES = "sources"        # 能看到来源列表（编号 + 来源名）
-CAP_SQL = "sql"                # 能看到 SQL 原文与结果行（仅管理员，见 README 权限矩阵）
+CAP_SQL = "sql"                # 能看到 SQL 原文与执行报错（仅管理员；结果行不算，见 render）
 CAP_INTERNALS = "internals"    # 能看到 trace / 原文片段 / 精排分数 / 检索式
 CAP_TRACE_FLOW = "trace_flow"  # 能看到「融合与精排」汇总：融合条数 / 各池名额 / 画像池基数
 CAP_STATS = "stats"            # 能看到 /stats 数据概况
@@ -216,8 +216,15 @@ def render(payload: dict, role: str) -> dict:
     if CAP_SOURCES in caps and payload.get("sources") is not None:
         out["sources"] = [_render_source(s, caps) for s in payload["sources"]]
 
+    # 查询结果行是**业务事实**（与回答里的数字同源），所有能提问的身份都能看；
+    # 只有 SQL 原文与执行报错属于实现细节（管理员）。二者不能捆在同一个能力上：
+    # 捆在一起会让「不想给 SQL 语句」连带把用户已经能从回答里看到的数字也藏掉。
+    for key in ("rows_count", "sql_rows"):
+        if key in payload:
+            out[key] = payload[key]
+
     if CAP_SQL in caps:
-        for key in ("sql", "rows_count", "sql_rows", "sql_error"):
+        for key in ("sql", "sql_error"):
             if key in payload:
                 out[key] = payload[key]
 

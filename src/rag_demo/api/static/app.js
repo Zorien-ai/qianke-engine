@@ -96,6 +96,9 @@ function applyCapabilities() {
     el("trace-sql-rows").innerHTML = "";
   }
 
+  // 看不到来源列表的身份：来源整节隐藏（否则换身份后会留下上一份来源）
+  if (!CAPS.sources) el("detail-sources-section").hidden = true;
+
   // 看不到任何过程信息时，把上一身份留下的面板清掉，避免残留
   if (!CAPS.sources && !CAPS.sql && !CAPS.internals) el("detail-panel").hidden = true;
 
@@ -390,8 +393,8 @@ function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlErr
 function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, cached, question }) {
   const panel = el("detail-panel");
 
-  // 闲聊：没有来源、没有 SQL、没有留痕，这个过程区没有意义
-  if (!sources.length && !sqlText && !trace) {
+  // 闲聊：没有来源、没有查询结果、没有留痕，这个过程区没有意义
+  if (!sources.length && !sqlText && !sqlRows.length && !trace) {
     panel.hidden = true;
     // 只 hidden 不清内容的话，下一次面板重新出现时若某个子块没被重写，
     // 旧 DOM 会留在那儿——表现就是「溯源不刷新」。
@@ -429,10 +432,12 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, c
   const cacheNote = el("detail-cache-note");
   if (cached) {
     cacheNote.hidden = false;
-    // 无 internals 权限时下面根本看不到检索过程，声明里就别提「过程」
+    // 声明里只提这个身份**真能看到**的东西，否则等于告诉他「有东西没给你看」
     cacheNote.textContent = canInternals
       ? "本次命中缓存、未重新检索：以下来源与检索过程均为缓存中的上一次结果。"
-      : "本次命中缓存、未重新检索：以下来源为缓存中的上一次结果。";
+      : CAPS.sources
+        ? "本次命中缓存、未重新检索：以下来源为缓存中的上一次结果。"
+        : "本次命中缓存、未重新检索：以下查询结果为缓存中的上一次结果。";
   } else {
     cacheNote.hidden = true;
     cacheNote.textContent = "";
@@ -514,6 +519,10 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, c
       : `<span class="tp-empty">本次未产生检索链路数据</span>`;
 
   // 4) 数据来源（名称 + 分数 + 命中它的检索式 + 内容）
+  //    看不到来源列表的身份（cs）这里要整节隐藏：只留「（无）」会被读成
+  //    「一条都没召回」，而事实是没让他看。现在 cs 也能看到查询结果，
+  //    这个过程面板对他可见，所以不能再留空壳。
+  el("detail-sources-section").hidden = !CAPS.sources;
   el("detail-sources").innerHTML =
     sources
       .map((s) => {
@@ -544,27 +553,37 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, c
       })
       .join("") || `<div class="tp-empty">（无）</div>`;
 
-  // 5) SQL 语句与查询结果（管理员专属；后端已按 CAP_SQL 裁掉 sql/sql_rows）
+  // 5) SQL 原文（管理员）与查询结果（所有人）
+  //    查询结果是业务事实——和回答里的数字同源，藏起来只会让人无法核对；
+  //    SQL 原文才是实现细节。两者分开判断，不捆在一起。
   const sqlSec = el("trace-sql-section");
-  if (CAPS.sql && sqlText) {
+  const showSqlText = !!CAPS.sql && !!sqlText;
+  const hasRows = sqlRows.length > 0;
+  const showSqlSec = showSqlText || hasRows || (!!CAPS.sql && !!sqlError);
+  el("sql-text-block").hidden = !showSqlText;
+  // 有 SQL 原文时「查询结果」是二级标题，没有时它就是这一节的主标题
+  el("sql-rows-title").classList.toggle("is-sub", showSqlText);
+  if (showSqlSec) {
     sqlSec.hidden = false;
-    el("sql-body").textContent = sqlText;
+    el("sql-body").textContent = showSqlText ? sqlText : "";
     // 总行数用后端的 rows_count（真实行数），不能用 sqlRows.length——
     // 后者是回传数组，已被 brief_rows 截到 20 行，>20 行时会显示成「共 20 行」，
     // 与顶部徽章的「返回 N 行」自相矛盾。
     const sqlTotal = typeof rowsCount === "number" ? rowsCount : sqlRows.length;
-    el("trace-sql-note").textContent = sqlError
-      ? `执行失败：${sqlError}`
-      : sqlTotal > sqlRows.length
-        ? `共 ${sqlTotal} 行，下列前 ${sqlRows.length} 行`
-        : `共 ${sqlTotal} 行`;
+    el("trace-sql-note").textContent =
+      CAPS.sql && sqlError
+        ? `执行失败：${sqlError}`
+        : sqlTotal > sqlRows.length
+          ? `共 ${sqlTotal} 行，下列前 ${sqlRows.length} 行`
+          : `共 ${sqlTotal} 行`;
     el("trace-sql-rows").innerHTML = sqlRows.length
       ? `<table class="tp-table">${sqlRows
           .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(String(c))}</td>`).join("")}</tr>`)
           .join("")}</table>`
-      : `<div class="tp-empty">${sqlError ? escapeHtml(sqlError) : "（空结果）"}</div>`;
+      : `<div class="tp-empty">${CAPS.sql && sqlError ? escapeHtml(sqlError) : "（空结果）"}</div>`;
   } else {
     sqlSec.hidden = true;
+    el("sql-body").textContent = "";
   }
 }
 

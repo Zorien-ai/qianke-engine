@@ -149,17 +149,19 @@
           <div class="trace-flow" id="trace-flow"></div>
         </div>
 
-        <!-- 数据来源（含内容） -->
-        <div class="detail-section">
+        <!-- 数据来源（含内容）：看不到来源列表的身份整节不出现 -->
+        <div class="detail-section" id="detail-sources-section">
           <div class="detail-title">数据来源（进入上下文的资料）</div>
           <div class="ds-list" id="detail-sources"></div>
         </div>
 
-        <!-- SQL 语句与查询结果 -->
+        <!-- SQL 原文（管理员专属）与查询结果（所有人可见，是业务事实） -->
         <div class="detail-section" id="trace-sql-section" hidden>
-          <div class="detail-title">生成的 SQL</div>
-          <pre class="detail-sql" id="sql-body"></pre>
-          <div class="detail-title is-sub">
+          <div id="sql-text-block" hidden>
+            <div class="detail-title">生成的 SQL</div>
+            <pre class="detail-sql" id="sql-body"></pre>
+          </div>
+          <div class="detail-title" id="sql-rows-title">
             查询结果 <span id="trace-sql-note"></span>
           </div>
           <div class="trace-sql-rows" id="trace-sql-rows"></div>
