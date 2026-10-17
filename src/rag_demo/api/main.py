@@ -95,11 +95,19 @@ def _role(x_role: str | None) -> str:
 
     待审核账号按 guest 处理（没有任何能力），但**能登录**——这样他看到的是
     「等待审核」，而不是「密码错了」。
+
+    管理员身份按**账号标记**判定，不只看 `role` 列：
+    系统管理员 = `admin`，企业管理员 = `ent_admin`。这样早期审核出来的企业账号
+    （role 可能还停在 cs）也不会因为历史数据而失去身份。
     """
     account = auth.current_account()
     if account is not None:
         if account.get("status") != auth.STATUS_ACTIVE:
             return permissions.ROLE_GUEST
+        if account.get("is_system_admin"):
+            return permissions.ROLE_ADMIN
+        if account.get("is_enterprise_admin"):
+            return permissions.ROLE_ENT_ADMIN
         return account.get("role") or permissions.ROLE_GUEST
     if _auth_enforced():
         return permissions.ROLE_GUEST
@@ -453,8 +461,10 @@ def whoami(
             "display_name": account["display_name"],
             "account_type": account["account_type"],
             "account_type_label": account["account_type_label"],
-            "role": account["role"],
-            "role_label": permissions.ROLE_LABELS.get(account["role"], account["role"]),
+            # 用**解析后的角色**（管理员身份按账号标记判定），而不是库里的 role 列：
+            # 早期审核出来的企业账号 role 可能还停在 cs，页面不该显示成销售。
+            "role": role,
+            "role_label": permissions.ROLE_LABELS.get(role, role),
             "status": account["status"],
             "status_label": account["status_label"],
             "is_system_admin": account["is_system_admin"],
@@ -1108,8 +1118,16 @@ def reset_permissions(
 #   企业管理员：只管本企业的员工（审核 / 改角色 / 停用），不能碰全局规则。
 # 企业管理员的能力来自账号标记，不来自等级——等级决定"能看什么"。
 
-# 企业管理员能给员工分配的角色（不含 admin：那是系统管理员的角色）
-_ENTERPRISE_ASSIGNABLE_ROLES = ("exec", "analyst", "ops", "cs")
+# 能分配给员工业务角色（不含 admin / ent_admin：那两个身份由审核产生，
+# 不是"等级高低"可以随便勾的）——定义在 permissions.ASSIGNABLE_ROLES，避免两份真源。
+_ENTERPRISE_ASSIGNABLE_ROLES = permissions.ASSIGNABLE_ROLES
+
+
+def _assignable_roles(actor: dict) -> tuple[str, ...]:
+    """当前管理员能分配的角色：系统管理员多一个 admin，两边都没有 ent_admin"""
+    if actor.get("is_system_admin"):
+        return (permissions.ROLE_ADMIN,) + _ENTERPRISE_ASSIGNABLE_ROLES
+    return _ENTERPRISE_ASSIGNABLE_ROLES
 
 
 def _public_user(user: dict | None) -> dict | None:
@@ -1136,6 +1154,10 @@ def _check_target_scope(actor: dict, target: dict) -> None:
             raise HTTPException(status_code=403, detail="只能管理本企业的账号")
         if target.get("account_type") == auth.ACCOUNT_ENTERPRISE:
             raise HTTPException(status_code=403, detail="企业账号只能由系统管理员审核")
+        if target.get("is_enterprise_admin"):
+            # 企业管理员之间是平级：能审核/停用员工，但不能互相改动，
+            # 否则同一企业里先被通过的那个人就能把另一个管理员停掉。
+            raise HTTPException(status_code=403, detail="企业管理员账号只能由系统管理员调整")
 
 
 @app.get("/admin/users")
@@ -1156,10 +1178,10 @@ def admin_list_users() -> dict:
         "enterprises": enterprises,
         "scope": scope,
         "me": _public_user(actor),
+        # 只给能分配的角色：ent_admin 由企业账号审核产生，不出现在这里
         "roles": [
             {"value": r, "label": permissions.ROLE_LABELS[r], "level": permissions.resolve_level(r)}
-            for r in permissions.ROLES
-            if r != permissions.ROLE_GUEST
+            for r in _assignable_roles(actor)
         ],
     }
 
@@ -1173,12 +1195,17 @@ def admin_approve_user(user_id: int, payload: ApproveIn) -> dict:
         raise HTTPException(status_code=404, detail="账号不存在")
     _check_target_scope(actor, target)
 
-    role = (payload.role or "").strip().lower()
-    if not actor.get("is_system_admin") and role not in _ENTERPRISE_ASSIGNABLE_ROLES:
-        raise HTTPException(
-            status_code=400,
-            detail="企业管理员只能分配 管理层 / 分析师 / 运营 / 销售 角色",
-        )
+    if target["account_type"] == auth.ACCOUNT_ENTERPRISE:
+        # 企业账号通过后就是本企业的管理员，角色由账号类型决定，不看下拉框
+        role = permissions.ROLE_ENT_ADMIN
+    else:
+        role = (payload.role or "").strip().lower()
+        if role not in _assignable_roles(actor):
+            raise HTTPException(
+                status_code=400,
+                detail="角色只能是 管理层 / 分析师 / 运营 / 销售"
+                + ("（系统管理员可另选系统管理员）" if actor.get("is_system_admin") else ""),
+            )
     try:
         user = auth.approve(user_id, role, actor["username"])
     except ValueError as e:
@@ -1203,8 +1230,12 @@ def admin_set_user_role(user_id: int, payload: UserRoleIn) -> dict:
     _check_target_scope(actor, target)
 
     role = (payload.role or "").strip().lower()
-    if not actor.get("is_system_admin") and role not in _ENTERPRISE_ASSIGNABLE_ROLES:
-        raise HTTPException(status_code=400, detail="企业管理员只能分配 管理层 / 分析师 / 运营 / 销售 角色")
+    if role not in _assignable_roles(actor):
+        raise HTTPException(
+            status_code=400,
+            detail="角色只能是 管理层 / 分析师 / 运营 / 销售"
+            + ("（系统管理员可另选系统管理员）" if actor.get("is_system_admin") else ""),
+        )
     try:
         user = auth.set_role(user_id, role, actor["username"])
     except ValueError as e:

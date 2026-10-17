@@ -778,8 +778,16 @@ function renderAccounts() {
   const roles = ACCOUNTS.roles || [];
   const enterprises = ACCOUNTS.enterprises || [];
   const me = ACCOUNTS.me || {};
+  const isSys = !!me.is_system_admin;
   const entMap = {};
   enterprises.forEach((e) => { entMap[e.id] = e; });
+
+  // 同一个面板，两种管辖范围：系统管理员管全部，企业管理员管本企业成员。
+  // 标题跟着范围变，避免企业管理员以为自己能看到别家企业的人。
+  el("accounts-title").textContent = isSys ? "账号管理" : "本企业成员";
+  el("accounts-intro").textContent = isSys
+    ? "企业账号审核通过后创建企业库并生成邀请码；员工账号由所属企业管理员审核并分配角色。角色决定默认等级 → 决定能看到什么。"
+    : "本企业员工由你审核并分配角色；把邀请码发给同事，他们注册时填写。企业账号的审核由系统管理员负责。";
 
   el("accounts-status").textContent =
     ACCOUNTS.scope === "all" ? `全部账号 ${users.length} 个` : `本企业账号 ${users.length} 个`;
@@ -820,14 +828,21 @@ function renderAccounts() {
             <div class="acc-actions">
               ${
                 pending
-                  ? `<select data-approve-role="${u.id}">${roleOptions("cs")}</select>
-                     <button type="button" class="perm-btn is-primary" data-approve="${u.id}">通过</button>`
+                  ? u.account_type === "enterprise"
+                    ? isSys
+                      ? `<span class="pu-meta">企业账号</span>
+                         <button type="button" class="perm-btn is-primary" data-approve="${u.id}">通过</button>`
+                      : `<span class="pu-meta">企业账号 · 待系统管理员审核</span>`
+                    : `<select data-approve-role="${u.id}">${roleOptions("cs")}</select>
+                       <button type="button" class="perm-btn is-primary" data-approve="${u.id}">通过</button>`
                   : u.is_system_admin
                     ? `<span class="pu-meta">系统管理员</span>`
-                    : `<select data-role="${u.id}">${roleOptions(u.role)}</select>`
+                    : u.is_enterprise_admin
+                      ? `<span class="pu-meta">企业管理员</span>`
+                      : `<select data-role="${u.id}">${roleOptions(u.role)}</select>`
               }
               ${
-                u.is_system_admin
+                u.is_system_admin || (u.account_type === "enterprise" && !isSys)
                   ? ""
                   : u.status === "disabled"
                     ? `<button type="button" class="perm-btn" data-enable="${u.id}">启用</button>`

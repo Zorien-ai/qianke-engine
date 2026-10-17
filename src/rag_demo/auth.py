@@ -360,17 +360,26 @@ def approve(user_id: int, role: str, actor: str) -> dict[str, Any]:
     「先审核、后建库」：建库要连维护库执行 CREATE DATABASE，属于重操作，
     不该挂在一次点击上等几秒；这里只登记数据集名（DATASETS 注册），
     真正的库在第一次构建时创建（见 db/provision.py）。
+
+    企业账号审核通过后**角色固定为 `ent_admin`**，不采信调用方传的角色：
+    这个账号的身份就是"本企业的管理员"，和"能看多少信息"（等级）是两回事。
     """
     from rag_demo import permissions
-
-    if role not in permissions.ROLES or role == permissions.ROLE_GUEST:
-        raise ValueError(f"角色非法: {role}")
 
     user = find_user_by_id(user_id)
     if user is None:
         raise ValueError("账号不存在")
     if user["status"] == STATUS_ACTIVE:
         return user
+
+    if user["account_type"] == ACCOUNT_ENTERPRISE:
+        role = permissions.ROLE_ENT_ADMIN
+    elif role == permissions.ROLE_ENT_ADMIN:
+        # 员工账号即使传了 ent_admin 也不认：那是"企业账号审核通过"这个动作
+        # 产生的身份，不是审核弹窗里能勾的一个业务角色。
+        raise ValueError("企业管理员只能由企业账号审核产生，不能分配给员工")
+    if role not in permissions.ROLES or role == permissions.ROLE_GUEST:
+        raise ValueError(f"角色非法: {role}")
 
     enterprise = None
     if user["account_type"] == ACCOUNT_ENTERPRISE and not user["enterprise_id"]:
@@ -404,12 +413,19 @@ def approve(user_id: int, role: str, actor: str) -> dict[str, Any]:
 def set_role(user_id: int, role: str, actor: str) -> dict[str, Any]:
     from rag_demo import permissions
 
+    if role == permissions.ROLE_ENT_ADMIN:
+        raise ValueError("企业管理员是企业账号审核产生的身份，不能直接分配")
     if role not in permissions.ROLES or role == permissions.ROLE_GUEST:
         raise ValueError(f"角色非法: {role}")
+    user = find_user_by_id(user_id)
+    if user is None:
+        raise ValueError("账号不存在")
+    if user["account_type"] == ACCOUNT_ENTERPRISE:
+        # 企业账号的角色由「审核通过」产生，改掉它会和 is_enterprise_admin 打架：
+        # 账号标记说"能管人"，角色却说"只是销售"。要收回权限请停用账号。
+        raise ValueError("企业账号的角色固定为企业管理员，不能直接修改（可停用账号）")
     with _LOCK:
         conn = _db()
-        if conn.execute("SELECT 1 FROM app_user WHERE id = ?", (int(user_id),)).fetchone() is None:
-            raise ValueError("账号不存在")
         conn.execute("UPDATE app_user SET role = ? WHERE id = ?", (role, int(user_id)))
         conn.commit()
     logger.info("账号改角色: id=%s role=%s by %s", user_id, role, actor)

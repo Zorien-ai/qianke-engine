@@ -68,16 +68,18 @@ logger = logging.getLogger(__name__)
 # ==================== 角色 ====================
 
 ROLE_ADMIN = "admin"        # 系统管理员
+ROLE_ENT_ADMIN = "ent_admin"  # 企业管理员（企业账号审核通过后的身份，只管本企业）
 ROLE_EXEC = "exec"          # 管理层
 ROLE_ANALYST = "analyst"    # 数据分析师 / 产品
 ROLE_OPS = "ops"            # 运营 / 市场
 ROLE_CS = "cs"              # 销售 / 客服
 ROLE_GUEST = "guest"        # 未识别身份（非法或缺失角色一律降级到这里）
 
-ROLES = (ROLE_ADMIN, ROLE_EXEC, ROLE_ANALYST, ROLE_OPS, ROLE_CS, ROLE_GUEST)
+ROLES = (ROLE_ADMIN, ROLE_ENT_ADMIN, ROLE_EXEC, ROLE_ANALYST, ROLE_OPS, ROLE_CS, ROLE_GUEST)
 
 ROLE_LABELS = {
     ROLE_ADMIN: "系统管理员",
+    ROLE_ENT_ADMIN: "企业管理员",
     ROLE_EXEC: "管理层",
     ROLE_ANALYST: "数据分析师/产品",
     ROLE_OPS: "运营/市场",
@@ -100,6 +102,10 @@ CAP_STATS = "stats"            # 能看到 /stats 数据概况
 CAP_RAW_SEARCH = "raw_search"  # 能调用 /search（只召回不生成，最敏感）
 CAP_OPS = "ops"                # 能调用 /admin/*（清缓存、重建索引、改权限）
 CAP_TOPK = "topk"              # 能调整"返回多少个用户"
+# 企业空间管理：管本企业的成员（审核/角色/停用）。
+# **不在等级矩阵里**——它是「身份自带」的能力（企业管理员这个角色），
+# 不是"看到多少信息"的等级；允许管理员把它勾给 L1 只会让所有人都能管人。
+CAP_TENANT = "tenant"
 
 # 顺序即前端权限矩阵的列顺序：从"人人需要"到"最敏感"
 CAP_ORDER = (
@@ -117,6 +123,7 @@ CAP_LABELS = {
     CAP_STATS: "数据概况",
     CAP_RAW_SEARCH: "召回对比",
     CAP_OPS: "运维 / 权限管理",
+    CAP_TENANT: "本企业成员管理",
 }
 
 CAP_DESCRIPTIONS = {
@@ -129,6 +136,7 @@ CAP_DESCRIPTIONS = {
     CAP_STATS: "/stats 数据概况",
     CAP_RAW_SEARCH: "/search 召回对比（绕过生成直接吐原文）",
     CAP_OPS: "/admin/* 运维接口 + 本页的权限配置",
+    CAP_TENANT: "审核本企业员工、改角色、停用（不能碰全局规则）",
 }
 
 # ==================== 等级（L1~L4） ====================
@@ -170,12 +178,31 @@ DEFAULT_LEVEL_CAPS: dict[str, tuple[str, ...]] = {
 
 DEFAULT_ROLE_LEVELS: dict[str, str] = {
     ROLE_ADMIN: LEVEL_L4,
+    # 企业管理员：自己企业的经营者，默认与「管理层」同档（L3），
+    # 能看到检索过程但拿不到 SQL 原文 / 运维接口——那些属于平台方。
+    ROLE_ENT_ADMIN: LEVEL_L3,
     ROLE_EXEC: LEVEL_L3,
     ROLE_ANALYST: LEVEL_L2,
     ROLE_OPS: LEVEL_L2,
     ROLE_CS: LEVEL_L1,
     ROLE_GUEST: LEVEL_NONE,
 }
+
+# ==================== 身份自带能力 ====================
+
+# 由「这个身份是什么」决定的能力，与等级矩阵**并行**：既不能被等级授予，
+# 也不会被等级升降影响。目前只有一条——企业管理员管本企业成员。
+# 判「能管谁」靠的是账号标记（auth 的 is_enterprise_admin）与租户范围校验，
+# 这里补齐的是权限层的一致性：`/whoami` 的 `can.tenant` 与企业管理员身份对得上。
+IDENTITY_CAPS: dict[str, tuple[str, ...]] = {
+    ROLE_ENT_ADMIN: (CAP_TENANT,),
+}
+
+# 管理员**能分配给别人的**业务角色：
+# - 不含 admin：那是系统管理员，只能由系统管理员的审核入口产生；
+# - 不含 ent_admin：企业管理员由「企业账号审核通过」产生，
+#   把它当普通角色发出去，等于随手发一个「能管人」的身份。
+ASSIGNABLE_ROLES = (ROLE_EXEC, ROLE_ANALYST, ROLE_OPS, ROLE_CS)
 
 # ==================== 配置文件（持久化 + 实时生效） ====================
 
@@ -239,6 +266,13 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
         unknown = [c for c in caps if c not in CAP_LABELS]
         if unknown:
             raise ValueError(f"{lv} 含未知能力: {', '.join(map(str, unknown))}")
+        if CAP_TENANT in caps:
+            # 企业成员管理不按等级授予：它是企业管理员这个身份自带的。
+            # 放进来要么被下面的 CAP_ORDER 过滤静默丢掉（管理员以为配上了），
+            # 要么所有人勾一下 L1 就都能管人——两种都不可接受，直接拒绝。
+            raise ValueError(
+                "「本企业成员管理」由企业管理员身份自带，不能按等级授予或撤销"
+            )
         # 按 CAP_ORDER 归一：同一份配置两次保存得到完全相同的文件，便于比对
         levels[lv] = [c for c in CAP_ORDER if c in caps]
 
@@ -429,12 +463,17 @@ def resolve_level(role: str, user: str | None = None) -> str:
 
 
 def capabilities(role: str, user: str | None = None) -> frozenset[str]:
-    """当前身份的能力集合（每次请求都重新算，管理员改完立刻生效）"""
+    """
+    当前身份的能力集合（每次请求都重新算，管理员改完立刻生效）
+
+    = 等级授予的能力 ∪ 身份自带的能力。后者（`IDENTITY_CAPS`）不受等级影响：
+    企业管理员被降成 L1，也只是"少看些信息"，不会因此失去管本企业成员的身份。
+    """
+    caps = set(IDENTITY_CAPS.get(role, ()))
     level = resolve_level(role, user)
-    if level == LEVEL_NONE:
-        return frozenset()
-    cfg = _load()
-    return frozenset(cfg["levels"].get(level, ()))
+    if level != LEVEL_NONE:
+        caps |= set(_load()["levels"].get(level, ()))
+    return frozenset(caps)
 
 
 def has(role: str, cap: str, user: str | None = None) -> bool:
@@ -460,6 +499,7 @@ _CAN_KEYS = {
     "raw_search": CAP_RAW_SEARCH,
     "ops": CAP_OPS,
     "topk": CAP_TOPK,
+    "tenant": CAP_TENANT,
 }
 
 
@@ -501,9 +541,12 @@ def admin_view() -> dict[str, Any]:
             {"value": cap, "label": CAP_LABELS[cap], "description": CAP_DESCRIPTIONS[cap]}
             for cap in CAP_ORDER
         ],
+        # 用 ROLES 而不是 ROLE_SELECTOR_ORDER：企业管理员也要能在这里看到并调整
+        # 默认等级（它决定企业管理员能看到多少业务信息），但它不出现在问答页的
+        # 身份下拉里——那不是可以「切换成」的身份，是由账号审核产生的。
         "roles": [
             {"value": r, "label": ROLE_LABELS[r], "level": cfg["role_levels"].get(r, LEVEL_NONE)}
-            for r in ROLE_SELECTOR_ORDER
+            for r in ROLES
         ],
         "defaults": _default_config(),
     }
