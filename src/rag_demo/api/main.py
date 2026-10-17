@@ -46,6 +46,7 @@ from openai import APIError
 from pydantic import BaseModel
 
 from rag_demo import answer_guard, auth, config, permissions
+from rag_demo.api.kb import register_kb
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache
 from rag_demo.config import (
@@ -60,6 +61,7 @@ from rag_demo.db.connection import (
     close_conn,
     current_dataset,
     get_conn,
+    pin_dataset,
     reset_dataset,
     use_dataset,
 )
@@ -485,6 +487,23 @@ class UserStatusIn(BaseModel):
 # 否则 /static/wizard/* 会被 /static 吃掉并 404（Starlette 按注册顺序匹配前缀）。
 # 页面在 /wizard，接口在 /api/wizard/*，实现见 rag_demo/mvp/app.py。
 register_wizard(app)
+
+# 企业后台（M3）：/api/kb/* 与 /admin/enterprises、邀请码重置。
+# 实现见 rag_demo/api/kb.py；这里只注册路由（不挂静态），与向导一起排在
+# 既有静态挂载之前，保持「先特殊、后通用」的注册顺序。
+register_kb(app)
+
+# Vue 3 新界面（M3）：把构建产物挂到 /v2。
+# 项目根从本文件位置向上推导（api/main.py → api → rag_demo → src → 项目根），
+# 不写死盘符、不 import config 拿路径。dist 不存在时**跳过而不是报错**：
+# 只跑后端、或 Vue 还没构建的环境必须能正常启动。
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+WEB_DIST = os.path.join(_PROJECT_ROOT, "web", "dist")
+if os.path.isdir(WEB_DIST):
+    app.mount("/v2", StaticFiles(directory=WEB_DIST, html=True), name="web-v2")
+    logger.info("Vue 3 新界面已挂载: /v2 -> %s", WEB_DIST)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -978,6 +997,30 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _dataset_pinned_stream(dataset: str, inner):
+    """
+    让同步生成器的**每一次恢复**都跑在同一个数据集上（M3 修跨租户串数据）
+
+    为什么需要它：StreamingResponse 迭代同步生成器走的是 iterate_in_threadpool，
+    而 anyio 每次 to_thread.run_sync 都会 copy_context() —— 生成器每 next() 一次
+    都在一个**全新的 Context 副本**里执行。所以在生成器内部 `use_dataset()` 只对
+    第一段代码生效：从第二段开始（检索 prepare）读的又是默认数据集 demo，
+    企业账号的流式回答会引用 demo 的文档，且 `reset_dataset(token)` 在最后一段
+    必然抛 "Token was created in a different Context"。
+
+    这里在每次 next 之前重新 pin（见 db.connection.pin_dataset）：每次 Context
+    都是一次性的，pin 完不需要（也不可能）配对 reset。
+    """
+    iterator = iter(inner)
+    while True:
+        pin_dataset(dataset)
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return
+        yield item
+
+
 @app.post("/qa/stream")
 def qa_stream(
     req: QueryRequest,
@@ -1014,29 +1057,28 @@ def qa_stream(
     )
     # 与 /qa 同一口径：dept 不接受自报，仅管理员可覆盖
     dept = req.dept if permissions.has(role, permissions.CAP_OPS, user) else None
+    # 读哪个库由账号推导，且在**请求线程**里先算好：生成器每次恢复都在新的
+    # Context 副本里（见 _dataset_pinned_stream），不能指望它自己切库。
+    dataset = _tenant_dataset()
 
     def meta(payload: dict, **extra) -> str:
         """构造 meta 事件：先裁剪再序列化，避免各处漏裁剪"""
         return _sse("meta", permissions.render(payload, role, user) | extra)
 
     def event_stream():
-        # 读哪个库由账号决定（与 /qa 同一口径），整段生成都在这个数据集上；
-        # 无论正常结束、提前 return 还是抛异常，都必须还原 contextvar——
-        # 漏掉会让同一线程上的下一个请求继续读上一个租户的库。
-        token = None
+        # 读哪个库由账号决定（与 /qa 同一口径）：dataset 已在请求线程里算好，
+        # 生成器自己**不再切库**——它每次恢复都在一个新的 Context 里，
+        # 由 `_dataset_pinned_stream` 在每次 next 之前重新钉住（见其 docstring）。
+        if not _tenant_ready(dataset):
+            yield _sse("error", {"message": _TENANT_EMPTY})
+            return
         try:
-            dataset = _tenant_dataset()
-            if not _tenant_ready(dataset):
-                yield _sse("error", {"message": _TENANT_EMPTY})
-                return
-            token = use_dataset(dataset)
-
             # 命中缓存时直接吐完，不用走生成。
             # 键里带 deep_thinking：开与不开是两份不同的答案，不能互相命中。
             # 缓存里**不存思维链**——它只是展示物、不进答案，存下来让缓存翻倍不划算；
             # 代价是命中缓存时前端拿不到思维链（此时下面也不会发 reasoning 事件）。
             key = answer_cache.make_key(req.question, dept, req.retriever, limit,
-                                        req.deep_thinking, dataset=current_dataset())
+                                        req.deep_thinking, dataset=dataset)
             hit = answer_cache.get(key)
             if hit is not None:
                 yield meta({
@@ -1142,12 +1184,9 @@ def qa_stream(
         except Exception as e:  # 流式过程中出错也要让前端知道
             logger.exception("流式问答失败")
             yield _sse("error", {"message": str(e)})
-        finally:
-            if token is not None:
-                reset_dataset(token)
 
     return StreamingResponse(
-        event_stream(),
+        _dataset_pinned_stream(dataset, event_stream()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

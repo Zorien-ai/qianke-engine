@@ -631,6 +631,9 @@ def _run_build(task_id: str, req: BuildRequest, csv_paths: list[str], md_paths: 
             md_paths=md_paths,
             fields=req.fields,
             simulate_failure=req.simulate_failure,
+            # 把批次号带进构建线程：成功后落盘 meta.last_build，
+            # 概况页拿它 + fields 就能一键重建（企业库清空后尤其重要）
+            upload_id=req.upload_id,
         )
         result = run_build(inputs, lambda ev: _apply_event(task, ev))
     except Exception as e:  # noqa: BLE001 构建失败必须变成任务状态，而不是打死线程

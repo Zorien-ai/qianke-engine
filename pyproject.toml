@@ -44,3 +44,13 @@ torch = { path = "wheels/torch-2.14.1+cu126-cp312-cp312-win_amd64.whl" }
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+# 只收 tests/ 下的单测：src/rag_demo/tests 里是历史评测脚本（要模型/数据/网络），
+# 不是 pytest 用例，被自动收进来会一跑就红。
+testpaths = ["tests"]

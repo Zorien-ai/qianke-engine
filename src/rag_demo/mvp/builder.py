@@ -80,12 +80,17 @@ class BuildInputs:
     """一次真实构建的全部输入（都是已经落盘、已解析过的东西）"""
 
     def __init__(self, dataset: str, csv_paths: list[str], md_paths: list[str],
-                 fields: dict[str, str | None], simulate_failure: bool = False):
+                 fields: dict[str, str | None], simulate_failure: bool = False,
+                 upload_id: str = ""):
         self.dataset = dataset
         self.csv_paths = csv_paths
         self.md_paths = md_paths
         self.fields = fields
         self.simulate_failure = simulate_failure
+        # 这次构建用了哪个上传批次（写入 meta.last_build，供概况页一键重建）。
+        # 默认空串是为了兼容既有的脚本/测试构造方式——没有批次号时仍能构建，
+        # 只是概况页不会给出「重建」入口。
+        self.upload_id = upload_id
 
 
 def resolve_dataset(name: str | None, action: str = "构建") -> str:
@@ -234,6 +239,26 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
 
             index_stats = build_index(progress=on_index_progress, on_phase=on_index_phase)
             emit(kind="step_done", step="index", total=index_stats["total"])
+
+            # ---------- 落盘本次构建的源（重建依据） ----------
+            # 必须在**同一个 writes_to 作用域内**、且在 build_index 成功之后写：
+            # 只记成功的构建（失败时保留上一次的源，避免把「重建命令」指向半成品）；
+            # 同一个作用域保证它写进的是本次构建的那个数据集（企业库），
+            # 而不是默认的 demo —— 这正是 writes_to 要防的「写错库」。
+            # 清空数据空间时会**保留**这个键（源文件还在 data/uploads 下），
+            # 概况页因此在清空后仍能给出「一键重建」。
+            from rag_demo.db.schema import write_last_build
+            from rag_demo.kb_stats import serialize_last_build
+
+            write_last_build(
+                serialize_last_build(
+                    upload_id=inputs.upload_id,
+                    fields=inputs.fields,
+                    csv=len(inputs.csv_paths),
+                    md=len(inputs.md_paths),
+                    at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                )
+            )
 
             # 内存里的 BM25 索引按数据集各存一份，重建后必须刷新，
             # 否则查询仍用旧语料（数据更新了、答案还是旧的，且不报错）

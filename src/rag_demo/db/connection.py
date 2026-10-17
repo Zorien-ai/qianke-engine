@@ -108,6 +108,24 @@ def reset_dataset(token) -> None:
     _current.reset(token)
 
 
+def pin_dataset(name: str) -> None:
+    """
+    把**当前 Context** 的数据集钉住（不返回 token，也不配对 reset）
+
+    专供「同步生成器 + StreamingResponse」这类场景（见 api/main.py 的
+    `_dataset_pinned_stream`）：Starlette 迭代同步生成器走 iterate_in_threadpool，
+    生成器每恢复一次都跑在一个**全新的 Context 副本**里（anyio 每次
+    to_thread.run_sync 都会 contextvars.copy_context()）。所以生成器里
+    `use_dataset()` 只对第一段代码有效，第二段开始（检索 prepare）读的又是
+    默认数据集 demo——企业账号的流式回答会拿到 demo 的文档，这是跨租户串数据。
+
+    这种一次性 Context 随本次 run_sync 结束就销毁，因此「只 set 不 reset」是安全的：
+    钉住的数据集不会泄漏到别的请求；反过来，试图在下一段里 reset 上一次的 token
+    反而会抛 `Token was created in a different Context`。
+    """
+    _current.set(_resolve(name))
+
+
 # ================= 写操作守卫 =================
 # 与「数据集」分开的一个 contextvar：_current 决定**读**去哪，_WRITE_SCOPE 只表示
 # 「有人显式承诺过这段是写 user 的」。读允许回落到默认值，写不允许。

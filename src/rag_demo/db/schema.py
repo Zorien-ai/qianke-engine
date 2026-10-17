@@ -25,11 +25,13 @@
 附：search_index_meta 表记录**构建时的语料指纹**，用来回答
 「索引是不是已经落后于源表了」。理由见本文末「语料指纹」一节。
 """
+import json
 import logging
 from datetime import datetime
 
 from rag_demo.config import EMBED_DIM, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
 from rag_demo.db.connection import get_conn, require_write_scope
+from rag_demo.kb_stats import parse_last_build
 
 logger = logging.getLogger(__name__)
 
@@ -496,3 +498,118 @@ def write_ui_config(values: dict[str, str | None]) -> None:
         conn.commit()
     finally:
         cur.close()
+
+
+# ==================== 最近一次构建的源（last_build） ====================
+# 为什么需要它：清空数据空间后，`built_at` 与语料指纹都会被删掉，但**源文件还在**
+# data/uploads/<upload_id>/ 下。概况页据此给出「一键重建」——前端拿 upload_id + fields
+# 调既有的 `POST /api/wizard/build`（幂等：会先清空再重写），不必新增重建接口。
+#
+# 它与指纹的取舍不同：指纹描述的是「这批数据是什么」（清空即失效），
+# last_build 描述的是「这批数据从哪来」（清空后仍然有效），所以清空时保留它。
+LAST_BUILD_KEY = "last_build"
+
+# 清空数据空间时删除的「数据类」meta 键：语料指纹 + 构建时间。
+# **保留** last_build（重建的源批次）、`ui_*` 配置（这个空间怎么用）与
+# doc_source_dir（文档原文目录）——清空数据不等于重置配置。
+DATA_META_KEYS = (
+    "built_at",
+    "profile_hash",
+    "wiki_hash",
+    "profile_count",
+    "wiki_count",
+)
+
+
+def write_last_build(payload: dict) -> None:
+    """
+    记录「最近一次成功构建用的是哪批源」（写操作，需在 writes_to 作用域内调用）
+
+    与写指纹一样复用 meta 表：键值对、跟着数据集库走、又要能按需保留/删除，
+    与指纹 / UI 配置是同一类东西，不值得单开一张表。
+
+    JSON 字符串入库且 `ensure_ascii=False`：meta 表是 TEXT，人肉排查时
+    能直接看懂 upload_id 与中文字段名，而不是一堆 \\uXXXX。
+    """
+    require_write_scope("write_last_build")
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(CREATE_META_SQL)
+        cur.execute(
+            f"INSERT INTO {META_TABLE} (key, value) VALUES (%s, %s) "
+            f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (LAST_BUILD_KEY, json.dumps(payload, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def read_last_build() -> dict | None:
+    """
+    读回最近一次成功构建的源
+
+    表不存在 / 没有这个键 / JSON 坏掉都返回 None（解析逻辑在 kb_stats，
+    那里能脱离数据库单测）。调用方负责切到正确的数据集（use_dataset）。
+    """
+    return parse_last_build(read_index_meta(LAST_BUILD_KEY))
+
+
+# ==================== 清空数据空间（M3 企业后台） ====================
+def dataset_counts(cur) -> dict:
+    """
+    统计一个数据集的数据规模（**复用调用方 cursor，不提交**）
+
+    在 TRUNCATE 之前调用：返回的既是清空接口的响应体，也是日志里
+    「清掉了多少」的依据，同时还用来判断「本来就是空的，不用清」。
+
+    索引表可能不存在（只建了源表、还没重建索引的数据集），
+    这里用 to_regclass 判断而不是直接 COUNT，免得清空接口在那种环境下 500。
+    """
+    cur.execute("SELECT COUNT(*) FROM user_profile_vectors")
+    profiles = int(cur.fetchone()[0] or 0)
+
+    cur.execute("SELECT COUNT(*), COUNT(DISTINCT doc_name) FROM wiki_vectors")
+    chunks, docs = cur.fetchone()
+
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"public.{SEARCH_INDEX_TABLE}",))
+    index_total = 0
+    if cur.fetchone()[0]:
+        cur.execute(f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE}")
+        index_total = int(cur.fetchone()[0] or 0)
+
+    return {
+        "profiles": profiles,
+        "chunks": int(chunks or 0),
+        "docs": int(docs or 0),
+        "index": index_total,
+    }
+
+
+def truncate_dataset_data(cur) -> int:
+    """
+    清空一个数据集的源表与检索索引表，并删掉语料指纹类 meta 键
+
+    只 TRUNCATE、不 DROP：库/表结构保留，清空后概况页仍是 ready=true（只是 empty=true），
+    企业管理员可以直接用 last_build 一键重建。
+
+    **保留**：last_build（重建依据）、ui_* 配置、doc_source_dir。
+    返回删除的 meta 键数。
+
+    复用调用方 cursor/事务（与 write_fingerprint 同一约定）：TRUNCATE 与
+    meta 删除必须在同一个事务里提交，否则会出现「表清了、指纹还在」的中间态，
+    概况页会把空库误判成 fresh。
+    """
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"public.{SEARCH_INDEX_TABLE}",))
+    tables = ["user_profile_vectors", "wiki_vectors"]
+    if cur.fetchone()[0]:
+        tables.append(SEARCH_INDEX_TABLE)
+    # 表名全部来自本模块常量 / config，不是外部输入，因此可以拼进 SQL；
+    # 加双引号是为了不被保留字或大小写影响。
+    cur.execute("TRUNCATE TABLE " + ", ".join(f'"{name}"' for name in tables))
+
+    cur.execute(CREATE_META_SQL)
+    cur.execute(f"DELETE FROM {META_TABLE} WHERE key = ANY(%s)", (list(DATA_META_KEYS),))
+    return int(cur.rowcount or 0)
