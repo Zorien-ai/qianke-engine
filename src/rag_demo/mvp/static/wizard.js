@@ -477,6 +477,9 @@ async function loadExamples() {
     const data = await api("/api/wizard/examples" + q);
     el("examples-list").innerHTML = (data.questions || [])
       .map((q) => `<button type="button" class="ex-chip">${escapeHtml(q)}</button>`).join("");
+    // 输入框的提示也用他数据里的第一条示例，不写死某个业务取值
+    const first = (data.questions || [])[0];
+    if (first) el("query-input").placeholder = `例如：${first}`;
   } catch (e) {
     el("examples-list").innerHTML = "";
   }

@@ -374,7 +374,9 @@ def stats(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
             "SELECT member_level, COUNT(*) FROM user_profile_vectors "
             "GROUP BY member_level ORDER BY COUNT(*) DESC"
         )
-        levels = dict(cur.fetchall())
+        # 丢掉 NULL 档：member_level 可能整列为空（未映射等级列且未配置档位名），
+        # 那不该显示成「null 占比 xx%」
+        levels = {k: v for k, v in cur.fetchall() if k is not None}
 
         cur.execute(
             "SELECT COUNT(*) FROM information_schema.columns "
@@ -385,7 +387,7 @@ def stats(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
         conn.rollback()  # 清理查询事务，避免连接停在 idle in transaction
         cur.close()
 
-    total = sum(levels.values()) or 1
+    total = users or 1
     return {
         "users": users,
         "chunks": chunks,
@@ -394,7 +396,10 @@ def stats(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
         "categories": categories,
         "member_levels": levels,
         "profiles_columns": columns,
-        "diamond_ratio": f"{levels.get('钻石', 0) / total * 100:.1f}%",
+        # 各等级占比（键就是数据里的真实等级名）。
+        # 改前是写死的 diamond_ratio：用户等级叫「黑卡/金卡」时恒为 0.0%，
+        # 且 total=0 时会除零。等级名属于数据，不属于接口。
+        "level_ratio": {k: f"{v / total * 100:.1f}%" for k, v in levels.items()},
     }
 
 

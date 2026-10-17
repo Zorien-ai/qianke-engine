@@ -39,14 +39,16 @@ from rag_demo.config import (
     MODEL_PATH,
     SEARCH_INDEX_TABLE,
 )
+from rag_demo.config import DEMO_MEMBER_LEVEL_NAMES
 from rag_demo.db.connection import (
     close_conn,
+    current_dataset,
     get_conn,
     require_write_scope,
     writes_to,
 )
 from rag_demo.db import schema_facts
-from rag_demo.db.schema import ensure_base_tables
+from rag_demo.db.schema import ensure_base_tables, read_ui_config
 from rag_demo.splitter import DOC_TYPE_PROFILE, split
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -70,9 +72,15 @@ BATCH = 50
 #   字段：金额列必须映射上（没有 avg_amount 就没有等级）
 #   规则：本批用户数 ≥ MEMBER_LEVEL_MIN_USERS（几个人算分位数没有意义）
 #
-# 注：本表不跟 data/docs/tag_definitions.md 的客单标签（高客单 ≥1000）挂钩——
+# 注：本表不跟 data/docs/tag_definitions.md 的客单标签挂钩——
 #     该口径对演示数据同样偏松（约 70% 用户满足），属另一个待处理的数据问题。
-MEMBER_LEVEL_QUANTILES = [("钻石", 0.95), ("黄金", 0.80), ("白银", 0.50)]
+#
+# 这里只保留**分位点**（系统契约：怎么切）。档位**名称**不在这里——
+# 名字是业务语义，不同客户叫法不同（钻石 / 黑卡 / VIP3），从数据推不出来。
+# 写死会怎样：M2 用户上传机械设备数据、没映射等级列时，画像里会被拼出
+# 「钻石会员 / 黄金会员」，凭空长出一套不属于他业务的等级，还污染检索与统计。
+# 名称从当前数据集的 UI 配置 member_level_names 读（见 member_level_names()）。
+MEMBER_LEVEL_QUANTILES = (0.95, 0.80, 0.50)
 MEMBER_LEVEL_MIN_USERS = 20
 
 # 结构化字段 DDL（幂等，保留现有 8110 条数据，不 DROP 重建）
@@ -187,29 +195,59 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def calibrate_member_levels(avg_amounts: pd.Series) -> list[tuple[str, float]] | None:
+def member_level_names() -> list[str] | None:
+    """
+    档位名称：从当前数据集的 UI 配置读（member_level_names，逗号分隔，高档在前）
+
+    返回 None 表示「这份数据不该推导等级」——不猜、不套模板。
+    demo 是仓库自带的固定数据集，档位名属于它的数据说明，故有默认值；
+    用户自己的数据集必须显式配置，否则宁可不产出等级。
+    """
+    raw = ""
+    try:
+        raw = (read_ui_config().get("member_level_names") or "").strip()
+    except Exception as e:  # noqa: BLE001 读不到配置就当没配
+        logger.warning("读取等级档位名失败: %s", e)
+    names = [n.strip() for n in raw.split(",") if n.strip()]
+    if not names and current_dataset() == "demo":
+        names = list(DEMO_MEMBER_LEVEL_NAMES)
+    if len(names) != len(MEMBER_LEVEL_QUANTILES) + 1:
+        return None
+    return names
+
+
+def calibrate_member_levels(
+    avg_amounts: pd.Series, names: list[str] | None
+) -> list[tuple[str, float]] | None:
     """
     按本批用户的人均客单价分布算出分档阈值；前提不满足返回 None
 
     None 的含义是「**本次等级不生效**」，调用方据此把整列留空并解释原因。
     这和「算出来全是普通」是两件不同的事：前者诚实，后者是假装有结论。
     """
+    if names is None:
+        return None
     values = pd.to_numeric(avg_amounts, errors="coerce").dropna()
     if len(values) < MEMBER_LEVEL_MIN_USERS:
         return None
-    return [(name, float(values.quantile(q))) for name, q in MEMBER_LEVEL_QUANTILES]
+    return [
+        (names[i], float(values.quantile(q)))
+        for i, q in enumerate(MEMBER_LEVEL_QUANTILES)
+    ]
 
 
 def build_member_level(
-    avg_amount: float | None, thresholds: list[tuple[str, float]] | None
+    avg_amount: float | None,
+    thresholds: list[tuple[str, float]] | None,
+    fallback: str | None,
 ) -> str | None:
     """按标定好的阈值判档；没有金额数据、或规则本次没生效时返回 None"""
-    if thresholds is None or not _present(avg_amount):
+    if thresholds is None or not _present(avg_amount) or not fallback:
         return None
     for name, threshold in thresholds:
         if avg_amount >= threshold:
             return name
-    return "普通"
+    return fallback
 
 
 def _clean_level(value: Any) -> str | None:
@@ -498,15 +536,23 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
                 len(profiles) - filled,
             )
     else:
-        thresholds = calibrate_member_levels(profiles["avg_amount"])
+        names = member_level_names()
+        thresholds = calibrate_member_levels(profiles["avg_amount"], names)
         if thresholds is None:
-            # 说清「为什么这一列是空的」：要么没金额列，要么人太少。
+            # 说清「为什么这一列是空的」：可能没金额列、人太少，或没配档位名。
             # 用户看到的画像里不会有等级片段，日志里必须有据可查。
             level_source = "none"
-            logger.info(
-                "会员等级本次不生效（没有等级列，需要金额列且至少 %d 个用户；本批 %d 个用户）",
-                MEMBER_LEVEL_MIN_USERS, len(profiles),
-            )
+            if names is None:
+                logger.info(
+                    "会员等级本次不生效：未映射等级列，且未配置档位名"
+                    "（member_level_names，需 %d 个名字：高档 → 兜底档）",
+                    len(MEMBER_LEVEL_QUANTILES) + 1,
+                )
+            else:
+                logger.info(
+                    "会员等级本次不生效（没有等级列，需要金额列且至少 %d 个用户；本批 %d 个用户）",
+                    MEMBER_LEVEL_MIN_USERS, len(profiles),
+                )
         else:
             level_source = "derived"
             logger.info(
@@ -514,8 +560,9 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
                 len(profiles),
                 "；".join(f"{name} ≥ {value:.2f}" for name, value in thresholds),
             )
+        fallback = names[-1] if names else None
         profiles["member_level"] = profiles["avg_amount"].apply(
-            lambda v: build_member_level(v, thresholds)
+            lambda v: build_member_level(v, thresholds, fallback)
         )
     # 用 attrs 带出「这一列是怎么来的」，不改函数签名（build_profiles 有别的调用方，
     # 返回元组会把它们全弄坏）。调用方按需取，取不到就当 unknown。
@@ -674,7 +721,14 @@ def verify(cur: Any) -> None:
     logger.info("===== 结构化字段验证 =====")
     checks = [
         ("年龄 20-30 用户数", "SELECT COUNT(*) FROM user_profile_vectors WHERE age BETWEEN 20 AND 30"),
-        ("美妆用户平均客单价", "SELECT ROUND(AVG(avg_amount), 2) FROM user_profile_vectors WHERE top_category = '美妆'"),
+        # 不写死某个品类：换数据集后 '美妆' 可能不存在，这条自检会恒为空，
+        # 容易被误读成「检索链路坏了」。按品类分组，任何数据都有结果可看。
+        (
+            "Top5 品类平均客单价",
+            "SELECT top_category, ROUND(AVG(avg_amount), 2) AS avg_amount "
+            "FROM user_profile_vectors WHERE top_category IS NOT NULL "
+            "GROUP BY top_category ORDER BY avg_amount DESC LIMIT 5",
+        ),
         ("Top5 城市分布", "SELECT city, COUNT(*) AS cnt FROM user_profile_vectors GROUP BY city ORDER BY cnt DESC LIMIT 5"),
         ("会员等级分布", "SELECT member_level, COUNT(*) AS cnt FROM user_profile_vectors GROUP BY member_level ORDER BY cnt DESC"),
     ]

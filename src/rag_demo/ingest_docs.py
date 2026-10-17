@@ -38,7 +38,7 @@ from rag_demo.db.connection import (
     require_write_scope,
     writes_to,
 )
-from rag_demo.db.schema import ensure_base_tables
+from rag_demo.db.schema import CREATE_META_SQL, META_TABLE, ensure_base_tables
 from rag_demo.splitter import DOC_TYPE_WIKI, split
 
 logger = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ def ingest_documents(
     docs: list[tuple[str, str]],
     model: SentenceTransformer | None = None,
     progress: ProgressFn | None = None,
+    docs_dir: str | None = None,
 ) -> dict:
     """
     切分 + 向量化 + 写入 wiki_vectors（**全量覆盖**：先 TRUNCATE 再写）
@@ -116,6 +117,16 @@ def ingest_documents(
 
         # 清空旧数据，避免重复导入
         cur.execute("TRUNCATE wiki_vectors RESTART IDENTITY;")
+        # 记下原文目录：检索层做 Parent Document 全文化时按它找文件。
+        # 不记的话，M2 用户上传的文档（data/uploads/<id>/）永远找不到，
+        # WIKI_EXPAND_FULLTEXT 对他等于静默关闭。
+        if docs_dir:
+            cur.execute(CREATE_META_SQL)
+            cur.execute(
+                f"INSERT INTO {META_TABLE} (key, value) VALUES ('doc_source_dir', %s) "
+                f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (os.path.abspath(docs_dir),),
+            )
         conn.commit()
 
         total_chunks = 0
@@ -176,7 +187,7 @@ def main() -> None:
     # 显式声明写作用域：脚本入口是「明确知道自己在写哪个库」的地方。不声明的话
     # ingest_documents 的第一行就会抛 UnsafeWriteError（空输入之外的第二道闸）。
     with writes_to(DEFAULT_DATASET):
-        result = ingest_documents(docs)
+        result = ingest_documents(docs, docs_dir=DOCS_DIR)
     logger.info("所有文档已入库，共 %d 个分块（%d 篇）", result["chunks"], result["docs"])
 
     close_conn()

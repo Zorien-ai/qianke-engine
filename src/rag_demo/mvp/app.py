@@ -915,6 +915,8 @@ class UiConfigRequest(BaseModel):
     dataset: str = "user"
     assistant_name: str | None = None
     sample_question: str | None = None
+    # 逗号分隔、高档在前、最后一个是兜底档，例如「黑卡,金卡,银卡,普通」
+    member_level_names: str | None = None
 
 
 @router.get("/ui-config")
@@ -965,6 +967,24 @@ def put_ui_config(req: UiConfigRequest) -> dict:
         if len(question) > 100:
             raise HTTPException(status_code=400, detail="示例问句太长了（超过 100 字）。")
         values["sample_question"] = question or None
+    if req.member_level_names is not None:
+        from rag_demo.config import MEMBER_LEVEL_TIER_COUNT
+
+        # 中文逗号也认：用户从表格里复制过来多半是全角
+        names = [
+            n.strip()
+            for n in req.member_level_names.replace("，", ",").split(",")
+            if n.strip()
+        ]
+        if names and len(names) != MEMBER_LEVEL_TIER_COUNT:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"等级档位名需要 {MEMBER_LEVEL_TIER_COUNT} 个（高档在前，"
+                    "最后一个是兜底档），用逗号分隔。"
+                ),
+            )
+        values["member_level_names"] = ",".join(names) if names else None
 
     if not values:
         raise HTTPException(status_code=400, detail="没有要修改的配置项。")

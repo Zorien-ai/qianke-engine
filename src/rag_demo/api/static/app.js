@@ -1,14 +1,18 @@
 /* 用户画像 RAG 智能问答 —— 前端交互 */
 
+/* 示例问句：只给**问法**，不写具体取值（城市名 / 等级名 / 品类名）。
+ *
+ * 演示页的数据是固定的，但取值不属于系统规则：写死「深圳的钻石会员」，
+ * 换一份数据（或用户从向导进来复用这套问法）就是让他点一个查不到东西的问题。
+ * 具体取值由画面对应的数据决定——首页的数据概况、向导页的 /examples 都是动态的。
+ */
 const EXAMPLE_QUESTIONS = [
-  "高客单、喜欢美妆的女性用户有哪些",
-  "深圳的钻石会员都是什么特征",
   "高价值用户怎么定义的",
   "流失预警的判定标准",
   "用户说优惠券过期了怎么办",
-  "美妆用户的客单价分布",
-  "本周高价值用户规模有多少",
-  "母婴偏好用户在哪些城市集中",
+  "客单价最高的用户有什么共同点",
+  "用户主要分布在哪些城市",
+  "各会员等级的用户分别有多少",
 ];
 
 const el = (id) => document.getElementById(id);
@@ -101,11 +105,16 @@ async function loadStats() {
       .map(([k, v]) => `${k} ${v}`)
       .join(" · ");
 
+    // 占比卡片跟着数据走：取人数最多的那一档（后端已按条数降序），
+    // 不再写死「钻石」——用户的等级可能叫黑卡 / 金卡 / VIP3
+    const topLevel = Object.entries(levels)[0];
+    const topRatio = topLevel ? (data.level_ratio || {})[topLevel[0]] : null;
+
     const cards = [
       { value: data.users.toLocaleString(), label: "用户画像", extra: `共 ${data.profiles_columns} 个结构化字段` },
       { value: data.docs, label: "知识库文档", extra: `切分为 ${data.chunks} 个分块` },
       { value: data.cities, label: "覆盖城市", extra: `品类 ${data.categories} 类` },
-      { value: data.diamond_ratio, label: "钻石会员占比", extra: levelText || "—" },
+      { value: topRatio || "—", label: topLevel ? `${topLevel[0]}占比` : "等级占比", extra: levelText || "—" },
     ];
 
     grid.innerHTML = cards

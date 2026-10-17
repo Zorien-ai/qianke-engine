@@ -42,7 +42,7 @@ FIELD_DEFS: list[dict] = [
         "key": "amount",
         "label": "订单金额",
         "required": False,
-        "hint": "客单价、高价值客户判定的依据；会员等级也按它的人均分布自动分档（不给这一列就没有等级）",
+        "hint": "客单价类问句的依据；会员等级按它的人均分布自动分档（没映射等级列、也没配档位名时就没有等级）",
         "synonyms": [
             "amount", "order_amount", "pay_amount", "total_amount", "price", "gmv",
             "订单金额", "实付金额", "支付金额", "成交金额", "金额", "客单价", "交易金额",
@@ -52,7 +52,7 @@ FIELD_DEFS: list[dict] = [
         "key": "purchase_time",
         "label": "下单时间",
         "required": False,
-        "hint": "活跃度、流失预警等时间相关问句的依据",
+        "hint": "活跃度、最近购买等时间相关问句的依据",
         "synonyms": [
             "purchase_time", "order_time", "pay_time", "create_time", "trade_time",
             "下单时间", "订单时间", "支付时间", "成交时间", "购买时间", "交易时间", "创建时间",
@@ -96,7 +96,7 @@ FIELD_DEFS: list[dict] = [
         "key": "category",
         "label": "商品类目",
         "required": False,
-        "hint": "品类偏好类问句（如「喜欢美妆的用户」）",
+        "hint": "品类偏好类问句的依据",
         "synonyms": [
             "category", "cate", "class", "一级品类", "二级品类",
             "类目", "品类", "商品类目", "商品分类", "类别", "商品类别",

@@ -24,6 +24,31 @@ logger = logging.getLogger(__name__)
 
 _reranker = None
 
+# 文档原文目录缓存：按数据集分键（demo 在 data/docs，用户上传在 data/uploads/<id>/）
+_doc_dir_cache: dict[str, str] = {}
+
+
+def _doc_base_dir() -> str:
+    """
+    文档原文目录：优先用导入时记下的路径，读不到再退回 DOCS_DIR
+
+    改前这里写死 `DOCS_DIR`（data/docs）。M2 用户上传的文档落在
+    `data/uploads/<id>/` 下，扩展必然找不到——不是报错，是**静默退化**：
+    只打一条 warning，用户的 WIKI_EXPAND_FULLTEXT 等于被关掉。
+    目录属于数据布局，不属于系统常量。
+    """
+    try:
+        from rag_demo.db.connection import current_dataset
+        from rag_demo.db.schema import read_index_meta
+
+        dataset = current_dataset()
+        if dataset not in _doc_dir_cache:
+            _doc_dir_cache[dataset] = read_index_meta("doc_source_dir") or DOCS_DIR
+        return _doc_dir_cache[dataset]
+    except Exception as e:  # noqa: BLE001 读不到就退回默认目录，不影响主链路
+        logger.debug("读取文档原文目录失败，退回 DOCS_DIR: %s", e)
+        return DOCS_DIR
+
 
 def get_reranker():
     global _reranker
@@ -76,7 +101,7 @@ def _expand_to_full_doc(items, max_chars=WIKI_MAX_CHARS):
             continue
         seen.add(doc)
 
-        path = os.path.join(DOCS_DIR, doc)
+        path = os.path.join(_doc_base_dir(), doc)
         if not os.path.exists(path):
             logger.warning(f"Parent Document 扩展失败，找不到源文件: {path}")
             expanded.append(c)

@@ -387,14 +387,15 @@ def index_freshness() -> dict:
 # ==================== 数据集级 UI 配置 ====================
 # 存在 meta 表里（与语料指纹同一张键值表，key 加前缀区分），理由是「先复用、不必新开表」。
 #
-# 目前只有两项：
-#   assistant_name   助手名（拒答兜底文案里的「我是XX」）
-#   sample_question  兜底文案末尾的示例问句
+# 目前三项：
+#   assistant_name       助手名（拒答兜底文案里的「我是XX」）
+#   sample_question      兜底文案末尾的示例问句
+#   member_level_names   等级档位名（逗号分隔，高档在前，最后一个是兜底档）
 #
 # ⚠ 这里**不放「支持哪些能力」**：能力清单必须由代码决定（改了就是撒谎）。
-#   用户能改的只有称呼与示例，改不了「系统会做什么」。
+#   用户能改的只有称呼、示例与自己业务的档位名，改不了「系统会做什么」。
 UI_CONFIG_PREFIX = "ui_"
-UI_CONFIG_KEYS = ("assistant_name", "sample_question")
+UI_CONFIG_KEYS = ("assistant_name", "sample_question", "member_level_names")
 
 
 def read_ui_config() -> dict[str, str]:
@@ -422,6 +423,49 @@ def read_ui_config() -> dict[str, str]:
         for k, v in raw.items()
         if k.startswith(UI_CONFIG_PREFIX)
     }
+
+
+def read_index_meta(key: str) -> str | None:
+    """
+    读索引/数据布局类元数据（与 UI 配置同一张表，但不带 ui_ 前缀）
+
+    典型用途：doc_source_dir —— 文档原文在哪个目录。M2 上传的文档落在
+    data/uploads/<id>/ 下，检索层的 Parent Document 扩展若只认 data/docs，
+    用户上传的文档就永远拿不到全文（静默退化，只留一条 warning）。
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT to_regclass(%s)", (META_TABLE,))
+        if cur.fetchone()[0] is None:
+            return None
+        cur.execute(f"SELECT value FROM {META_TABLE} WHERE key = %s", (key,))
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.rollback()
+        cur.close()
+
+
+def write_index_meta(key: str, value: str | None) -> None:
+    """写索引/数据布局类元数据（写操作，需在 writes_to 作用域内调用）"""
+    require_write_scope("write_index_meta")
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(CREATE_META_SQL)
+        if value is None:
+            cur.execute(f"DELETE FROM {META_TABLE} WHERE key = %s", (key,))
+        else:
+            cur.execute(
+                f"INSERT INTO {META_TABLE} (key, value) VALUES (%s, %s) "
+                f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (key, value),
+            )
+        conn.commit()
+    finally:
+        cur.close()
 
 
 def write_ui_config(values: dict[str, str | None]) -> None:

@@ -194,7 +194,14 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
                 def on_doc_progress(done: int, total: int, name: str) -> None:
                     emit(kind="step_progress", step="chunk", processed=done, total=total)
 
-                doc_stats = ingest_documents(docs, model=model, progress=on_doc_progress)
+                # 传入上传目录：检索层做 Parent Document 全文化时要按它找原文，
+                # 只认 data/docs 的话用户上传的文档永远扩展不了
+                doc_stats = ingest_documents(
+                    docs,
+                    model=model,
+                    progress=on_doc_progress,
+                    docs_dir=os.path.dirname(inputs.md_paths[0]),
+                )
                 emit(kind="step_done", step="chunk", total=doc_stats["docs"])
             else:
                 emit(kind="note", text="本次没有规则文档：跳过文档重建，问答仍引用上一批文档。")
