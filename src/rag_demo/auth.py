@@ -5,40 +5,25 @@
 @File    : auth.py
 @Function: 账号 / 企业 / 会话（M3）——登录态的唯一真源
 
-为什么单独一个模块
-------------------
-权限（permissions.py）回答的是「这个身份能看到什么」；本模块回答的是
-「这个请求**是谁**」。两者必须分开：权限可以按等级配置，身份不能配置。
+为什么用 PostgreSQL
+-------------------
+项目本来就有一套 PostgreSQL 16（`docker-compose.yml` 的 pgvector）。账号库不再
+另起一个 SQLite 文件：
 
-存哪、为什么
-------------
-用 SQLite（`var/app.db`，stdlib 的 `sqlite3`，无新依赖）而不是 PostgreSQL：
+- **账号必须活得比数据久**。数据集库（`vec_db` / `vec_db_user` / `vec_db_ent_*`）
+  随时可能被重建或清空，账号不能跟着没了，所以放进**独立数据库 `rag_auth`**，
+  而不是塞进 `vec_db`——「一企业一库」的隔离思路同样适用于账号；
+- 登录判定在每个请求入口，连接池 + 主键/唯一索引比反复开关文件更稳；
+- 密码用 **Argon2id**（argon2-cffi）：内存困难型 KDF，比 PBKDF2 更抗 GPU/ASIC 爆破。
 
-- 账号是**跨数据集**的：它必须在任何数据集库被重建/清空时都不受影响，
-  而 demo 库同时是评测基线，user/企业库随时可能被 TRUNCATE；
-- 登录判定在**每个请求**的入口，走网络数据库会把一次 401 变成一次 IO；
-- 数据量极小（账号 + 会话），SQLite 单文件足够，备份就是拷一个文件。
+从 SQLite 迁移
+--------------
+首次启动时若 `rag_auth` 里没有任何账号，自动读取旧的 `var/app.db`
+（`RAG_AUTH_SQLITE` 可改路径，`RAG_AUTH_MIGRATE_SQLITE=0` 可关闭），
+按原 id 迁入用户 / 企业 / 会话 / 上传归属；老密码是 PBKDF2 也能登录，
+**登录成功后自动升级为 Argon2id**（见 authenticate）。
 
-⚠ 单进程内 SQLite 连接用 `check_same_thread=False` + 模块锁串行化。
-  多进程（uvicorn --workers）下 SQLite 自身保证写锁，账号量级不会成为瓶颈。
-
-账号类型
---------
-- **企业账号**（`account_type=enterprise`）：注册 → 系统管理员审核 →
-  创建企业、分配企业库（`vec_db_ent_<id>`）、生成邀请码，账号本身成为企业管理员；
-- **员工账号**（`account_type=employee`）：注册时必须填所属企业的邀请码，
-  归属该企业；审核通过后由企业管理员/系统管理员分配角色；
-- **系统管理员**：初始种子账号（`admin`），可审核企业与员工、改全局权限。
-
-企业是**数据隔离的单位**：同一企业的员工共享同一个库，企业之间互不可见。
-这也是「数据库按企业账号划分」的落地方式——不是按人，是按企业。
-
-审核与状态
-----------
-`status`：`pending`（待审核，能登录但没有任何能力）/ `active` / `disabled` /
-`rejected`（审核拒绝：保留记录、不能登录，可改判为通过）。
-待审核的人**能登录**是有意的：登录后能看到「等待审核」，比「密码对了却登不进」
-少一类"我密码是不是错了"的误判。没有能力由 permissions 的 L0 保证。
+⚠ 账号表在 `rag_auth` 库，不要放进 `vec_db_*`：数据集重建会清表。
 """
 import contextvars
 import hashlib
@@ -49,13 +34,20 @@ import re
 import secrets
 import sqlite3
 import threading
-import time
-from typing import Any
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Any, Iterator
+
+import psycopg2
+import psycopg2.errors
+import psycopg2.extras
+import psycopg2.pool
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 logger = logging.getLogger(__name__)
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_PATH = os.environ.get("RAG_AUTH_DB") or os.path.join(_BASE_DIR, "var", "app.db")
 
 # ---------- 开关（都留了环境变量，方便离线回归/部署时覆盖） ----------
 # 关闭后回到 M2 的"请求头自报身份"，仅用于离线脚本；默认开启登录态
@@ -65,6 +57,25 @@ ALLOW_HEADER_AUTH = os.environ.get("RAG_ALLOW_HEADER_AUTH", "0") == "1"
 SESSION_COOKIE = "rag_session"
 SEED_ADMIN_USERNAME = os.environ.get("RAG_ADMIN_USER", "admin")
 SEED_ADMIN_PASSWORD = os.environ.get("RAG_ADMIN_PASSWORD", "admin123")
+
+# ---------- PostgreSQL ----------
+# 与 config.py::DB_CONFIG / docker-compose.yml 的账号密码保持一致；
+# 单独读环境变量而不是 import config：config 会顺带 import torch，
+# 而鉴权在每个请求入口，不该为一个连库参数付模型框架的启动成本。
+_PG_BASE = {
+    "host": os.environ.get("RAG_AUTH_PG_HOST", "localhost"),
+    "port": int(os.environ.get("RAG_AUTH_PG_PORT", "5432")),
+    "user": os.environ.get("RAG_AUTH_PG_USER", "postgres"),
+    "password": os.environ.get("RAG_AUTH_PG_PASSWORD", "123456"),
+}
+AUTH_DB_NAME = os.environ.get("RAG_AUTH_PG_DB", "rag_auth")
+PG_CONFIG = {**_PG_BASE, "dbname": AUTH_DB_NAME, "connect_timeout": 5}
+
+# 旧账号库（迁移用；迁移完成后不再读写）
+SQLITE_MIGRATION_PATH = os.environ.get("RAG_AUTH_SQLITE") or os.path.join(
+    _BASE_DIR, "var", "app.db"
+)
+SQLITE_MIGRATION_ENABLED = os.environ.get("RAG_AUTH_MIGRATE_SQLITE", "1") != "0"
 
 ACCOUNT_ENTERPRISE = "enterprise"
 ACCOUNT_EMPLOYEE = "employee"
@@ -88,9 +99,22 @@ STATUS_LABELS = {
 # 拒绝 = 申请不通过但保留记录，不能登录；误拒可以由管理员改判为通过。
 LOGIN_STATUSES = (STATUS_ACTIVE, STATUS_PENDING)
 
-# PBKDF2 参数：20 万次在单机上约 60~100ms，登录频率下完全可接受。
-# 迭代次数写进哈希串里，将来调高不用迁移旧密码（按存的那份校验）。
-_PBKDF2_ITER = 200_000
+# ==================== 密码：Argon2id ====================
+# 参数取 OWASP 推荐档位：64 MiB 内存 / 3 轮 / 2 并行。
+# 单次约 60~120ms，登录频率下可接受；改参数后老哈希仍可验证，
+# 登录成功时自动重算（见 password_needs_rehash）。
+_ARGON2_TIME_COST = 3
+_ARGON2_MEMORY_KIB = 64 * 1024
+_ARGON2_PARALLELISM = 2
+_ARGON2_HASHER = PasswordHasher(
+    time_cost=_ARGON2_TIME_COST,
+    memory_cost=_ARGON2_MEMORY_KIB,
+    parallelism=_ARGON2_PARALLELISM,
+    hash_len=32,
+    salt_len=16,
+)
+
+# 历史密码格式（PBKDF2）：只保留验证能力，新密码一律 Argon2id
 _HASH_PREFIX = "pbkdf2_sha256"
 
 # 会话有效期：7 天。演示环境不该让人每次重启服务就重新登录。
@@ -99,8 +123,8 @@ SESSION_TTL_SECONDS = 7 * 24 * 3600
 # （不勾选就是浏览器会话 Cookie，关掉浏览器即失效）。
 REMEMBER_TTL_SECONDS = 30 * 24 * 3600
 
-_LOCK = threading.RLock()
-_conn: sqlite3.Connection | None = None
+_pool: Any = None
+_pool_lock = threading.RLock()
 
 # 当前请求的账号（由 API 中间件设置）。用 contextvar 而不是全局变量：
 # 并发请求各看各的，不会出现"A 的账号被 B 用到"。
@@ -118,25 +142,20 @@ def current_account() -> dict[str, Any] | None:
     return _current_account.get()
 
 
-# ==================== 建库 ====================
-
-
-def _now() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
-
+# ==================== 连接 / 建库 ====================
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS enterprise (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     name          TEXT NOT NULL UNIQUE,
     invite_code   TEXT NOT NULL UNIQUE,
     dataset       TEXT NOT NULL UNIQUE,
-    owner_user_id INTEGER,
-    created_at    TEXT NOT NULL
+    owner_user_id BIGINT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS app_user (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     username            TEXT NOT NULL UNIQUE,
     -- 手机号或邮箱（登录用）：邮箱存小写、手机号存 11 位纯数字，空值表示历史账号没填
     contact             TEXT,
@@ -144,97 +163,126 @@ CREATE TABLE IF NOT EXISTS app_user (
     password_hash       TEXT NOT NULL,
     account_type        TEXT NOT NULL,
     role                TEXT NOT NULL DEFAULT 'cs',
-    enterprise_id       INTEGER,
-    is_system_admin     INTEGER NOT NULL DEFAULT 0,
-    is_enterprise_admin INTEGER NOT NULL DEFAULT 0,
+    enterprise_id       BIGINT,
+    is_system_admin     BOOLEAN NOT NULL DEFAULT FALSE,
+    is_enterprise_admin BOOLEAN NOT NULL DEFAULT FALSE,
     status              TEXT NOT NULL DEFAULT 'pending',
-    created_at          TEXT NOT NULL,
-    reviewed_at         TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at         TIMESTAMPTZ,
     reviewed_by         TEXT,
-    last_login_at       TEXT
+    last_login_at       TIMESTAMPTZ
 );
+
+-- 部分唯一索引：NULL 不算重复（老账号没有联系方式）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_user_contact
+    ON app_user (contact) WHERE contact IS NOT NULL AND contact <> '';
 
 CREATE TABLE IF NOT EXISTS session (
     token_hash  TEXT PRIMARY KEY,
-    user_id     INTEGER NOT NULL,
-    created_at  TEXT NOT NULL,
-    expires_at  TEXT NOT NULL
+    user_id     BIGINT NOT NULL REFERENCES app_user (id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_session_expires ON session (expires_at);
+CREATE INDEX IF NOT EXISTS idx_session_user ON session (user_id);
 
 -- 上传批次属于哪个企业：上传、构建、查询三处都要校验，
 -- 否则拿到别人的 upload_id 就能读/构建/查询别人的数据。
 CREATE TABLE IF NOT EXISTS upload_owner (
     upload_id     TEXT PRIMARY KEY,
-    enterprise_id INTEGER,
-    user_id       INTEGER NOT NULL,
-    created_at    TEXT NOT NULL
+    enterprise_id BIGINT,
+    user_id       BIGINT NOT NULL REFERENCES app_user (id) ON DELETE CASCADE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 """
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
+def describe_backend() -> str:
+    """给启动日志用：不打印密码"""
+    return f"postgresql://{_PG_BASE['user']}@{_PG_BASE['host']}:{_PG_BASE['port']}/{AUTH_DB_NAME}"
+
+
+def _ensure_database() -> None:
+    """账号库不存在就建。CREATE DATABASE 不能进事务，所以单独用 autocommit 连接。"""
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", AUTH_DB_NAME):
+        raise ValueError(f"账号库名非法: {AUTH_DB_NAME!r}")
+    try:
+        conn = psycopg2.connect(dbname="postgres", **_PG_BASE, connect_timeout=5)
+    except psycopg2.Error as e:  # 连不上就别装死，启动时明确报错
+        raise RuntimeError(
+            f"连不上 PostgreSQL（{_PG_BASE['host']}:{_PG_BASE['port']}）：{e}"
+        ) from e
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (AUTH_DB_NAME,))
+            if cur.fetchone() is None:
+                cur.execute(f'CREATE DATABASE "{AUTH_DB_NAME}"')
+                logger.warning("已创建账号库 %s", AUTH_DB_NAME)
+    finally:
+        conn.close()
+
+
+@contextmanager
+def _cursor() -> Iterator[psycopg2.extras.RealDictCursor]:
     """
-    轻量迁移：登录页改版前建的库没有 `contact` 列（手机号 / 邮箱）
+    从连接池借一条连接，正常提交、异常回滚、最后归还
 
-    不做完整的迁移框架：本项目就一个 SQLite 文件、一张账号表，
-    加列 + 建索引足够；每次启动跑一遍是幂等的。
+    不共用一条全局连接：FastAPI 的请求是并发的，单连接需要全局锁串行化，
+    登录高峰会把排队时间都算到响应里。
     """
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(app_user)")}
-    if "contact" not in cols:
-        conn.execute("ALTER TABLE app_user ADD COLUMN contact TEXT")
-        logger.info("账号库已补 contact 列（手机号 / 邮箱登录）")
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_app_user_contact "
-        "ON app_user(contact) WHERE contact IS NOT NULL AND contact <> ''"
-    )
+    pool = _get_pool()
+    conn = pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            yield cur
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        pool.putconn(conn)
 
 
-def _db() -> sqlite3.Connection:
-    """进程内单连接 + 锁串行化（见模块注释）"""
-    global _conn
-    with _LOCK:
-        if _conn is None:
-            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-            _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-            _conn.row_factory = sqlite3.Row
-            _conn.executescript(_SCHEMA)
-            _migrate(_conn)
-            _conn.commit()
-        return _conn
+def _get_pool() -> Any:
+    global _pool
+    if _pool is not None:
+        return _pool
+    with _pool_lock:
+        if _pool is None:
+            _ensure_database()
+            _pool = psycopg2.pool.ThreadedConnectionPool(1, 8, **PG_CONFIG)
+            _init_schema()
+    return _pool
 
 
-def _row_to_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
-    if row is None:
-        return None
-    data = dict(row)
-    data["is_system_admin"] = bool(data.get("is_system_admin"))
-    data["is_enterprise_admin"] = bool(data.get("is_enterprise_admin"))
-    data["status_label"] = STATUS_LABELS.get(data.get("status"), data.get("status"))
-    data["account_type_label"] = ACCOUNT_TYPE_LABELS.get(
-        data.get("account_type"), data.get("account_type")
-    )
-    return data
+def _init_schema() -> None:
+    with _cursor() as cur:
+        cur.execute(_SCHEMA)
 
 
 def init(seed_username: str, seed_password: str) -> None:
     """
-    初始化表 + 种子系统管理员（幂等）
+    初始化表 + 迁移旧 SQLite + 种子系统管理员（幂等）
 
     只在"一个账号都没有"时创建种子账号：否则每次重启都会把一个已知密码的
     admin 塞回去，等于给系统留后门。
     """
-    with _LOCK:
-        conn = _db()
-        cur = conn.execute("SELECT COUNT(*) AS n FROM app_user")
+    _get_pool()
+    _migrate_from_sqlite()
+
+    with _cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM app_user")
         if cur.fetchone()["n"] > 0:
             return
         if len(seed_password) < 6:
             raise ValueError("种子管理员密码至少 6 位")
-        conn.execute(
+        cur.execute(
             """INSERT INTO app_user
                (username, display_name, password_hash, account_type, role,
-                is_system_admin, status, created_at)
-               VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+                is_system_admin, status)
+               VALUES (%s, %s, %s, %s, %s, TRUE, %s)""",
             (
                 seed_username.strip().lower(),
                 "系统管理员",
@@ -242,27 +290,175 @@ def init(seed_username: str, seed_password: str) -> None:
                 ACCOUNT_EMPLOYEE,
                 "admin",
                 STATUS_ACTIVE,
-                _now(),
             ),
         )
-        conn.commit()
-        logger.warning(
-            "已创建初始系统管理员 %s（密码来自 RAG_ADMIN_PASSWORD，默认 admin123），"
-            "请在正式使用前修改", seed_username,
-        )
+    logger.warning(
+        "已创建初始系统管理员 %s（密码来自 RAG_ADMIN_PASSWORD，默认 admin123），"
+        "请在正式使用前修改", seed_username,
+    )
+
+
+def _parse_ts(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        # 旧库存的是本地时间字符串；带上本地时区再入库，避免被当成 UTC 差 8 小时
+        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S").astimezone()
+    except ValueError:
+        return None
+
+
+def _format_ts(value: Any) -> str | None:
+    """库里的 TIMESTAMPTZ → 页面一直用的 "YYYY-MM-DD HH:MM:SS"（本地时区）"""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone()
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    return str(value)
+
+
+def _sqlite_rows(src: sqlite3.Connection, table: str, wanted: tuple[str, ...]) -> list[dict]:
+    """按列存在与否读取旧表：老库可能缺 `contact` 列，缺的给 None"""
+    cols = {r["name"] for r in src.execute(f"PRAGMA table_info({table})")}
+    select = ", ".join(c for c in wanted if c in cols)
+    if not select:
+        return []
+    rows = [dict(r) for r in src.execute(f"SELECT {select} FROM {table}")]
+    for row in rows:
+        for col in wanted:
+            row.setdefault(col, None)
+    return rows
+
+
+def _migrate_from_sqlite() -> None:
+    """
+    一次性迁移：把 `var/app.db` 里的账号搬进 PostgreSQL
+
+    幂等：目标库已有账号就直接返回。保留原 id，因为企业库名 `vec_db_ent_<id>`
+    与数据集名 `ent_<id>` 都依赖它；迁移后同步 identity 序列，
+    否则下一条 INSERT 会撞主键。
+    """
+    if not SQLITE_MIGRATION_ENABLED or not os.path.exists(SQLITE_MIGRATION_PATH):
+        return
+    with _cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM app_user")
+        if cur.fetchone()["n"] > 0:
+            return
+
+    try:
+        src = sqlite3.connect(f"file:{SQLITE_MIGRATION_PATH}?mode=ro", uri=True)
+        src.row_factory = sqlite3.Row
+        users = _sqlite_rows(src, "app_user", (
+            "id", "username", "contact", "display_name", "password_hash", "account_type",
+            "role", "enterprise_id", "is_system_admin", "is_enterprise_admin", "status",
+            "created_at", "reviewed_at", "reviewed_by", "last_login_at",
+        ))
+        enterprises = _sqlite_rows(src, "enterprise", (
+            "id", "name", "invite_code", "dataset", "owner_user_id", "created_at",
+        ))
+        sessions = _sqlite_rows(src, "session", ("token_hash", "user_id", "created_at", "expires_at"))
+        uploads = _sqlite_rows(src, "upload_owner", ("upload_id", "enterprise_id", "user_id", "created_at"))
+        src.close()
+    except sqlite3.Error as e:
+        logger.warning("读取旧 SQLite 账号库失败，跳过迁移：%s", e)
+        return
+    if not users:
+        return
+
+    user_ids = {int(u["id"]) for u in users}
+    with _cursor() as cur:
+        for ent in enterprises:
+            cur.execute(
+                """INSERT INTO enterprise (id, name, invite_code, dataset, owner_user_id, created_at)
+                   VALUES (%s, %s, %s, %s, %s, COALESCE(%s, now())) ON CONFLICT (id) DO NOTHING""",
+                (
+                    ent["id"], ent["name"], ent["invite_code"], ent["dataset"],
+                    ent["owner_user_id"], _parse_ts(ent["created_at"]),
+                ),
+            )
+        for user in users:
+            cur.execute(
+                """INSERT INTO app_user
+                   (id, username, contact, display_name, password_hash, account_type, role,
+                    enterprise_id, is_system_admin, is_enterprise_admin, status,
+                    created_at, reviewed_at, reviewed_by, last_login_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                           COALESCE(%s, now()), %s, %s, %s) ON CONFLICT (id) DO NOTHING""",
+                (
+                    user["id"], user["username"], user.get("contact"), user["display_name"],
+                    user["password_hash"], user["account_type"], user["role"],
+                    user["enterprise_id"], bool(user["is_system_admin"]),
+                    bool(user["is_enterprise_admin"]), user["status"],
+                    _parse_ts(user["created_at"]), _parse_ts(user["reviewed_at"]),
+                    user["reviewed_by"], _parse_ts(user["last_login_at"]),
+                ),
+            )
+        for sess in sessions:
+            if int(sess["user_id"]) not in user_ids:
+                continue
+            cur.execute(
+                """INSERT INTO session (token_hash, user_id, created_at, expires_at)
+                   VALUES (%s, %s, COALESCE(%s, now()), %s) ON CONFLICT (token_hash) DO NOTHING""",
+                (
+                    sess["token_hash"], sess["user_id"], _parse_ts(sess["created_at"]),
+                    _parse_ts(sess["expires_at"]) or datetime.now(),
+                ),
+            )
+        for up in uploads:
+            if int(up["user_id"]) not in user_ids:
+                continue
+            cur.execute(
+                """INSERT INTO upload_owner (upload_id, enterprise_id, user_id, created_at)
+                   VALUES (%s, %s, %s, COALESCE(%s, now())) ON CONFLICT (upload_id) DO NOTHING""",
+                (up["upload_id"], up["enterprise_id"], up["user_id"], _parse_ts(up["created_at"])),
+            )
+        for table in ("app_user", "enterprise"):
+            cur.execute(
+                f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+                f"COALESCE((SELECT MAX(id) FROM {table}), 1))"
+            )
+    logger.warning(
+        "已从 SQLite 迁移账号：用户 %d / 企业 %d / 会话 %d（密码保持可用，登录后自动升级为 Argon2id）",
+        len(users), len(enterprises), len(sessions),
+    )
 
 
 # ==================== 密码 ====================
 
 
 def hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITER)
-    return f"{_HASH_PREFIX}${_PBKDF2_ITER}${salt.hex()}${digest.hex()}"
+    """新密码一律 Argon2id（带随机 salt，格式含参数，升级参数可平滑验证）"""
+    return _ARGON2_HASHER.hash(password)
+
+
+def password_needs_rehash(stored: str) -> bool:
+    """老 PBKDF2 或参数已过时 → 需要重算（登录成功时顺手做）"""
+    if not stored or not stored.startswith("$argon2"):
+        return True
+    try:
+        return _ARGON2_HASHER.check_needs_rehash(stored)
+    except InvalidHashError:
+        return True
 
 
 def verify_password(password: str, stored: str) -> bool:
-    """定长比较，避免"逐字节比较耗时"泄露密码前缀"""
+    """
+    校验密码：Argon2id 为主，兼容历史 PBKDF2
+
+    兼容不是为了省事：库里已有的账号不能因为换算法就登不进来。
+    """
+    if not stored:
+        return False
+    if stored.startswith("$argon2"):
+        try:
+            return _ARGON2_HASHER.verify(stored, password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            return False
+
     try:
         prefix, iter_s, salt_hex, digest_hex = stored.split("$")
         if prefix != _HASH_PREFIX:
@@ -324,18 +520,39 @@ def contact_label(value: str | None) -> str:
 # ==================== 账号 ====================
 
 
+def _row_to_user(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["is_system_admin"] = bool(data.get("is_system_admin"))
+    data["is_enterprise_admin"] = bool(data.get("is_enterprise_admin"))
+    data["status_label"] = STATUS_LABELS.get(data.get("status"), data.get("status"))
+    data["account_type_label"] = ACCOUNT_TYPE_LABELS.get(
+        data.get("account_type"), data.get("account_type")
+    )
+    for key in ("created_at", "reviewed_at", "last_login_at"):
+        data[key] = _format_ts(data.get(key))
+    return data
+
+
+def _row_to_enterprise(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    data = dict(row)
+    data["created_at"] = _format_ts(data.get("created_at"))
+    return data
+
+
 def find_user(username: str) -> dict[str, Any] | None:
-    with _LOCK:
-        row = _db().execute(
-            "SELECT * FROM app_user WHERE username = ?", (username.strip().lower(),)
-        ).fetchone()
-        return _row_to_user(row)
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM app_user WHERE username = %s", (username.strip().lower(),))
+        return _row_to_user(cur.fetchone())
 
 
 def find_user_by_id(user_id: int) -> dict[str, Any] | None:
-    with _LOCK:
-        row = _db().execute("SELECT * FROM app_user WHERE id = ?", (int(user_id),)).fetchone()
-        return _row_to_user(row)
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM app_user WHERE id = %s", (int(user_id),))
+        return _row_to_user(cur.fetchone())
 
 
 def find_user_by_login(account: str) -> dict[str, Any] | None:
@@ -357,26 +574,25 @@ def find_user_by_login(account: str) -> dict[str, Any] | None:
         return None  # 既不是合法用户名也不是合法手机号/邮箱
     if not contact:
         return None
-    with _LOCK:
-        row = _db().execute("SELECT * FROM app_user WHERE contact = ?", (contact,)).fetchone()
-        return _row_to_user(row)
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM app_user WHERE contact = %s", (contact,))
+        return _row_to_user(cur.fetchone())
 
 
 def list_users(enterprise_id: int | None = None) -> list[dict[str, Any]]:
     """`enterprise_id=None` = 全部（仅系统管理员调用）"""
-    with _LOCK:
-        conn = _db()
+    with _cursor() as cur:
         if enterprise_id is None:
-            rows = conn.execute(
-                "SELECT * FROM app_user ORDER BY status = 'pending' DESC, id ASC"
-            ).fetchall()
+            cur.execute(
+                "SELECT * FROM app_user ORDER BY (status = 'pending') DESC, id ASC"
+            )
         else:
-            rows = conn.execute(
-                "SELECT * FROM app_user WHERE enterprise_id = ? "
-                "ORDER BY status = 'pending' DESC, id ASC",
+            cur.execute(
+                "SELECT * FROM app_user WHERE enterprise_id = %s "
+                "ORDER BY (status = 'pending') DESC, id ASC",
                 (int(enterprise_id),),
-            ).fetchall()
-        return [_row_to_user(r) for r in rows]
+            )
+        return [_row_to_user(r) for r in cur.fetchall()]  # type: ignore[misc]
 
 
 def create_user(
@@ -416,32 +632,36 @@ def create_user(
     elif invite_code:
         raise ValueError("企业账号不需要邀请码（审核通过后会生成）")
 
-    with _LOCK:
-        conn = _db()
-        if conn.execute("SELECT 1 FROM app_user WHERE username = ?", (username,)).fetchone():
-            raise ValueError("用户名已被占用")
-        if contact_value and conn.execute(
-            "SELECT 1 FROM app_user WHERE contact = ?", (contact_value,)
-        ).fetchone():
-            raise ValueError("该手机号 / 邮箱已被注册")
-        conn.execute(
-            """INSERT INTO app_user
-               (username, contact, display_name, password_hash, account_type, role,
-                enterprise_id, status, created_at)
-               VALUES (?, ?, ?, ?, ?, 'cs', ?, ?, ?)""",
-            (
-                username,
-                contact_value,
-                (display_name or username).strip()[:64],
-                hash_password(password),
-                account_type,
-                enterprise_id,
-                STATUS_PENDING,
-                _now(),
-            ),
-        )
-        conn.commit()
-    user = find_user(username)
+    try:
+        with _cursor() as cur:
+            cur.execute("SELECT 1 FROM app_user WHERE username = %s", (username,))
+            if cur.fetchone() is not None:
+                raise ValueError("用户名已被占用")
+            if contact_value:
+                cur.execute("SELECT 1 FROM app_user WHERE contact = %s", (contact_value,))
+                if cur.fetchone() is not None:
+                    raise ValueError("该手机号 / 邮箱已被注册")
+            cur.execute(
+                """INSERT INTO app_user
+                   (username, contact, display_name, password_hash, account_type, role,
+                    enterprise_id, status)
+                   VALUES (%s, %s, %s, %s, %s, 'cs', %s, %s)
+                   RETURNING *""",
+                (
+                    username,
+                    contact_value,
+                    (display_name or username).strip()[:64],
+                    hash_password(password),
+                    account_type,
+                    enterprise_id,
+                    STATUS_PENDING,
+                ),
+            )
+            user = _row_to_user(cur.fetchone())
+    except psycopg2.errors.UniqueViolation as e:
+        # 并发注册时预检查拦不住，交给唯一约束兜底
+        raise ValueError("用户名或手机号 / 邮箱已被占用") from e
+
     assert user is not None
     logger.info(
         "新注册（待审核）: %s 类型=%s 企业=%s 联系方式=%s",
@@ -455,6 +675,8 @@ def authenticate(account: str, password: str) -> dict[str, Any]:
     校验登录凭据；失败一律抛同一句话，不区分"账号不存在/密码错"
 
     `account` 可以是用户名、手机号或邮箱（见 find_user_by_login）。
+    密码校验成功且哈希需要升级（老 PBKDF2 / Argon2 参数过时）时，
+    顺手写回 Argon2id——用户无感，库里的强度只增不减。
     """
     user = find_user_by_login(account)
     if user is None or not verify_password(password, user["password_hash"]):
@@ -464,10 +686,17 @@ def authenticate(account: str, password: str) -> dict[str, Any]:
     if user["status"] == STATUS_REJECTED:
         # 和「停用」分开说：拒绝是申请没通过，不是账号被停；用户要知道下一步该做什么
         raise ValueError("注册申请未通过审核，请联系管理员")
-    with _LOCK:
-        conn = _db()
-        conn.execute("UPDATE app_user SET last_login_at = ? WHERE id = ?", (_now(), user["id"]))
-        conn.commit()
+
+    if password_needs_rehash(user["password_hash"]):
+        with _cursor() as cur:
+            cur.execute(
+                "UPDATE app_user SET password_hash = %s WHERE id = %s",
+                (hash_password(password), user["id"]),
+            )
+        logger.info("密码哈希已升级为 Argon2id: %s", user["username"])
+
+    with _cursor() as cur:
+        cur.execute("UPDATE app_user SET last_login_at = now() WHERE id = %s", (user["id"],))
     return user
 
 
@@ -503,29 +732,48 @@ def approve(user_id: int, role: str, actor: str) -> dict[str, Any]:
     if user["account_type"] == ACCOUNT_ENTERPRISE and not user["enterprise_id"]:
         enterprise = _create_enterprise(user)
 
-    with _LOCK:
-        conn = _db()
-        conn.execute(
+    with _cursor() as cur:
+        cur.execute(
             """UPDATE app_user
-               SET status = ?, role = ?, reviewed_at = ?, reviewed_by = ?,
-                   enterprise_id = COALESCE(?, enterprise_id),
-                   is_enterprise_admin = CASE WHEN ? = 'enterprise' THEN 1 ELSE is_enterprise_admin END
-               WHERE id = ?""",
+               SET status = %s, role = %s, reviewed_at = now(), reviewed_by = %s,
+                   enterprise_id = COALESCE(%s, enterprise_id),
+                   is_enterprise_admin = CASE WHEN %s = 'enterprise' THEN TRUE
+                                              ELSE is_enterprise_admin END
+               WHERE id = %s""",
             (
                 STATUS_ACTIVE,
                 role,
-                _now(),
                 actor,
                 enterprise["id"] if enterprise else None,
                 user["account_type"],
                 user["id"],
             ),
         )
-        conn.commit()
     updated = find_user_by_id(user_id)
     assert updated is not None
     logger.info("账号审核通过: %s role=%s by %s", updated["username"], role, actor)
     return updated
+
+
+def reject(user_id: int, actor: str) -> dict[str, Any]:
+    """
+    审核拒绝：**保留记录**、不能登录，而不是删号
+
+    为什么不删：同一手机号/邮箱往往还要重新申请，删掉就丢了「被拒过」这个事实，
+    审计也查不到谁在什么时候拒了谁。误拒可以由管理员再走一次「审核通过」改判。
+    """
+    user = find_user_by_id(user_id)
+    if user is None:
+        raise ValueError("账号不存在")
+    if user["status"] == STATUS_ACTIVE:
+        raise ValueError("已审核通过的账号请使用停用 / 启用")
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE app_user SET status = %s, reviewed_at = now(), reviewed_by = %s WHERE id = %s",
+            (STATUS_REJECTED, actor, int(user_id)),
+        )
+    logger.info("账号审核拒绝: %s by %s", user["username"], actor)
+    return find_user_by_id(user_id)  # type: ignore[return-value]
 
 
 def set_role(user_id: int, role: str, actor: str) -> dict[str, Any]:
@@ -542,34 +790,9 @@ def set_role(user_id: int, role: str, actor: str) -> dict[str, Any]:
         # 企业账号的角色由「审核通过」产生，改掉它会和 is_enterprise_admin 打架：
         # 账号标记说"能管人"，角色却说"只是销售"。要收回权限请停用账号。
         raise ValueError("企业账号的角色固定为企业管理员，不能直接修改（可停用账号）")
-    with _LOCK:
-        conn = _db()
-        conn.execute("UPDATE app_user SET role = ? WHERE id = ?", (role, int(user_id)))
-        conn.commit()
+    with _cursor() as cur:
+        cur.execute("UPDATE app_user SET role = %s WHERE id = %s", (role, int(user_id)))
     logger.info("账号改角色: id=%s role=%s by %s", user_id, role, actor)
-    return find_user_by_id(user_id)  # type: ignore[return-value]
-
-
-def reject(user_id: int, actor: str) -> dict[str, Any]:
-    """
-    审核拒绝：**保留记录**、不能登录，而不是删号
-
-    为什么不删：同一手机号/邮箱往往还要重新申请，删掉就丢了「被拒过」这个事实，
-    审计也查不到谁在什么时候拒了谁。误拒可以由管理员再走一次「审核通过」改判。
-    """
-    user = find_user_by_id(user_id)
-    if user is None:
-        raise ValueError("账号不存在")
-    if user["status"] == STATUS_ACTIVE:
-        raise ValueError("已审核通过的账号请使用停用 / 启用")
-    with _LOCK:
-        conn = _db()
-        conn.execute(
-            "UPDATE app_user SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ?",
-            (STATUS_REJECTED, _now(), actor, int(user_id)),
-        )
-        conn.commit()
-    logger.info("账号审核拒绝: %s by %s", user["username"], actor)
     return find_user_by_id(user_id)  # type: ignore[return-value]
 
 
@@ -583,13 +806,11 @@ def set_status(user_id: int, status: str, actor: str) -> dict[str, Any]:
         # 待审核 / 已拒绝的账号必须先走「审核通过」拿到角色，
         # 否则一次「启用」就能绕过审核，拿个 cs 直接进系统。
         raise ValueError("该账号尚未审核，请使用「审核通过」")
-    with _LOCK:
-        conn = _db()
-        conn.execute(
-            "UPDATE app_user SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ?",
-            (status, _now(), actor, int(user_id)),
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE app_user SET status = %s, reviewed_at = now(), reviewed_by = %s WHERE id = %s",
+            (status, actor, int(user_id)),
         )
-        conn.commit()
     logger.info("账号状态: id=%s -> %s by %s", user_id, status, actor)
     return find_user_by_id(user_id)  # type: ignore[return-value]
 
@@ -605,24 +826,29 @@ def _new_invite_code() -> str:
 
 def _create_enterprise(user: dict[str, Any]) -> dict[str, Any]:
     name = (user.get("display_name") or user["username"]).strip()[:64]
-    with _LOCK:
-        conn = _db()
+    with _cursor() as cur:
         # 同名企业加后缀，避免注册时因重名卡住（企业名不像用户名需要全局唯一）
         base, n = name, 1
-        while conn.execute("SELECT 1 FROM enterprise WHERE name = ?", (name,)).fetchone():
+        while True:
+            cur.execute("SELECT 1 FROM enterprise WHERE name = %s", (name,))
+            if cur.fetchone() is None:
+                break
             n += 1
             name = f"{base}-{n}"
-        cur = conn.execute(
-            "INSERT INTO enterprise (name, invite_code, dataset, created_at) VALUES (?, ?, ?, ?)",
-            (name, _new_invite_code(), "pending", _now()),
+        cur.execute(
+            """INSERT INTO enterprise (name, invite_code, dataset, owner_user_id)
+               VALUES (%s, %s, 'pending', %s) RETURNING id""",
+            (name, _new_invite_code(), user["id"]),
         )
-        ent_id = int(cur.lastrowid)
+        ent_id = int(cur.fetchone()["id"])
         dataset = f"ent_{ent_id}"
-        conn.execute(
-            "UPDATE enterprise SET dataset = ?, owner_user_id = ? WHERE id = ?",
-            (dataset, user["id"], ent_id),
+        cur.execute(
+            "UPDATE enterprise SET dataset = %s WHERE id = %s", (dataset, ent_id)
         )
-        conn.commit()
+        # 同一事务里把 owner 指回去，避免出现"企业有了、主人还是空"的中间态
+        cur.execute(
+            "UPDATE app_user SET enterprise_id = %s WHERE id = %s", (ent_id, user["id"])
+        )
     ent = find_enterprise(ent_id)
     assert ent is not None
     logger.info("已创建企业: %s (dataset=%s)", ent["name"], ent["dataset"])
@@ -630,25 +856,24 @@ def _create_enterprise(user: dict[str, Any]) -> dict[str, Any]:
 
 
 def find_enterprise(enterprise_id: int) -> dict[str, Any] | None:
-    with _LOCK:
-        row = _db().execute(
-            "SELECT * FROM enterprise WHERE id = ?", (int(enterprise_id),)
-        ).fetchone()
-        return dict(row) if row else None
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM enterprise WHERE id = %s", (int(enterprise_id),))
+        return _row_to_enterprise(cur.fetchone())
 
 
 def find_enterprise_by_code(code: str) -> dict[str, Any] | None:
-    with _LOCK:
-        row = _db().execute(
-            "SELECT * FROM enterprise WHERE invite_code = ?", ((code or "").strip().upper(),)
-        ).fetchone()
-        return dict(row) if row else None
+    with _cursor() as cur:
+        cur.execute(
+            "SELECT * FROM enterprise WHERE invite_code = %s",
+            ((code or "").strip().upper(),),
+        )
+        return _row_to_enterprise(cur.fetchone())
 
 
 def list_enterprises() -> list[dict[str, Any]]:
-    with _LOCK:
-        rows = _db().execute("SELECT * FROM enterprise ORDER BY id ASC").fetchall()
-        return [dict(r) for r in rows]
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM enterprise ORDER BY id ASC")
+        return [_row_to_enterprise(r) for r in cur.fetchall()]  # type: ignore[misc]
 
 
 def enterprise_of(user: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -668,26 +893,19 @@ def create_session(user_id: int, ttl_seconds: int | None = None) -> str:
     """
     发一个会话令牌（Cookie 里存原文，库里只存 sha256）
 
-    只存哈希的原因：库文件被拷走时，令牌不能直接拿来登录。
+    只存哈希的原因：库被拖走时，令牌不能直接拿来登录。
     `ttl_seconds`：勾选「记住登录状态」时传 30 天，否则用默认 7 天。
     """
     token = secrets.token_urlsafe(32)
-    now = time.time()
     ttl = int(ttl_seconds or SESSION_TTL_SECONDS)
-    with _LOCK:
-        conn = _db()
+    with _cursor() as cur:
         # 顺手清掉过期会话：没有定时任务，就在登录这个低频动作里做
-        conn.execute("DELETE FROM session WHERE expires_at < ?", (_now(),))
-        conn.execute(
-            "INSERT INTO session (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-            (
-                _token_hash(token),
-                int(user_id),
-                _now(),
-                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + ttl)),
-            ),
+        cur.execute("DELETE FROM session WHERE expires_at < now()")
+        cur.execute(
+            """INSERT INTO session (token_hash, user_id, expires_at)
+               VALUES (%s, %s, now() + make_interval(secs => %s))""",
+            (_token_hash(token), int(user_id), ttl),
         )
-        conn.commit()
     return token
 
 
@@ -695,24 +913,19 @@ def resolve_session(token: str | None) -> dict[str, Any] | None:
     """令牌 → 账号（附带企业信息）；过期/停用/不存在都返回 None"""
     if not token:
         return None
-    with _LOCK:
-        conn = _db()
-        row = conn.execute(
+    with _cursor() as cur:
+        cur.execute(
             """SELECT u.* FROM session s JOIN app_user u ON u.id = s.user_id
-               WHERE s.token_hash = ? AND s.expires_at >= ?""",
-            (_token_hash(token), _now()),
-        ).fetchone()
-        if row is None:
-            return None
-        user = _row_to_user(row)
+               WHERE s.token_hash = %s AND s.expires_at >= now()""",
+            (_token_hash(token),),
+        )
+        user = _row_to_user(cur.fetchone())
         if user is None or user["status"] not in LOGIN_STATUSES:
             return None
         ent = None
         if user.get("enterprise_id"):
-            ent_row = conn.execute(
-                "SELECT * FROM enterprise WHERE id = ?", (user["enterprise_id"],)
-            ).fetchone()
-            ent = dict(ent_row) if ent_row else None
+            cur.execute("SELECT * FROM enterprise WHERE id = %s", (user["enterprise_id"],))
+            ent = _row_to_enterprise(cur.fetchone())
         user["enterprise"] = ent
         user["dataset"] = ent["dataset"] if ent else None
         return user
@@ -721,17 +934,13 @@ def resolve_session(token: str | None) -> dict[str, Any] | None:
 def revoke_session(token: str | None) -> None:
     if not token:
         return
-    with _LOCK:
-        conn = _db()
-        conn.execute("DELETE FROM session WHERE token_hash = ?", (_token_hash(token),))
-        conn.commit()
+    with _cursor() as cur:
+        cur.execute("DELETE FROM session WHERE token_hash = %s", (_token_hash(token),))
 
 
 def purge_expired_sessions() -> int:
-    with _LOCK:
-        conn = _db()
-        cur = conn.execute("DELETE FROM session WHERE expires_at < ?", (_now(),))
-        conn.commit()
+    with _cursor() as cur:
+        cur.execute("DELETE FROM session WHERE expires_at < now()")
         return cur.rowcount
 
 
@@ -739,29 +948,26 @@ def purge_expired_sessions() -> int:
 
 
 def bind_upload(upload_id: str, user: dict[str, Any]) -> None:
-    with _LOCK:
-        conn = _db()
-        conn.execute(
-            "INSERT OR REPLACE INTO upload_owner (upload_id, enterprise_id, user_id, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (upload_id, user.get("enterprise_id"), user["id"], _now()),
+    with _cursor() as cur:
+        cur.execute(
+            """INSERT INTO upload_owner (upload_id, enterprise_id, user_id)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (upload_id) DO UPDATE
+               SET enterprise_id = EXCLUDED.enterprise_id, user_id = EXCLUDED.user_id""",
+            (upload_id, user.get("enterprise_id"), user["id"]),
         )
-        conn.commit()
 
 
 def upload_owner(upload_id: str) -> dict[str, Any] | None:
-    with _LOCK:
-        row = _db().execute(
-            "SELECT * FROM upload_owner WHERE upload_id = ?", (upload_id,)
-        ).fetchone()
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM upload_owner WHERE upload_id = %s", (upload_id,))
+        row = cur.fetchone()
         return dict(row) if row else None
 
 
 def unbind_upload(upload_id: str) -> None:
-    with _LOCK:
-        conn = _db()
-        conn.execute("DELETE FROM upload_owner WHERE upload_id = ?", (upload_id,))
-        conn.commit()
+    with _cursor() as cur:
+        cur.execute("DELETE FROM upload_owner WHERE upload_id = %s", (upload_id,))
 
 
 def can_access_upload(user: dict[str, Any] | None, upload_id: str) -> bool:

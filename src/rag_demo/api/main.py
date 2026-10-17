@@ -234,7 +234,7 @@ async def lifespan(app: FastAPI):
         config.register_dataset(ent["dataset"], config.enterprise_db_name(ent["id"]))
     logger.info(
         "登录态：账号库 %s，企业 %d 家（AUTH_ENABLED=%s）",
-        auth.DB_PATH, len(enterprises), auth.AUTH_ENABLED,
+        auth.describe_backend(), len(enterprises), auth.AUTH_ENABLED,
     )
 
     logger.info("预加载模型和 BM25 语料...")
