@@ -42,7 +42,7 @@ FIELD_DEFS: list[dict] = [
         "key": "amount",
         "label": "订单金额",
         "required": False,
-        "hint": "客单价、高价值客户判定的依据",
+        "hint": "客单价、高价值客户判定的依据；会员等级也按它的人均分布自动分档（不给这一列就没有等级）",
         "synonyms": [
             "amount", "order_amount", "pay_amount", "total_amount", "price", "gmv",
             "订单金额", "实付金额", "支付金额", "成交金额", "金额", "客单价", "交易金额",

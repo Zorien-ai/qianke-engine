@@ -54,18 +54,25 @@ logger = logging.getLogger(__name__)
 # ================= 配置区 =================
 BATCH = 50
 
-# 会员等级阈值（按平均客单价推导，原始 CSV 无该字段）
+# 会员等级分档：**按本次构建的数据分布标定**，不再用写死的绝对金额。
 #
-# 历史问题：原阈值（钻石 2000 / 黄金 1000 / 白银 500）是绝对金额，但本数据集
-# 客单价整体虚高（p30=1531、p50=2495、p90=10382），导致钻石占 59%、等级几乎无区分度。
-# 现改为按分位数标定（2026-10-11 实测分布）：
-#   钻石 ≈ top 5%    (p95 = 14555)
-#   黄金 ≈ 5%~20%    (p80 = 6680)
-#   白银 ≈ 20%~50%   (p50 = 2495)
-#   普通 ≈ bottom 50%
-# 注：本表不再与 data/docs/tag_definitions.md 的客单标签（高客单≥1000）挂钩——
-#     该口径对这份数据同样偏松（约 70% 用户满足），属另一个待处理的数据问题。
-MEMBER_LEVELS = [("钻石", 14555.0), ("黄金", 6680.0), ("白银", 2495.0)]
+# 这条演进线留着，免得又被「修」回去：
+#   1. 最初是绝对金额（钻石 2000 / 黄金 1000 / 白银 500）→ 区分度崩了（钻石占 59%）
+#   2. 改成按分位数标定，但把**当时那份数据的实测值**写成了常量
+#      （14555 / 6680 / 2495 = 演示数据的 p95 / p80 / p50）
+#   3. 常量搬到真实小店上就失效了：真实客单价中位 176 元，永远到不了 2495，
+#      195 个用户全是「普通」——字段在、规则也在，等级却等于没生效（见 bug/10.17）
+#   4. 现在每次构建按本批用户人均客单价的分位数分档：口径与第 2 步完全一致，
+#      数据换了规则跟着走。演示数据上算出来仍≈原来那三个数（p95/p80/p50 不变）
+#
+# 生效前提（缺一不可，缺了就把整列留空并说明原因，不产出「看起来精确」的假结论）：
+#   字段：金额列必须映射上（没有 avg_amount 就没有等级）
+#   规则：本批用户数 ≥ MEMBER_LEVEL_MIN_USERS（几个人算分位数没有意义）
+#
+# 注：本表不跟 data/docs/tag_definitions.md 的客单标签（高客单 ≥1000）挂钩——
+#     该口径对演示数据同样偏松（约 70% 用户满足），属另一个待处理的数据问题。
+MEMBER_LEVEL_QUANTILES = [("钻石", 0.95), ("黄金", 0.80), ("白银", 0.50)]
+MEMBER_LEVEL_MIN_USERS = 20
 
 # 结构化字段 DDL（幂等，保留现有 8110 条数据，不 DROP 重建）
 ALTER_SQL = """
@@ -179,11 +186,26 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def build_member_level(avg_amount: float | None) -> str | None:
-    """按平均客单价推导会员等级（原始 CSV 无该字段）；没有金额数据则返回 None"""
-    if not _present(avg_amount):
+def calibrate_member_levels(avg_amounts: pd.Series) -> list[tuple[str, float]] | None:
+    """
+    按本批用户的人均客单价分布算出分档阈值；前提不满足返回 None
+
+    None 的含义是「**本次等级不生效**」，调用方据此把整列留空并解释原因。
+    这和「算出来全是普通」是两件不同的事：前者诚实，后者是假装有结论。
+    """
+    values = pd.to_numeric(avg_amounts, errors="coerce").dropna()
+    if len(values) < MEMBER_LEVEL_MIN_USERS:
         return None
-    for name, threshold in MEMBER_LEVELS:
+    return [(name, float(values.quantile(q))) for name, q in MEMBER_LEVEL_QUANTILES]
+
+
+def build_member_level(
+    avg_amount: float | None, thresholds: list[tuple[str, float]] | None
+) -> str | None:
+    """按标定好的阈值判档；没有金额数据、或规则本次没生效时返回 None"""
+    if thresholds is None or not _present(avg_amount):
+        return None
+    for name, threshold in thresholds:
         if avg_amount >= threshold:
             return name
     return "普通"
@@ -415,7 +437,23 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
               .apply(agg_user, include_groups=False)
               .reset_index()
     )
-    profiles["member_level"] = profiles["avg_amount"].apply(build_member_level)
+    thresholds = calibrate_member_levels(profiles["avg_amount"])
+    if thresholds is None:
+        # 说清「为什么这一列是空的」：要么没金额列，要么人太少。
+        # 用户看到的画像里不会有等级片段，日志里必须有据可查。
+        logger.info(
+            "会员等级本次不生效（需要金额列，且至少 %d 个用户；本批 %d 个用户）",
+            MEMBER_LEVEL_MIN_USERS, len(profiles),
+        )
+    else:
+        logger.info(
+            "会员等级分档阈值（按本批 %d 个用户的人均客单价标定）：%s",
+            len(profiles),
+            "；".join(f"{name} ≥ {value:.2f}" for name, value in thresholds),
+        )
+    profiles["member_level"] = profiles["avg_amount"].apply(
+        lambda v: build_member_level(v, thresholds)
+    )
     profiles["profile_text"] = profiles.apply(build_profile_text, axis=1)
 
     logger.info("共得到 %d 个用户画像", len(profiles))
