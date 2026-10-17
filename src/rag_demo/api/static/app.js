@@ -82,6 +82,20 @@ function applyCapabilities() {
     el("topk-range").textContent = `范围 ${TOPK_RANGE.min}~${TOPK_RANGE.max}`;
   }
 
+  // 融合与精排 / SQL 原文与结果：管理员专属。
+  // 换身份时旧 DOM 还留在面板里，只 hidden 不够——内容也要清掉，
+  // 否则下次切回有权限的身份、某个子块没被重写，就会看到上一个身份的数据。
+  if (!CAPS.trace_flow) {
+    el("trace-flow-section").hidden = true;
+    el("trace-flow").innerHTML = "";
+  }
+  if (!CAPS.sql) {
+    el("trace-sql-section").hidden = true;
+    el("sql-body").textContent = "";
+    el("trace-sql-note").textContent = "";
+    el("trace-sql-rows").innerHTML = "";
+  }
+
   // 看不到任何过程信息时，把上一身份留下的面板清掉，避免残留
   if (!CAPS.sources && !CAPS.sql && !CAPS.internals) el("detail-panel").hidden = true;
 
@@ -401,6 +415,9 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, c
   //   · 本次真的没产生留痕（例如缓存里没存 / 走了兜底）
   // 混着写的话，用户会以为「换了身份还在用旧缓存」（2026-10-17 实测反馈）。
   const canInternals = !!CAPS.internals;
+  // 「融合与精排」是管理员专属：无权时整个区块（含标题）不出现
+  const canFlow = !!CAPS.trace_flow;
+  el("trace-flow-section").hidden = !canFlow;
   const hasTrace = !!trace;
 
   // 1) 原问题
@@ -483,8 +500,10 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, c
       : "文档池每路";
   // 没有 trace 时不能画这条链路：totalHits/merged 都会是 0，
   // 看起来像「一条都没召回却入了 5 条上下文」——那是权限裁剪造成的假象，不是事实
-  el("trace-flow").innerHTML = hasTrace && canInternals
-    ? `
+  el("trace-flow").innerHTML = !canFlow
+    ? ""
+    : hasTrace
+      ? `
     <span class="tp-node">各路并行召回 <b>${totalHits}</b></span>
     <span class="tp-arrow">→</span>
     <span class="tp-node">${profileText} · ${wikiText}</span>
@@ -492,11 +511,7 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, c
     <span class="tp-node">合并去重 <b>${merged}</b></span>
     <span class="tp-arrow">→</span>
     <span class="tp-node is-final">入上下文 <b>${sources.length}</b></span>`
-    : `<span class="tp-empty">${
-        canInternals
-          ? "本次未产生检索链路数据"
-          : "当前身份无权查看检索链路（精排分数与合并明细需更高权限）"
-      }</span>`;
+      : `<span class="tp-empty">本次未产生检索链路数据</span>`;
 
   // 4) 数据来源（名称 + 分数 + 命中它的检索式 + 内容）
   el("detail-sources").innerHTML =
@@ -529,9 +544,9 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, c
       })
       .join("") || `<div class="tp-empty">（无）</div>`;
 
-  // 5) SQL 语句与查询结果
+  // 5) SQL 语句与查询结果（管理员专属；后端已按 CAP_SQL 裁掉 sql/sql_rows）
   const sqlSec = el("trace-sql-section");
-  if (sqlText) {
+  if (CAPS.sql && sqlText) {
     sqlSec.hidden = false;
     el("sql-body").textContent = sqlText;
     // 总行数用后端的 rows_count（真实行数），不能用 sqlRows.length——

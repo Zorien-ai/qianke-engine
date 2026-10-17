@@ -57,8 +57,9 @@ DEFAULT_UI_ROLE = ROLE_CS
 
 CAP_ANSWER = "answer"          # 能提问（业务问答）
 CAP_SOURCES = "sources"        # 能看到来源列表（编号 + 来源名）
-CAP_SQL = "sql"                # 能看到 SQL 原文与结果行
+CAP_SQL = "sql"                # 能看到 SQL 原文与结果行（仅管理员，见 README 权限矩阵）
 CAP_INTERNALS = "internals"    # 能看到 trace / 原文片段 / 精排分数 / 检索式
+CAP_TRACE_FLOW = "trace_flow"  # 能看到「融合与精排」汇总：融合条数 / 各池名额 / 画像池基数
 CAP_STATS = "stats"            # 能看到 /stats 数据概况
 CAP_RAW_SEARCH = "raw_search"  # 能调用 /search（只召回不生成，最敏感）
 CAP_OPS = "ops"                # 能调用 /admin/*（清缓存、重建索引）
@@ -67,11 +68,11 @@ CAP_TOPK = "topk"              # 能调整"返回多少个用户"
 # 角色 -> 能力。与 README「权限矩阵」严格对应，改一处要改另一处。
 _ROLE_CAPS: dict[str, frozenset[str]] = {
     ROLE_ADMIN: frozenset({
-        CAP_ANSWER, CAP_SOURCES, CAP_SQL, CAP_INTERNALS,
+        CAP_ANSWER, CAP_SOURCES, CAP_SQL, CAP_INTERNALS, CAP_TRACE_FLOW,
         CAP_STATS, CAP_RAW_SEARCH, CAP_OPS, CAP_TOPK,
     }),
-    ROLE_EXEC: frozenset({CAP_ANSWER, CAP_SOURCES, CAP_SQL, CAP_INTERNALS, CAP_TOPK}),
-    ROLE_ANALYST: frozenset({CAP_ANSWER, CAP_SOURCES, CAP_SQL, CAP_TOPK}),
+    ROLE_EXEC: frozenset({CAP_ANSWER, CAP_SOURCES, CAP_INTERNALS, CAP_TOPK}),
+    ROLE_ANALYST: frozenset({CAP_ANSWER, CAP_SOURCES, CAP_TOPK}),
     ROLE_OPS: frozenset({CAP_ANSWER, CAP_SOURCES, CAP_TOPK}),
     ROLE_CS: frozenset({CAP_ANSWER}),
     # 未识别身份：连业务问答都不给——后端不知道你是谁，就不该吐业务数据
@@ -137,6 +138,7 @@ def describe(role: str) -> dict[str, Any]:
             "sources": CAP_SOURCES in caps,
             "sql": CAP_SQL in caps,
             "internals": CAP_INTERNALS in caps,
+            "trace_flow": CAP_TRACE_FLOW in caps,
             "stats": CAP_STATS in caps,
             "raw_search": CAP_RAW_SEARCH in caps,
             "ops": CAP_OPS in caps,
@@ -178,6 +180,21 @@ def _render_source(src: dict, caps: frozenset[str]) -> dict:
     return out
 
 
+# 「融合与精排」靠这几个汇总字段渲染：融合条数 / 各池名额 / 画像池基数。
+# 它们是 trace 的一部分，但权限级别比「各路检索式」更高（管理员专属），
+# 所以单独挑出来，而不是把整个 trace 一起裁掉——否则 exec 连「走的路径」都没了。
+_TRACE_FLOW_KEYS = ("fused_count", "limits", "profile_pool_count", "wiki_doc_dedup")
+
+
+def _render_trace(trace: dict, caps: frozenset[str]) -> dict:
+    """trace 内部再分级：L3 拿各路明细，管理员额外拿融合汇总"""
+    out = dict(trace)
+    if CAP_TRACE_FLOW not in caps:
+        for key in _TRACE_FLOW_KEYS:
+            out.pop(key, None)
+    return out
+
+
 def render(payload: dict, role: str) -> dict:
     """
     按角色裁剪一次问答的响应（**所有出口都必须过这里**）
@@ -205,7 +222,7 @@ def render(payload: dict, role: str) -> dict:
                 out[key] = payload[key]
 
     if CAP_INTERNALS in caps and payload.get("trace") is not None:
-        out["trace"] = payload["trace"]
+        out["trace"] = _render_trace(payload["trace"], caps)
 
     return out
 
