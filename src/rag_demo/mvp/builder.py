@@ -138,6 +138,9 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
             model = get_model()
 
             total_rows = 0
+            # None 表示「本次没有重建画像」，与「重建出 0 个用户」是两件事：
+            # 报告给用户的那句话不能把它们混成一句（见 app.py 里完成提示的两种写法）
+            total_profiles: int | None = None
             if inputs.csv_paths:
                 emit(kind="step_start", step="clean", total=0)
                 emit(kind="step_start", step="profile", total=0)
@@ -172,6 +175,7 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
                     on_phase=on_phase,
                 )
                 total_rows = stats["rows"]
+                total_profiles = stats["profiles"]
                 emit(kind="step_done", step="embed", total=stats["profiles"])
             else:
                 emit(kind="note", text="本次没有交易数据：跳过画像重建，保留上一批画像。")
@@ -220,7 +224,8 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
 
             result = {
                 "dataset": dataset,
-                "rows": total_rows,
+                "rows": total_rows,             # 本次入库的交易行数
+                "profiles": total_profiles,     # 画像条数；None = 本次没重建画像
                 "index_total": index_stats["total"],
                 "freshness": index_stats["fresh"]["status"],
                 "elapsed_s": round(time.time() - started, 1),

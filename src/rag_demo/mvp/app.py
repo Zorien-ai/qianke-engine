@@ -268,7 +268,13 @@ def _analyze_fields(csv_files: list[dict]) -> tuple[list[dict], list[str]]:
             + ("…" if len(unmatched) > 8 else "")
         )
 
-    missed = [f["label"] for f in fields if not f["detected"] and f["required"]]
+    # 没有 CSV 时**不能**报这条：没有任何列可选，让用户「手动指定」是一句无解的话
+    # （他会对着一个空下拉框找「用户ID」）。只传文档时必然命中这种情况——
+    # 一条假警告比没有警告更伤人（本函数开头的取舍同理）。
+    missed = (
+        [f["label"] for f in fields if not f["detected"] and f["required"]]
+        if all_columns else []
+    )
     if missed:
         warnings.append("关键字段未识别到，建议手动指定：" + "、".join(missed))
 
@@ -565,10 +571,22 @@ def _run_build(task_id: str, req: BuildRequest, csv_paths: list[str], md_paths: 
             task["status"] = "done"
             task["percent"] = 100
             task["step_index"] = len(BUILD_STEPS)
-            task["note"] = (
-                f"构建完成：画像 {result.get('rows', 0):,} 行、索引 {result.get('index_total', 0):,} 条，"
-                f"用时 {result.get('elapsed_s')}s，索引新鲜度 {result.get('freshness')}。可以开始提问了"
+            # 完成提示分开说：画像条数（多少个用户）与交易行数不是一回事，
+            # 早先写成「画像 700 行」——那其实是清洗后的交易行数，真实画像只有 616 个用户，
+            # 数字对不上会让人以为画像丢了。没上传 CSV 时更不能说「画像 0 行」：
+            # 那是「没重建」而不是「清空了」（见 builder 的 profiles=None）。
+            idx = result.get("index_total", 0)
+            tail = (
+                f"索引 {idx:,} 条，用时 {result.get('elapsed_s')}s，"
+                f"索引新鲜度 {result.get('freshness')}。可以开始提问了"
             )
+            if result.get("profiles") is None:
+                task["note"] = f"构建完成：本次只更新了文档（未重建画像，上一批画像保持不变），{tail}"
+            else:
+                task["note"] = (
+                    f"构建完成：画像 {result['profiles']:,} 个用户"
+                    f"（来自 {result.get('rows', 0):,} 行交易），{tail}"
+                )
             task["result"] = result
 
 
@@ -603,18 +621,24 @@ def build(req: BuildRequest) -> dict:
     # 必填但没映射的字段：**只警告不拦截**——MVP 明确要求「允许跳过不重要字段」，
     # 用户的判断优先于我们去替他决定。真正拦下来只会让人卡在这一步。
     # 唯一硬性的是 user_id：没有它就没有「一个用户」这个聚合单位（ingest 会自己报错）。
-    missing = [
-        spec["label"] for spec in FIELD_DEFS
-        if spec["required"] and not req.fields.get(spec["key"])
-    ]
-    if missing:
-        raise HTTPException(
-            status_code=400,
-            detail=f"「{missing[0]}」还没选对应的列。没有它就无法把订单聚合到人身上，请回到上一步选择。",
-        )
-    # 只传文档、没有交易数据：仍允许构建（文档问答本来就不需要画像），
-    # 但必须说清楚「这次构建不出画像」，否则用户会以为查不到人群是自己的问题。
-    if not csv_paths:
+    #
+    # ⚠ 这道检查只在**有 CSV** 时才做。没有 CSV 就没有任何列可选，此时要求 user_id
+    #   是一道无解的关卡：用户照做也做不到（第 2 步的下拉框是空的），
+    #   而提示还让他「回到上一步选择」。只传文档的构建本来就成立——文档问答不需要画像。
+    #   （2026-10-17 走流程时实测：只传两篇文档 → 构建被 400 拦下。）
+    if csv_paths:
+        missing = [
+            spec["label"] for spec in FIELD_DEFS
+            if spec["required"] and not req.fields.get(spec["key"])
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"「{missing[0]}」还没选对应的列。没有它就无法把订单聚合到人身上，请回到上一步选择。",
+            )
+    else:
+        # 只传文档、没有交易数据：仍允许构建（文档问答本来就不需要画像），
+        # 但必须说清楚「这次构建不出画像」，否则用户会以为查不到人群是自己的问题。
         logger.info("构建任务不含 CSV，仅文档问答")
 
     # 非阻塞试探：拿不到锁说明该数据集有别的活在干（构建，或有人正在提问——
