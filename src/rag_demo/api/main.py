@@ -1373,3 +1373,23 @@ def admin_set_user_status(user_id: int, payload: UserStatusIn) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"status": "ok", "user": _public_user(user)}
+
+
+@app.post("/admin/users/{user_id}/reject")
+def admin_reject_user(user_id: int) -> dict:
+    """
+    审核拒绝：未通过的申请不进入系统，但**保留账号记录**
+
+    不删号的原因：同一个人可能重新申请，审计也需要"谁在什么时候拒了谁"。
+    拒绝后不能登录；管理员可以再调 `/approve` 改判。
+    """
+    actor = _require_manager()
+    target = auth.find_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    _check_target_scope(actor, target)
+    try:
+        user = auth.reject(user_id, actor["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "rejected", "user": _public_user(user)}

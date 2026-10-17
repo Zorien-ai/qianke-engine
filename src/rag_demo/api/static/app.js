@@ -100,8 +100,10 @@ function renderAccount(mine) {
   } else {
     entEl.hidden = true;
   }
-  // 待审核/停用：把原因直接说在提问框上方，而不是让他点一次才发现没反应
-  if (acct.status && acct.status !== "active") {
+  // 待审核/拒绝/停用：把原因直接说在提问框上方，而不是让他点一次才发现没反应
+  if (acct.status === "rejected") {
+    el("ask-hint").textContent = "注册申请未通过审核，请联系管理员";
+  } else if (acct.status && acct.status !== "active") {
     el("ask-hint").textContent = `账号${acct.status_label || "待审核"}：通过后即可使用`;
   }
 }
@@ -154,9 +156,11 @@ function applyCapabilities() {
   el("ask-btn").disabled = !CAPS.ask;
   el("ask-hint").textContent = CAPS.ask
     ? "按 Ctrl / Cmd + Enter 快速提交"
-    : ACCOUNT && ACCOUNT.status && ACCOUNT.status !== "active"
-      ? `账号${ACCOUNT.status_label || "待审核"}：通过后即可使用`
-      : "当前账号无权提问";
+    : ACCOUNT && ACCOUNT.status === "rejected"
+      ? "注册申请未通过审核，请联系管理员"
+      : ACCOUNT && ACCOUNT.status && ACCOUNT.status !== "active"
+        ? `账号${ACCOUNT.status_label || "待审核"}：通过后即可使用`
+        : "当前账号无权提问";
 }
 
 /* ---------- 数据概况 ---------- */
@@ -815,8 +819,14 @@ function renderAccounts() {
         .map((u) => {
           const ent = u.enterprise_id ? entMap[u.enterprise_id] : null;
           const pending = u.status === "pending";
-          const statusCls =
-            pending ? "is-warn" : u.status === "disabled" ? "is-danger" : "";
+          const rejected = u.status === "rejected";
+          // 待审核 / 已拒绝都没拿到角色，操作区都要给「通过」；只有 pending 才需要「拒绝」
+          const waiting = pending || rejected;
+          const statusCls = pending
+            ? "is-warn"
+            : rejected || u.status === "disabled"
+              ? "is-danger"
+              : "";
           return `<div class="account-row">
             <div class="acc-main">
               <span class="acc-name">${escapeHtml(u.display_name || u.username)}</span>
@@ -827,14 +837,16 @@ function renderAccounts() {
             </div>
             <div class="acc-actions">
               ${
-                pending
+                waiting
                   ? u.account_type === "enterprise"
                     ? isSys
                       ? `<span class="pu-meta">企业账号</span>
-                         <button type="button" class="perm-btn is-primary" data-approve="${u.id}">通过</button>`
+                         <button type="button" class="perm-btn is-primary" data-approve="${u.id}">${rejected ? "改判通过" : "通过"}</button>
+                         ${pending ? `<button type="button" class="perm-btn is-danger" data-reject="${u.id}">拒绝</button>` : ""}`
                       : `<span class="pu-meta">企业账号 · 待系统管理员审核</span>`
                     : `<select data-approve-role="${u.id}">${roleOptions("cs")}</select>
-                       <button type="button" class="perm-btn is-primary" data-approve="${u.id}">通过</button>`
+                       <button type="button" class="perm-btn is-primary" data-approve="${u.id}">${rejected ? "改判通过" : "通过"}</button>
+                       ${pending ? `<button type="button" class="perm-btn is-danger" data-reject="${u.id}">拒绝</button>` : ""}`
                   : u.is_system_admin
                     ? `<span class="pu-meta">系统管理员</span>`
                     : u.is_enterprise_admin
@@ -842,7 +854,7 @@ function renderAccounts() {
                       : `<select data-role="${u.id}">${roleOptions(u.role)}</select>`
               }
               ${
-                u.is_system_admin || (u.account_type === "enterprise" && !isSys)
+                u.is_system_admin || waiting || (u.account_type === "enterprise" && !isSys)
                   ? ""
                   : u.status === "disabled"
                     ? `<button type="button" class="perm-btn" data-enable="${u.id}">启用</button>`
@@ -890,6 +902,19 @@ async function changeAccountRole(id, role) {
     el("accounts-status").textContent = "角色已更新，下一个请求即按新等级判定";
   } catch (e) {
     el("accounts-status").textContent = `改角色失败：${e.message}`;
+  }
+}
+
+async function rejectAccount(id) {
+  el("accounts-status").textContent = "处理中…";
+  try {
+    const res = await apiFetch(`/admin/users/${id}/reject`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    await loadWhoami();
+    el("accounts-status").textContent = "已拒绝该申请（账号保留，可改判通过）";
+  } catch (e) {
+    el("accounts-status").textContent = `拒绝失败：${e.message}`;
   }
 }
 
@@ -1127,6 +1152,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       const sel = document.querySelector(`select[data-approve-role="${id}"]`);
       approveAccount(id, sel ? sel.value : "cs");
       return;
+    }
+    const reject = e.target.closest("button[data-reject]");
+    if (reject) {
+      const ok = window.confirm("确认拒绝该注册申请？账号将无法登录（之后可以改判通过）。");
+      if (!ok) return undefined;
+      return rejectAccount(reject.dataset.reject);
     }
     const disable = e.target.closest("button[data-disable]");
     if (disable) return setAccountStatus(disable.dataset.disable, "disabled");

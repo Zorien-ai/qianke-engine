@@ -149,6 +149,11 @@ uv run uvicorn m1_mock.app:app --port 8001 --app-dir prototype
 注册后一律 `pending`：**能登录**，但等级为 L0、看不到任何业务数据。
 拦在登录这一步只会让人以为"密码记错了"；让他进去看到「等待审核」才是准确的反馈。
 
+审核有两个出口：`active`（通过，同时分配角色）和 `rejected`（拒绝）。
+拒绝**不删号**——同一个手机号/邮箱往往还要重新申请，审计也需要「谁在什么时候拒了谁」；
+被拒账号不能登录，管理员可以再「改判通过」。`/status` 只做停用/启用，
+**不能把 `pending`/`rejected` 直接改成 `active`**，否则一次「启用」就绕过了审核和角色分配。
+
 ### 数据隔离：按企业分库
 
 - 一家企业一个库：`vec_db_ent_<企业ID>`，数据集名 `ent_<企业ID>`；
@@ -204,9 +209,10 @@ uv run uvicorn m1_mock.app:app --port 8001 --app-dir prototype
 | POST | `/auth/login` | 登录：`account`（手机号 / 邮箱 / 用户名）+ `password` + `remember` |
 | POST | `/auth/logout` | 删除服务端会话 + 清 Cookie |
 | GET | `/admin/users` | 账号列表（系统管理员看全部，企业管理员看本企业） |
-| POST | `/admin/users/{id}/approve` | 审核通过 + 分配角色（企业账号在此建企业库） |
+| POST | `/admin/users/{id}/approve` | 审核通过 + 分配角色（企业账号在此建企业库）；可改判已拒绝的申请 |
+| POST | `/admin/users/{id}/reject` | 审核拒绝（保留账号记录，不能登录） |
 | POST | `/admin/users/{id}/role` | 改角色 |
-| POST | `/admin/users/{id}/status` | 停用 / 启用 |
+| POST | `/admin/users/{id}/status` | 停用 / 启用（待审核、已拒绝的账号不能直接启用） |
 
 > ⚠️ 仍是 Demo 级鉴权：密码是 PBKDF2-SHA256（20 万次迭代），但 Cookie 走 HTTP、
 > 没有 CSRF Token、没有找回密码/改密码。生产环境需要 HTTPS + CSRF + 邮件/短信验证。

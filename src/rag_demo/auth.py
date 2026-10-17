@@ -35,7 +35,8 @@
 
 审核与状态
 ----------
-`status`：`pending`（待审核，能登录但没有任何能力）/ `active` / `disabled`。
+`status`：`pending`（待审核，能登录但没有任何能力）/ `active` / `disabled` /
+`rejected`（审核拒绝：保留记录、不能登录，可改判为通过）。
 待审核的人**能登录**是有意的：登录后能看到「等待审核」，比「密码对了却登不进」
 少一类"我密码是不是错了"的误判。没有能力由 permissions 的 L0 保证。
 """
@@ -76,11 +77,16 @@ ACCOUNT_TYPE_LABELS = {
 STATUS_PENDING = "pending"
 STATUS_ACTIVE = "active"
 STATUS_DISABLED = "disabled"
+STATUS_REJECTED = "rejected"
 STATUS_LABELS = {
     STATUS_PENDING: "待审核",
     STATUS_ACTIVE: "正常",
     STATUS_DISABLED: "已停用",
+    STATUS_REJECTED: "已拒绝",
 }
+# 能登录的状态：待审核也放进来（登录后展示「等待审核」），其余一律不认。
+# 拒绝 = 申请不通过但保留记录，不能登录；误拒可以由管理员改判为通过。
+LOGIN_STATUSES = (STATUS_ACTIVE, STATUS_PENDING)
 
 # PBKDF2 参数：20 万次在单机上约 60~100ms，登录频率下完全可接受。
 # 迭代次数写进哈希串里，将来调高不用迁移旧密码（按存的那份校验）。
@@ -455,6 +461,9 @@ def authenticate(account: str, password: str) -> dict[str, Any]:
         raise ValueError("账号或密码不正确")
     if user["status"] == STATUS_DISABLED:
         raise ValueError("该账号已停用，请联系管理员")
+    if user["status"] == STATUS_REJECTED:
+        # 和「停用」分开说：拒绝是申请没通过，不是账号被停；用户要知道下一步该做什么
+        raise ValueError("注册申请未通过审核，请联系管理员")
     with _LOCK:
         conn = _db()
         conn.execute("UPDATE app_user SET last_login_at = ? WHERE id = ?", (_now(), user["id"]))
@@ -541,9 +550,39 @@ def set_role(user_id: int, role: str, actor: str) -> dict[str, Any]:
     return find_user_by_id(user_id)  # type: ignore[return-value]
 
 
+def reject(user_id: int, actor: str) -> dict[str, Any]:
+    """
+    审核拒绝：**保留记录**、不能登录，而不是删号
+
+    为什么不删：同一手机号/邮箱往往还要重新申请，删掉就丢了「被拒过」这个事实，
+    审计也查不到谁在什么时候拒了谁。误拒可以由管理员再走一次「审核通过」改判。
+    """
+    user = find_user_by_id(user_id)
+    if user is None:
+        raise ValueError("账号不存在")
+    if user["status"] == STATUS_ACTIVE:
+        raise ValueError("已审核通过的账号请使用停用 / 启用")
+    with _LOCK:
+        conn = _db()
+        conn.execute(
+            "UPDATE app_user SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ?",
+            (STATUS_REJECTED, _now(), actor, int(user_id)),
+        )
+        conn.commit()
+    logger.info("账号审核拒绝: %s by %s", user["username"], actor)
+    return find_user_by_id(user_id)  # type: ignore[return-value]
+
+
 def set_status(user_id: int, status: str, actor: str) -> dict[str, Any]:
     if status not in (STATUS_ACTIVE, STATUS_DISABLED):
         raise ValueError("状态只能是 active / disabled")
+    user = find_user_by_id(user_id)
+    if user is None:
+        raise ValueError("账号不存在")
+    if status == STATUS_ACTIVE and user["status"] in (STATUS_PENDING, STATUS_REJECTED):
+        # 待审核 / 已拒绝的账号必须先走「审核通过」拿到角色，
+        # 否则一次「启用」就能绕过审核，拿个 cs 直接进系统。
+        raise ValueError("该账号尚未审核，请使用「审核通过」")
     with _LOCK:
         conn = _db()
         conn.execute(
@@ -666,7 +705,7 @@ def resolve_session(token: str | None) -> dict[str, Any] | None:
         if row is None:
             return None
         user = _row_to_user(row)
-        if user is None or user["status"] == STATUS_DISABLED:
+        if user is None or user["status"] not in LOGIN_STATUSES:
             return None
         ent = None
         if user.get("enterprise_id"):
