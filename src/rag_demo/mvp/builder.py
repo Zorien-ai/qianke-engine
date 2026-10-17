@@ -141,6 +141,8 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
             # None 表示「本次没有重建画像」，与「重建出 0 个用户」是两件事：
             # 报告给用户的那句话不能把它们混成一句（见 app.py 里完成提示的两种写法）
             total_profiles: int | None = None
+            # 会员等级这一列的来源：user / derived / none（见 ingest_data.build_profiles）
+            level_source: str | None = None
             if inputs.csv_paths:
                 emit(kind="step_start", step="clean", total=0)
                 emit(kind="step_start", step="profile", total=0)
@@ -176,6 +178,7 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
                 )
                 total_rows = stats["rows"]
                 total_profiles = stats["profiles"]
+                level_source = stats.get("member_level_source")
                 emit(kind="step_done", step="embed", total=stats["profiles"])
             else:
                 emit(kind="note", text="本次没有交易数据：跳过画像重建，保留上一批画像。")
@@ -226,6 +229,7 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
                 "dataset": dataset,
                 "rows": total_rows,             # 本次入库的交易行数
                 "profiles": total_profiles,     # 画像条数；None = 本次没重建画像
+                "member_level_source": level_source,
                 "index_total": index_stats["total"],
                 "freshness": index_stats["fresh"]["status"],
                 "elapsed_s": round(time.time() - started, 1),

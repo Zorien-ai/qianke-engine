@@ -258,6 +258,32 @@ function goAnalyze() {
   showStep(2);
 }
 
+/* 会员等级的来源，必须当场说清（M2 第 5 块）
+ *
+ * 三种情况说三句不同的话，因为它们对用户的意义完全不同：
+ *   映射了等级列   → 用他的口径，系统不再推导（「把口径交给业务」）
+ *   没映射但有金额 → 按本批客单价的分位推导，等级名只代表**相对位置**，小店会失真
+ *   连金额都没有   → 不产出这一列（上传时的警告已经说过，这里不重复）
+ * 跟着下拉框实时变：它取决于用户此刻的选择，不是上传那一刻的状态。
+ */
+function renderLevelNote() {
+  const box = el("level-note");
+  const pick = (key) => document.querySelector(`.f-select[data-key="${key}"]`);
+  const levelSel = pick("member_level");
+  const amountSel = pick("amount");
+  if (!levelSel) { clearMsg(box); return; }
+
+  if (levelSel.value) {
+    showMsg(box, `已使用你的会员等级规则（取自「${levelSel.value}」列），系统不再自动推导。`,
+      "is-info");
+  } else if (amountSel && amountSel.value) {
+    showMsg(box, "没有映射会员等级列：将按消费金额自动推导（相对分位，等级名只代表相对位置）。"
+      + "建议把「会员等级」映射到你自己的那一列——你店里的口径比推导准。", "is-warn");
+  } else {
+    clearMsg(box);
+  }
+}
+
 function renderAnalysis(data) {
   const s = data.summary;
   el("analyze-summary").innerHTML = `
@@ -285,6 +311,8 @@ function renderAnalysis(data) {
           ${f.detected ? "已自动识别" : "请手动选择"}
         </div>
       </div>`).join("");
+
+  renderLevelNote();
 
   if (!data.docs.length) {
     el("doc-table").innerHTML = '<div class="doc-row">没有上传规则文档，只能做数据类查询。</div>';
@@ -671,6 +699,9 @@ function bindEvents() {
   el("btn-to-step2").addEventListener("click", goAnalyze);
   el("btn-back-1").addEventListener("click", () => showStep(1));
   el("btn-build").addEventListener("click", () => { showStep(3); });
+  // 等级提示要看下拉框的**当前**选择，所以在容器上代理（表格会被整块重绘，
+  // 绑到 select 上会在下次渲染时丢）
+  el("field-table").addEventListener("change", renderLevelNote);
   el("btn-back-2").addEventListener("click", () => showStep(2));
   el("btn-start-build").addEventListener("click", startBuild);
   el("btn-retry").addEventListener("click", retryBuild);

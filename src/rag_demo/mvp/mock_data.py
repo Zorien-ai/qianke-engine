@@ -83,6 +83,16 @@ FIELD_DEFS: list[dict] = [
         "synonyms": ["age", "年龄", "用户年龄", "年龄段"],
     },
     {
+        "key": "member_level",
+        "label": "会员等级",
+        "required": False,
+        "hint": "你自己的等级口径（黑卡 / 金卡 / VIP3…）：映射了就直接用你的，不映射才按消费金额推导",
+        "synonyms": [
+            "member_level", "member_grade", "level", "vip_level", "grade", "tier",
+            "会员等级", "客户等级", "会员级别", "会员星级", "VIP等级", "等级",
+        ],
+    },
+    {
         "key": "category",
         "label": "商品类目",
         "required": False,

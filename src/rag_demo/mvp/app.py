@@ -278,12 +278,15 @@ def _analyze_fields(csv_files: list[dict]) -> tuple[list[dict], list[str]]:
     if missed:
         warnings.append("关键字段未识别到，建议手动指定：" + "、".join(missed))
 
-    # 会员等级是靠金额推导出来的，没有金额这一列它就不生效（不是「全是普通」，
-    # 是整列留空）。这件事得在选字段之前说，否则用户会以为等级是系统自带的。
-    if all_columns and not any(f["key"] == "amount" and f["detected"] for f in fields):
+    # 金额列决定两件事：消费类结论、以及**没有等级列时**的等级推导。
+    # 有等级列就要说清「等级不受影响」，别让人以为还得再映射点什么。
+    has_amount_col = any(f["key"] == "amount" and f["detected"] for f in fields)
+    has_level_col = any(f["key"] == "member_level" and f["detected"] for f in fields)
+    if all_columns and not has_amount_col:
         warnings.append(
-            "没有识别到「订单金额」：本次不会生成会员等级"
-            "（等级按本批用户的人均客单价分档，不给金额就没法分）。"
+            "没有识别到「订单金额」：客单价、消费类结论会缺失"
+            + ("（会员等级用你自己的那一列，不受影响）。" if has_level_col
+               else "；本次也不会生成会员等级（没有等级列时，等级要靠金额分档）。")
         )
 
     return fields, warnings

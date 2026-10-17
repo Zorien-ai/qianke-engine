@@ -211,6 +211,24 @@ def build_member_level(
     return "普通"
 
 
+def _clean_level(value: Any) -> str | None:
+    """
+    用户自己给的等级值：去空白、限长
+
+    限长不是洁癖：member_level 列是 VARCHAR(20)，用户列里偶尔混进备注或整段文字，
+    超长会让 INSERT 在 **TRUNCATE 之后**才炸——那时表已经被清空了，代价太大。
+    """
+    if not _present(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) > 20:
+        logger.warning("会员等级值超长（%d 字），已截断：%r", len(text), text[:30])
+        return text[:20]
+    return text
+
+
 def ensure_schema(cur: Any) -> None:
     """幂等补充结构化字段与聚合索引"""
     cur.execute(ALTER_SQL)
@@ -246,7 +264,10 @@ def build_profile_text(row: pd.Series) -> str:
     if _present(row.get("city")):
         demo_parts.append(f"{row['city']}人")
     if _present(row.get("member_level")):
-        demo_parts.append(f"{row['member_level']}会员")
+        # 等级名可能是用户自己给的（M2 第 5 块），本来就带「会员」二字时要防空拼：
+        # 「普通会员」不该变成「普通会员会员」。演示数据的钻石/黄金不受影响。
+        level = str(row["member_level"]).strip()
+        demo_parts.append(level if level.endswith("会员") else f"{level}会员")
     demo = "，".join(demo_parts) + "。" if demo_parts else ""
 
     # 消费段：累计订单N笔，总消费X元，平均客单价Y元，偏好品类为Z。
@@ -388,6 +409,8 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
     has_time = "purchase_time" in cols
     has_amount = "amount" in cols
     has_category = "category" in cols
+    # 用户映射了「会员等级」列 = 他愿意用自己的等级口径（M2 第 5 块）
+    has_level = "member_level" in cols
 
     snapshot_date = None
     if has_time:
@@ -399,13 +422,30 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
             logger.warning("下单时间列里没有可用时间值，将跳过「最近购买」相关聚合")
 
     if not has_amount:
-        logger.warning("未指定「订单金额」字段：画像里不会有消费金额与会员等级")
+        # 有等级列时别说「没有会员等级」——那种情况等级照常有，缺的只是消费类结论
+        logger.warning(
+            "未指定「订单金额」字段：画像里不会有消费金额%s",
+            "" if has_level else "与推导的会员等级",
+        )
     if not has_category:
         logger.warning("未指定「商品类目」字段：画像里不会有偏好品类")
 
     def first(g: pd.DataFrame, col: str) -> Any:
         """取分组首行的某列；该列整体没被指定时返回 None"""
         return g[col].iloc[0] if col in cols else None
+
+    def pick_level(g: pd.DataFrame) -> str | None:
+        """
+        取这一组（同一用户的多笔订单）里出现最多的等级值
+
+        为什么取众数而不是首行：同一用户的明细可能跨等级（升级当天的订单还是旧等级），
+        众数是「他大部分时间处在哪一档」，比随便取第一行稳。
+        """
+        if not has_level:
+            return None
+        vals = g["member_level"].dropna().astype(str).str.strip()
+        vals = vals[vals != ""]
+        return None if vals.empty else str(vals.mode().iloc[0])
 
     def agg_user(g: pd.DataFrame) -> pd.Series:
         last_buy = g["purchase_time"].max() if has_time else None
@@ -414,6 +454,8 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
             "gender": first(g, "gender"),
             "age": _to_int(first(g, "age")),
             "city": first(g, "city"),
+            # 用户自己的等级原值；没映射这一列时是 None（键仍然产出，见函数开头说明）
+            "member_level_raw": pick_level(g),
             "order_count": int(len(g)),
             "total_amount": _to_float(g["amount"].sum()) if has_amount else None,
             "avg_amount": _to_float(g["amount"].mean()) if has_amount else None,
@@ -437,23 +479,46 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
               .apply(agg_user, include_groups=False)
               .reset_index()
     )
-    thresholds = calibrate_member_levels(profiles["avg_amount"])
-    if thresholds is None:
-        # 说清「为什么这一列是空的」：要么没金额列，要么人太少。
-        # 用户看到的画像里不会有等级片段，日志里必须有据可查。
-        logger.info(
-            "会员等级本次不生效（需要金额列，且至少 %d 个用户；本批 %d 个用户）",
-            MEMBER_LEVEL_MIN_USERS, len(profiles),
-        )
+    # ---------- 会员等级：用户自己的口径优先，没有才推导 ----------
+    # 「把口径交给业务」：他店里的「黑卡」就是黑卡，系统不去猜一个相对位置。
+    # 只有**没给等级列**时才回退到按本批分位数推导（那是上一块的做法）。
+    if has_level:
+        level_source = "user"
+        given = profiles["member_level_raw"].map(_clean_level)
+        profiles["member_level"] = given
+        filled = int(given.notna().sum())
+        logger.info("会员等级：使用用户自己那一列（%d/%d 个用户有值）", filled, len(profiles))
+        if filled < len(profiles):
+            # 缺值**不拿推导值去补**：一列里混两套等级名（黑卡 / 钻石）比留几个空更糟，
+            # 检索和统计都没法解释「为什么他身上有两个名字」。
+            logger.warning(
+                "会员等级：%d 个用户在自己那列里没有值，这些用户不产出等级"
+                "（不与推导值混用）",
+                len(profiles) - filled,
+            )
     else:
-        logger.info(
-            "会员等级分档阈值（按本批 %d 个用户的人均客单价标定）：%s",
-            len(profiles),
-            "；".join(f"{name} ≥ {value:.2f}" for name, value in thresholds),
+        thresholds = calibrate_member_levels(profiles["avg_amount"])
+        if thresholds is None:
+            # 说清「为什么这一列是空的」：要么没金额列，要么人太少。
+            # 用户看到的画像里不会有等级片段，日志里必须有据可查。
+            level_source = "none"
+            logger.info(
+                "会员等级本次不生效（没有等级列，需要金额列且至少 %d 个用户；本批 %d 个用户）",
+                MEMBER_LEVEL_MIN_USERS, len(profiles),
+            )
+        else:
+            level_source = "derived"
+            logger.info(
+                "会员等级分档阈值（未映射等级列，按本批 %d 个用户的人均客单价标定）：%s",
+                len(profiles),
+                "；".join(f"{name} ≥ {value:.2f}" for name, value in thresholds),
+            )
+        profiles["member_level"] = profiles["avg_amount"].apply(
+            lambda v: build_member_level(v, thresholds)
         )
-    profiles["member_level"] = profiles["avg_amount"].apply(
-        lambda v: build_member_level(v, thresholds)
-    )
+    # 用 attrs 带出「这一列是怎么来的」，不改函数签名（build_profiles 有别的调用方，
+    # 返回元组会把它们全弄坏）。调用方按需取，取不到就当 unknown。
+    profiles.attrs["member_level_source"] = level_source
     profiles["profile_text"] = profiles.apply(build_profile_text, axis=1)
 
     logger.info("共得到 %d 个用户画像", len(profiles))
@@ -590,7 +655,12 @@ def ingest_transactions(
         on_phase("split_done", {"documents": len(documents)})
     count = write_to_db(documents, model, progress)
     logger.info("成功导入 %d 条用户画像（含结构化字段）", count)
-    return {"rows": len(df_all), "profiles": count}
+    return {
+        "rows": len(df_all),
+        "profiles": count,
+        # 这一列是怎么来的：user（用户自己的等级列）/ derived（按本批分位推导）/ none
+        "member_level_source": profiles.attrs.get("member_level_source", "unknown"),
+    }
 
 
 def verify(cur: Any) -> None:
