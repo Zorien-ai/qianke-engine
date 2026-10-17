@@ -61,16 +61,19 @@ $env:DEEPSEEK_API_KEY="sk-你的key"
 uv run uvicorn rag_demo.api.main:app --reload --port 8000
 ```
 
-访问 <http://127.0.0.1:8000>（旧版问答页） / <http://127.0.0.1:8000/v2/>（新版工作台）
+访问 <http://127.0.0.1:8000>（**302 进新版工作台 `/v2/`**，主入口只有这一套界面）
 / <http://127.0.0.1:8000/v2/#/setup>（新版四步向导） / `/docs`（API 文档）
 
 > **M3 起需要登录**：首次启动会创建系统管理员 `admin` / `admin123`
 > （用 `RAG_ADMIN_USER` / `RAG_ADMIN_PASSWORD` 覆盖；正式使用前请改掉）。
 > 未登录访问首页会跳 `/login`。账号体系见下文「登录、账号与企业隔离」。
 >
+> **主入口已统一到 Vue 新版**：`/` 直接 302 到 `/v2/`，登录页之后的跳转都在 Vue 路由内，
+> 不再出现「旧界面 → 新版」的割裂感；旧单页只在 `web/dist` 缺失（本地没构建）时兜底。
+>
 > 四步向导（上传 → 确认 → 构建 → 查询）页面已迁到 Vue 3 的 **`/v2/#/setup`**
 > （M3 收口时从 `mvp/static` 的原生页重写，视觉与 /v2 其余页面统一）；
-> 老入口 `/wizard` 现在 302 到新版，老书签/旧侧边栏入口继续可用。
+> 老入口 `/wizard` 现在 302 到新版，老书签继续可用。
 > 接口仍是 `/api/wizard/*`，实现见 `src/rag_demo/mvp/app.py`，
 > 接入方式见 `src/rag_demo/api/wizard.py`。
 >

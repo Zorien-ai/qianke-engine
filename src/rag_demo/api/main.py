@@ -512,9 +512,18 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", include_in_schema=False)
 def index() -> Response:
-    """交互页面（未登录跳登录页；登录态关闭时直接放行）"""
-    if _auth_enforced() and auth.current_account() is None:
-        return RedirectResponse("/login", status_code=302)
+    """主入口：M3 收口后统一进 Vue 新版（`/v2/`），旧单页只作兜底
+
+    为什么直接 302 到 `/v2/`：新旧两套界面并存时，从旧首页点「数据导入/新版界面」
+    会突然换皮肤，体验是割裂的；主入口直接落到新版后，登录页之后的每一跳都在
+    Vue 路由内，只有确实没有构建产物时才退回旧单页。
+
+    - `web/dist` 存在（正常部署）→ 302 `/v2/`；未登录由 Vue 路由守卫跳 `/login`，
+      服务端不再重复判断一次登录态（两套口径容易不一致）。
+    - `web/dist` 缺失（本地没 `npm run build`）→ 仍返回旧单页——总比 404 好。
+    """
+    if os.path.isdir(WEB_DIST):
+        return RedirectResponse("/v2/", status_code=302)
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 

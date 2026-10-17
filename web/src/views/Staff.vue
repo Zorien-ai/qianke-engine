@@ -310,7 +310,7 @@ function entStatusBadge(ent) {
         <div class="empty-desc">{{ loadError }}</div>
         <div class="row-actions">
           <button type="button" class="btn btn-primary" @click="loadUsers">重试</button>
-          <a class="btn btn-ghost" href="/">回工作台</a>
+          <RouterLink class="btn btn-ghost" to="/">回工作台</RouterLink>
         </div>
       </div>
     </div>

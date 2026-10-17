@@ -214,7 +214,7 @@ function stepIcon(status) {
           </p>
         </div>
         <div class="row-actions">
-          <a class="btn btn-ghost" href="/wizard">去数据导入</a>
+          <RouterLink class="btn btn-ghost" to="/setup">去数据导入</RouterLink>
           <button type="button" class="btn btn-ghost" @click="load">刷新</button>
         </div>
       </div>
@@ -232,7 +232,7 @@ function stepIcon(status) {
           <div class="empty-desc">
             上传 CSV / Markdown 并完成一次构建后，这里会显示文档数、切片数、画像数、索引新鲜度与文档矩阵。
           </div>
-          <a class="btn btn-primary" href="/wizard">去数据导入向导</a>
+          <RouterLink class="btn btn-primary" to="/setup">去数据导入向导</RouterLink>
         </div>
       </div>
 
@@ -296,7 +296,7 @@ function stepIcon(status) {
           <div v-else class="empty-state" style="padding: 28px 10px">
             <div class="empty-desc">
               已构建但还没有文档。可以去
-              <a href="/wizard">数据导入向导</a>
+              <RouterLink to="/setup">数据导入向导</RouterLink>
               上传 Markdown 文档后重建。
             </div>
           </div>

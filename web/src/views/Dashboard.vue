@@ -107,7 +107,7 @@ const quickLinks = computed(() => {
       title: "数据导入",
       desc: "上传 CSV / 文档并构建索引",
       icon: "📥",
-      href: "/wizard",
+      to: "/setup",
     });
   }
   if (isManager()) {
@@ -197,7 +197,7 @@ onMounted(async () => {
         </div>
         <div class="row-actions">
           <RouterLink v-if="hasCap('ask')" to="/chat" class="btn btn-primary">开始提问</RouterLink>
-          <a v-if="isManager()" href="/wizard" class="btn btn-ghost">数据导入</a>
+          <RouterLink v-if="isManager()" to="/setup" class="btn btn-ghost">数据导入</RouterLink>
         </div>
       </div>
       <p v-if="quickCapHint" class="alert is-warn" style="margin-top: 16px">
@@ -289,7 +289,7 @@ onMounted(async () => {
 
           <div v-if="!overview.ready" class="alert is-warn" style="margin-top: 14px">
             数据空间还没构建。去
-            <a href="/wizard">数据导入向导</a>
+            <RouterLink to="/setup">数据导入向导</RouterLink>
             上传数据并完成构建后，这里才会有内容。
           </div>
         </template>
@@ -318,7 +318,7 @@ onMounted(async () => {
           <div class="empty-title">数据概况不可见</div>
           <div class="empty-desc">
             该区域展示会员等级分布，属于「数据概况」能力（默认仅 L4 可见）。
-            <a href="/settings" v-if="hasCap('ops')">去权限配置</a>
+            <RouterLink to="/settings" v-if="hasCap('ops')">去权限配置</RouterLink>
           </div>
         </div>
       </section>
