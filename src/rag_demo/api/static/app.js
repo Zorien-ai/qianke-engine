@@ -155,12 +155,19 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;");
 }
 
+/* 答案正文统一走 markdown（见 /static/markdown.js）。
+ *
+ * 改前这里是「转义 + 只包一层 [来源N]」：模型输出 `**北京 722 人**`、`- 列表`、
+ * 表格、代码块，全部原样显示成一堆星号和竖线。
+ *
+ * [来源N] 的处理保持原语义：
+ *   有来源列表 -> 可点击的小标签；看不到来源的身份 -> 直接去掉（指向看不见的东西更糟）。
+ * 流式路径必须在这里处理——服务端按 delta 分片做正则会被切片边界漏掉。
+ */
 function formatAnswer(text) {
-  let html = escapeHtml(text);
-  // 看不到来源列表的身份：[来源N] 指向一个用户看不见的东西，留着比去掉更糟。
-  // 流式路径必须在这里处理——服务端按 delta 分片正则匹配会被切片边界漏掉。
-  if (!CAPS.sources) html = html.replace(/\[来源\s*\d+\]/g, "");
-  return html.replace(/\[来源\s*(\d+)\]/g, '<span class="cite">[来源$1]</span>');
+  return window.renderMarkdown(text, {
+    cite: (n) => (CAPS.sources ? `<span class="cite">[来源${n}]</span>` : null),
+  });
 }
 
 /* ---------- 思维链（仅开启深度思考时出现） ---------- */
@@ -180,6 +187,10 @@ async function ask(question) {
   const btnText = btn.querySelector(".btn-text");
 
   el("result-panel").hidden = true;
+  // 溯源面板是独立 section，不跟着 result-panel 一起隐藏：
+  // 新一轮提问必须立刻把它收掉，否则请求失败/中途无 delta 时，
+  // 屏幕上会一直挂着上一题的来源（看起来就是「溯源不刷新」）。
+  el("detail-panel").hidden = true;
   el("error-panel").hidden = true;
   resetReasoning();
   btn.disabled = true;
@@ -214,6 +225,16 @@ async function ask(question) {
     let buffer = "";
     let answer = "";
     let route = "rag";
+    /* 流式重渲染节流：每来一个 delta 就整段重解析 markdown 没必要，
+     * 80ms 一次足够跟手，也避免长答案把主线程压住（表格/代码块重建更贵）。 */
+    let renderTimer = null;
+    const scheduleRender = () => {
+      if (renderTimer) return;
+      renderTimer = setTimeout(() => {
+        renderTimer = null;
+        el("answer-body").innerHTML = formatAnswer(answer);
+      }, 80);
+    };
     let sources = [];
     let sqlText = "";
     let rowsCount = null;
@@ -263,7 +284,7 @@ async function ask(question) {
           if (!resultShown) {
             renderStreamShell({
               route, sources, sqlText, rowsCount,
-              sqlRows, sqlError, trace, cached,
+              sqlRows, sqlError, trace, cached, question,
             });
             resultShown = true;
           }
@@ -283,7 +304,7 @@ async function ask(question) {
             // 首个片段到达——此刻才让结果区出现，避免空白面板闪一下
             renderStreamShell({
               route, sources, sqlText, rowsCount,
-              sqlRows, sqlError, trace, cached,
+              sqlRows, sqlError, trace, cached, question,
             });
             resultShown = true;
           }
@@ -294,7 +315,7 @@ async function ask(question) {
             if (reasoning && el("reasoning-box").open) el("reasoning-box").open = false;
           }
           answer += data.delta;
-          el("answer-body").innerHTML = formatAnswer(answer);
+          scheduleRender();
         } else if (event === "error") {
           // 把错误类型带到外层 catch，由它统一决定显示什么文案
           // （LLM 故障用人话，其他错误照实但截断）
@@ -306,6 +327,10 @@ async function ask(question) {
     }
 
     if (resultShown) {
+      // 收尾：把节流里还没落地的一段立刻渲染出来，再画图表
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      el("answer-body").innerHTML = formatAnswer(answer);
+      window.hydrateMermaid(el("answer-body"));
       finishStreamShell((performance.now() - t0) / 1000,
                         firstCharAt ? (firstCharAt - t0) / 1000 : null);
     } else {
@@ -327,7 +352,7 @@ async function ask(question) {
 }
 
 /* 流式结果区：回答区只放正文，过程信息统一交给下一个面板 */
-function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlError, trace, cached }) {
+function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlError, trace, cached, question }) {
   const badges = [
     `<span class="badge ${route}">${String(route).toUpperCase()}</span>`,
     `<span class="badge time" id="elapsed-badge">生成中…</span>`,
@@ -339,39 +364,57 @@ function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlErr
   // 思维链与回答同一个生命周期：新一轮提问不该看到上一轮的推理
   resetReasoning();
 
-  renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace });
+  renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, question });
 
   el("result-panel").hidden = false;
   el("result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /* ---------- 数据来源与检索过程（独立面板） ---------- */
-function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace }) {
+function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, question }) {
   const panel = el("detail-panel");
 
   // 闲聊：没有来源、没有 SQL、没有留痕，这个过程区没有意义
   if (!sources.length && !sqlText && !trace) {
     panel.hidden = true;
+    // 只 hidden 不清内容的话，下一次面板重新出现时若某个子块没被重写，
+    // 旧 DOM 会留在那儿——表现就是「溯源不刷新」。
+    el("detail-question").textContent = "";
+    el("trace-plan").innerHTML = "";
+    el("trace-variants").innerHTML = "";
+    el("trace-flow").innerHTML = "";
+    el("detail-sources").innerHTML = "";
+    el("trace-sql-rows").innerHTML = "";
     return;
   }
   panel.hidden = false;
   el("detail-body").hidden = false;
   el("detail-fold").textContent = "收起";
 
+  // trace 为空有两种完全不同的原因，不能都写成「缓存」：
+  //   · 当前身份没有 internals 权限 -> trace 被 permissions.render 整键裁掉
+  //   · 真的命中缓存 -> 缓存里没有过程数据
+  // 混着写的话，用户会以为「换了身份还在用旧缓存」（2026-10-17 实测反馈）。
+  const canInternals = !!CAPS.internals;
+  const hasTrace = !!trace;
+
   // 1) 原问题
-  el("detail-question").textContent = (trace && trace.question) || "（缓存结果，未留痕）";
+  el("detail-question").textContent =
+    (trace && trace.question) || question || "（本次请求未留痕）";
 
   // 2) 走的路径 + 改写的路径
   const variants = (trace && trace.variants) || [];
   const chips = [`<span class="tp-chip">检索路 <b>${variants.length}</b> 条</span>`];
-  if (trace) {
+  if (hasTrace) {
     chips.push(
       trace.need_sql
         ? `<span class="tp-chip is-sql">LLM 判定：需要 SQL</span>`
         : `<span class="tp-chip">LLM 判定：不需要 SQL</span>`
     );
+  } else if (!canInternals) {
+    chips.push(`<span class="tp-chip is-warn">当前身份无权查看检索过程</span>`);
   } else {
-    chips.push(`<span class="tp-chip is-warn">缓存结果，无过程数据</span>`);
+    chips.push(`<span class="tp-chip is-warn">本次命中缓存，未存过程数据</span>`);
   }
   el("trace-plan").innerHTML = chips.join("");
 
@@ -412,14 +455,20 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace })
     limits.wiki_per_route != null
       ? `文档池每路 <b>${limits.wiki_per_route}</b>`
       : "文档池每路";
-  el("trace-flow").innerHTML = `
+  // 没有 trace 时不能画这条链路：totalHits/merged 都会是 0，
+  // 看起来像「一条都没召回却入了 5 条上下文」——那是权限裁剪造成的假象，不是事实
+  el("trace-flow").innerHTML = hasTrace
+    ? `
     <span class="tp-node">各路并行召回 <b>${totalHits}</b></span>
     <span class="tp-arrow">→</span>
     <span class="tp-node">${profileText} · ${wikiText}</span>
     <span class="tp-arrow">→</span>
     <span class="tp-node">合并去重 <b>${merged}</b></span>
     <span class="tp-arrow">→</span>
-    <span class="tp-node is-final">入上下文 <b>${sources.length}</b></span>`;
+    <span class="tp-node is-final">入上下文 <b>${sources.length}</b></span>`
+    : `<span class="tp-empty">${
+        canInternals ? "本次命中缓存，未存过程数据" : "当前身份无权查看检索链路"
+      }</span>`;
 
   // 4) 数据来源（名称 + 分数 + 命中它的检索式 + 内容）
   el("detail-sources").innerHTML =
@@ -447,7 +496,7 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace })
             ? `<div class="ds-from">命中检索式：${escapeHtml(String(s.from_query))}</div>`
             : ""
         }
-        <div class="ds-text">${escapeHtml(s.text || "")}</div>
+        ${s.text ? `<div class="ds-text">${escapeHtml(s.text)}</div>` : ""}
       </div>`;
       })
       .join("") || `<div class="tp-empty">（无）</div>`;
@@ -500,6 +549,7 @@ function renderResult(data, elapsed) {
   // 答案
   resetReasoning();
   el("answer-body").innerHTML = formatAnswer(data.answer || "（无内容）");
+  window.hydrateMermaid(el("answer-body"));
 
   // 过程信息统一走 renderDetail（与流式路径共用，避免两处逻辑分叉）
   const sources = data.sources || [];

@@ -208,6 +208,11 @@
     </span>
   </footer>
 
-  <script src="/static/wizard.js"></script>
+  <!-- 路径必须是 /static/wizard/wizard.js：注册顺序是「先 /static/wizard 再 /static」
+       （见 api/wizard.py 的 docstring），写成 /static/wizard.js 会被前缀匹配吃掉并 404。
+       改前这里就是 404，向导页的交互脚本其实一直没加载。 -->
+  <script src="/static/vendor/mermaid.min.js" defer></script>
+  <script src="/static/markdown.js"></script>
+  <script src="/static/wizard/wizard.js"></script>
 </body>
 </html>

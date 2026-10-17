@@ -199,6 +199,11 @@
     <a href="/docs" target="_blank" rel="noopener">API 文档</a>
   </footer>
 
+  <!-- mermaid 走本地文件：demo 是离线部署，CDN 断了会白屏；
+       加载失败不影响主流程，代码块会原样保留。
+       markdown.js 必须在 app.js 之前，app.js 的 formatAnswer 直接用它。 -->
+  <script src="/static/vendor/mermaid.min.js" defer></script>
+  <script src="/static/markdown.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

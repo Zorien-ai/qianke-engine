@@ -527,17 +527,15 @@ async function ask(question) {
   }
 }
 
-/* 答案正文里的 [来源N] 变成可点击的小标签，点一下跳到下方对应的来源卡片。
- * 与 Demo 页（api/static/app.js 的 formatAnswer）是同一套标记约定，只多了一层跳转。 */
+/* 答案正文统一走 markdown（见 /static/markdown.js），与 Demo 页同一套渲染。
+ * [来源N] 在这里多一层：变成可点击的按钮，点一下跳到下方对应的来源卡片；
+ * 没有来源列表时去掉——指向一个不存在的东西，用户点了没反应会以为页面坏了。 */
 function formatAnswer(text, hasSources) {
-  let html = escapeHtml(text);
-  // 没有来源列表时，[来源N] 指向一个不存在的东西——去掉比留着好，
-  // 否则用户点了没反应，会以为页面坏了。
-  if (!hasSources) return html.replace(/\[来源\s*\d+\]/g, "");
-  return html.replace(
-    /\[来源\s*(\d+)\]/g,
-    '<button type="button" class="cite" data-cite="$1" title="跳转到第 $1 条来源">[来源$1]</button>'
-  );
+  return window.renderMarkdown(text, {
+    cite: (n) => hasSources
+      ? `<button type="button" class="cite" data-cite="${n}" title="跳转到第 ${n} 条来源">[来源${n}]</button>`
+      : null,
+  });
 }
 
 function jumpToSource(idx) {
@@ -583,6 +581,7 @@ function renderAnswer(question, data) {
   }
 
   el("answer-body").innerHTML = formatAnswer(data.answer || "", sources.length > 0);
+  window.hydrateMermaid(el("answer-body"));
 
   const box = el("sources-box");
   if (sources.length) {

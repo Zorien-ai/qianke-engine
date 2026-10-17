@@ -358,7 +358,41 @@ select:focus { outline: 2px solid var(--primary-soft); border-color: var(--prima
 .result-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .result-title { font-size: 14px; font-weight: 650; }
 .result-meta { font-size: 12px; color: var(--muted); }
-.answer { font-size: 14.5px; white-space: pre-line; }
+/* 答案由 markdown 渲染成结构化标签（见 /static/markdown.js），
+ * 不能再用 pre-line：HTML 源码里的换行会被保留，块之间多出空行。 */
+.answer { font-size: 14.5px; line-height: 1.7; white-space: normal; word-break: break-word; }
+.answer > :first-child { margin-top: 0; }
+.answer > :last-child { margin-bottom: 0; }
+.answer p { margin: 0 0 9px; }
+.answer h1, .answer h2, .answer h3, .answer h4 { margin: 15px 0 7px; line-height: 1.35; font-weight: 650; }
+.answer h1 { font-size: 18px; } .answer h2 { font-size: 16.5px; }
+.answer h3 { font-size: 15.2px; } .answer h4 { font-size: 14.8px; }
+.answer ul, .answer ol { margin: 0 0 9px; padding-left: 22px; }
+.answer li { margin: 3px 0; }
+.answer li > ul, .answer li > ol { margin: 3px 0 0; }
+.answer blockquote {
+  margin: 0 0 9px; padding: 6px 12px; border-left: 3px solid var(--border);
+  border-radius: 0 6px 6px 0; background: #fafbfe; color: #5a6272;
+}
+.answer hr { border: none; border-top: 1px dashed var(--border); margin: 13px 0; }
+.answer code {
+  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+  font-size: 12.8px; background: #eceef3; padding: 1px 5px; border-radius: 4px;
+}
+.answer pre.code-block {
+  margin: 0 0 11px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: #fbfcfe; overflow-x: auto;
+}
+.answer pre.code-block code { background: none; padding: 0; font-size: 12.6px; white-space: pre; }
+.md-table-wrap { margin: 0 0 11px; overflow-x: auto; }
+.md-table-wrap table { border-collapse: collapse; width: 100%; font-size: 13.1px; }
+.md-table-wrap th, .md-table-wrap td {
+  border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top;
+}
+.md-table-wrap th { background: #f6f7fb; font-weight: 620; }
+.md-table-wrap tbody tr:nth-child(even) td { background: #fbfcfe; }
+.mermaid-block { margin: 0 0 11px; overflow-x: auto; text-align: center; }
+.mermaid-block svg { max-width: 100%; height: auto; }
 .sources { margin-top: 16px; border-top: 1px dashed var(--border); padding-top: 12px; }
 .sources-title { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
 .sources-title code {
