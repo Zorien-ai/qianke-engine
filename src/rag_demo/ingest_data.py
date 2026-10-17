@@ -28,6 +28,7 @@ import os
 from typing import Any, Callable
 
 import pandas as pd
+import psycopg2.errors
 from langchain_core.documents import Document
 from sentence_transformers import SentenceTransformer
 
@@ -87,16 +88,31 @@ MEMBER_LEVEL_MIN_USERS = 20
 ALTER_SQL = """
 ALTER TABLE user_profile_vectors
     ADD COLUMN IF NOT EXISTS age INT,
-    ADD COLUMN IF NOT EXISTS gender VARCHAR(4),
-    ADD COLUMN IF NOT EXISTS city VARCHAR(50),
-    ADD COLUMN IF NOT EXISTS member_level VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS gender VARCHAR(16),
+    ADD COLUMN IF NOT EXISTS city VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS member_level VARCHAR(32),
     ADD COLUMN IF NOT EXISTS order_count INT,
     ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12, 2),
     ADD COLUMN IF NOT EXISTS avg_amount NUMERIC(12, 2),
-    ADD COLUMN IF NOT EXISTS top_category VARCHAR(50),
+    ADD COLUMN IF NOT EXISTS top_category VARCHAR(64),
     ADD COLUMN IF NOT EXISTS days_since_last_buy INT,
     ADD COLUMN IF NOT EXISTS platforms VARCHAR(200)
 """
+
+# 文本列的长度上限（与上面的 DDL、db/schema.py 的建表语句保持一致）。
+#
+# 为什么不能只靠 DDL：真实数据不保证遵守长度——性别写成 "Female" / "未知/保密"、
+# 城市写成完整地址、品类写成 "电脑办公/外设产品/键盘鼠标" 都可能出现。
+# 超长值会在 INSERT 时炸在 **TRUNCATE 之后**（表已被清空，代价最大），而且报错是
+# psycopg2 的英文「value too long for type character varying(4)」——用户看不懂、
+# 也不知道该改哪一列（2026-10-18 真实测试者传入 99,457 行数据踩到的就是 gender 4）。
+# 所以在聚合阶段就按上限截断并留日志，DDL 只作为最后一道保险。
+TEXT_LIMITS: dict[str, int] = {
+    "gender": 16,
+    "city": 64,
+    "member_level": 32,
+    "top_category": 64,
+}
 
 INDEX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_upv_age ON user_profile_vectors (age)",
@@ -250,27 +266,65 @@ def build_member_level(
     return fallback
 
 
-def _clean_level(value: Any) -> str | None:
+def _clip_text(value: Any, *, field: str, limit: int) -> str | None:
     """
-    用户自己给的等级值：去空白、限长
+    文本列清洗：去空白 + 按列宽上限截断（超长留 warning）
 
-    限长不是洁癖：member_level 列是 VARCHAR(20)，用户列里偶尔混进备注或整段文字，
-    超长会让 INSERT 在 **TRUNCATE 之后**才炸——那时表已经被清空了，代价太大。
+    截断而不是报错：一条超长的性别/城市/品类不该让整批构建在 **TRUNCATE 之后** 失败；
+    也不能静默——日志里写清字段、原长度与保留的前缀，排查时能对上是哪条数据。
     """
     if not _present(value):
         return None
     text = str(value).strip()
     if not text:
         return None
-    if len(text) > 20:
-        logger.warning("会员等级值超长（%d 字），已截断：%r", len(text), text[:30])
-        return text[:20]
+    if len(text) > limit:
+        logger.warning(
+            "%s 值超长（%d 字 > 上限 %d），已截断：%r",
+            field, len(text), limit, text[:40],
+        )
+        return text[:limit]
     return text
 
 
+def _clean_level(value: Any) -> str | None:
+    """
+    用户自己给的等级值：去空白、限长（列宽上限见 TEXT_LIMITS）
+
+    限长不是洁癖：用户列里偶尔混进备注或整段文字，超长会让 INSERT 在
+    **TRUNCATE 之后**才炸——那时表已经被清空了，代价太大。
+    """
+    return _clip_text(value, field="会员等级", limit=TEXT_LIMITS["member_level"])
+
+
 def ensure_schema(cur: Any) -> None:
-    """幂等补充结构化字段与聚合索引"""
+    """
+    幂等补充结构化字段与聚合索引
+
+    除了 ADD COLUMN，还要把**旧库的窄列扩宽**：M3 之前的 gender 是 VARCHAR(4)，
+    真实数据里 "Female" / "未知/保密" 这类值会直接把构建打挂（同样炸在 TRUNCATE 之后）。
+    扩容只在列宽不足时执行——ALTER TYPE 会重建该列上的索引，没必要每次构建都做。
+    """
     cur.execute(ALTER_SQL)
+    cur.execute(
+        "SELECT column_name, character_maximum_length FROM information_schema.columns "
+        "WHERE table_name = 'user_profile_vectors' AND column_name = ANY(%s)",
+        (list(TEXT_LIMITS),),
+    )
+    current = {row[0]: row[1] for row in cur.fetchall()}
+    widen = {
+        name: limit for name, limit in TEXT_LIMITS.items()
+        if current.get(name) is not None and current[name] < limit
+    }
+    if widen:
+        clause = ", ".join(
+            f"ALTER COLUMN {name} TYPE VARCHAR({limit})" for name, limit in widen.items()
+        )
+        cur.execute(f"ALTER TABLE user_profile_vectors {clause}")
+        logger.info(
+            "结构化字段列宽已扩容: %s",
+            ", ".join(f"{name}->VARCHAR({limit})" for name, limit in widen.items()),
+        )
     for sql in INDEX_SQL:
         cur.execute(sql)
     logger.info("结构化字段与索引已就绪")
@@ -495,18 +549,21 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
         last_buy = g["purchase_time"].max() if has_time else None
         row: dict[str, Any] = {
             "user_name": first(g, "user_name"),
-            "gender": first(g, "gender"),
+            "gender": _clip_text(first(g, "gender"), field="用户性别",
+                                 limit=TEXT_LIMITS["gender"]),
             "age": _to_int(first(g, "age")),
-            "city": first(g, "city"),
+            "city": _clip_text(first(g, "city"), field="用户城市",
+                               limit=TEXT_LIMITS["city"]),
             # 用户自己的等级原值；没映射这一列时是 None（键仍然产出，见函数开头说明）
             "member_level_raw": pick_level(g),
             "order_count": int(len(g)),
             "total_amount": _to_float(g["amount"].sum()) if has_amount else None,
             "avg_amount": _to_float(g["amount"].mean()) if has_amount else None,
             # 品类要按金额加权才知道「偏好」哪个，两者缺一就没法算
-            "top_category": (
-                g.groupby("category")["amount"].sum().idxmax()
-                if (has_category and has_amount) else None
+            "top_category": _clip_text(
+                (g.groupby("category")["amount"].sum().idxmax()
+                 if (has_category and has_amount) else None),
+                field="商品类目", limit=TEXT_LIMITS["top_category"],
             ),
             "platforms": ",".join(sorted(g["platform"].unique())),
         }
@@ -617,51 +674,62 @@ def write_to_db(
     conn.commit()
 
     logger.info("正在生成向量并写入...")
-    for i in range(0, len(documents), BATCH):
-        batch = documents[i:i + BATCH]
-        vecs = model.encode(
-            [d.page_content for d in batch], batch_size=16, show_progress_bar=False
-        )
-        for doc, v in zip(batch, vecs):
-            m = doc.metadata
-            cur.execute(
-                """INSERT INTO user_profile_vectors
-                   (user_id, profile_text, embedding, dept, sensitivity, metadata,
-                    age, gender, city, member_level, order_count, total_amount,
-                    avg_amount, top_category, days_since_last_buy, platforms)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                (
-                    m["user_id"],
-                    doc.page_content,
-                    v,
-                    m["dept"],
-                    m["sensitivity"],
-                    json.dumps({
-                        "platforms": m["platforms"],
-                        "top_category": m["top_category"],
-                    }, ensure_ascii=False),
-                    # 数值列一律走容错转换：pandas 的缺失值是 NaN/NaT，
-                    # 直接交给 psycopg2 会变成字符串 'NaN'，PostgreSQL 对 INT 列
-                    # 报 "integer out of range"，一条 NaN 就能让整批构建失败
-                    # （用户订单时间全都解析不出来时必然踩到）。
-                    # 转成 None 后落库是 SQL NULL，下游按「未知」处理。
-                    _to_int(m["age"]),
-                    m["gender"],
-                    m["city"],
-                    m["member_level"],
-                    _to_int(m["order_count"]),
-                    _to_float(m["total_amount"]),
-                    _to_float(m["avg_amount"]),
-                    m["top_category"],
-                    _to_int(m["days_since_last_buy"]),
-                    m["platforms"],
-                )
+    try:
+        for i in range(0, len(documents), BATCH):
+            batch = documents[i:i + BATCH]
+            vecs = model.encode(
+                [d.page_content for d in batch], batch_size=16, show_progress_bar=False
             )
-        conn.commit()
-        done = min(i + BATCH, len(documents))
-        logger.info("  已写入 %d/%d", done, len(documents))
-        if progress:
-            progress(done, len(documents), "写入画像")
+            for doc, v in zip(batch, vecs):
+                m = doc.metadata
+                cur.execute(
+                    """INSERT INTO user_profile_vectors
+                       (user_id, profile_text, embedding, dept, sensitivity, metadata,
+                        age, gender, city, member_level, order_count, total_amount,
+                        avg_amount, top_category, days_since_last_buy, platforms)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        m["user_id"],
+                        doc.page_content,
+                        v,
+                        m["dept"],
+                        m["sensitivity"],
+                        json.dumps({
+                            "platforms": m["platforms"],
+                            "top_category": m["top_category"],
+                        }, ensure_ascii=False),
+                        # 数值列一律走容错转换：pandas 的缺失值是 NaN/NaT，
+                        # 直接交给 psycopg2 会变成字符串 'NaN'，PostgreSQL 对 INT 列
+                        # 报 "integer out of range"，一条 NaN 就能让整批构建失败
+                        # （用户订单时间全都解析不出来时必然踩到）。
+                        # 转成 None 后落库是 SQL NULL，下游按「未知」处理。
+                        _to_int(m["age"]),
+                        m["gender"],
+                        m["city"],
+                        m["member_level"],
+                        _to_int(m["order_count"]),
+                        _to_float(m["total_amount"]),
+                        _to_float(m["avg_amount"]),
+                        m["top_category"],
+                        _to_int(m["days_since_last_buy"]),
+                        m["platforms"],
+                    )
+                )
+            conn.commit()
+            done = min(i + BATCH, len(documents))
+            logger.info("  已写入 %d/%d", done, len(documents))
+            if progress:
+                progress(done, len(documents), "写入画像")
+    except psycopg2.errors.StringDataRightTruncation as e:
+        # 兜底翻译：到了这一步说明有文本列没被 TEXT_LIMITS 覆盖（或用户直接调了本函数）。
+        # 原始报错是英文「value too long for type character varying(N)」，用户既看不懂
+        # 也不知道该改哪一列；这里给中文 + 下一步动作，并把原始错误带上便于排查。
+        conn.rollback()
+        raise ValueError(
+            "写入画像失败：某个文本字段的值超过数据库列长度限制"
+            "（常见是性别/城市/会员等级/品类；相关列宽会自动扩容，可直接重试构建）。"
+            f"若仍失败，请检查数据里是否有异常长的文本。原始错误：{e}"
+        ) from e
 
     return len(documents)
 

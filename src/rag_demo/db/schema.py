@@ -50,13 +50,13 @@ CREATE TABLE IF NOT EXISTS user_profile_vectors (
     update_time          TIMESTAMP    DEFAULT NOW(),
     metadata             JSONB,
     age                  INT,
-    gender               VARCHAR(4),
-    city                 VARCHAR(50),
-    member_level         VARCHAR(20),
+    gender               VARCHAR(16),
+    city                 VARCHAR(64),
+    member_level         VARCHAR(32),
     order_count          INT,
     total_amount         NUMERIC,
     avg_amount           NUMERIC,
-    top_category         VARCHAR(50),
+    top_category         VARCHAR(64),
     days_since_last_buy  INT,
     platforms            VARCHAR(200)
 )
