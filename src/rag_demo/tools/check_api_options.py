@@ -17,9 +17,20 @@ import os
 import urllib.request
 
 from rag_demo.config import BASE_DIR
+from rag_demo.tools.api_auth import login
 
 BASE_URL = "http://127.0.0.1:8000"
 TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
+
+# M3 起接口需要登录态（/search 还要求 L4）：懒登录一次，复用 Cookie
+_opener = None
+
+
+def _http():
+    global _opener
+    if _opener is None:
+        _opener = login(BASE_URL)
+    return _opener
 
 
 def post(path: str, payload: dict, timeout: int = 300) -> dict:
@@ -28,7 +39,7 @@ def post(path: str, payload: dict, timeout: int = 300) -> dict:
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    return json.load(urllib.request.urlopen(req, timeout=timeout))
+    return json.load(_http().open(req, timeout=timeout))
 
 
 def main() -> None:

@@ -18,78 +18,101 @@ const EXAMPLE_QUESTIONS = [
 const el = (id) => document.getElementById(id);
 
 /* ---------- 身份与权限 ----------
- * 能力清单来自后端 /whoami，前端**不硬编码权限表**——两份真源必然改漏一处。
+ * 身份来自登录态（M3）：后端从 Cookie 会话解析，页面不再自选角色。
+ * 能力清单仍来自 /whoami，前端**不硬编码权限表**——两份真源必然改漏一处。
  *
  * ⚠ 前端隐藏面板只是"不设计入口"，不是权限。真正的拦截在后端
  *   （直接 curl 接口绕不过去）。这里隐藏是因为"用不了的功能不该出现"，
  *   而不是因为"藏起来就安全"。
  */
 let currentRole = null;
-// 指定人员（Demo 用）：留空 = 只按角色等级；填了 = 该用户的人员授权优先于角色默认等级
 let currentUser = "";
+let ACCOUNT = null;      // 当前登录账号（含企业信息）
 let CAPS = {};
 let CURRENT_LEVEL = "";
 let TOPK_RANGE = { min: 1, max: 30 };
 
-/* 所有请求都带上当前角色/用户（后端按它裁剪响应） */
-function apiFetch(url, options = {}) {
-  const opts = { ...options, headers: { ...(options.headers || {}) } };
-  if (currentRole) opts.headers["X-Role"] = currentRole;
-  if (currentUser) opts.headers["X-User"] = currentUser;
-  return fetch(url, opts);
+/* 所有请求都走这里：401 = 未登录/会话过期 → 直接回登录页。
+ * 让每个调用点自己判断 401 必然漏，漏掉的那处会表现为"点了没反应"。 */
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, { ...options, headers: { ...(options.headers || {}) } });
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("未登录");
+  }
+  return res;
 }
 
 async function loadWhoami() {
-  // 第一次（可能不带角色）：只为拿"可选角色清单"，避免把角色写死在前端
-  let info = await (await fetch("/whoami")).json();
-
-  const select = el("role-select");
-  if (!select.options.length) {
-    // 只列出**可用**的角色。未识别身份（guest）不提供入口——
-    // 用不了的东西直接不呈现，而不是让他点一下再告知没权限。
-    const usable = (info.roles || []).filter((r) => r.usable);
-    select.innerHTML = usable
-      .map((r) => `<option value="${r.value}">${r.label}</option>`)
-      .join("");
-    select.value = currentRole || (usable.length ? usable[usable.length - 1].value : "");
+  const mine = await (await apiFetch("/whoami")).json();
+  if (!mine.authenticated) {
+    window.location.href = "/login";
+    return mine;
   }
-
-  currentRole = select.value;
-  const mine = await (await apiFetch("/whoami")).json(); // 带上角色/用户，拿自己的能力清单
+  ACCOUNT = mine.account || null;
+  currentRole = mine.role || "";
+  currentUser = mine.username || "";
   CAPS = mine.can || {};
   CURRENT_LEVEL = mine.level || "";
   TOPK_RANGE = mine.topk_range || TOPK_RANGE;
 
-  // 等级徽章：管理员改完配置后，当前身份能直接看到自己现在是哪一级。
-  // 「人员授权」优先于角色默认，所以有用户 ID 时要说明这是个人等级。
+  // 等级徽章：管理员改完配置后，账号能直接看到自己现在是哪一级。
+  // 「人员授权」优先于角色默认，所以这里按账号说明，而不是按角色。
   const badge = el("level-badge");
   if (CURRENT_LEVEL) {
     badge.hidden = false;
     badge.textContent = mine.level_label || CURRENT_LEVEL;
-    badge.title = mine.user
-      ? `用户 ${mine.user} 的有效等级（人员授权优先于角色默认）`
-      : "角色默认等级";
+    badge.title = "账号的有效等级（人员授权优先于角色默认）";
   } else {
     badge.hidden = true;
   }
 
-  // Demo 声明：身份由请求头自报，尚未接入电商系统
+  renderAccount(mine);
   el("role-note").textContent = mine.note || "";
   applyCapabilities();
 
   // 权限面板的数据单独拉：必须 await，否则调用方（保存/授权后）写提示文案时
   // 会被后面异步完成的 renderPermissions 清空——表现为"保存成功了但提示是空的"
   if (CAPS.ops) await loadPermissions();
+  if (canManageAccounts()) await loadAccounts();
 
   el("stats-panel").hidden = !CAPS.stats;
   if (CAPS.stats) loadStats();
   return mine;
 }
 
+function canManageAccounts() {
+  return !!(ACCOUNT && (ACCOUNT.is_system_admin || ACCOUNT.is_enterprise_admin));
+}
+
+function renderAccount(mine) {
+  const bar = el("account-bar");
+  bar.hidden = false;
+  const acct = ACCOUNT || {};
+  const who = acct.display_name || acct.username || "未知账号";
+  el("account-name").textContent =
+    `${who}（${acct.account_type_label || "-"} · ${acct.role_label || acct.role || "-"}）`;
+  const ent = acct.enterprise;
+  const entEl = el("account-ent");
+  if (ent) {
+    entEl.hidden = false;
+    entEl.textContent = `企业：${ent.name}`;
+  } else {
+    entEl.hidden = true;
+  }
+  // 待审核/停用：把原因直接说在提问框上方，而不是让他点一次才发现没反应
+  if (acct.status && acct.status !== "active") {
+    el("ask-hint").textContent = `账号${acct.status_label || "待审核"}：通过后即可使用`;
+  }
+}
+
 function applyCapabilities() {
   // 权限管理：没有「运维 / 权限管理」能力就连面板都不渲染（默认只有管理员）。
   // 面板数据由 loadWhoami 里 await loadPermissions() 负责，这里只管显隐。
   el("perm-panel").hidden = !CAPS.ops;
+
+  // 账号管理：系统管理员看全部，企业管理员只看本企业员工
+  el("accounts-panel").hidden = !canManageAccounts();
 
   // 数据概况：无权限直接不渲染
   if (!CAPS.stats) el("stats-grid").innerHTML = "";
@@ -131,7 +154,9 @@ function applyCapabilities() {
   el("ask-btn").disabled = !CAPS.ask;
   el("ask-hint").textContent = CAPS.ask
     ? "按 Ctrl / Cmd + Enter 快速提交"
-    : "当前身份无权提问";
+    : ACCOUNT && ACCOUNT.status && ACCOUNT.status !== "active"
+      ? `账号${ACCOUNT.status_label || "待审核"}：通过后即可使用`
+      : "当前账号无权提问";
 }
 
 /* ---------- 数据概况 ---------- */
@@ -729,6 +754,146 @@ function renderCompare(data) {
   el("compare-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/* ---------- 账号管理（系统管理员 / 企业管理员） ----------
+ * 待审核账号列表 + 角色分配 + 停用/启用。
+ * 企业管理员只能看到本企业的人；企业账号本身只有系统管理员能审核。
+ * 这些限制在后端也各有一份（前端只是不给他点，后端才是拦住）。
+ */
+let ACCOUNTS = null;
+
+async function loadAccounts() {
+  try {
+    const res = await apiFetch("/admin/users");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    ACCOUNTS = await res.json();
+    renderAccounts();
+  } catch (e) {
+    el("accounts-status").textContent = `账号列表加载失败：${e.message}`;
+  }
+}
+
+function renderAccounts() {
+  if (!ACCOUNTS) return;
+  const users = ACCOUNTS.users || [];
+  const roles = ACCOUNTS.roles || [];
+  const enterprises = ACCOUNTS.enterprises || [];
+  const me = ACCOUNTS.me || {};
+  const entMap = {};
+  enterprises.forEach((e) => { entMap[e.id] = e; });
+
+  el("accounts-status").textContent =
+    ACCOUNTS.scope === "all" ? `全部账号 ${users.length} 个` : `本企业账号 ${users.length} 个`;
+
+  const myEnt = me.enterprise_id ? entMap[me.enterprise_id] : null;
+  const box = el("enterprise-box");
+  if (myEnt && myEnt.invite_code) {
+    box.hidden = false;
+    el("ent-name").textContent = myEnt.name;
+    el("ent-code").textContent = myEnt.invite_code;
+  } else {
+    box.hidden = true;
+  }
+
+  const roleOptions = (current) =>
+    roles
+      .map(
+        (r) =>
+          `<option value="${r.value}" ${r.value === current ? "selected" : ""}>${escapeHtml(r.label)}（${r.level}）</option>`
+      )
+      .join("");
+
+  el("accounts-list").innerHTML = users.length
+    ? users
+        .map((u) => {
+          const ent = u.enterprise_id ? entMap[u.enterprise_id] : null;
+          const pending = u.status === "pending";
+          const statusCls =
+            pending ? "is-warn" : u.status === "disabled" ? "is-danger" : "";
+          return `<div class="account-row">
+            <div class="acc-main">
+              <span class="acc-name">${escapeHtml(u.display_name || u.username)}</span>
+              <span class="acc-username">@${escapeHtml(u.username)}</span>
+              <span class="pu-level">${escapeHtml(u.account_type_label || "")}</span>
+              <span class="acc-status ${statusCls}">${escapeHtml(u.status_label || u.status)}</span>
+              ${ent ? `<span class="pu-meta">${escapeHtml(ent.name)}</span>` : ""}
+            </div>
+            <div class="acc-actions">
+              ${
+                pending
+                  ? `<select data-approve-role="${u.id}">${roleOptions("cs")}</select>
+                     <button type="button" class="perm-btn is-primary" data-approve="${u.id}">通过</button>`
+                  : u.is_system_admin
+                    ? `<span class="pu-meta">系统管理员</span>`
+                    : `<select data-role="${u.id}">${roleOptions(u.role)}</select>`
+              }
+              ${
+                u.is_system_admin
+                  ? ""
+                  : u.status === "disabled"
+                    ? `<button type="button" class="perm-btn" data-enable="${u.id}">启用</button>`
+                    : `<button type="button" class="perm-btn is-danger" data-disable="${u.id}">停用</button>`
+              }
+            </div>
+            <div class="acc-meta">
+              ${escapeHtml(u.created_at || "")}
+              ${u.reviewed_by ? ` · 审核：${escapeHtml(u.reviewed_by)}` : ""}
+              ${u.last_login_at ? ` · 最近登录 ${escapeHtml(u.last_login_at)}` : ""}
+            </div>
+          </div>`;
+        })
+        .join("")
+    : `<div class="tp-empty">还没有账号</div>`;
+}
+
+async function approveAccount(id, role) {
+  el("accounts-status").textContent = "审核中…";
+  try {
+    const res = await apiFetch(`/admin/users/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    await loadWhoami();
+    el("accounts-status").textContent = "已通过审核，权限立即生效";
+  } catch (e) {
+    el("accounts-status").textContent = `审核失败：${e.message}`;
+  }
+}
+
+async function changeAccountRole(id, role) {
+  try {
+    const res = await apiFetch(`/admin/users/${id}/role`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    await loadWhoami();
+    el("accounts-status").textContent = "角色已更新，下一个请求即按新等级判定";
+  } catch (e) {
+    el("accounts-status").textContent = `改角色失败：${e.message}`;
+  }
+}
+
+async function setAccountStatus(id, status) {
+  try {
+    const res = await apiFetch(`/admin/users/${id}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    await loadWhoami();
+    el("accounts-status").textContent = status === "disabled" ? "账号已停用（会话立即失效）" : "账号已启用";
+  } catch (e) {
+    el("accounts-status").textContent = `操作失败：${e.message}`;
+  }
+}
+
 /* ---------- 权限管理（管理员） ----------
  * 前端只负责把配置渲染成人能看懂的样子：
  * 能力目录、等级目录、角色清单、默认值全部来自 GET /admin/permissions，
@@ -930,28 +1095,32 @@ document.addEventListener("DOMContentLoaded", async () => {
   initRetriever();
   el("compare-btn").addEventListener("click", compareRecall);
 
-  // 切换身份/用户：必须先清空上一个身份留下的结果。
-  // 不清的话，降权后旧的高权内容还挂在页面上，会让人以为"权限没生效"。
-  const resetOutputs = () => {
-    el("result-panel").hidden = true;
-    el("detail-panel").hidden = true;
-    el("compare-panel").hidden = true;
-    el("error-panel").hidden = true;
-    el("answer-body").innerHTML = "";
-  };
-
-  el("role-select").addEventListener("change", async () => {
-    currentRole = el("role-select").value;
-    resetOutputs();
-    await loadWhoami();
+  // 退出：服务端删会话 + 清 Cookie。只清 Cookie 不算退出（令牌还能用）
+  el("logout-btn").addEventListener("click", async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST" });
+    } finally {
+      window.location.href = "/login";
+    }
   });
 
-  // 指定人员：切完立刻按「人员授权 > 角色默认」重新算能力。
-  // 这样管理员把 u_1001 提到 L4 后，页面把用户填成 u_1001 就能当场验证。
-  el("user-input").addEventListener("change", async () => {
-    currentUser = el("user-input").value.trim();
-    resetOutputs();
-    await loadWhoami();
+  // 账号管理：通过审核 / 改角色 / 停用启用
+  el("accounts-list").addEventListener("click", (e) => {
+    const approve = e.target.closest("button[data-approve]");
+    if (approve) {
+      const id = approve.dataset.approve;
+      const sel = document.querySelector(`select[data-approve-role="${id}"]`);
+      approveAccount(id, sel ? sel.value : "cs");
+      return;
+    }
+    const disable = e.target.closest("button[data-disable]");
+    if (disable) return setAccountStatus(disable.dataset.disable, "disabled");
+    const enable = e.target.closest("button[data-enable]");
+    if (enable) return setAccountStatus(enable.dataset.enable, "active");
+  });
+  el("accounts-list").addEventListener("change", (e) => {
+    const sel = e.target.closest("select[data-role]");
+    if (sel) changeAccountRole(sel.dataset.role, sel.value);
   });
 
   // 权限管理面板：元素常驻，事件只绑一次（内容是重新渲染的，容器本身不换）
@@ -967,7 +1136,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (btn) revokeUserPermission(btn.dataset.revoke);
   });
 
-  // 先定身份，再决定渲染什么（loadStats 由 applyCapabilities 按能力触发）
+  // 先拿当前账号（未登录会被 apiFetch 直接带回 /login），再决定渲染什么
   await loadWhoami();
 
   el("detail-fold").addEventListener("click", () => {

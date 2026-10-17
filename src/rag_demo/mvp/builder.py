@@ -58,7 +58,20 @@ logger = logging.getLogger(__name__)
 # 自带数据经脚本重建。用户上传的数据一律进 user；test 是首跑用的试验库。
 # 白名单写在服务端而不是让前端传任意库名：否则「写错库」这件事就只剩一个输入框
 # 的距离——那正是 writes_to 要防的东西。
+#
+# M3 起多了企业库（ent_<企业ID>）：它们由账号体系在运行时注册进 config.DATASETS。
+# 判断放在 `is_buildable()` 里，**只认已注册的名字**——库名不能由请求里编，
+# 否则「写错库」的防线就退化成一次字符串前缀检查。
 BUILDABLE_DATASETS = ("user", "test")
+
+
+def is_buildable(dataset: str) -> bool:
+    """能否写入这个数据集：user / test，或已注册的企业库"""
+    if dataset in BUILDABLE_DATASETS:
+        return True
+    from rag_demo.config import DATASETS, ENTERPRISE_DATASET_PREFIX
+
+    return dataset.startswith(ENTERPRISE_DATASET_PREFIX) and dataset in DATASETS
 
 EventFn = Callable[[dict], None]
 
@@ -83,11 +96,11 @@ def resolve_dataset(name: str | None, action: str = "构建") -> str:
     对提问的人来说是句错话——用户会以为自己点错了按钮。
     """
     target = (name or "user").strip() or "user"
-    if target not in BUILDABLE_DATASETS:
+    if not is_buildable(target):
         raise ValueError(
-            f"向导只服务 {list(BUILDABLE_DATASETS)} 这两个数据集，不能{action} {target!r}。"
+            f"向导只服务 {list(BUILDABLE_DATASETS)} 与企业库（ent_*），不能{action} {target!r}。"
             f"demo 是演示底座与评测基线，它自己的问答在首页（/qa），不走向导；"
-            f"用户上传的数据一律进 user，test 是用来试跑的试验库。"
+            f"企业库在账号审核通过后自动注册，不能手写库名。"
         )
     return target
 
@@ -114,8 +127,8 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
     from rag_demo.tools.build_search_index import build_index
 
     dataset = inputs.dataset
-    if dataset not in BUILDABLE_DATASETS:   # 二次确认：调用方可能绕过 resolve_dataset
-        raise ValueError(f"数据集 {dataset!r} 不在构建白名单 {list(BUILDABLE_DATASETS)} 内")
+    if not is_buildable(dataset):   # 二次确认：调用方可能绕过 resolve_dataset
+        raise ValueError(f"数据集 {dataset!r} 不在构建白名单内（user / test / 已注册企业库）")
 
     def emit(**event) -> None:
         on_event(event)

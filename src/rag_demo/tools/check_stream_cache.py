@@ -18,9 +18,20 @@ import time
 import urllib.request
 
 from rag_demo.config import BASE_DIR
+from rag_demo.tools.api_auth import login
 
 BASE = "http://127.0.0.1:8000"
 TESTS_DIR = os.path.join(BASE_DIR, "src", "rag_demo", "tests")
+
+# M3 起接口需要登录态：懒登录一次，之后所有请求复用 Cookie
+_opener = None
+
+
+def _http():
+    global _opener
+    if _opener is None:
+        _opener = login(BASE)
+    return _opener
 
 
 def sse_ask(question: str, mode: str = "bm25") -> dict:
@@ -33,7 +44,7 @@ def sse_ask(question: str, mode: str = "bm25") -> dict:
     )
 
     t0 = time.time()
-    resp = urllib.request.urlopen(req, timeout=300)
+    resp = _http().open(req, timeout=300)
 
     first_char = None
     answer = ""

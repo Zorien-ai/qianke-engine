@@ -69,6 +69,12 @@ async function api(url, options = {}) {
   } catch (e) {
     throw new Error("连接不上服务，请确认服务还在运行（终端窗口别关掉），然后重试。");
   }
+  // 会话过期/未登录：统一回登录页。让每个调用点各自判断必然漏，
+  // 漏掉的那处只会表现为「按钮点了没反应」。
+  if (resp.status === 401) {
+    window.location.href = "/login";
+    throw new Error("登录已过期，请重新登录。");
+  }
   let data = null;
   try { data = await resp.json(); } catch (e) { /* 非 JSON 响应，下面统一按状态码处理 */ }
   if (!resp.ok) {

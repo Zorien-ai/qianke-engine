@@ -62,6 +62,35 @@ DATASETS = {
     "test": TEST_DB_CONFIG,
 }
 
+# ---------- 企业数据集（M3：数据库按企业划分） ----------
+# 隔离单位是**企业**，不是个人：同一企业的员工共享一个库，企业之间互不可见。
+# 数据集名 ent_<企业ID>，库名 vec_db_ent_<企业ID>；企业审核通过时注册，
+# 第一次构建时才真正 CREATE DATABASE（建库是重操作，不该挂在一次点击上）。
+ENTERPRISE_DATASET_PREFIX = "ent_"
+ENTERPRISE_DB_PREFIX = "vec_db_ent_"
+# 系统管理员在向导里调试用哪个库（不能是 demo：demo 是评测基线兼演示底座）
+ADMIN_DEBUG_DATASET = "test"
+
+
+def enterprise_dataset_name(enterprise_id: int) -> str:
+    return f"{ENTERPRISE_DATASET_PREFIX}{int(enterprise_id)}"
+
+
+def enterprise_db_name(enterprise_id: int) -> str:
+    return f"{ENTERPRISE_DB_PREFIX}{int(enterprise_id)}"
+
+
+def register_dataset(name: str, dbname: str) -> dict:
+    """
+    运行时注册一个数据集（企业审核通过 / 启动时从账号库恢复）
+
+    `DATASETS` 同时是「合法数据集白名单」，connection._resolve 会据此校验。
+    因此动态库必须走这里注册，否则第一次 get_conn 就会抛 UnknownDataset。
+    连接、锁、BM25 索引都按数据集名分键，注册后自动各走各的。
+    """
+    DATASETS[name] = {**_DB_BASE, "dbname": dbname}
+    return DATASETS[name]
+
 # 默认数据集：**保持 demo**。pipeline / hybrid_retriever / sql_tool 里几十处
 # get_conn() 都不传参数，因此它们的默认行为与改造前完全一致——评测脚本不用改，
 # 这正是保住既有评测基线的前提。向导的路由会显式切到 user。

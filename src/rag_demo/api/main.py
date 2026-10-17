@@ -35,13 +35,13 @@ import os
 import threading
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import permissions
+from rag_demo import auth, config, permissions
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache
 from rag_demo.config import (
@@ -84,14 +84,88 @@ ROLE_HEADER = "X-Role"
 USER_HEADER = "X-User"
 
 
+def _auth_enforced() -> bool:
+    """登录态是否必须：开启登录且没有显式放行请求头（见 auth.ALLOW_HEADER_AUTH）"""
+    return auth.AUTH_ENABLED and not auth.ALLOW_HEADER_AUTH
+
+
 def _role(x_role: str | None) -> str:
-    """解析请求角色：缺失走兜底（config.DEFAULT_API_ROLE），非法降级 guest"""
+    """
+    当前请求的角色：优先登录态，其次请求头（仅在未强制登录时）
+
+    待审核账号按 guest 处理（没有任何能力），但**能登录**——这样他看到的是
+    「等待审核」，而不是「密码错了」。
+    """
+    account = auth.current_account()
+    if account is not None:
+        if account.get("status") != auth.STATUS_ACTIVE:
+            return permissions.ROLE_GUEST
+        return account.get("role") or permissions.ROLE_GUEST
+    if _auth_enforced():
+        return permissions.ROLE_GUEST
     return permissions.resolve_role(x_role, default=DEFAULT_API_ROLE)
 
 
 def _user(x_user: str | None) -> str | None:
-    """解析请求里的用户 ID：空白视为未指定（走角色默认等级）"""
+    """
+    当前请求的「人员标识」：登录态用**用户名**，请求头模式用 X-User
+
+    用用户名而不是自增 ID：管理员在权限页看到的就是 `zhangsan`，
+    人和配置项能对上号；换库/迁移也不会因为 ID 变化而错配。
+    """
+    account = auth.current_account()
+    if account is not None:
+        return account.get("username")
+    if _auth_enforced():
+        return None
     return permissions.normalize_user(x_user)
+
+
+def _require_login() -> dict | None:
+    """
+    业务接口的登录校验
+
+    - 未登录：401（前端据此跳登录页；403 会被误读成"登录了但没权限"）
+    - 待审核：403 + 明确文案
+    - 未强制登录（离线脚本模式）：返回 None，后续按请求头走
+    """
+    account = auth.current_account()
+    if account is None:
+        if _auth_enforced():
+            raise HTTPException(status_code=401, detail="请先登录")
+        return None
+    if account.get("status") == auth.STATUS_DISABLED:
+        raise HTTPException(status_code=403, detail="该账号已停用")
+    if account.get("status") != auth.STATUS_ACTIVE:
+        raise HTTPException(status_code=403, detail="账号待审核：请等待管理员通过后再使用")
+    return account
+
+
+def _require_system_admin() -> dict:
+    """全局配置/运维接口：只有系统管理员能动（企业管理员只管自己企业）"""
+    account = _require_login()
+    if account is None or not account.get("is_system_admin"):
+        raise HTTPException(status_code=403, detail="仅系统管理员可执行该操作")
+    return account
+
+
+def _require_manager(enterprise_id: int | None = None) -> dict:
+    """
+    账号管理权限：系统管理员管全部，企业管理员只管本企业
+
+    企业管理员的能力来自账号标记（`is_enterprise_admin`），不是来自等级——
+    等级决定"能看什么"，但它不该决定"能管谁"。
+    """
+    account = _require_login()
+    if account is None:
+        raise HTTPException(status_code=403, detail="该接口需要登录态（当前为离线脚本模式）")
+    if account.get("is_system_admin"):
+        return account
+    if account.get("is_enterprise_admin"):
+        if enterprise_id is not None and account.get("enterprise_id") != enterprise_id:
+            raise HTTPException(status_code=403, detail="只能管理本企业的账号")
+        return account
+    raise HTTPException(status_code=403, detail="仅管理员可执行该操作")
 
 
 def _require(role: str, cap: str, user: str | None = None) -> None:
@@ -138,6 +212,19 @@ async def lifespan(app: FastAPI):
     # 而 uvicorn 会重置自己那几个 logger 的 handler。不在这里补挂，
     # 「启动信息 + 谁在什么时候请求了什么」就不会落盘。
     setup_logging()
+
+    # 登录态（M3）：建表 + 种子系统管理员 + 恢复企业数据集注册。
+    # 注册必须发生在任何请求之前 —— connection._resolve 只认 DATASETS 里的名字，
+    # 没注册的企业库第一次 get_conn 就会抛 UnknownDataset。
+    auth.init(auth.SEED_ADMIN_USERNAME, auth.SEED_ADMIN_PASSWORD)
+    enterprises = auth.list_enterprises()
+    for ent in enterprises:
+        config.register_dataset(ent["dataset"], config.enterprise_db_name(ent["id"]))
+    logger.info(
+        "登录态：账号库 %s，企业 %d 家（AUTH_ENABLED=%s）",
+        auth.DB_PATH, len(enterprises), auth.AUTH_ENABLED,
+    )
+
     logger.info("预加载模型和 BM25 语料...")
     get_model()
     _load_bm25_corpus()
@@ -202,6 +289,30 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def _attach_account(request: Request, call_next):
+    """
+    每个请求先把 Cookie 会话解析成账号，放进 contextvar
+
+    为什么用 contextvar 而不是给每个端点加参数：向导那条线（mvp/app.py）
+    有 10 个端点，它们要的是「当前企业库」而不是「HTTP 身份」。把身份解析
+    放在入口一次，业务层统一读 current_account()，不必逐个改签名。
+
+    `/static` 不解析：静态资源不需要身份，而每次读库/sqlite 都是白花。
+    """
+    if auth.AUTH_ENABLED and not request.url.path.startswith("/static"):
+        try:
+            account = auth.resolve_session(request.cookies.get(auth.SESSION_COOKIE))
+        except Exception:  # noqa: BLE001 账号库异常不能把整站打成 500
+            logger.exception("会话解析失败，按未登录处理")
+            account = None
+        auth.set_current_account(account)
+    try:
+        return await call_next(request)
+    finally:
+        auth.set_current_account(None)
+
+
 # ================= 请求 / 响应模型 =================
 class QueryRequest(BaseModel):
     question: str
@@ -262,6 +373,19 @@ class GrantIn(BaseModel):
     note: str | None = None
 
 
+# ---------- 账号（管理员） ----------
+class ApproveIn(BaseModel):
+    role: str = "cs"
+
+
+class UserRoleIn(BaseModel):
+    role: str
+
+
+class UserStatusIn(BaseModel):
+    status: str
+
+
 # ================= 静态资源与页面 =================
 # 向导（M2）先注册：它自带 /static/wizard 挂载点，必须排在下面那个 /static 之前，
 # 否则 /static/wizard/* 会被 /static 吃掉并 404（Starlette 按注册顺序匹配前缀）。
@@ -272,9 +396,17 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/", include_in_schema=False)
-def index() -> FileResponse:
-    """交互页面"""
+def index() -> Response:
+    """交互页面（未登录跳登录页；登录态关闭时直接放行）"""
+    if _auth_enforced() and auth.current_account() is None:
+        return RedirectResponse("/login", status_code=302)
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/login", include_in_schema=False)
+def login_page() -> FileResponse:
+    """登录 / 注册页（唯一不需要登录的页面）"""
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"))
 
 
 @app.get("/whoami")
@@ -290,8 +422,10 @@ def whoami(
 
     返回里带 `level`（L1~L4）：管理员改完配置，这里立刻反映新等级与新能力。
     """
+    account = auth.current_account()
     role, user = _role(x_role), _user(x_user)
     info = permissions.describe(role, user)
+    info["authenticated"] = account is not None
     info["topk_range"] = {"min": TOP_K_PROFILE_MIN, "max": TOP_K_PROFILE_MAX}
     # 「可用」按角色默认等级算：管理员把某个角色提到 L1 以上，它就会出现在下拉框里
     info["roles"] = [
@@ -307,12 +441,141 @@ def whoami(
     info["levels"] = [
         {"value": lv, "label": permissions.LEVEL_LABELS[lv]} for lv in permissions.LEVELS
     ]
-    # Demo 声明：身份由请求头自报，尚未接入电商系统
+
+    # 账号信息：页面据此显示"我是谁/哪家企业/什么状态"。
+    # 待审核账号在这里就能看到原因，不用去猜"为什么点了没反应"。
+    if account is not None:
+        ent = account.get("enterprise") or None
+        can_see_code = bool(account.get("is_system_admin") or account.get("is_enterprise_admin"))
+        info["account"] = {
+            "id": account["id"],
+            "username": account["username"],
+            "display_name": account["display_name"],
+            "account_type": account["account_type"],
+            "account_type_label": account["account_type_label"],
+            "role": account["role"],
+            "role_label": permissions.ROLE_LABELS.get(account["role"], account["role"]),
+            "status": account["status"],
+            "status_label": account["status_label"],
+            "is_system_admin": account["is_system_admin"],
+            "is_enterprise_admin": account["is_enterprise_admin"],
+            "enterprise": (
+                {
+                    "id": ent["id"],
+                    "name": ent["name"],
+                    "dataset": ent.get("dataset"),
+                    # 邀请码只给企业管理员看：普通员工拿到了也没用，反而是泄露面
+                    "invite_code": ent["invite_code"] if can_see_code else None,
+                }
+                if ent
+                else None
+            ),
+        }
+    info["auth"] = {"enabled": auth.AUTH_ENABLED, "enforced": _auth_enforced()}
     info["note"] = (
-        "当前为 Demo，身份由请求头自报，尚未接入电商系统。"
-        "正式权限应以登录态为准；管理员可在「权限管理」里调整等级与人员授权。"
+        "已启用登录：身份来自账号，请求头不再生效。"
+        "企业账号审核通过后会生成企业库与邀请码；员工用邀请码加入企业。"
+        if _auth_enforced()
+        else "当前未强制登录（离线脚本模式），身份由请求头自报，不是安全边界。"
     )
     return info
+
+
+# ================= 登录 / 注册（M3） =================
+class RegisterIn(BaseModel):
+    username: str
+    password: str
+    account_type: str = auth.ACCOUNT_EMPLOYEE
+    display_name: str = ""
+    invite_code: str | None = None
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/register")
+def register(payload: RegisterIn) -> dict:
+    """
+    开放注册，但**一律进待审核**：
+
+    自助注册解决的是"不用管理员手工建号"，不是"注册即可用"。审核这一步
+    同时承担两件事：确认企业身份（企业账号审核通过才建库、发邀请码），
+    以及给员工分配角色（角色决定等级，等级决定能看什么）。
+    """
+    if not auth.AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="当前未启用登录")
+    try:
+        user = auth.create_user(
+            username=payload.username,
+            password=payload.password,
+            account_type=payload.account_type,
+            display_name=payload.display_name,
+            invite_code=payload.invite_code,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "status": auth.STATUS_PENDING,
+        "message": (
+            "注册成功，等待系统管理员审核"
+            if user["account_type"] == auth.ACCOUNT_ENTERPRISE
+            else "注册成功，等待企业管理员审核"
+        ),
+        "username": user["username"],
+        "account_type": user["account_type"],
+        "status_label": user["status_label"],
+    }
+
+
+@app.post("/auth/login")
+def login(payload: LoginIn, response: Response) -> dict:
+    """登录：校验密码 → 发会话 Cookie。
+
+    待审核账号**允许登录**：登录后能看到「等待审核」。
+    拦在登录这一步，用户只会以为自己的密码记错了。
+    """
+    if not auth.AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="当前未启用登录")
+    try:
+        user = auth.authenticate(payload.username, payload.password)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
+
+    token = auth.create_session(user["id"])
+    account = auth.resolve_session(token)
+    if account is None:  # 理论上不可能，除非账号在两步之间被停用
+        raise HTTPException(status_code=403, detail="该账号不可用")
+    auth.set_current_account(account)
+    response.set_cookie(
+        auth.SESSION_COOKIE,
+        token,
+        max_age=auth.SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    logger.info("登录成功: %s（%s）", account["username"], account["status"])
+    return {
+        "status": "ok",
+        "username": account["username"],
+        "display_name": account["display_name"],
+        "role": account["role"],
+        "account_status": account["status"],
+        "status_label": account["status_label"],
+        "is_system_admin": account["is_system_admin"],
+        "is_enterprise_admin": account["is_enterprise_admin"],
+    }
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response) -> dict:
+    """退出：删服务端会话 + 清 Cookie（只清 Cookie 不算退出，令牌仍可用）"""
+    auth.revoke_session(request.cookies.get(auth.SESSION_COOKIE))
+    auth.set_current_account(None)
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return {"status": "ok"}
 
 
 # ================= 接口 =================
@@ -332,6 +595,7 @@ def qa(
     top_k 是「返回多少个用户」，只有运营及以上角色能生效，其余角色静默忽略。
     响应**按角色裁剪**后才返回（见 permissions.render 与 README 权限矩阵）。
     """
+    _require_login()
     role, user = _role(x_role), _user(x_user)
     _require(role, permissions.CAP_ANSWER, user)
 
@@ -366,6 +630,7 @@ def search(
     ⚠ 这是**最敏感**的接口：它绕过精排与生成，直接吐出知识库原文片段，
     等于"不经过任何加工地扒库"。只对系统管理员开放。
     """
+    _require_login()
     role, user = _role(x_role), _user(x_user)
     _require(role, permissions.CAP_RAW_SEARCH, user)
 
@@ -412,6 +677,7 @@ def stats(
     ⚠ 它等价于「免 SQL 的聚合统计」：会员等级分布、钻石占比直接给出，
     还附带画像表的字段数（等于泄露 schema 规模）。故只对系统管理员开放。
     """
+    _require_login()
     _require(_role(x_role), permissions.CAP_STATS, _user(x_user))
 
     conn = get_conn()
@@ -482,6 +748,7 @@ def index_status(
     会**静默**用旧索引检索（详见 data/new-dianshuang/README.md 6.4）。
     status: fresh（一致）/ stale（源表变了）/ unknown（无基线指纹）
     """
+    _require_login()
     _require(_role(x_role), permissions.CAP_STATS, _user(x_user))
     return index_freshness()
 
@@ -518,6 +785,7 @@ def qa_stream(
     漏一个就是一次越权，而这类漏在 code review 里极难发现，因为四个分支长得不像。
     缓存里存的是**完整结果**，裁剪只发生在发出前，所以角色不进缓存键。
     """
+    _require_login()
     role, user = _role(x_role), _user(x_user)
     _require(role, permissions.CAP_ANSWER, user)
 
@@ -646,7 +914,7 @@ def cache_stats(
     x_user: str | None = Header(default=None, alias=USER_HEADER),
 ) -> dict:
     """问答缓存命中情况——用于验证缓存是否真的生效（运维信息，仅管理员）"""
-    _require(_role(x_role), permissions.CAP_OPS, _user(x_user))
+    _require_system_admin()
     return answer_cache.stats()
 
 
@@ -656,7 +924,7 @@ def clear_cache(
     x_user: str | None = Header(default=None, alias=USER_HEADER),
 ) -> StatusResponse:
     """数据或配置更新后清空问答缓存（写操作，仅管理员）"""
-    _require(_role(x_role), permissions.CAP_OPS, _user(x_user))
+    _require_system_admin()
     answer_cache.clear()
     logger.info("问答缓存已清空")
     return {"status": "cleared"}
@@ -674,7 +942,7 @@ def admin_reload(
     x_user: str | None = Header(default=None, alias=USER_HEADER),
 ) -> StatusResponse:
     """数据更新后重建 BM25 内存索引（写操作 + 影响性能，仅管理员）"""
-    _require(_role(x_role), permissions.CAP_OPS, _user(x_user))
+    _require_system_admin()
     reload_bm25()
     return {"status": "reloaded"}
 
@@ -702,7 +970,8 @@ def get_permissions(
     目录由后端给：前端若自己写一份能力清单，加新能力时必然漏改一处。
     """
     role, user = _role(x_role), _user(x_user)
-    _require(role, permissions.CAP_OPS, user)
+    # 全局权限矩阵只有系统管理员能改：企业管理员改的是本企业的人，不是规则
+    _require_system_admin()
     view = permissions.admin_view()
     view["actor"] = {
         "role": role,
@@ -725,7 +994,7 @@ def put_permissions(
     （管理员会以为已经生效，实际某条被静默忽略）。
     """
     role, user = _role(x_role), _user(x_user)
-    _require(role, permissions.CAP_OPS, user)
+    _require_system_admin()
 
     def _apply(cur: dict) -> dict:
         cur["levels"] = cfg.levels
@@ -757,7 +1026,7 @@ def grant_permission(
         —— 让所有销售都能看全部信息
     """
     role, user = _role(x_role), _user(x_user)
-    _require(role, permissions.CAP_OPS, user)
+    _require_system_admin()
 
     level = (payload.level or "").strip().upper()
     if level not in permissions.LEVELS:
@@ -806,7 +1075,7 @@ def revoke_user_permission(
 ) -> dict:
     """撤销某个人员的等级覆盖（回到所属角色的默认等级）"""
     role, user = _role(x_role), _user(x_user)
-    _require(role, permissions.CAP_OPS, user)
+    _require_system_admin()
 
     uid = permissions.normalize_user(user_id)
     if not uid:
@@ -828,6 +1097,131 @@ def reset_permissions(
 ) -> dict:
     """恢复默认配置（= 代码里的等级表，与改造前行为一致）"""
     role, user = _role(x_role), _user(x_user)
-    _require(role, permissions.CAP_OPS, user)
+    _require_system_admin()
     new = permissions.reset_config(_actor(role, user))
     return {"status": "reset", "config": new}
+
+
+# ================= 账号与企业（管理员） =================
+# 两套管理范围，不能混：
+#   系统管理员：审核企业账号、管所有账号、改全局权限矩阵；
+#   企业管理员：只管本企业的员工（审核 / 改角色 / 停用），不能碰全局规则。
+# 企业管理员的能力来自账号标记，不来自等级——等级决定"能看什么"。
+
+# 企业管理员能给员工分配的角色（不含 admin：那是系统管理员的角色）
+_ENTERPRISE_ASSIGNABLE_ROLES = ("exec", "analyst", "ops", "cs")
+
+
+def _public_user(user: dict | None) -> dict | None:
+    """出网前去掉 password_hash —— 不该出现的字段就别出现在响应里"""
+    if user is None:
+        return None
+    keys = (
+        "id", "username", "display_name", "account_type", "account_type_label",
+        "role", "role_label", "enterprise_id", "status", "status_label",
+        "is_system_admin", "is_enterprise_admin",
+        "created_at", "reviewed_at", "reviewed_by", "last_login_at",
+    )
+    data = {k: user.get(k) for k in keys}
+    data["role_label"] = permissions.ROLE_LABELS.get(user.get("role"), user.get("role"))
+    return data
+
+
+def _check_target_scope(actor: dict, target: dict) -> None:
+    """统一的越权检查：改谁之前先确认"这是不是你能管的人" """
+    if target.get("is_system_admin"):
+        raise HTTPException(status_code=403, detail="系统管理员账号不可在此修改")
+    if not actor.get("is_system_admin"):
+        if target.get("enterprise_id") != actor.get("enterprise_id"):
+            raise HTTPException(status_code=403, detail="只能管理本企业的账号")
+        if target.get("account_type") == auth.ACCOUNT_ENTERPRISE:
+            raise HTTPException(status_code=403, detail="企业账号只能由系统管理员审核")
+
+
+@app.get("/admin/users")
+def admin_list_users() -> dict:
+    """账号列表：系统管理员看全部，企业管理员看本企业"""
+    actor = _require_manager()
+    if actor.get("is_system_admin"):
+        users = auth.list_users(None)
+        enterprises = auth.list_enterprises()
+        scope = "all"
+    else:
+        users = auth.list_users(actor["enterprise_id"])
+        ent = auth.enterprise_of(actor)
+        enterprises = [ent] if ent else []
+        scope = "enterprise"
+    return {
+        "users": [_public_user(u) for u in users],
+        "enterprises": enterprises,
+        "scope": scope,
+        "me": _public_user(actor),
+        "roles": [
+            {"value": r, "label": permissions.ROLE_LABELS[r], "level": permissions.resolve_level(r)}
+            for r in permissions.ROLES
+            if r != permissions.ROLE_GUEST
+        ],
+    }
+
+
+@app.post("/admin/users/{user_id}/approve")
+def admin_approve_user(user_id: int, payload: ApproveIn) -> dict:
+    """审核通过 + 分配角色。企业账号通过后会生成企业库与邀请码。"""
+    actor = _require_manager()
+    target = auth.find_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    _check_target_scope(actor, target)
+
+    role = (payload.role or "").strip().lower()
+    if not actor.get("is_system_admin") and role not in _ENTERPRISE_ASSIGNABLE_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail="企业管理员只能分配 管理层 / 分析师 / 运营 / 销售 角色",
+        )
+    try:
+        user = auth.approve(user_id, role, actor["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # 企业账号：把企业库注册进 DATASETS（白名单），否则第一次构建会 UnknownDataset
+    if user["account_type"] == auth.ACCOUNT_ENTERPRISE:
+        ent = auth.enterprise_of(user)
+        if ent:
+            config.register_dataset(ent["dataset"], config.enterprise_db_name(ent["id"]))
+            logger.info("企业库已注册: %s -> %s", ent["dataset"], config.enterprise_db_name(ent["id"]))
+    return {"status": "approved", "user": _public_user(user), "enterprise": auth.enterprise_of(user)}
+
+
+@app.post("/admin/users/{user_id}/role")
+def admin_set_user_role(user_id: int, payload: UserRoleIn) -> dict:
+    """改角色（角色 → 默认等级，决定这个账号能看到什么）"""
+    actor = _require_manager()
+    target = auth.find_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    _check_target_scope(actor, target)
+
+    role = (payload.role or "").strip().lower()
+    if not actor.get("is_system_admin") and role not in _ENTERPRISE_ASSIGNABLE_ROLES:
+        raise HTTPException(status_code=400, detail="企业管理员只能分配 管理层 / 分析师 / 运营 / 销售 角色")
+    try:
+        user = auth.set_role(user_id, role, actor["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "ok", "user": _public_user(user)}
+
+
+@app.post("/admin/users/{user_id}/status")
+def admin_set_user_status(user_id: int, payload: UserStatusIn) -> dict:
+    """启用 / 停用账号（停用后会话立即失效：鉴权每请求都查状态）"""
+    actor = _require_manager()
+    target = auth.find_user_by_id(user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    _check_target_scope(actor, target)
+    try:
+        user = auth.set_status(user_id, (payload.status or "").strip().lower(), actor["username"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "ok", "user": _public_user(user)}

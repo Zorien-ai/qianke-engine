@@ -61,6 +61,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from rag_demo import auth
+
 # 复用现有切分逻辑（无 torch / 无数据库副作用），保证「预估分块数」与真实入库口径一致
 from rag_demo.splitter import split_wiki_documents
 
@@ -115,6 +117,44 @@ def _read_sample_files() -> list[tuple[str, bytes]]:
 # 接口前缀只在这里写一次：8000 与独立调试服务共用同一个 router，
 # 前端因此只需要认一套路径（见模块 docstring 的路径约定）。
 router = APIRouter(prefix="/api/wizard", tags=["wizard"])
+
+
+# ================= 登录态与企业数据（M3） =================
+# 8002 的独立调试服务没有登录态：`auth.current_account()` 为 None 时保持 M2 行为
+# （数据集由请求参数决定）。正式服务（8000）上数据集**由账号推导**——
+# 前端传什么都不会被采纳，否则「切到别人的库」只是一个请求体字段的距离。
+def _account() -> dict | None:
+    return auth.current_account()
+
+
+def _scope_dataset(requested: str) -> str:
+    """登录态下：企业账号 → 本企业库；系统管理员 → 调试库；未登录沿用请求值"""
+    acct = _account()
+    if not acct:
+        return requested
+    from rag_demo import config
+
+    if acct.get("is_system_admin"):
+        return config.ADMIN_DEBUG_DATASET
+    dataset = acct.get("dataset")
+    if not dataset:
+        raise HTTPException(status_code=403, detail="该账号还没有可用数据空间，请联系管理员")
+    return dataset
+
+
+def _require_upload(upload_id: str) -> dict | None:
+    """
+    上传批次归属校验：同企业的人可用、系统管理员可用，其余一律 403
+
+    批次号是 12 位随机串，但"猜不到"不能当权限用——同一个企业内也应该
+    按批次归属判，而不是"只要知道 id 就能构建"。
+    """
+    acct = _account()
+    if acct is None:
+        return None
+    if not auth.can_access_upload(acct, upload_id):
+        raise HTTPException(status_code=403, detail="无权访问该上传批次")
+    return acct
 
 app = FastAPI(title="MVP 向导（独立调试服务）", version="0.2.0")
 app.mount("/static/wizard", StaticFiles(directory=STATIC_DIR), name="wizard-static")
@@ -415,6 +455,11 @@ async def upload(
     except uploads.UploadError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    # 记住这批数据属于谁：构建/查询/读取状态都要按它校验
+    acct = _account()
+    if acct:
+        auth.bind_upload(uid, acct)
+
     state = _state_payload(uid)
     state["rejected"] = rejected
     if rejected and not (state["csv_files"] or state["md_files"]):
@@ -428,6 +473,7 @@ async def upload(
 @router.post("/upload/remove")
 def remove_file(req: RemoveFileRequest) -> dict:
     """从批次里移除一个文件（服务端删盘上的那份，前端不用重传剩下的）"""
+    _require_upload(req.upload_id)
     try:
         uploads.remove(req.upload_id, req.name)
         csv_paths, md_paths = uploads.paths(req.upload_id)
@@ -436,6 +482,7 @@ def remove_file(req: RemoveFileRequest) -> dict:
 
     # 删光了就连批次一起消失（uploads.remove 已经清了目录），返回空状态让前端能继续渲染
     if not csv_paths and not md_paths:
+        auth.unbind_upload(req.upload_id)
         return _empty_state(req.upload_id)
     return _state_payload(req.upload_id)
 
@@ -443,6 +490,7 @@ def remove_file(req: RemoveFileRequest) -> dict:
 @router.get("/upload/{upload_id}")
 def upload_state(upload_id: str) -> dict:
     """取批次当前状态（页面刷新后恢复用）"""
+    _require_upload(upload_id)
     return _state_payload(upload_id)
 
 
@@ -450,6 +498,9 @@ def upload_state(upload_id: str) -> dict:
 def sample() -> dict:
     """用仓库自带的真实数据填满（走与真人上传完全相同的那条落盘/解析路径）"""
     uid, rejected = uploads.save(None, _read_sample_files())
+    acct = _account()
+    if acct:
+        auth.bind_upload(uid, acct)
     state = _state_payload(uid)
     state["rejected"] = rejected
     logger.info("[上传] 示例数据已填满：批次 %s", uid)
@@ -614,11 +665,27 @@ def build(req: BuildRequest) -> dict:
     from rag_demo.db.connection import dataset_lock
     from rag_demo.mvp.builder import resolve_dataset
 
+    _require_upload(req.upload_id)
+    # 登录态下数据集由账号推导（企业库 / 管理员调试库），前端传的 dataset 不采纳
+    req.dataset = _scope_dataset(req.dataset)
     try:
         dataset = resolve_dataset(req.dataset)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     req.dataset = dataset
+
+    # 企业库在**第一次构建**时才真正 CREATE DATABASE（见 db/provision.py）：
+    # 审核通过只是登记数据集名，建库这种重操作不该挂在一次点击上。
+    from rag_demo.config import ENTERPRISE_DATASET_PREFIX
+    if dataset.startswith(ENTERPRISE_DATASET_PREFIX):
+        from rag_demo.db.provision import ensure_dataset_ready
+        try:
+            ensure_dataset_ready(dataset)
+        except Exception as e:  # noqa: BLE001 建库失败要说人话，而不是 500 裸栈
+            logger.exception("企业库准备失败: %s", dataset)
+            raise HTTPException(
+                status_code=500, detail=f"数据空间准备失败：{e}"
+            ) from e
 
     try:
         csv_paths, md_paths = uploads.paths(req.upload_id)
@@ -712,6 +779,8 @@ def build_progress(task_id: str) -> dict:
     task = _BUILD_TASKS.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="构建任务不存在或已过期，请回到第 3 步重新点击「开始构建」。")
+    # 任务 id 也是可猜的：进度里带着数据集名与条数，仍然按批次归属校验
+    _require_upload(task.get("upload_id", ""))
     with _BUILD_LOCK:
         return deepcopy(task)
 
@@ -758,8 +827,11 @@ def query(req: QueryRequest) -> dict:
     from rag_demo.mvp.builder import resolve_dataset
     from rag_demo.pipeline import answer_question
 
+    if req.upload_id:
+        _require_upload(req.upload_id)
+    # 和构建同一个口径：查哪个库由账号决定，前端传值只在未登录（8002）时生效
     try:
-        dataset = resolve_dataset(req.dataset, action="提问")
+        dataset = resolve_dataset(_scope_dataset(req.dataset), action="提问")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -864,6 +936,7 @@ def examples(upload_id: str = "") -> dict:
     csv_paths: list[str] = []
     doc_names: list[str] = []
     if upload_id:
+        _require_upload(upload_id)
         try:
             csvs, mds = uploads.paths(upload_id)
             csv_paths = csvs
@@ -927,7 +1000,7 @@ def get_ui_config(dataset: str = "user") -> dict:
     from rag_demo.mvp.builder import resolve_dataset
 
     try:
-        target = resolve_dataset(dataset, action="配置")
+        target = resolve_dataset(_scope_dataset(dataset), action="配置")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -952,7 +1025,7 @@ def put_ui_config(req: UiConfigRequest) -> dict:
     from rag_demo.mvp.builder import resolve_dataset
 
     try:
-        target = resolve_dataset(req.dataset, action="配置")
+        target = resolve_dataset(_scope_dataset(req.dataset), action="配置")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

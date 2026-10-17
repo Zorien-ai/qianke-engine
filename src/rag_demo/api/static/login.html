@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · 用户画像 RAG 智能问答</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="hero login-hero">
+    <div class="hero-inner">
+      <h1>用户画像 RAG 智能问答</h1>
+      <p class="hero-sub">登录后使用 · 数据按企业隔离 · 权限分 L1~L4</p>
+    </div>
+  </header>
+
+  <main class="container login-container">
+    <section class="panel login-panel">
+      <div class="login-tabs">
+        <button type="button" id="tab-login" class="active">登录</button>
+        <button type="button" id="tab-register">注册</button>
+      </div>
+
+      <form id="login-form" class="login-form">
+        <label>用户名
+          <input id="login-username" autocomplete="username" placeholder="例如 admin" />
+        </label>
+        <label>密码
+          <input id="login-password" type="password" autocomplete="current-password" />
+        </label>
+        <button type="submit" class="login-submit">登录</button>
+        <div class="login-msg" id="login-msg"></div>
+      </form>
+
+      <form id="register-form" class="login-form" hidden>
+        <label>账号类型
+          <select id="reg-type">
+            <option value="enterprise">企业账号（审核通过后创建企业数据空间）</option>
+            <option value="employee">员工账号（需要企业邀请码）</option>
+          </select>
+        </label>
+        <label>用户名
+          <input id="reg-username" autocomplete="username" placeholder="3~32 位字母数字下划线" />
+        </label>
+        <label id="reg-display-label">企业名称
+          <input id="reg-display" placeholder="例如：小店科技" />
+        </label>
+        <label id="reg-invite-label" hidden>企业邀请码
+          <input id="reg-invite" placeholder="向企业管理员索取，例如 ABCD2345" />
+        </label>
+        <label>密码
+          <input id="reg-password" type="password" autocomplete="new-password" placeholder="至少 6 位" />
+        </label>
+        <button type="submit" class="login-submit">注册（待审核）</button>
+        <div class="login-msg" id="reg-msg"></div>
+      </form>
+
+      <p class="login-note">
+        注册后需审核：<strong>企业账号</strong>由系统管理员审核，通过后自动创建企业库并生成邀请码；
+        <strong>员工账号</strong>由所属企业管理员审核并分配角色。审核期间可以登录，但看不到业务数据。
+      </p>
+    </section>
+  </main>
+
+  <script src="/static/login.js"></script>
+</body>
+</html>

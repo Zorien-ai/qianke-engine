@@ -28,12 +28,33 @@
 """
 import os
 
-from fastapi import APIRouter, FastAPI
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from rag_demo import auth
 from rag_demo.mvp.app import STATIC_DIR as WIZARD_STATIC_DIR
 from rag_demo.mvp.app import router as wizard_api
+
+
+def require_login(request: Request) -> None:
+    """
+    向导接口的登录闸门（M3）
+
+    挂在 router 级依赖上而不是逐个端点加：10 个端点漏一个就是一次越权，
+    而"哪个漏了"在 code review 里极难看出来。
+
+    待审核账号：401/403 分开是有意的——401 让前端跳登录页，
+    403 让前端显示"等待审核"，两者用户的下一步动作完全不同。
+    """
+    if not auth.AUTH_ENABLED:
+        return
+    account = auth.current_account()
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    if account.get("status") != auth.STATUS_ACTIVE:
+        raise HTTPException(status_code=403, detail="账号待审核：通过后才能上传与查询")
+
 
 # 页面与接口分两个 router：接口那个（wizard_api）自带 /api/wizard 前缀且
 # 带 OpenAPI 标签，页面这条不需要进文档，混在一起会让 /docs 里多出一个空的标签组。
@@ -41,8 +62,10 @@ _page = APIRouter()
 
 
 @_page.get("/wizard", include_in_schema=False)
-def wizard_page() -> FileResponse:
-    """四步向导页（上传 → 确认 → 构建 → 查询）"""
+def wizard_page() -> Response:
+    """四步向导页（上传 → 确认 → 构建 → 查询）；未登录先登录"""
+    if auth.AUTH_ENABLED and auth.current_account() is None:
+        return RedirectResponse("/login", status_code=302)
     return FileResponse(os.path.join(WIZARD_STATIC_DIR, "wizard.html"))
 
 
@@ -54,4 +77,5 @@ def register_wizard(app: FastAPI) -> None:
         name="wizard-static",
     )
     app.include_router(_page)
-    app.include_router(wizard_api)
+    # 登录闸门：`/api/wizard/*` 全部要求登录态（独立调试服务 8002 不走这里）
+    app.include_router(wizard_api, dependencies=[Depends(require_login)])

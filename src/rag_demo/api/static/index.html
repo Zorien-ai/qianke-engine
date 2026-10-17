@@ -13,13 +13,12 @@
       <p class="hero-sub">
         向量召回 + BM25 + RRF 融合 · bge-reranker-v2-m3 精排 · 意图路由分流 Text2SQL
       </p>
-      <!-- Demo 用身份切换器。生产环境身份应来自登录态，不该由页面自选 -->
-      <div class="role-bar">
-        <label for="role-select">当前身份</label>
-        <select id="role-select" title="Demo 切换器：生产环境的身份应来自登录态，而不是页面自选"></select>
-        <label for="user-input" title="Demo：模拟指定人员。管理员可在「权限管理」里对某个用户单独授权，覆盖角色默认等级">用户</label>
-        <input id="user-input" placeholder="可留空" autocomplete="off" />
+      <!-- 身份来自登录态（M3），页面不再提供身份切换 -->
+      <div class="role-bar" id="account-bar" hidden>
+        <span class="account-name" id="account-name"></span>
         <span class="level-badge" id="level-badge" hidden></span>
+        <span class="account-ent" id="account-ent" hidden></span>
+        <button type="button" class="logout-btn" id="logout-btn">退出登录</button>
         <span class="role-note" id="role-note"></span>
       </div>
     </div>
@@ -38,6 +37,24 @@
         <div class="stat-card is-loading"></div>
         <div class="stat-card is-loading"></div>
       </div>
+    </section>
+
+    <!-- 账号管理：系统管理员管全部账号；企业管理员只管本企业员工 -->
+    <section class="panel" id="accounts-panel" hidden>
+      <div class="panel-head">
+        <h2>账号管理</h2>
+        <span class="panel-tag" id="accounts-status">审核 · 角色</span>
+      </div>
+      <p class="perm-intro" id="accounts-intro">
+        注册后需审核：企业账号由系统管理员审核（通过后创建企业库并生成邀请码）；
+        员工账号由所属企业管理员审核并分配角色。角色决定默认等级 → 决定能看到什么。
+      </p>
+      <div class="enterprise-box" id="enterprise-box" hidden>
+        企业数据空间：<b id="ent-name"></b>
+        · 邀请码 <code id="ent-code"></code>
+        <span class="pu-meta">员工注册时填写，可发给同事</span>
+      </div>
+      <div class="accounts-list" id="accounts-list"></div>
     </section>
 
     <!-- 权限管理：仅具备「运维 / 权限管理」能力的身份可见（默认只有管理员） -->
