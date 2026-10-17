@@ -21,6 +21,12 @@
 ⚠ 自己 new 的 threading.Thread **不会**继承 contextvar（构建线程就是这种）。
   那里必须显式 use_dataset("user")，否则它会安静地连回默认的 demo 库，
   而构建的第一步就是 TRUNCATE——那正好会把评测基线和 demo 一起清掉。
+
+⚠ **线程池同理**（ThreadPoolExecutor.submit 一样不会把上下文带过去）。
+  检索就是在线程池里并行跑的，它在提交时用 contextvars.copy_context().run
+  把当前上下文带进去（见 retrieval/query_processor.search_variants 的注释）。
+  漏了这一句不会报错：表现为「用 demo 的数据回答 user 的问题」——
+  答案看着很正常，只是不是他那批数据的。
 """
 import contextlib
 import contextvars
@@ -213,9 +219,15 @@ def dataset_lock(dataset: str | None = None) -> threading.RLock:
     INSERT 并 commit，若此时另一个线程拿着同一条连接跑查询，会撞上
     「another command is already in progress」——而且是在用户点查询的瞬间随机炸。
 
-    所以约定：**构建期间由构建线程持锁，查询侧用 acquire(blocking=False) 试探**，
-    拿不到就明确回「正在构建，暂时不能查询」，而不是硬闯。
+    所以约定：**谁在动这个数据集，谁就持锁一整段**——构建线程从第一行持到结束，
+    查询线程从试探成功持到答案生成完（**不是试探一下就放**）。
+    拿不到锁的一方立刻明确回绝（构建回 409、查询回「正在重建」），而不是硬闯。
     这既避免了崩溃，也正好符合产品的期望（构建中本来就不该查询）。
+
+    ⚠ 查询从「试探一下就放」改成「整段持有」是 M2 第 4 步的改动：
+    在此之前向导的答案是内存里的假文本，试探完就放没有代价；
+    接上真实 pipeline 后一次问答要读库十几秒，那个窗口足以让构建挤进来，
+    两条线程共用同一条连接——崩溃变成随机的，且在用户点击的瞬间才发生。
     """
     with _locks_guard:
         name = _resolve(dataset)

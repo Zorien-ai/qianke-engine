@@ -3,6 +3,10 @@
  * 这一层只做「取数据 + 渲染」，不写业务规则：字段怎么认、几行、什么编码、
  * 进度怎么算、答案从哪来，全部由服务端给出（见 rag_demo/mvp/app.py）。
  *
+ * M2 第 4 块：**第 4 步的答案是真实检索 + 生成出来的**。
+ *   页面不拼答案、也不猜来源，只按服务端给的 route / sources / elapsed_ms 渲染——
+ *   正文里的 [来源N] 与下方来源卡片是同一个下标（同一套标记约定见首页 app.js）。
+ *
  * M2 改动：**文件不再在浏览器里解析**。
  *   M1 是自己解码文件、按换行数行数、按逗号数列名，再把结果发给服务端——
  *   服务端从头到尾没见过文件本身，行数只能写「约」，编码判断还散在前端。
@@ -20,9 +24,16 @@ const state = {
   mdFiles: [],       // {name, size, encoding, chars}
   analysis: null,    // 上传接口返回的完整状态（字段识别 + 文档结构 + 汇总）
   taskId: null,
+  // 最近一次构建**实际写入**的那个库（第 3 步的响应里带回来）。
+  // 提问必须带上它：构建到 test 而查询默认去 user，会查到另一个库上——
+  // 表现是「刚构建完，问什么都答不出来」，而且没有任何报错。
+  dataset: "user",
   pollTimer: null,
   history: [],       // {question, answer, sources, time}
 };
+
+// 数据集 → 给人看的话。用户不需要知道库名，只需要知道自己在查哪批数据
+const DATASET_LABEL = { user: "你的数据", test: "试验库" };
 
 let maxStep = 1; // 已经走到过的最远步骤，决定步骤条能回退到哪
 
@@ -330,6 +341,8 @@ async function startBuild() {
   try {
     const res = await api("/api/wizard/build", { method: "POST", body: JSON.stringify(buildPayload()) });
     state.taskId = res.task_id;
+    // 记住这次到底写进了哪个库：提问要查的就是它（见 state.dataset 的注释）
+    state.dataset = res.dataset || "user";
     el("progress-wrap").hidden = false;
     el("build-intro").hidden = true;
     renderProgress({ percent: 0, steps: [], note: "正在准备…", processed: 0, total: 0 });
@@ -457,16 +470,24 @@ async function ask(question) {
   const btnText = btn.querySelector(".btn-text");
   btn.disabled = true;
   spinner.hidden = false;
-  btnText.textContent = "思考中…";
+  btnText.textContent = "检索并生成中…";
+  // 真实问答是十几秒级的（检索 + 生成，9~25s）。等待期间必须说清楚在等什么，
+  // 否则「点了没反应」会被当成坏了——这比慢本身更伤人。
+  showMsg(msg, `正在检索${DATASET_LABEL[state.dataset] || "数据"}并生成答案（约 10~25 秒，请稍候）…`, "is-info");
 
   try {
     const data = await api("/api/wizard/query", {
       method: "POST",
-      body: JSON.stringify({ question: q, upload_id: state.uploadId }),
+      body: JSON.stringify({
+        question: q,
+        upload_id: state.uploadId,
+        dataset: state.dataset,   // 必须与最近一次构建写入的库一致
+      }),
     });
     renderAnswer(q, data);
     pushHistory(q, data);
   } catch (e) {
+    clearMsg(msg);
     showMsg(msg, e.message, "is-error");
   } finally {
     btn.disabled = false;
@@ -499,13 +520,38 @@ function jumpToSource(idx) {
   setTimeout(() => node.classList.remove("is-flash"), 1600);
 }
 
+/* 答案渲染。字段口径与首页（api/static/app.js）一致：正文里的 [来源N] 与
+ * sources[i] 是同一个下标，来源项用 source（哪条资料）+ text（片段）。 */
 function renderAnswer(question, data) {
   const sources = data.sources || [];
+  const route = data.route || "rag";
+  const msg = el("msg-step4");
   el("result").hidden = false;
-  el("result-meta").textContent = data.busy
-    ? "构建进行中 · 本次查询已被拒绝"
-    : `${(data.elapsed_ms / 1000).toFixed(1)} 秒 · 检索类问题` + (data.degraded ? " · 无引用来源" : "");
-  el("answer-body").innerHTML = formatAnswer(data.answer, sources.length > 0);
+
+  // 三种「答不出来」必须各说各的：它们该找的人完全不同
+  //   检索/数据侧挂了 -> 查库；大模型侧挂了 -> 查 LLM 接口；闲聊 -> 他本来就问错了
+  if (route === "error") {
+    showMsg(msg, "这次没走通检索（数据或索引侧的问题），下面是兜底说明，不是检索出来的结论。", "is-warn");
+  } else if (route === "llm_error") {
+    showMsg(msg, "检索到的资料没问题，但生成答案的大模型没响应。稍后重问即可，不用重新构建。", "is-warn");
+  } else if (route === "chitchat") {
+    showMsg(msg, "这句话被判定为闲聊/域外，没有去检索你的数据。", "is-info");
+  } else {
+    clearMsg(msg);
+  }
+
+  if (data.busy) {
+    el("result-meta").textContent = "构建进行中 · 本次查询已被拒绝";
+  } else {
+    const bits = [];
+    if (route === "rag") bits.push("检索类问题");
+    if (data.cached) bits.push("命中缓存（同问题同参数，直接复用上次结果）");
+    bits.push(`${(data.elapsed_ms / 1000).toFixed(1)} 秒`);
+    bits.push(DATASET_LABEL[data.dataset] || data.dataset || "");
+    el("result-meta").textContent = bits.filter(Boolean).join(" · ");
+  }
+
+  el("answer-body").innerHTML = formatAnswer(data.answer || "", sources.length > 0);
 
   const box = el("sources-box");
   if (sources.length) {
@@ -513,9 +559,9 @@ function renderAnswer(question, data) {
     el("sources-list").innerHTML = sources.map((s, i) => `
       <div class="source-item" id="src-${i + 1}">
         <div class="source-head">
-          <span class="source-idx">[来源${i + 1}]</span>${escapeHtml(s.doc)} · ${escapeHtml(s.section)}
+          <span class="source-idx">[来源${i + 1}]</span>${escapeHtml(s.source || "")}
         </div>
-        <div class="source-snippet">${escapeHtml(s.snippet)}</div>
+        <div class="source-snippet">${escapeHtml(s.text || "")}</div>
       </div>`).join("");
     box.hidden = false;
   } else {

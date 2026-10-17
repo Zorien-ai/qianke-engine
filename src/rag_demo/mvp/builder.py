@@ -75,13 +75,19 @@ class BuildInputs:
         self.simulate_failure = simulate_failure
 
 
-def resolve_dataset(name: str | None) -> str:
-    """校验目标数据集；不在白名单就拒绝（含 demo）"""
+def resolve_dataset(name: str | None, action: str = "构建") -> str:
+    """
+    校验目标数据集；不在白名单就拒绝（含 demo）
+
+    action 只影响报错里的措辞：查询侧也要过同一道白名单，但「不能构建到 demo」
+    对提问的人来说是句错话——用户会以为自己点错了按钮。
+    """
     target = (name or "user").strip() or "user"
     if target not in BUILDABLE_DATASETS:
         raise ValueError(
-            f"不能构建到数据集 {target!r}。可选的只有 {list(BUILDABLE_DATASETS)}——"
-            f"demo 是演示底座与评测基线，只由仓库自带数据重建，不接受用户上传的内容。"
+            f"向导只服务 {list(BUILDABLE_DATASETS)} 这两个数据集，不能{action} {target!r}。"
+            f"demo 是演示底座与评测基线，它自己的问答在首页（/qa），不走向导；"
+            f"用户上传的数据一律进 user，test 是用来试跑的试验库。"
         )
     return target
 
@@ -100,6 +106,7 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
     本包（mvp/）同时被一个「只想看界面」的毫秒级调试服务使用，
     模块级 import 会把它的启动从毫秒级拖到十几秒。
     """
+    from rag_demo.cache import answer_cache
     from rag_demo.ingest_data import column_map_from_confirmed, ingest_transactions
     from rag_demo.ingest_docs import ingest_documents
     from rag_demo.mvp import uploads
@@ -204,6 +211,12 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
             # 内存里的 BM25 索引按数据集各存一份，重建后必须刷新，
             # 否则查询仍用旧语料（数据更新了、答案还是旧的，且不报错）
             reload_bm25(dataset)
+
+            # 问答缓存同理，而且它更隐蔽：缓存键是 (数据集, 问题, 检索参数)，
+            # **不含任何数据版本**。不在这里清，重建后问同一个问题会秒回上一版数据
+            # 算出来的答案——用户刚换了一批数据，看到的却是旧结论，且没有任何提示。
+            # 整体清空的代价只是让另一个数据集的缓存重算一遍（见 cache.py 的说明）。
+            answer_cache.clear()
 
             result = {
                 "dataset": dataset,

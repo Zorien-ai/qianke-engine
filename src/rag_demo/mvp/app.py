@@ -14,13 +14,14 @@
     app    —— 一个自包含的独立服务，给「只想看界面」时用：不 import
               config / torch / 数据库，启动毫秒级，离线也能演示。
 
-M2 进度（哪一步是真的，哪一步还是假的）：
+M2 进度（四步都已接真）：
     第 1 步 上传   **真的**：multipart 落盘 → 统一转 UTF-8 → pandas 真读出行数与列名
     第 2 步 字段   **真的**：同义词字典匹配，key 与入库口径同一套（FIELD_DEFS）
     第 3 步 构建   **真的**：真 ingest 写库（writes_to 守卫 + dataset_lock 互斥 +
                    真实进度事件）。编排在 builder.py，那里有完整说明
-    第 4 步 查询   答案还是内置样例（下一步接真实检索链路），
-                   但「构建期间谢绝查询」是真判断（同数据集试探锁）
+    第 4 步 查询   **真的**：走与首页 /qa 同一条 pipeline（检索 → 精排 → 生成），
+                   答案与 sources 都来自它；按请求切到用户构建的那个数据集。
+                   构建期间谢绝查询由真锁判定（整段问答持锁，原因见 query 的注释）
 
 写库前的纪律（M2 首次真实构建的约束）：
     真实构建只允许写 user / test 两个数据集（builder.BUILDABLE_DATASETS）；
@@ -65,11 +66,9 @@ from rag_demo.splitter import split_wiki_documents
 
 from rag_demo.mvp import uploads
 from rag_demo.mvp.mock_data import (
-    ANSWER_BANK,
     BUILD_STEPS,
     EXAMPLE_COMMON,
     EXAMPLE_TEMPLATES,
-    FALLBACK_ANSWER,
     FIELD_DEFS,
     match_column,
 )
@@ -302,7 +301,9 @@ class QueryRequest(BaseModel):
     # 但不该由前端把文档清单再报一遍——那是可以伪造的重复信息
     upload_id: str | None = None
     # 查哪个数据集的数据（与构建同一个白名单）：决定「构建期间谢绝查询」这条规则
-    # 该对谁生效——构建 user 不该挡住查 demo 的人
+    # 该对谁生效——构建 user 不该挡住查 demo 的人。
+    # 前端会带上**最近一次构建实际写入的那个库**（第 3 步的响应里就有），
+    # 否则「构建到 test、查询默认 user」会查到另一个库上，答案对不上数据。
     dataset: str = "user"
 
 
@@ -616,14 +617,18 @@ def build(req: BuildRequest) -> dict:
     if not csv_paths:
         logger.info("构建任务不含 CSV，仅文档问答")
 
-    # 非阻塞试探：拿不到锁说明该数据集正在构建。
+    # 非阻塞试探：拿不到锁说明该数据集有别的活在干（构建，或有人正在提问——
+    # 第 4 步起一次问答也整段持锁，它要真读库十几秒）。
     # 这里**只试探不放锁**——RLock 只能由持有它的线程释放，
     # 请求线程替构建线程放锁会直接抛 RuntimeError。真正的持锁发生在构建线程里。
     lock = dataset_lock(dataset)
     if not lock.acquire(blocking=False):
         raise HTTPException(
             status_code=409,
-            detail=f"数据集 {dataset} 正在构建中，请等这次构建完成再开始新的构建。",
+            detail=(
+                f"数据集 {dataset} 正忙：要么有一次构建在进行，"
+                f"要么有人正在提问（一次问答要十几秒）。等这次结束再开始新的构建。"
+            ),
         )
     lock.release()
 
@@ -676,29 +681,33 @@ def build_progress(task_id: str) -> dict:
         return deepcopy(task)
 
 
-# ================= 3. 查询 =================
-def _pick_answer(question: str) -> dict:
-    """关键词命中打分，取命中最多的那条；都没命中走兜底话术"""
-    best, best_score = None, 0
-    for item in ANSWER_BANK:
-        score = sum(1 for kw in item["keywords"] if kw in question)
-        if score > best_score:
-            best, best_score = item, score
-    return best or FALLBACK_ANSWER
-
-
+# ================= 4. 查询（真实问答） =================
 @router.post("/query")
 def query(req: QueryRequest) -> dict:
     """
-    假答案 + **真的互斥判断**：构建期间谢绝查询
+    第 4 步：**真实问答**（M2）
 
-    答案本身还是内置样例（第 4 步的真实链路是下一步），但「构建中不能查」这条
-    不是模拟的：构建线程持有该数据集的锁，这里用 acquire(blocking=False) 试探。
-    为什么必须有这道闸——psycopg2 连接不是线程安全的，构建每批 INSERT 时另一个
-    线程查询会撞「another command is already in progress」；而且画像与索引
-    正在被重写，此刻的答案对应的是「改到一半的数据」，说不清是新的还是旧的。
+    与首页问答（/qa）走**同一条 pipeline**：意图路由 → 多路检索 → 精排 → 生成，
+    答案与 sources 都是现成链路产出的，这里不另写一套。
 
-    只挡**同一个数据集**：构建 user 不该影响查 demo 的人（锁是按数据集分的）。
+    向导比 /qa 只多做两件事：
+
+    **① 切数据集**。pipeline / 检索 / SQL 里几十处 get_conn() 都不传参数，
+    靠 contextvar 决定去哪个库（分库改造为什么这么做，见 db/connection.py）。
+    所以「查用户自己刚构建的数据」在这里就是一句 use_dataset —— 切换只在本次
+    请求内生效，请求结束就还原（同步端点跑在线程池里，contextvar 跟着请求走）。
+
+    **② 整段问答持锁**。构建期间谢绝查询这条规则从 M1 就在，但当时答案是一段
+    内存里的假文本，试探一下就放锁没有代价；现在一次问答要**真读库十几秒**，
+    「试探完就放锁」会留下一个十几秒的窗口——这期间有人点「重新构建」，
+    两条线程就会共用同一条 psycopg2 连接（它非线程安全），
+    报错是在用户点击的瞬间随机炸的「another command is already in progress」。
+    而且画像与索引正在被重写时，答出来的东西对应的是「改到一半的数据」，
+    说不清是新的还是旧的。锁按数据集分：构建 user 不影响查 demo 的人。
+
+    ⚠ 本接口**不做按角色的裁剪**（permissions.render）：向导是一条独立的业务线，
+    操作者是「这批数据的主人」——他手里本来就有 CSV 和 .md 原件，来源片段对他是
+    自查凭据而不是越权信息。等向导接入正式登录态时再统一收口。
     """
     question = (req.question or "").strip()
     if not question:
@@ -706,9 +715,20 @@ def query(req: QueryRequest) -> dict:
     if len(question) > 200:
         raise HTTPException(status_code=400, detail="问题太长了（超过 200 字），请精简后再问。")
 
-    from rag_demo.db.connection import dataset_lock
+    from rag_demo.db.connection import (
+        dataset_lock,
+        reset_dataset,
+        use_dataset,
+    )
+    from rag_demo.mvp.builder import resolve_dataset
+    from rag_demo.pipeline import answer_question
 
-    lock = dataset_lock(req.dataset)
+    try:
+        dataset = resolve_dataset(req.dataset, action="提问")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    lock = dataset_lock(dataset)
     if not lock.acquire(blocking=False):
         return {
             "answer": (
@@ -716,48 +736,47 @@ def query(req: QueryRequest) -> dict:
                 "这样避免回答到「改到一半的数据」。等第 3 步的进度到 100% 再问即可。"
             ),
             "sources": [],
-            "kind": "busy",
+            "route": "busy",
             "busy": True,
-            "degraded": True,
+            "cached": False,
+            "dataset": dataset,
             "elapsed_ms": 0,
-            "used_fields": [],
         }
-    lock.release()
 
     started = time.time()
-    time.sleep(1.2)
-    picked = _pick_answer(question)
-
-    # 文档清单从**磁盘**取（用户可能刷新过页面、服务可能重启过），
-    # 只有「确认过的字段」是流程中间态，才留在内存里
-    doc_names: list[str] = []
-    if req.upload_id:
-        try:
-            doc_names = [os.path.basename(p) for p in uploads.paths(req.upload_id)[1]]
-        except uploads.UploadError:
-            logger.info("查询引用了不存在的上传批次 %s，按「无文档」处理", req.upload_id)
-    with _STATE_LOCK:
-        configured = {
-            k: v for k, v in (_CONFIRMED_FIELDS.get(req.upload_id or "") or {}).items() if v
-        }
-
-    # 没有任何文档时，答案里的来源指向空气——提前说清楚，比给一个没有出处的答案诚实
-    if not doc_names:
+    token = use_dataset(dataset)
+    try:
+        result = answer_question(question)
+    except Exception as e:  # noqa: BLE001 问答失败要给用户一句人话，不能是 500 裸栈
+        # 典型触发：这个数据集从来没构建过（检索索引表为空，BM25 语料加载直接抛）。
+        # 那是「该做的事没做」，不是系统故障，所以原样说清楚 + 指出下一步。
+        logger.exception("向导问答失败（数据集 %s）", dataset)
         return {
-            "answer": "当前还没有构建任何规则文档，所以只能给出通用说明、无法提供引用来源。",
+            "answer": (
+                f"这次没能答出来：{e}\n\n"
+                "如果这个数据集还没构建过（或上次构建失败），请回到第 3 步重新构建一次。"
+            ),
             "sources": [],
-            "kind": "retrieval",
+            "route": "error",
+            "busy": False,
+            "cached": False,
+            "dataset": dataset,
             "elapsed_ms": int((time.time() - started) * 1000),
-            "degraded": True,
         }
+    finally:
+        reset_dataset(token)
+        lock.release()
 
     return {
-        "answer": picked["answer"],
-        "sources": picked["sources"],
-        "kind": "retrieval",
+        "answer": result.get("answer", ""),
+        # sources 直接用生成层的产出（编号 + 来源名 + 片段），
+        # 正文里的 [来源N] 与它的下标一一对应，前端据此做「点引用跳出处」
+        "sources": result.get("sources", []),
+        "route": result.get("route"),
+        "busy": False,
+        "cached": bool(result.get("cached")),
+        "dataset": dataset,
         "elapsed_ms": int((time.time() - started) * 1000),
-        "degraded": False,
-        "used_fields": list(configured.keys()),
     }
 
 

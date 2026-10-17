@@ -25,6 +25,7 @@
 ⚠ 路由复核的作用范围有限：它只能捞「被判成 RAG 的漏判」。
 被判成 chitchat 的问题在 router.route() 阶段就分流走了，压根到不了这里。
 """
+import contextvars
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -411,12 +412,22 @@ def search_variants(
     get_model()
 
     # ① 各路并行检索
+    #
+    # ⚠ 提交时必须**把当前上下文拷一份带进去**。concurrent.futures 的线程**不继承
+    # contextvar**，也就是说这些检索线程会拿到默认值——而「当前数据集」正是靠
+    # contextvar 传的（见 db/connection.py）。不拷，所有检索都会安静地打到默认数据集
+    # （demo）上：/qa 上看不出任何异常（它本来就查 demo），但向导切到 user/test 之后
+    # 会「用别人的数据回答我的问题」，且没有任何报错。2026-10-17 实测踩到。
+    #
+    # 必须**逐任务** copy：一个 Context 不能被两个线程同时进入，
+    # 共用一份会让第二路直接抛 RuntimeError。
     per_variant_hits: dict[tuple[str, str], list[dict]] = {}
     errors: dict[tuple[str, str], str] = {}
     with ThreadPoolExecutor(max_workers=len(variants)) as pool:
         futures = {
             pool.submit(
-                _retrieve_one, strategy, text, top_k, dept, keyword_mode, origin_query
+                contextvars.copy_context().run,
+                _retrieve_one, strategy, text, top_k, dept, keyword_mode, origin_query,
             ): (strategy, text)
             for strategy, text in variants
         }
