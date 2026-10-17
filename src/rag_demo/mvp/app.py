@@ -142,6 +142,25 @@ def _scope_dataset(requested: str) -> str:
     return dataset
 
 
+def _require_writer() -> dict | None:
+    """
+    能改动本企业数据的人：系统管理员或企业管理员
+
+    员工可以提问、可以看自己企业的知识库，但**不能导入 / 重建**：一次构建会
+    先清空再重写整个企业库，普通分析师点一下就把全公司的画像重建了。
+    独立调试服务（无登录态）保持 M2 行为，不做限制。
+    """
+    acct = _account()
+    if acct is None:
+        return None
+    if acct.get("is_system_admin") or acct.get("is_enterprise_admin"):
+        return acct
+    raise HTTPException(
+        status_code=403,
+        detail="只有企业管理员可以导入或重建数据，请联系本企业管理员",
+    )
+
+
 def _require_upload(upload_id: str) -> dict | None:
     """
     上传批次归属校验：同企业的人可用、系统管理员可用，其余一律 403
@@ -443,6 +462,7 @@ async def upload(
     解析失败的文件**只跳过并说明原因**，不让整次上传失败：用户拖进来 6 个文件，
     其中一个编码坏了，不该导致另外 5 个也白传。
     """
+    _require_writer()
     if not files:
         raise HTTPException(status_code=400, detail="还没有选择任何文件。")
 
@@ -473,6 +493,7 @@ async def upload(
 @router.post("/upload/remove")
 def remove_file(req: RemoveFileRequest) -> dict:
     """从批次里移除一个文件（服务端删盘上的那份，前端不用重传剩下的）"""
+    _require_writer()
     _require_upload(req.upload_id)
     try:
         uploads.remove(req.upload_id, req.name)
@@ -497,6 +518,7 @@ def upload_state(upload_id: str) -> dict:
 @router.get("/sample")
 def sample() -> dict:
     """用仓库自带的真实数据填满（走与真人上传完全相同的那条落盘/解析路径）"""
+    _require_writer()
     uid, rejected = uploads.save(None, _read_sample_files())
     acct = _account()
     if acct:
@@ -665,6 +687,7 @@ def build(req: BuildRequest) -> dict:
     from rag_demo.db.connection import dataset_lock
     from rag_demo.mvp.builder import resolve_dataset
 
+    _require_writer()
     _require_upload(req.upload_id)
     # 登录态下数据集由账号推导（企业库 / 管理员调试库），前端传的 dataset 不采纳
     req.dataset = _scope_dataset(req.dataset)
@@ -1020,6 +1043,7 @@ def put_ui_config(req: UiConfigRequest) -> dict:
     写操作走 writes_to 守卫：不声明数据集就写会落到默认的 demo（评测基线），
     这条守卫在 ingest 上已经踩过坑，配置接口不例外。
     """
+    _require_writer()
     from rag_demo.db.connection import writes_to
     from rag_demo.db.schema import read_ui_config, write_ui_config
     from rag_demo.mvp.builder import resolve_dataset

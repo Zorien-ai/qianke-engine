@@ -37,7 +37,7 @@ import random
 import secrets
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
@@ -50,12 +50,19 @@ from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache
 from rag_demo.config import (
     DEFAULT_API_ROLE,
+    DEFAULT_DATASET,
     ENABLE_API_DOCS,
     INTENT_ROUTER,
     TOP_K_PROFILE_MAX,
     TOP_K_PROFILE_MIN,
 )
-from rag_demo.db.connection import close_conn, current_dataset, get_conn
+from rag_demo.db.connection import (
+    close_conn,
+    current_dataset,
+    get_conn,
+    reset_dataset,
+    use_dataset,
+)
 from rag_demo.db.schema import index_freshness
 from rag_demo.generation.generator import (
     EVENT_ANSWER,
@@ -178,6 +185,81 @@ def _require_manager(enterprise_id: int | None = None) -> dict:
             raise HTTPException(status_code=403, detail="只能管理本企业的账号")
         return account
     raise HTTPException(status_code=403, detail="仅管理员可执行该操作")
+
+
+# ================= 租户数据空间（M3 隔离：读侧） =================
+# 为什么不让前端传 dataset / tenant_id：数据集决定「读哪个库」，属于权限而不是参数。
+# 一旦前端能传，「切到别人的库」就只差一个请求体字段。所以一律从登录账号推导：
+#
+#   系统管理员 -> demo（演示底座，也是评测基线；要看企业库请走向导）
+#   企业账号   -> 本企业库（enterprise.dataset，审核通过时生成 ent_<id>）
+#
+# 推导不出来就 403，**绝不回落 DEFAULT_DATASET**。这是 M3 头号缺陷：
+# 改造前 /qa、/search、/stats 根本不切库，企业租户提问拿到的全是 demo 的答案
+# （8110 画像 / 36 篇文档），而界面上没有任何标识——用户会当成自家数据。
+_TENANT_EMPTY = "当前租户数据为空，请先到「数据接入」上传数据并构建"
+
+
+def _tenant_dataset() -> str:
+    """当前请求该读哪个库：账号推导，前端无权指定"""
+    account = _require_login()
+    if account is None:
+        # 离线脚本模式（未强制登录）：沿用请求头语义，由调用方负责数据集
+        return current_dataset()
+    if account.get("is_system_admin"):
+        return DEFAULT_DATASET
+    dataset = account.get("dataset")
+    if not dataset:
+        raise HTTPException(
+            status_code=403,
+            detail="该账号还没有绑定数据空间，请联系企业管理员确认企业信息",
+        )
+    return dataset
+
+
+def _tenant_ready(dataset: str) -> bool:
+    """
+    这个库是不是「已经构建过」：两张核心表都在才算
+
+    审核通过只登记数据集名，真正的库要等第一次构建才建（db/provision.py）。
+    所以「有 dataset」不等于「能查」——先确认再查，才能给出「当前租户数据为空」
+    这句人话，而不是一句 psycopg2 的 database does not exist。
+    """
+    try:
+        conn = get_conn(dataset)
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT to_regclass('public.user_profile_vectors') IS NOT NULL, "
+                "to_regclass('public.wiki_vectors') IS NOT NULL"
+            )
+            profiles, wiki = cur.fetchone()
+            return bool(profiles) and bool(wiki)
+        finally:
+            conn.rollback()  # 清事务，避免连接停在 idle in transaction
+            cur.close()
+    except Exception as e:  # noqa: BLE001 库不存在 / 连不上都按「还没构建」处理
+        logger.info("租户数据空间不可用（%s）：%s", dataset, e)
+        return False
+
+
+@contextmanager
+def _tenant_scope():
+    """
+    把本次请求固定在「当前账号的数据集」上
+
+    pipeline / 检索 / SQL 里几十处 get_conn() 都不传参数，靠 contextvar 决定去哪个库
+    （分库改造的取舍见 db/connection.py）。所以切库只有 use_dataset 一句，但**必须在
+    finally 里还原**：漏掉 reset 会让同一线程上的下一个请求继续读上一个租户的库。
+    """
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    token = use_dataset(dataset)
+    try:
+        yield dataset
+    finally:
+        reset_dataset(token)
 
 
 def _require(role: str, cap: str, user: str | None = None) -> None:
@@ -735,10 +817,12 @@ def qa(
     # 「由登录身份推导部门」，届时这个参数应整体从请求模型里删掉。
     dept = req.dept if permissions.has(role, permissions.CAP_OPS, user) else None
 
-    result = answer_question(
-        req.question, dept, keyword_mode=req.retriever, profile_limit=limit,
-        deep_thinking=req.deep_thinking,
-    )
+    # 读哪个库由账号决定（_tenant_scope 内部校验并切换），前端无权指定
+    with _tenant_scope():
+        result = answer_question(
+            req.question, dept, keyword_mode=req.retriever, profile_limit=limit,
+            deep_thinking=req.deep_thinking,
+        )
     return permissions.render(result, role, user)
 
 
@@ -766,18 +850,19 @@ def search(
         return {"error": "问题不能为空"}
 
     k = max(1, min(req.top_k, 50))
-    bm_hits = bm25_search(question, top_k=k)
+    with _tenant_scope():
+        bm_hits = bm25_search(question, top_k=k)
 
-    sparse_note = ""
-    if sparse_search is None:
-        sp_hits = []
-        sparse_note = "FlagEmbedding 未安装，稀疏检索不可用"
-    else:
-        try:
-            sp_hits = sparse_search(question, top_k=k)
-        except Exception as e:  # 稀疏索引加载失败不应影响 BM25 结果展示
+        sparse_note = ""
+        if sparse_search is None:
             sp_hits = []
-            sparse_note = f"稀疏检索失败：{e}"
+            sparse_note = "FlagEmbedding 未安装，稀疏检索不可用"
+        else:
+            try:
+                sp_hits = sparse_search(question, top_k=k)
+            except Exception as e:  # 稀疏索引加载失败不应影响 BM25 结果展示
+                sp_hits = []
+                sparse_note = f"稀疏检索失败：{e}"
 
     bm_sources = {h["source"] for h in bm_hits}
     sp_sources = {h["source"] for h in sp_hits}
@@ -807,6 +892,14 @@ def stats(
     _require_login()
     _require(_role(x_role), permissions.CAP_STATS, _user(x_user))
 
+    # 概况只统计「当前账号的库」：企业管理员看到的是自己企业的规模，
+    # 而不是 demo 的 8110 —— 这里不切库，首页那张卡就在说谎。
+    with _tenant_scope():
+        return _stats_snapshot()
+
+
+def _stats_snapshot() -> dict:
+    """在「当前数据集」上取一次概况（切库由调用方负责，见 _tenant_scope）"""
     conn = get_conn()
     cur = conn.cursor()
     try:
@@ -927,7 +1020,17 @@ def qa_stream(
         return _sse("meta", permissions.render(payload, role, user) | extra)
 
     def event_stream():
+        # 读哪个库由账号决定（与 /qa 同一口径），整段生成都在这个数据集上；
+        # 无论正常结束、提前 return 还是抛异常，都必须还原 contextvar——
+        # 漏掉会让同一线程上的下一个请求继续读上一个租户的库。
+        token = None
         try:
+            dataset = _tenant_dataset()
+            if not _tenant_ready(dataset):
+                yield _sse("error", {"message": _TENANT_EMPTY})
+                return
+            token = use_dataset(dataset)
+
             # 命中缓存时直接吐完，不用走生成。
             # 键里带 deep_thinking：开与不开是两份不同的答案，不能互相命中。
             # 缓存里**不存思维链**——它只是展示物、不进答案，存下来让缓存翻倍不划算；
@@ -1039,6 +1142,9 @@ def qa_stream(
         except Exception as e:  # 流式过程中出错也要让前端知道
             logger.exception("流式问答失败")
             yield _sse("error", {"message": str(e)})
+        finally:
+            if token is not None:
+                reset_dataset(token)
 
     return StreamingResponse(
         event_stream(),
