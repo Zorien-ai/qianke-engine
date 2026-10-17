@@ -44,6 +44,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -88,6 +89,9 @@ _HASH_PREFIX = "pbkdf2_sha256"
 
 # 会话有效期：7 天。演示环境不该让人每次重启服务就重新登录。
 SESSION_TTL_SECONDS = 7 * 24 * 3600
+# 勾选「记住登录状态」时的有效期：30 天，同时把 Cookie 写成持久 Cookie
+# （不勾选就是浏览器会话 Cookie，关掉浏览器即失效）。
+REMEMBER_TTL_SECONDS = 30 * 24 * 3600
 
 _LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -128,6 +132,8 @@ CREATE TABLE IF NOT EXISTS enterprise (
 CREATE TABLE IF NOT EXISTS app_user (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     username            TEXT NOT NULL UNIQUE,
+    -- 手机号或邮箱（登录用）：邮箱存小写、手机号存 11 位纯数字，空值表示历史账号没填
+    contact             TEXT,
     display_name        TEXT NOT NULL DEFAULT '',
     password_hash       TEXT NOT NULL,
     account_type        TEXT NOT NULL,
@@ -160,6 +166,23 @@ CREATE TABLE IF NOT EXISTS upload_owner (
 """
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """
+    轻量迁移：登录页改版前建的库没有 `contact` 列（手机号 / 邮箱）
+
+    不做完整的迁移框架：本项目就一个 SQLite 文件、一张账号表，
+    加列 + 建索引足够；每次启动跑一遍是幂等的。
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(app_user)")}
+    if "contact" not in cols:
+        conn.execute("ALTER TABLE app_user ADD COLUMN contact TEXT")
+        logger.info("账号库已补 contact 列（手机号 / 邮箱登录）")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_app_user_contact "
+        "ON app_user(contact) WHERE contact IS NOT NULL AND contact <> ''"
+    )
+
+
 def _db() -> sqlite3.Connection:
     """进程内单连接 + 锁串行化（见模块注释）"""
     global _conn
@@ -169,6 +192,7 @@ def _db() -> sqlite3.Connection:
             _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
             _conn.row_factory = sqlite3.Row
             _conn.executescript(_SCHEMA)
+            _migrate(_conn)
             _conn.commit()
         return _conn
 
@@ -246,6 +270,51 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
+# ==================== 手机号 / 邮箱 ====================
+
+# 与前端 login.js 里的规则保持一致：前端即时提示，后端才是边界。
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+_PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+
+
+def normalize_contact(value: str | None) -> str | None:
+    """
+    归一化手机号 / 邮箱（空值返回 None，格式错抛 ValueError）
+
+    为什么要归一化而不是原样存：
+    - 邮箱大小写不敏感，不转小写会出现 "A@x.com" 与 "a@x.com" 两个账号；
+    - 手机号用户会带空格、连字符或 +86，存之前要变成同一个字符串。
+    """
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    if "@" in raw:
+        email = raw.lower()
+        if len(email) > 120 or not _EMAIL_RE.match(email):
+            raise ValueError("邮箱格式不正确，例如 name@example.com")
+        return email
+    digits = re.sub(r"[\s\-()]", "", raw)
+    if digits.startswith("+86"):
+        digits = digits[3:]
+    elif digits.startswith("86") and len(digits) == 13:
+        digits = digits[2:]
+    if not _PHONE_RE.match(digits):
+        raise ValueError("手机号格式不正确（11 位，1 开头）")
+    return digits
+
+
+def contact_label(value: str | None) -> str:
+    """脱敏展示：日志/提示里不该出现完整手机号与邮箱"""
+    raw = (value or "").strip()
+    if not raw:
+        return "-"
+    if "@" in raw:
+        name, _, domain = raw.partition("@")
+        head = name[:2] if len(name) > 2 else name[:1]
+        return f"{head}***@{domain}"
+    return f"{raw[:3]}****{raw[-4:]}" if len(raw) >= 8 else "***"
+
+
 # ==================== 账号 ====================
 
 
@@ -260,6 +329,30 @@ def find_user(username: str) -> dict[str, Any] | None:
 def find_user_by_id(user_id: int) -> dict[str, Any] | None:
     with _LOCK:
         row = _db().execute("SELECT * FROM app_user WHERE id = ?", (int(user_id),)).fetchone()
+        return _row_to_user(row)
+
+
+def find_user_by_login(account: str) -> dict[str, Any] | None:
+    """
+    登录标识解析：先按用户名，再按手机号 / 邮箱
+
+    顺序有意义：用户名是历史主键（`admin`、`ent220013` 这类），先查它保证
+    改版后老账号仍能用原用户名登录；手机号/邮箱是后加的可选标识。
+    """
+    account = (account or "").strip()
+    if not account:
+        return None
+    user = find_user(account)
+    if user is not None:
+        return user
+    try:
+        contact = normalize_contact(account)
+    except ValueError:
+        return None  # 既不是合法用户名也不是合法手机号/邮箱
+    if not contact:
+        return None
+    with _LOCK:
+        row = _db().execute("SELECT * FROM app_user WHERE contact = ?", (contact,)).fetchone()
         return _row_to_user(row)
 
 
@@ -286,11 +379,14 @@ def create_user(
     account_type: str,
     display_name: str = "",
     invite_code: str | None = None,
+    contact: str | None = None,
 ) -> dict[str, Any]:
     """
     注册：一律落 `pending`，角色先给最低档（审核时才分配）
 
     校验放这里而不是只在前端：前端挡的是手滑，后端挡的才是越权/脏数据。
+    `contact` 是手机号或邮箱，登录页改版后成为必填（接口层校验），
+    这里保留可选是为了离线脚本与历史数据。
     """
     username = (username or "").strip().lower()
     if not username or len(username) < 3 or len(username) > 32:
@@ -301,6 +397,7 @@ def create_user(
         raise ValueError("密码至少 6 位")
     if account_type not in ACCOUNT_TYPES:
         raise ValueError("账号类型只能是 企业 / 员工")
+    contact_value = normalize_contact(contact)
 
     enterprise_id = None
     if account_type == ACCOUNT_EMPLOYEE:
@@ -317,13 +414,18 @@ def create_user(
         conn = _db()
         if conn.execute("SELECT 1 FROM app_user WHERE username = ?", (username,)).fetchone():
             raise ValueError("用户名已被占用")
+        if contact_value and conn.execute(
+            "SELECT 1 FROM app_user WHERE contact = ?", (contact_value,)
+        ).fetchone():
+            raise ValueError("该手机号 / 邮箱已被注册")
         conn.execute(
             """INSERT INTO app_user
-               (username, display_name, password_hash, account_type, role,
+               (username, contact, display_name, password_hash, account_type, role,
                 enterprise_id, status, created_at)
-               VALUES (?, ?, ?, ?, 'cs', ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, 'cs', ?, ?, ?)""",
             (
                 username,
+                contact_value,
                 (display_name or username).strip()[:64],
                 hash_password(password),
                 account_type,
@@ -335,15 +437,22 @@ def create_user(
         conn.commit()
     user = find_user(username)
     assert user is not None
-    logger.info("新注册（待审核）: %s 类型=%s 企业=%s", username, account_type, enterprise_id)
+    logger.info(
+        "新注册（待审核）: %s 类型=%s 企业=%s 联系方式=%s",
+        username, account_type, enterprise_id, contact_label(contact_value),
+    )
     return user
 
 
-def authenticate(username: str, password: str) -> dict[str, Any]:
-    """校验用户名密码；失败一律抛同一句话，不区分"用户不存在/密码错" """
-    user = find_user(username)
+def authenticate(account: str, password: str) -> dict[str, Any]:
+    """
+    校验登录凭据；失败一律抛同一句话，不区分"账号不存在/密码错"
+
+    `account` 可以是用户名、手机号或邮箱（见 find_user_by_login）。
+    """
+    user = find_user_by_login(account)
     if user is None or not verify_password(password, user["password_hash"]):
-        raise ValueError("用户名或密码不正确")
+        raise ValueError("账号或密码不正确")
     if user["status"] == STATUS_DISABLED:
         raise ValueError("该账号已停用，请联系管理员")
     with _LOCK:
@@ -516,14 +625,16 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_session(user_id: int) -> str:
+def create_session(user_id: int, ttl_seconds: int | None = None) -> str:
     """
     发一个会话令牌（Cookie 里存原文，库里只存 sha256）
 
     只存哈希的原因：库文件被拷走时，令牌不能直接拿来登录。
+    `ttl_seconds`：勾选「记住登录状态」时传 30 天，否则用默认 7 天。
     """
     token = secrets.token_urlsafe(32)
     now = time.time()
+    ttl = int(ttl_seconds or SESSION_TTL_SECONDS)
     with _LOCK:
         conn = _db()
         # 顺手清掉过期会话：没有定时任务，就在登录这个低频动作里做
@@ -534,7 +645,7 @@ def create_session(user_id: int) -> str:
                 _token_hash(token),
                 int(user_id),
                 _now(),
-                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + SESSION_TTL_SECONDS)),
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + ttl)),
             ),
         )
         conn.commit()

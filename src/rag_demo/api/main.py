@@ -29,10 +29,14 @@
 
 首次请求会加载 bge-m3 与 bge-reranker-v2-m3（约 2GB 显存），启动时已预加载。
 """
+import base64
 import json
 import logging
 import os
+import random
+import secrets
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -495,14 +499,109 @@ def whoami(
 class RegisterIn(BaseModel):
     username: str
     password: str
+    contact: str = ""               # 手机号或邮箱（登录标识）
     account_type: str = auth.ACCOUNT_EMPLOYEE
     display_name: str = ""
     invite_code: str | None = None
+    captcha_id: str = ""
+    captcha_code: str = ""
+    agree_terms: bool = False
 
 
 class LoginIn(BaseModel):
-    username: str
+    # account：手机号 / 邮箱 / 用户名；username 保留给历史脚本
+    account: str | None = None
+    username: str | None = None
     password: str
+    remember: bool = False
+
+
+# ---------- 图形验证码 ----------
+# 为什么自己画 SVG：不引入 PIL / 验证码库，一个接口就能返回可直接 <img> 的图。
+# 存内存（单进程）；多进程部署时应换成 Redis——这里与 auth 的 SQLite 定位一致，
+# 演示环境不为此加依赖。
+_CAPTCHA_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"  # 去掉 0/O/1/I
+_CAPTCHA_TTL_SECONDS = 300
+_CAPTCHA_MAX_ITEMS = 5000
+_captchas: dict[str, tuple[str, float]] = {}
+_captcha_lock = threading.Lock()
+_captcha_last_gc = 0.0
+
+
+def _new_captcha() -> tuple[str, str]:
+    """生成一次性验证码：返回 (id, 明文)。明文只在服务端，出网的是图片。"""
+    global _captcha_last_gc
+    code = "".join(secrets.choice(_CAPTCHA_ALPHABET) for _ in range(4))
+    cid = secrets.token_urlsafe(12)
+    now = time.time()
+    with _captcha_lock:
+        if now - _captcha_last_gc > 60:
+            for key, (_, expires) in list(_captchas.items()):
+                if expires < now:
+                    _captchas.pop(key, None)
+            _captcha_last_gc = now
+        _captchas[cid] = (code, now + _CAPTCHA_TTL_SECONDS)
+        while len(_captchas) > _CAPTCHA_MAX_ITEMS:
+            _captchas.pop(next(iter(_captchas)))
+    return cid, code
+
+
+def _verify_captcha(cid: str, code: str) -> bool:
+    """校验并**立即作废**（无论对错）：否则可以拿同一个 id 一直猜。"""
+    item = _captchas.pop((cid or "").strip(), None)
+    if item is None:
+        return False
+    expected, expires = item
+    if expires < time.time():
+        return False
+    return secrets.compare_digest(expected, (code or "").strip().upper())
+
+
+def _captcha_svg(code: str) -> str:
+    """
+    极简 SVG 验证码：4 个字符 + 干扰线 + 轻微旋转。字符集无特殊符号，无需转义。
+
+    尺寸 120×48 与前端按钮**完全一致**：不一致会被 object-fit 裁掉最后一个字符，
+    用户看到 "TYE" 却要输入 "TYEE"。
+    """
+    width, height = 120, 48
+    rng = random.SystemRandom()
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}">',
+        f'<rect width="{width}" height="{height}" rx="8" fill="#F3F4F6"/>',
+    ]
+    for _ in range(3):
+        parts.append(
+            f'<path d="M{rng.randint(0, 16)},{rng.randint(6, height - 6)} '
+            f'Q{rng.randint(30, 90)},{rng.randint(0, height)} '
+            f'{rng.randint(width - 20, width)},{rng.randint(6, height - 6)}" '
+            f'fill="none" stroke="rgba(148,163,184,0.55)" stroke-width="1"/>'
+        )
+    for i, ch in enumerate(code):
+        x = 18 + i * 26
+        y = 33 + rng.randint(-2, 2)
+        angle = rng.randint(-14, 14)
+        parts.append(
+            f'<text x="{x}" y="{y}" font-family="ui-monospace,Consolas,monospace" '
+            f'font-size="25" font-weight="700" fill="#334155" '
+            f'transform="rotate({angle} {x} {y})">{ch}</text>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+@app.get("/auth/captcha")
+def auth_captcha() -> dict:
+    """发一张验证码（base64 data URL，前端直接塞给 <img>，不涉及 innerHTML）"""
+    cid, code = _new_captcha()
+    svg = _captcha_svg(code)
+    return {
+        "id": cid,
+        "image": "data:image/svg+xml;base64,"
+        + base64.b64encode(svg.encode("utf-8")).decode("ascii"),
+        "expires_in": _CAPTCHA_TTL_SECONDS,
+    }
 
 
 @app.post("/auth/register")
@@ -513,9 +612,18 @@ def register(payload: RegisterIn) -> dict:
     自助注册解决的是"不用管理员手工建号"，不是"注册即可用"。审核这一步
     同时承担两件事：确认企业身份（企业账号审核通过才建库、发邀请码），
     以及给员工分配角色（角色决定等级，等级决定能看什么）。
+
+    前置三道闸：同意条款、图形验证码、手机号/邮箱。
+    验证码**校验一次即作废**，失败要刷新——这是为了不让"猜验证码"变成可行路径。
     """
     if not auth.AUTH_ENABLED:
         raise HTTPException(status_code=400, detail="当前未启用登录")
+    if not payload.agree_terms:
+        raise HTTPException(status_code=400, detail="请先阅读并同意服务条款")
+    if not (payload.contact or "").strip():
+        raise HTTPException(status_code=400, detail="请填写手机号或邮箱")
+    if not _verify_captcha(payload.captcha_id, payload.captcha_code):
+        raise HTTPException(status_code=400, detail="验证码不正确或已过期，请刷新后重试")
     try:
         user = auth.create_user(
             username=payload.username,
@@ -523,6 +631,7 @@ def register(payload: RegisterIn) -> dict:
             account_type=payload.account_type,
             display_name=payload.display_name,
             invite_code=payload.invite_code,
+            contact=payload.contact,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -545,15 +654,22 @@ def login(payload: LoginIn, response: Response) -> dict:
 
     待审核账号**允许登录**：登录后能看到「等待审核」。
     拦在登录这一步，用户只会以为自己的密码记错了。
+
+    `account` 支持手机号 / 邮箱 / 用户名；`remember=true` 时发 30 天持久 Cookie，
+    否则是浏览器会话 Cookie（关掉浏览器就需要重新登录）。
     """
     if not auth.AUTH_ENABLED:
         raise HTTPException(status_code=400, detail="当前未启用登录")
+    account_id = (payload.account or payload.username or "").strip()
+    if not account_id:
+        raise HTTPException(status_code=400, detail="请输入手机号、邮箱或用户名")
     try:
-        user = auth.authenticate(payload.username, payload.password)
+        user = auth.authenticate(account_id, payload.password)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e)) from e
 
-    token = auth.create_session(user["id"])
+    ttl = auth.REMEMBER_TTL_SECONDS if payload.remember else auth.SESSION_TTL_SECONDS
+    token = auth.create_session(user["id"], ttl)
     account = auth.resolve_session(token)
     if account is None:  # 理论上不可能，除非账号在两步之间被停用
         raise HTTPException(status_code=403, detail="该账号不可用")
@@ -561,7 +677,8 @@ def login(payload: LoginIn, response: Response) -> dict:
     response.set_cookie(
         auth.SESSION_COOKIE,
         token,
-        max_age=auth.SESSION_TTL_SECONDS,
+        # 不勾「记住登录状态」= 不写 max_age：浏览器关掉即失效
+        max_age=ttl if payload.remember else None,
         httponly=True,
         samesite="lax",
         path="/",
@@ -1135,7 +1252,7 @@ def _public_user(user: dict | None) -> dict | None:
     if user is None:
         return None
     keys = (
-        "id", "username", "display_name", "account_type", "account_type_label",
+        "id", "username", "contact", "display_name", "account_type", "account_type_label",
         "role", "role_label", "enterprise_id", "status", "status_label",
         "is_system_admin", "is_enterprise_admin",
         "created_at", "reviewed_at", "reviewed_by", "last_login_at",

@@ -162,7 +162,8 @@ uv run uvicorn m1_mock.app:app --port 8001 --app-dir prototype
 
 ### 会话与配置
 
-- 登录后发 `rag_session` Cookie（HttpOnly / SameSite=Lax / 7 天）。
+- 登录后发 `rag_session` Cookie（HttpOnly / SameSite=Lax）。
+  勾选「记住登录状态」= 30 天持久 Cookie；不勾选 = 浏览器会话 Cookie（关掉浏览器即失效）。
   服务端只存**令牌哈希**——库文件被拷走也不能直接拿来登录。
 - 鉴权每个请求都查一次状态：**停用账号或退出登录后，会话立即失效**，不用等过期。
 - 账号库是 `var/app.db`（SQLite，stdlib，无新依赖）。放在账号库而不是 PostgreSQL：
@@ -176,12 +177,31 @@ uv run uvicorn m1_mock.app:app --port 8001 --app-dir prototype
 | `RAG_AUTH_ENABLED` | `1` | 置 `0` 回到 M2 的"请求头自报"（仅离线调试） |
 | `RAG_ALLOW_HEADER_AUTH` | `0` | 登录态之外是否仍接受 `X-Role` / `X-User`（逃生开关） |
 
+### 登录 / 注册页
+
+`/login` 是一张居中的卡片，登录与注册用同一个 tablist 切换（支持方向键）：
+
+- **登录**：账号（手机号 / 邮箱 / 历史用户名）、密码（可显隐）、记住登录状态、找回密码入口；
+- **注册**：账号类型（企业 / 员工）、用户名、手机号或邮箱、企业名称或邀请码、密码 + 强度条、
+  确认密码、图形验证码、服务条款勾选；
+- **校验**：逐字段即时校验 + 提交时汇总，错误文案挂在字段下方（`aria-describedby`），
+  并把焦点移到第一个错误项；手机号 / 邮箱、密码强度、两次密码一致、必填项都在前端先挡一遍；
+- **状态**：提交按钮有加载中与禁用状态，成功 / 失败各有明确反馈（表单内提示条 + toast）；
+- **主题**：浅色为 Flat Design（无阴影、色块分层），深色为环境光 + 玻璃卡片，跟随系统并可手动切换；
+- **无障碍**：`label for`、`aria-invalid`、`aria-describedby`、`role="alert"`、可见焦点环，
+  以及 `prefers-reduced-motion` 降级。
+
+手机号 / 邮箱存在账号表 `contact` 列（邮箱小写、手机号去 `+86` 与空格、唯一索引）；
+老账号没有这一列也能用原用户名登录。**找回密码只有入口、没有真实通道**：
+演示环境不接短信/邮件，弹窗会直接说明请系统管理员处理。
+
 ### 接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/auth/register` | 注册（`account_type` = `enterprise` / `employee`） |
-| POST | `/auth/login` | 登录，写会话 Cookie |
+| GET | `/auth/captcha` | 发图形验证码（返回 `id` + base64 SVG，5 分钟有效、一次性） |
+| POST | `/auth/register` | 注册：`username` / `password` / `contact` / `account_type` / `captcha_id` / `captcha_code` / `agree_terms` |
+| POST | `/auth/login` | 登录：`account`（手机号 / 邮箱 / 用户名）+ `password` + `remember` |
 | POST | `/auth/logout` | 删除服务端会话 + 清 Cookie |
 | GET | `/admin/users` | 账号列表（系统管理员看全部，企业管理员看本企业） |
 | POST | `/admin/users/{id}/approve` | 审核通过 + 分配角色（企业账号在此建企业库） |
