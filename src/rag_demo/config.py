@@ -62,6 +62,21 @@ DATASETS = {
     "test": TEST_DB_CONFIG,
 }
 
+# ---------- Text2SQL 只读账号 ----------
+# SQL 由 LLM 生成，应用层正则只能是「早失败提示」，不是安全边界。
+# 真正的边界落在这里：查询路用下面这个只有 SELECT 权限的账号连接，
+# 即使校验被绕过（双引号表名、query_to_xml 之类），也写不了库、读不到授权外的表。
+#
+# 账号由 db/connection.ensure_readonly_access() 幂等创建并授权
+# （tools/init_db.py 与 db/provision.py 在建库后调用；老环境首次查询时自愈）。
+# 生产环境必须用环境变量改掉默认密码。
+READONLY_DB_USER = os.environ.get("RAG_SQL_READONLY_USER", "sql_reader")
+READONLY_DB_PASSWORD = os.environ.get("RAG_SQL_READONLY_PASSWORD", "sql_reader_demo_pwd")
+
+# 单次 SQL 最多取多少行：LIMIT 由 LLM 决定，可能写成 1000000，
+# 必须在取数侧强制截断，否则一次查询就能把服务卡住 / 把内存打满。
+SQL_FETCH_MAX = 100
+
 # ---------- 企业数据集（M3：数据库按企业划分） ----------
 # 隔离单位是**企业**，不是个人：同一企业的员工共享一个库，企业之间互不可见。
 # 数据集名 ent_<企业ID>，库名 vec_db_ent_<企业ID>；企业审核通过时注册，

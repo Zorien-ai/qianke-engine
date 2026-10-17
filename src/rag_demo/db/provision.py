@@ -32,7 +32,13 @@ import psycopg2
 from psycopg2 import errors, sql
 
 from rag_demo.config import DATASETS
-from rag_demo.db.connection import close_conn, get_conn, reset_dataset, use_dataset
+from rag_demo.db.connection import (
+    close_conn,
+    ensure_readonly_access,
+    get_conn,
+    reset_dataset,
+    use_dataset,
+)
 from rag_demo.db.schema import ensure_base_tables, ensure_schema
 
 logger = logging.getLogger(__name__)
@@ -86,6 +92,9 @@ def ensure_dataset_ready(dataset: str) -> bool:
         ensure_schema()
     finally:
         reset_dataset(token)
+
+    # 新库的表建好之后授权只读账号，否则该企业的 Text2SQL 一律没有 SELECT 权限
+    ensure_readonly_access(dataset)
 
     # 探活一次，确保后续 ingest 拿到的连接是好的
     get_conn(dataset)

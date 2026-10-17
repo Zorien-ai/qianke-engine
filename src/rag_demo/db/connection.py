@@ -35,8 +35,14 @@ import threading
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
+from psycopg2 import sql
 
-from rag_demo.config import DATASETS, DEFAULT_DATASET
+from rag_demo.config import (
+    DATASETS,
+    DEFAULT_DATASET,
+    READONLY_DB_PASSWORD,
+    READONLY_DB_USER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +217,130 @@ def get_conn(dataset: str | None = None):
     return conn
 
 
+# ================= 只读连接（Text2SQL 专用） =================
+# 为什么要单独一套连接，而不是给 get_conn 加参数：
+#   查询路与写入路（ingest / 构建）用的是同一个数据集，但**权限必须不同**。
+#   共用一条超级用户连接意味着 LLM 生成的任何 SQL 都具备写权限，
+#   应用层正则一旦被绕过（双引号表名、不带 FROM 的函数调用）就没有第二道防线。
+#   这里让查询路走独立的只读账号，数据库权限成为真正的边界。
+_ro_conns: dict[str, "psycopg2.extensions.connection"] = {}
+# 已建角色 + 授权的数据集（进程级）。授权本身是持久的，这里只避免重复发 DDL。
+_ro_ready: set[str] = set()
+
+
+def readonly_params(dataset: str | None = None) -> dict:
+    """只读连接参数：与数据集连接同库同地址，仅换成只读账号"""
+    name = _resolve(dataset)
+    return {
+        **DATASETS[name],
+        "user": READONLY_DB_USER,
+        "password": READONLY_DB_PASSWORD,
+    }
+
+
+def ensure_readonly_access(dataset: str | None = None) -> str:
+    """
+    幂等创建只读账号并授权当前数据集库；返回数据集名
+
+    做三件事（全程用管理员连接，只发权限语句，不碰业务数据）：
+      1. 角色：不存在则 CREATE，存在则 ALTER（保证密码与配置一致）；
+      2. 库级：GRANT CONNECT，否则只读账号连不上这个库；
+      3. 库内：USAGE + SELECT ON ALL TABLES + 默认权限，
+         「默认权限」让后续 ingest 新建的表也自动可读。
+
+    只读账号没有任何写权限（NOSUPERUSER / NOCREATEDB / NOCREATEROLE），
+    这就是 Text2SQL 那条路的最终边界。
+    """
+    name = _resolve(dataset)
+    if name in _ro_ready:
+        return name
+
+    cfg = DATASETS[name]
+    dbname = cfg["dbname"]
+    role = sql.Identifier(READONLY_DB_USER)
+
+    # 建角色 / 改密码 / 库级 CONNECT 都要在维护库执行
+    admin = psycopg2.connect(**{**cfg, "dbname": "postgres"})
+    admin.autocommit = True
+    try:
+        with admin.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (READONLY_DB_USER,))
+            action = "ALTER" if cur.fetchone() is not None else "CREATE"
+            cur.execute(
+                sql.SQL(
+                    "{action} ROLE {role} WITH LOGIN NOSUPERUSER NOCREATEDB "
+                    "NOCREATEROLE NOINHERIT PASSWORD {pwd}"
+                ).format(
+                    action=sql.SQL(action),
+                    role=role,
+                    pwd=sql.Literal(READONLY_DB_PASSWORD),
+                )
+            )
+            cur.execute(
+                sql.SQL("GRANT CONNECT ON DATABASE {db} TO {role}").format(
+                    db=sql.Identifier(dbname), role=role
+                )
+            )
+    finally:
+        admin.close()
+
+    # 表级权限必须在目标库内授权
+    conn = psycopg2.connect(**cfg)
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {role}").format(role=role))
+            cur.execute(
+                sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {role}").format(role=role)
+            )
+            cur.execute(
+                sql.SQL(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT SELECT ON TABLES TO {role}"
+                ).format(role=role)
+            )
+    finally:
+        conn.close()
+
+    _ro_ready.add(name)
+    logger.info("只读账号 %s 已就绪（数据集 %s / 库 %s）", READONLY_DB_USER, name, dbname)
+    return name
+
+
+def get_readonly_conn(dataset: str | None = None):
+    """
+    取只读账号的连接（Text2SQL 专用）；不传则用当前 contextvar 里的数据集
+
+    首次访问某数据集时会先确保账号与授权存在——换机器、老环境没跑过
+    init_db 时也能自愈，而不是让 SQL 路直接不可用。
+    """
+    name = _resolve(dataset)
+
+    if name not in _ro_ready:
+        ensure_readonly_access(name)
+
+    conn = _ro_conns.get(name)
+    if conn is not None and not conn.closed:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            conn.rollback()  # 探活后立即清理事务
+            return conn
+        except Exception as e:
+            logger.warning("只读连接（数据集 %s）探活失败，准备重连: %s", name, e)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            _ro_conns.pop(name, None)
+
+    logger.info("建立新的只读数据库连接（数据集 %s / 账号 %s）...", name, READONLY_DB_USER)
+    conn = psycopg2.connect(**readonly_params(name))
+    register_vector(conn)
+    _ro_conns[name] = conn
+    return conn
+
+
 def dataset_lock(dataset: str | None = None) -> threading.RLock:
     """
     取某个数据集的互斥锁（可重入）
@@ -248,6 +378,16 @@ def close_conn(dataset: str | None = None) -> None:
     names = [_resolve(dataset)] if dataset else list(_conns)
     for name in names:
         conn = _conns.pop(name, None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # 只读连接是另一套句柄，必须一并关掉，否则「进程退出但连接还在」
+    ro_names = [_resolve(dataset)] if dataset else list(_ro_conns)
+    for name in ro_names:
+        conn = _ro_conns.pop(name, None)
         if conn is not None:
             try:
                 conn.close()

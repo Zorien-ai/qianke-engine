@@ -3,13 +3,20 @@
 """
 @Author  : Vincent
 @File    : sql_tool.py
-@Function: Text2SQL 工具：自然语言 -> SQL -> 安全校验 -> 执行
+@Function: Text2SQL 工具：自然语言 -> SQL -> 应用层预检 -> 只读执行
            解决 RAG 无法回答的聚合/统计/排名/分布类问题（有多少 / 平均多少 / 排名 / 占比）
+
+安全边界（两层，不要只靠前一层）：
+  1. validate_sql：正则预检（只读起点 / 关键字黑名单 / LIMIT / 表白名单），
+     作用是「早失败 + 给模型明确反馈」，它本身可被双引号表名等写法绕过；
+  2. 数据库权限：执行路一律走只读账号（见 db/connection.get_readonly_conn），
+     写操作与授权外的表由 PostgreSQL 直接拒绝；取数再强制截断 SQL_FETCH_MAX 行。
 """
 import logging
 import re
 
-from rag_demo.db.connection import get_conn
+from rag_demo.config import SQL_FETCH_MAX
+from rag_demo.db.connection import get_readonly_conn
 from rag_demo.db.schema_facts import get_sql_schema
 from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import TEXT2SQL_PROMPT
@@ -105,14 +112,22 @@ def validate_sql(sql: str) -> bool:
 
 
 def execute_sql(sql: str) -> list[tuple]:
-    """执行 SQL 并返回全部结果行（带 statement_timeout 保护）"""
-    conn = get_conn()
+    """
+    执行 SQL 并返回结果行（最多 SQL_FETCH_MAX 行）
+
+    两层硬约束：
+      1. 连接用只读账号（get_readonly_conn）——写操作与授权外的表由数据库拒绝，
+         这是真正的安全边界；上面的 validate_sql 只是提前失败的提示。
+      2. fetchmany(SQL_FETCH_MAX) 截断——LIMIT 是模型写的，可能写成 1000000，
+         必须由取数侧兜住，否则一次查询就能把服务卡死。
+    """
+    conn = get_readonly_conn()
     cur = conn.cursor()
     try:
         cur.execute(f"SET statement_timeout = '{STATEMENT_TIMEOUT}'")
         cur.execute(sql)
-        rows = cur.fetchall()
-        logger.info("SQL 执行完成，返回 %d 行", len(rows))
+        rows = cur.fetchmany(SQL_FETCH_MAX)
+        logger.info("SQL 执行完成，返回 %d 行（上限 %d）", len(rows), SQL_FETCH_MAX)
         return rows
     finally:
         conn.rollback()  # 清理查询事务，避免连接长期停在 idle in transaction

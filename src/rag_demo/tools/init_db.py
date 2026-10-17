@@ -24,7 +24,13 @@ import psycopg2
 from psycopg2 import sql
 
 from rag_demo.config import DATASETS
-from rag_demo.db.connection import close_conn, get_conn, reset_dataset, use_dataset
+from rag_demo.db.connection import (
+    close_conn,
+    ensure_readonly_access,
+    get_conn,
+    reset_dataset,
+    use_dataset,
+)
 from rag_demo.db.schema import ensure_base_tables, ensure_schema
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -95,6 +101,9 @@ def init_dataset(dataset: str) -> None:
         ensure_schema()        # 检索索引表 search_index + 指纹表
     finally:
         reset_dataset(token)
+
+    # 表建完之后再授权：只读账号需要 SELECT ON ALL TABLES，早于建表会漏掉
+    ensure_readonly_access(dataset)
 
 
 def main(argv: list[str]) -> int:
