@@ -103,8 +103,8 @@ class TableFact:
 # ================= 缓存 =================
 # 每次问答都重新扫一遍分布没有意义（8110 行虽快，但用户上传可能是几十万行），
 # 而数据变动只在 ingest 之后。故按数据集缓存，ingest 结束时显式失效。
-# value = (时间戳, 完整 schema 文本, 数据口径句子列表)
-_cache: dict[str, tuple[float, str, list[str]]] = {}
+# value = (时间戳, 完整 schema 文本, 数据口径句子列表, 表事实列表)
+_cache: dict[str, tuple[float, str, list[str], list[TableFact]]] = {}
 _cache_lock = threading.Lock()
 
 
@@ -385,10 +385,10 @@ def render(tables: list[TableFact], facts: list[str]) -> str:
     return "\n\n".join(blocks)
 
 
-def _build(dataset: str) -> tuple[str, list[str]]:
-    """真正去库里采集并渲染：返回 (完整 schema 文本, 数据口径句子)"""
+def _build(dataset: str) -> tuple[str, list[str], list[TableFact]]:
+    """真正去库里采集并渲染：返回 (完整 schema 文本, 数据口径句子, 表事实)"""
     tables, facts = collect(dataset)
-    return render(tables, facts), facts
+    return render(tables, facts), facts, tables
 
 
 # 拿不到数据时的降级文案。**故意不给枚举兜底**：回退到写死的取值
@@ -399,24 +399,24 @@ _UNAVAILABLE = (
 )
 
 
-def _load(dataset: str, force: bool) -> tuple[str, list[str]]:
+def _load(dataset: str, force: bool) -> tuple[str, list[str], list[TableFact]]:
     """取缓存或重新采集"""
     now = time.time()
     if not force:
         with _cache_lock:
             cached = _cache.get(dataset)
         if cached and now - cached[0] < SQL_SCHEMA_CACHE_TTL:
-            return cached[1], cached[2]
+            return cached[1], cached[2], cached[3]
 
     try:
-        text, facts = _build(dataset)
+        text, facts, tables = _build(dataset)
     except Exception as e:  # noqa: BLE001
         logger.warning("读取表结构失败（数据集 %s）: %s", dataset, e)
-        return _UNAVAILABLE, []
+        return _UNAVAILABLE, [], []
 
     with _cache_lock:
-        _cache[dataset] = (now, text, facts)
-    return text, facts
+        _cache[dataset] = (now, text, facts, tables)
+    return text, facts, tables
 
 
 def get_sql_schema(force: bool = False) -> str:
@@ -432,8 +432,19 @@ def get_time_capability(force: bool = False) -> str:
     改造前那里写死「库里只有 2024-12-30 的单时点静态快照」——那是 demo 的事实，
     接入真实数仓后会把有时间序列的库也当成没有，直接关掉 SQL 路。
     """
-    _, facts = _load(current_dataset(), force)
+    _, facts, _ = _load(current_dataset(), force)
     for f in facts:
         if f.startswith("时间口径"):
             return f
     return "时间口径：无法读取（数据库不可用时不要假设存在时间序列）"
+
+
+def get_tables(force: bool = False) -> list[TableFact]:
+    """
+    取当前数据集的表事实（与 get_sql_schema 共用同一份缓存）
+
+    供「按数据生成文案」使用：拒答兜底文案里的示例问句要来自他自己的数据，
+    而不是 dianshuang 的城市/等级名。数据库不可用时返回空列表，
+    调用方据此**不举例**，而不是退回一份写死的示例。
+    """
+    return _load(current_dataset(), force)[2]

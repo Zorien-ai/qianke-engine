@@ -38,10 +38,11 @@ import logging
 from openai import APIError
 
 from rag_demo.cache import answer_cache
+from rag_demo.chitchat import build_reply
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF
 from rag_demo.db.connection import current_dataset
 from rag_demo.generation.generator import generate
-from rag_demo.prompts import CHITCHAT_REPLY, LLM_UNAVAILABLE_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
+from rag_demo.prompts import LLM_UNAVAILABLE_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
 from rag_demo.retrieval.query_processor import (
     STRATEGY_DIRECT,
     QueryPlan,
@@ -109,8 +110,12 @@ def answer_question(
 
 
 def _chitchat_result() -> dict:
-    """闲聊 / 域外：固定回复，不检索、不调模型"""
-    return {"answer": CHITCHAT_REPLY, "sources": [], "route": ROUTE_CHITCHAT}
+    """
+    闲聊 / 域外：不检索、不调模型，直接给拒答引导
+
+    文案不是常量：能力清单固定，示例问句按当前数据集生成（见 chitchat.build_reply）。
+    """
+    return {"answer": build_reply(), "sources": [], "route": ROUTE_CHITCHAT}
 
 
 # 第三种 route：既不是正常回答（rag），也不是闲聊（chitchat），而是检索基础设施挂了。
@@ -272,7 +277,7 @@ def prepare(
             SQL 判定是否被预测类规则否决），供前端把中间步骤展示出来
     """
     if route(question) == ROUTE_CHITCHAT:
-        return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
+        return {"route": ROUTE_CHITCHAT, "answer": build_reply(), "sources": []}
 
     try:
         plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit)
@@ -289,7 +294,7 @@ def prepare(
 
     if plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
-        return {"route": ROUTE_CHITCHAT, "answer": CHITCHAT_REPLY, "sources": []}
+        return {"route": ROUTE_CHITCHAT, "answer": build_reply(), "sources": []}
 
     # candidates 已是最终份数（画像池名额在检索阶段就已生效），
     # 下方 sources 与它用的是**同一份**结果——不会出现

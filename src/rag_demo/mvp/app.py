@@ -852,6 +852,74 @@ def examples(upload_id: str = "") -> dict:
     }
 
 
+# ================= 5. 拒答文案配置（数据集级） =================
+# 只开放「助手名」与「示例问句」两项。能力清单（支持哪几类问题）是只读的：
+# 用户可以决定系统怎么称呼自己、举什么例子，但不能承诺系统做不到的事
+# （写一句「支持预测」，问起来答不了，比不给引导更伤）。
+class UiConfigRequest(BaseModel):
+    dataset: str = "user"
+    assistant_name: str | None = None
+    sample_question: str | None = None
+
+
+@router.get("/ui-config")
+def get_ui_config(dataset: str = "user") -> dict:
+    """读当前数据集的文案配置；没配过就是空 dict，由前端显示默认值"""
+    from rag_demo.db.connection import reset_dataset, use_dataset
+    from rag_demo.db.schema import read_ui_config
+    from rag_demo.mvp.builder import resolve_dataset
+
+    try:
+        target = resolve_dataset(dataset, action="配置")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    token = use_dataset(target)
+    try:
+        cfg = read_ui_config()
+    finally:
+        reset_dataset(token)
+    return {"dataset": target, "config": cfg}
+
+
+@router.put("/ui-config")
+def put_ui_config(req: UiConfigRequest) -> dict:
+    """
+    写文案配置（值为空串表示恢复默认）
+
+    写操作走 writes_to 守卫：不声明数据集就写会落到默认的 demo（评测基线），
+    这条守卫在 ingest 上已经踩过坑，配置接口不例外。
+    """
+    from rag_demo.db.connection import writes_to
+    from rag_demo.db.schema import read_ui_config, write_ui_config
+    from rag_demo.mvp.builder import resolve_dataset
+
+    try:
+        target = resolve_dataset(req.dataset, action="配置")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    values: dict[str, str | None] = {}
+    if req.assistant_name is not None:
+        name = req.assistant_name.strip()
+        if len(name) > 30:
+            raise HTTPException(status_code=400, detail="助手名太长了（超过 30 字）。")
+        values["assistant_name"] = name or None
+    if req.sample_question is not None:
+        question = req.sample_question.strip()
+        if len(question) > 100:
+            raise HTTPException(status_code=400, detail="示例问句太长了（超过 100 字）。")
+        values["sample_question"] = question or None
+
+    if not values:
+        raise HTTPException(status_code=400, detail="没有要修改的配置项。")
+
+    with writes_to(target):
+        write_ui_config(values)
+        cfg = read_ui_config()
+    return {"dataset": target, "config": cfg}
+
+
 # 接口在**文件末尾**统一挂到独立调试服务上：router 上的路由是靠上面的 @router.xxx
 # 装饰器在导入期逐个注册的，include 必须发生在它们之后。
 # 8000 的正式服务不走这里，而是自己 include 同一个 router（见 api/wizard.py）——

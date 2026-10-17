@@ -29,7 +29,7 @@ import logging
 from datetime import datetime
 
 from rag_demo.config import EMBED_DIM, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
-from rag_demo.db.connection import get_conn
+from rag_demo.db.connection import get_conn, require_write_scope
 
 logger = logging.getLogger(__name__)
 
@@ -382,3 +382,73 @@ def index_freshness() -> dict:
         "current": current,
         "meta_table": META_TABLE,
     }
+
+
+# ==================== 数据集级 UI 配置 ====================
+# 存在 meta 表里（与语料指纹同一张键值表，key 加前缀区分），理由是「先复用、不必新开表」。
+#
+# 目前只有两项：
+#   assistant_name   助手名（拒答兜底文案里的「我是XX」）
+#   sample_question  兜底文案末尾的示例问句
+#
+# ⚠ 这里**不放「支持哪些能力」**：能力清单必须由代码决定（改了就是撒谎）。
+#   用户能改的只有称呼与示例，改不了「系统会做什么」。
+UI_CONFIG_PREFIX = "ui_"
+UI_CONFIG_KEYS = ("assistant_name", "sample_question")
+
+
+def read_ui_config() -> dict[str, str]:
+    """
+    读当前数据集的 UI 配置；表不存在或没有配置时返回空 dict
+
+    空 dict 与「配置成空串」是两件事：前者由调用方用默认值，后者是用户有意清空。
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT to_regclass(%s)", (META_TABLE,))
+        if cur.fetchone()[0] is None:
+            return {}
+        cur.execute(f"SELECT key, value FROM {META_TABLE}")
+        raw = dict(cur.fetchall())
+    finally:
+        conn.rollback()
+        cur.close()
+
+    # 在 Python 里过滤而不是 LIKE 'ui_%'：LIKE 里的下划线是通配符，
+    # 会把 uixxxx 也匹配进来；键只有几十个，取回来过滤更省心。
+    return {
+        k[len(UI_CONFIG_PREFIX):]: v
+        for k, v in raw.items()
+        if k.startswith(UI_CONFIG_PREFIX)
+    }
+
+
+def write_ui_config(values: dict[str, str | None]) -> None:
+    """
+    写当前数据集的 UI 配置（值为 None 表示删除该键）
+
+    这是**写操作**，必须显式声明目标数据集（writes_to / require_write_scope）——
+    与 ingest 同一条守卫：不声明就落到默认数据集，而默认是 demo（评测基线）。
+    """
+    require_write_scope("write_ui_config")
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(CREATE_META_SQL)
+        for name, value in values.items():
+            if name not in UI_CONFIG_KEYS:
+                raise ValueError(f"不支持的 UI 配置项: {name}（可选：{UI_CONFIG_KEYS}）")
+            key = UI_CONFIG_PREFIX + name
+            if value is None:
+                cur.execute(f"DELETE FROM {META_TABLE} WHERE key = %s", (key,))
+            else:
+                cur.execute(
+                    f"INSERT INTO {META_TABLE} (key, value) VALUES (%s, %s) "
+                    f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                    (key, str(value).strip()),
+                )
+        conn.commit()
+    finally:
+        cur.close()
