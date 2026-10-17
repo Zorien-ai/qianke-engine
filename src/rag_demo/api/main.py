@@ -45,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import auth, config, permissions
+from rag_demo import answer_guard, auth, config, permissions
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache
 from rag_demo.config import (
@@ -64,7 +64,7 @@ from rag_demo.generation.generator import (
 )
 from rag_demo.logging_setup import setup_logging
 from rag_demo.pipeline import answer_question, brief_rows, prepare
-from rag_demo.prompts import LLM_UNAVAILABLE_REPLY
+from rag_demo.prompts import LLM_UNAVAILABLE_REPLY, PREDICTION_BLOCKED_REPLY
 from rag_demo.retrieval.reranker import get_reranker
 from rag_demo.retrieval.hybrid_retriever import (
     _load_bm25_corpus,
@@ -1005,11 +1005,23 @@ def qa_stream(
                     chunks.append(text)
                     yield _sse("delta", {"delta": text})
 
+            # 生成后审查：提示词只是约束，模型仍可能编造未来数据。
+            # 流式的 token 已经发出去了，收不回来——所以命中时补一个 replace 事件，
+            # 让前端把已经渲染的正文整体覆盖成固定文案（非流式的 /qa 直接在
+            # pipeline 层替换，见 _plan_and_retrieve）。
+            answer = "".join(chunks)
+            guard = answer_guard.inspect(req.question, answer)
+            if guard:
+                logger.warning("流式答案被后置审查替换：%s", answer_guard.summarize(guard))
+                answer = PREDICTION_BLOCKED_REPLY
+                yield _sse("replace", {"answer": answer, "guard": guard})
+
             yield _sse("done", {})
             # 写缓存的是**完整结果**（不裁剪）：否则低权角色先问一次，
             # 高权角色再问就只剩被裁过的版本
+            # 答案用审查后的版本：下次同一个问题直接就是固定文案，不会再走一遍生成
             answer_cache.set(key, {
-                "answer": "".join(chunks),
+                "answer": answer,
                 "sources": ctx["sources"],
                 "route": route_name,
                 **sql_payload,

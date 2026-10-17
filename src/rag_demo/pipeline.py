@@ -37,12 +37,17 @@ import logging
 
 from openai import APIError
 
+from rag_demo import answer_guard
 from rag_demo.cache import answer_cache
 from rag_demo.chitchat import build_reply
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF
 from rag_demo.db.connection import current_dataset
 from rag_demo.generation.generator import generate
-from rag_demo.prompts import LLM_UNAVAILABLE_REPLY, RETRIEVAL_UNAVAILABLE_REPLY
+from rag_demo.prompts import (
+    LLM_UNAVAILABLE_REPLY,
+    PREDICTION_BLOCKED_REPLY,
+    RETRIEVAL_UNAVAILABLE_REPLY,
+)
 from rag_demo.retrieval.query_processor import (
     STRATEGY_DIRECT,
     QueryPlan,
@@ -244,6 +249,15 @@ def _answer_uncached(
     # 这里直接进生成，不再做整体终选（否则等于三层精排）
     result = generate(question, candidates, sql_result=sql_result, deep_thinking=deep_thinking)
     result["route"] = ROUTE_RAG
+
+    # 生成后审查：提示词只是约束，模型仍可能替数据说话（「明年 GMV 将达到 1.2 亿」）。
+    # 命中就把整段答案换成固定文案——为什么是「后置审查」而不是前置拦截，
+    # 以及命中条件/开关的取舍，见 answer_guard.py 模块开头。
+    guard = answer_guard.inspect(question, result.get("answer", ""))
+    if guard:
+        logger.warning("答案被后置审查替换：%s", answer_guard.summarize(guard))
+        result["answer"] = PREDICTION_BLOCKED_REPLY
+        result["guard"] = guard
 
     if sql_result is not None:
         result["sql"] = sql_result.get("sql", "")
