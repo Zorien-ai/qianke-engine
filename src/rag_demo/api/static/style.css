@@ -801,6 +801,19 @@ button#ask-btn:disabled { opacity: .62; cursor: not-allowed; }
   word-break: break-word;
 }
 
+/* 缓存命中声明：不刺眼，但必须让人一眼看到「这是上次的过程数据」 */
+.detail-notice {
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 12.6px;
+  line-height: 1.6;
+  color: #8a5a00;
+  background: #fffaf0;
+  border: 1px solid #f5e2b8;
+  border-left: 3px solid #e0a53a;
+  border-radius: 0 9px 9px 0;
+}
+
 /* SQL 原文 */
 .detail-sql {
   margin: 0;

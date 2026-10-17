@@ -364,14 +364,16 @@ function renderStreamShell({ route, sources, sqlText, rowsCount, sqlRows, sqlErr
   // 思维链与回答同一个生命周期：新一轮提问不该看到上一轮的推理
   resetReasoning();
 
-  renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, question });
+  // cached 必须往下传：命中缓存时 trace 是上一次检索的留痕，
+  // 不传的话溯源面板会把它当成「本次过程」照常展示（2026-10-17 实测反馈）
+  renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, cached, question });
 
   el("result-panel").hidden = false;
   el("result-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /* ---------- 数据来源与检索过程（独立面板） ---------- */
-function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, question }) {
+function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, cached, question }) {
   const panel = el("detail-panel");
 
   // 闲聊：没有来源、没有 SQL、没有留痕，这个过程区没有意义
@@ -380,6 +382,9 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, q
     // 只 hidden 不清内容的话，下一次面板重新出现时若某个子块没被重写，
     // 旧 DOM 会留在那儿——表现就是「溯源不刷新」。
     el("detail-question").textContent = "";
+    const note = el("detail-cache-note");
+    note.hidden = true;
+    note.textContent = "";
     el("trace-plan").innerHTML = "";
     el("trace-variants").innerHTML = "";
     el("trace-flow").innerHTML = "";
@@ -393,7 +398,7 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, q
 
   // trace 为空有两种完全不同的原因，不能都写成「缓存」：
   //   · 当前身份没有 internals 权限 -> trace 被 permissions.render 整键裁掉
-  //   · 真的命中缓存 -> 缓存里没有过程数据
+  //   · 本次真的没产生留痕（例如缓存里没存 / 走了兜底）
   // 混着写的话，用户会以为「换了身份还在用旧缓存」（2026-10-17 实测反馈）。
   const canInternals = !!CAPS.internals;
   const hasTrace = !!trace;
@@ -402,26 +407,46 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, q
   el("detail-question").textContent =
     (trace && trace.question) || question || "（本次请求未留痕）";
 
+  // 1.1) 命中缓存声明：秒回保留，但过程数据必须标明是上一次的，
+  //      不能让用户以为这是本次重新检索跑出来的（2026-10-17 实测反馈）
+  const cacheNote = el("detail-cache-note");
+  if (cached) {
+    cacheNote.hidden = false;
+    // 无 internals 权限时下面根本看不到检索过程，声明里就别提「过程」
+    cacheNote.textContent = canInternals
+      ? "本次命中缓存、未重新检索：以下来源与检索过程均为缓存中的上一次结果。"
+      : "本次命中缓存、未重新检索：以下来源为缓存中的上一次结果。";
+  } else {
+    cacheNote.hidden = true;
+    cacheNote.textContent = "";
+  }
+
   // 2) 走的路径 + 改写的路径
   const variants = (trace && trace.variants) || [];
-  const chips = [`<span class="tp-chip">检索路 <b>${variants.length}</b> 条</span>`];
-  if (hasTrace) {
-    chips.push(
-      trace.need_sql
-        ? `<span class="tp-chip is-sql">LLM 判定：需要 SQL</span>`
-        : `<span class="tp-chip">LLM 判定：不需要 SQL</span>`
-    );
-  } else if (!canInternals) {
-    chips.push(`<span class="tp-chip is-warn">当前身份无权查看检索过程</span>`);
+  if (!canInternals) {
+    // 无 internals 权限时 trace 被整键裁掉。这里**不再画空壳**——
+    // 「检索路 0 条」+「（无）」会被读成「本次一条都没召回」，
+    // 而事实是「没让你看」。只留一句明确的无权提示。
+    el("trace-plan").innerHTML =
+      `<span class="tp-chip is-warn">当前身份无权查看检索过程（检索式与召回条数需更高权限）</span>`;
+    el("trace-variants").innerHTML = "";
   } else {
-    chips.push(`<span class="tp-chip is-warn">本次命中缓存，未存过程数据</span>`);
-  }
-  el("trace-plan").innerHTML = chips.join("");
+    const chips = [`<span class="tp-chip">检索路 <b>${variants.length}</b> 条</span>`];
+    if (hasTrace) {
+      chips.push(
+        trace.need_sql
+          ? `<span class="tp-chip is-sql">LLM 判定：需要 SQL</span>`
+          : `<span class="tp-chip">LLM 判定：不需要 SQL</span>`
+      );
+    } else {
+      chips.push(`<span class="tp-chip is-warn">本次未产生检索过程数据</span>`);
+    }
+    el("trace-plan").innerHTML = chips.join("");
 
-  el("trace-variants").innerHTML =
-    variants
-      .map(
-        (v) => `
+    el("trace-variants").innerHTML =
+      variants
+        .map(
+          (v) => `
       <div class="tp-variant">
         <div class="tp-variant-head">
           <span class="tp-strategy">${escapeHtml(v.strategy || "-")}</span>
@@ -437,8 +462,9 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, q
         }</div>
         ${v.error ? `<div class="tp-err">${escapeHtml(v.error)}</div>` : ""}
       </div>`
-      )
-      .join("") || `<div class="tp-empty">（无）</div>`;
+        )
+        .join("") || `<div class="tp-empty">（无）</div>`;
+  }
 
   // 3) 收敛链路：各路并行召回 → 画像池统一精排 + 文档池每路精排 → 合并去重 → 入上下文
   //    两个池的名额口径不同（画像全局、文档每路），必须分开显示：
@@ -457,7 +483,7 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, q
       : "文档池每路";
   // 没有 trace 时不能画这条链路：totalHits/merged 都会是 0，
   // 看起来像「一条都没召回却入了 5 条上下文」——那是权限裁剪造成的假象，不是事实
-  el("trace-flow").innerHTML = hasTrace
+  el("trace-flow").innerHTML = hasTrace && canInternals
     ? `
     <span class="tp-node">各路并行召回 <b>${totalHits}</b></span>
     <span class="tp-arrow">→</span>
@@ -467,7 +493,9 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace, q
     <span class="tp-arrow">→</span>
     <span class="tp-node is-final">入上下文 <b>${sources.length}</b></span>`
     : `<span class="tp-empty">${
-        canInternals ? "本次命中缓存，未存过程数据" : "当前身份无权查看检索链路"
+        canInternals
+          ? "本次未产生检索链路数据"
+          : "当前身份无权查看检索链路（精排分数与合并明细需更高权限）"
       }</span>`;
 
   // 4) 数据来源（名称 + 分数 + 命中它的检索式 + 内容）
@@ -560,6 +588,7 @@ function renderResult(data, elapsed) {
     sqlRows: data.sql_rows || [],
     sqlError: data.sql_error,
     trace: data.trace,
+    cached: !!data.cached,
   });
 
   el("result-panel").hidden = false;
