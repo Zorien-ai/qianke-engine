@@ -161,6 +161,11 @@ function applyCapabilities() {
       : ACCOUNT && ACCOUNT.status && ACCOUNT.status !== "active"
         ? `账号${ACCOUNT.status_label || "待审核"}：通过后即可使用`
         : "当前账号无权提问";
+
+  // 通知视图路由（nav.js）按新能力刷新导航显隐与账号信息。
+  // 能力是异步拿到的，而 nav.js 在页面加载时就同步过一次——不派发事件的话，
+  // 它只能靠 setTimeout 兜底，员工会先看到一瞬「员工管理」入口。
+  window.dispatchEvent(new Event("rag:capabilities"));
 }
 
 /* ---------- 数据概况 ---------- */

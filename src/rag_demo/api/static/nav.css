@@ -1,0 +1,166 @@
+/* 左侧导航 + 视图路由（M3 前端改造）
+ *
+ * 只新增样式，不改动原有面板：.view 容器负责视图切换，里面的 .panel 完全
+ * 沿用既有样式。小屏时侧边栏收成抽屉，由 #nav-toggle 唤出。 */
+
+:root {
+  --nav-w: 216px;
+  --nav-bg: #14181f;
+  --nav-fg: #c9d1d9;
+  --nav-fg-dim: #8b949e;
+  --nav-active: #2f81f7;
+}
+
+body {
+  padding-left: var(--nav-w);
+}
+
+/* ---------- 侧边栏 ---------- */
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--nav-w);
+  display: flex;
+  flex-direction: column;
+  background: var(--nav-bg);
+  color: var(--nav-fg);
+  border-right: 1px solid #21262d;
+  z-index: 40;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid #21262d;
+}
+
+.sidebar-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--nav-active);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: var(--nav-fg);
+  text-decoration: none;
+  font-size: 13.5px;
+  line-height: 1.2;
+}
+
+.nav-item:hover {
+  background: #1c2128;
+  color: #fff;
+}
+
+.nav-item.is-active {
+  background: rgba(47, 129, 247, 0.16);
+  color: #fff;
+  box-shadow: inset 2px 0 0 var(--nav-active);
+}
+
+.nav-ico {
+  width: 18px;
+  text-align: center;
+  color: var(--nav-fg-dim);
+  font-size: 13px;
+}
+
+.nav-item.is-active .nav-ico,
+.nav-item:hover .nav-ico {
+  color: var(--nav-active);
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid #21262d;
+  font-size: 12px;
+  color: var(--nav-fg-dim);
+  word-break: break-all;
+}
+
+/* ---------- 视图容器 ---------- */
+.view[hidden] { display: none; }
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* ---------- 小屏：抽屉 ---------- */
+.nav-toggle {
+  display: none;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 60;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #161b22;
+  color: #c9d1d9;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(1, 4, 9, 0.55);
+}
+
+@media (max-width: 860px) {
+  body { padding-left: 0; }
+  body.nav-open { padding-left: 0; }
+
+  .nav-toggle { display: block; }
+
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.18s ease-out;
+    box-shadow: 0 0 0 1px #21262d;
+  }
+
+  body.nav-open .sidebar { transform: translateX(0); }
+
+  .hero { padding-top: 54px; }
+}

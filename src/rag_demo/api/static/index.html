@@ -5,8 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>用户画像 RAG 智能问答</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/nav.css">
 </head>
 <body>
+  <!-- 左侧导航（M3 前端改造）：功能从「一长页」拆成视图，用 hash 路由切换。
+       导航项按能力显隐，但真正的拦截在后端——前端只是不给他点。 -->
+  <button type="button" class="nav-toggle" id="nav-toggle" aria-label="打开导航">☰</button>
+  <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+  <aside class="sidebar" id="sidebar" aria-label="主导航">
+    <div class="sidebar-brand">
+      <span class="sidebar-logo">RAG</span>
+      <span class="sidebar-title">用户画像问答</span>
+    </div>
+    <nav class="nav-list">
+      <a href="#/home" class="nav-item" data-nav="home"><span class="nav-ico">▤</span>首页</a>
+      <a href="#/chat" class="nav-item" data-nav="chat"><span class="nav-ico">◈</span>对话</a>
+      <a href="/wizard" class="nav-item" data-nav="import"><span class="nav-ico">⇪</span>数据导入</a>
+      <a href="#/kb" class="nav-item" data-nav="kb"><span class="nav-ico">▦</span>知识库管理</a>
+      <a href="#/staff" class="nav-item" data-nav="staff" data-cap="accounts" hidden>
+        <span class="nav-ico">☺</span>员工管理</a>
+      <a href="#/settings" class="nav-item" data-nav="settings" data-cap="ops" hidden>
+        <span class="nav-ico">⚙</span>权限配置</a>
+    </nav>
+    <div class="sidebar-foot">
+      <span id="nav-account">未登录</span>
+    </div>
+  </aside>
+
   <header class="hero">
     <div class="hero-inner">
       <h1>用户画像 RAG 智能问答</h1>
@@ -25,8 +50,22 @@
   </header>
 
   <main class="container">
-    <!-- 数据概况：仅管理员可见（等价于免 SQL 的聚合统计，见 README 权限矩阵） -->
-    <section class="panel" id="stats-panel" hidden>
+    <!-- ============ 视图：首页 ============ -->
+    <div class="view" data-view="home">
+      <section class="panel" id="welcome-panel">
+        <div class="panel-head">
+          <h2>我的数据空间</h2>
+          <span class="panel-tag" id="welcome-tag">—</span>
+        </div>
+        <p class="perm-intro" id="welcome-text">正在读取账号信息…</p>
+        <div class="welcome-actions">
+          <a class="perm-btn is-primary" href="/wizard">去导入数据</a>
+          <a class="perm-btn" href="#/chat">开始提问</a>
+        </div>
+      </section>
+
+      <!-- 数据概况：仅管理员可见（等价于免 SQL 的聚合统计，见 README 权限矩阵） -->
+      <section class="panel" id="stats-panel" hidden>
       <div class="panel-head">
         <h2>数据概况</h2>
         <span class="panel-tag" id="stats-status">加载中…</span>
@@ -38,7 +77,10 @@
         <div class="stat-card is-loading"></div>
       </div>
     </section>
+    </div><!-- /视图：首页 -->
 
+    <!-- ============ 视图：员工管理 ============ -->
+    <div class="view" data-view="staff">
     <!-- 账号管理：系统管理员管全部账号；企业管理员只管本企业员工 -->
     <section class="panel" id="accounts-panel" hidden>
       <div class="panel-head">
@@ -56,7 +98,10 @@
       </div>
       <div class="accounts-list" id="accounts-list"></div>
     </section>
+    </div><!-- /视图：员工管理 -->
 
+    <!-- ============ 视图：权限配置 ============ -->
+    <div class="view" data-view="settings">
     <!-- 权限管理：仅具备「运维 / 权限管理」能力的身份可见（默认只有管理员） -->
     <section class="panel" id="perm-panel" hidden>
       <div class="panel-head">
@@ -92,7 +137,10 @@
       </form>
       <div class="perm-users" id="perm-users"></div>
     </section>
+    </div><!-- /视图：权限配置 -->
 
+    <!-- ============ 视图：对话 ============ -->
+    <div class="view" data-view="chat">
     <!-- 提问 -->
     <section class="panel">
       <div class="panel-head">
@@ -250,6 +298,25 @@
         高亮行 = 只有该方法召回、另一方没找到——这正是两种策略的差异所在。
       </p>
     </section>
+    </div><!-- /视图：对话 -->
+
+    <!-- ============ 视图：知识库管理（M3 排期，先给入口） ============ -->
+    <div class="view" data-view="kb">
+      <section class="panel" id="kb-panel">
+        <div class="panel-head">
+          <h2>知识库管理</h2>
+          <span class="panel-tag">规划中</span>
+        </div>
+        <p class="perm-intro">
+          这里将列出本企业已导入的文档与切片：每篇文档的篇数、最近一次构建时间、
+          重建与清空入口。导入与构建请走左侧「数据导入」，四步向导的上传和构建在那里完成。
+        </p>
+        <div class="welcome-actions">
+          <a class="perm-btn is-primary" href="/wizard">去导入数据</a>
+          <a class="perm-btn" href="#/chat">开始提问</a>
+        </div>
+      </section>
+    </div>
   </main>
 
   <footer class="footer">
@@ -265,5 +332,7 @@
   <script src="/static/vendor/mermaid.min.js" defer></script>
   <script src="/static/markdown.js"></script>
   <script src="/static/app.js"></script>
+  <!-- 视图路由放最后：它只负责「显示哪个视图」，能力显隐仍由 app.js 的 applyCapabilities 管 -->
+  <script src="/static/nav.js"></script>
 </body>
 </html>
