@@ -4,10 +4,13 @@
  * 把原来「一长页滚到底」的首页拆成几个视图，用 hash 切换：
  *   #/home      首页（我的数据空间 + 数据概况）
  *   #/chat      对话（提问 + 回答 + 数据来源）
- *   #/kb        知识库管理（M3 排期，先给入口与说明）
  *   #/staff     员工管理（账号审核 / 角色 / 停用）
  *   #/settings  权限配置（等级 → 能力矩阵）
  *   /wizard     数据导入（独立向导页，四步流程，不走进 SPA 路由）
+ *
+ * 已冻结：`#/kb` 知识库管理。M3 收口后该视图只在 Vue 新版 `/v2/#/kb` 维护，
+ * 旧入口已从侧边栏移除；书签/手敲 `#/kb` 在这里直接跳转到新版页面
+ * （见 route() 顶部），旧视图 DOM 等全量迁移时一起删。
  *
  * 分工：本文件只负责「显示哪个视图」；面板本身的显隐仍由 app.js 的
  * applyCapabilities 按能力决定。两边叠加，不互相覆盖——视图管 .view 容器，
@@ -17,7 +20,7 @@
 (function () {
   "use strict";
 
-  var VIEWS = ["home", "chat", "kb", "staff", "settings"];
+  var VIEWS = ["home", "chat", "staff", "settings"];
   var sidebar = document.getElementById("sidebar");
   var backdrop = document.getElementById("nav-backdrop");
   var toggle = document.getElementById("nav-toggle");
@@ -107,6 +110,13 @@
   }
 
   function route() {
+    // #/kb 已冻结：整个视图迁到 Vue 新版 /v2/#/kb。用 replace 而不是改 hash，
+    // 避免历史记录里留下一条「刚打开就被跳走」的空视图。
+    var raw = (location.hash || "").replace(/^#\/?/, "").split("?")[0];
+    if (raw === "kb") {
+      window.location.replace("/v2/#/kb");
+      return;
+    }
     var name = currentView();
     // 无能力的视图：手动敲 #/staff 也进不去。面板被能力藏了，留着一个空视图
     // 不如直接送回首页——「进不去」要说清楚去向，而不是给一块空白。
@@ -120,8 +130,7 @@
   }
 
   window.addEventListener("hashchange", route);
-  if (toggle) {
-    toggle.addEventListener("click", function () {
+  if (toggle) {    toggle.addEventListener("click", function () {
       if (document.body.classList.contains("nav-open")) closeDrawer();
       else openDrawer();
     });

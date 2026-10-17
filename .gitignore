@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 web/node_modules/
+# Vue 新版前端的构建产物：本地 npm run build 生成、后端按目录挂到 /v2。
+# 它是「构建结果」不是源码（换机器一条命令就能重出），且带 hash 文件名会天天变化。
+web/dist/
 
 # 运行期日志与一次性调试产物（不入库）
 logs/
