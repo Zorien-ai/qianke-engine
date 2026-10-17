@@ -414,9 +414,14 @@ def load_transactions(
 
     if "purchase_time" in df_all.columns:
         # errors="coerce"：个别脏时间只让那一行退化成 NaT，不该让整批导入直接抛异常。
-        # 现有数据集的时间列是干净的，这一改动不影响它的输出。
+        # format="mixed"：逐行推断格式，而不是拿第一行的格式去套整列。
+        # 真实导出里同一个文件常混着 "2026-01-03 12:00:00"、"2026/1/9"、"2026.2.5"，
+        # 不带 mixed 时只有与首行格式一致的那几行能被解析，其余全变 NaT——
+        # 表现就是「看着导入成功，其实大部分行的购买时间丢了」。
         before_na = int(df_all["purchase_time"].isna().sum())
-        df_all["purchase_time"] = pd.to_datetime(df_all["purchase_time"], errors="coerce")
+        df_all["purchase_time"] = pd.to_datetime(
+            df_all["purchase_time"], errors="coerce", format="mixed"
+        )
         broken = int(df_all["purchase_time"].isna().sum()) - before_na
         if broken > 0:
             logger.warning("有 %d 行的时间无法解析，已忽略（这些行的画像里不会有购买时间信息）", broken)
@@ -635,15 +640,20 @@ def write_to_db(
                         "platforms": m["platforms"],
                         "top_category": m["top_category"],
                     }, ensure_ascii=False),
-                    m["age"],
+                    # 数值列一律走容错转换：pandas 的缺失值是 NaN/NaT，
+                    # 直接交给 psycopg2 会变成字符串 'NaN'，PostgreSQL 对 INT 列
+                    # 报 "integer out of range"，一条 NaN 就能让整批构建失败
+                    # （用户订单时间全都解析不出来时必然踩到）。
+                    # 转成 None 后落库是 SQL NULL，下游按「未知」处理。
+                    _to_int(m["age"]),
                     m["gender"],
                     m["city"],
                     m["member_level"],
-                    m["order_count"],
-                    m["total_amount"],
-                    m["avg_amount"],
+                    _to_int(m["order_count"]),
+                    _to_float(m["total_amount"]),
+                    _to_float(m["avg_amount"]),
                     m["top_category"],
-                    m["days_since_last_buy"],
+                    _to_int(m["days_since_last_buy"]),
                     m["platforms"],
                 )
             )
