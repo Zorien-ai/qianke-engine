@@ -76,6 +76,14 @@ body {
   line-height: 1.2;
 }
 
+/* 能力显隐靠 hidden 属性（nav.js 按 canManageAccounts / CAPS.ops 设置）。
+   作者样式里的 display:flex 会盖掉浏览器默认的 [hidden]{display:none}——
+   没有这条规则时，员工仍能在侧边栏看到「员工管理 / 权限配置」入口
+   （点进去会被路由挡回首页，但入口本身不该出现）。 */
+.nav-item[hidden] {
+  display: none;
+}
+
 .nav-item:hover {
   background: #1c2128;
   color: #fff;
@@ -107,6 +115,19 @@ body {
   color: var(--nav-fg-dim);
   word-break: break-all;
 }
+
+/* 新版界面（Vue 3）入口：底部常驻，不和账号信息抢行 */
+.sidebar-version {
+  display: block;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px dashed #30363d;
+  color: #8ec5ff;
+  text-decoration: none;
+  font-size: 12px;
+}
+.sidebar-version:hover { color: #fff; text-decoration: underline; }
+.sidebar-version::after { content: " ↗"; font-size: 11px; opacity: .7; }
 
 /* ---------- 视图容器 ---------- */
 .view[hidden] { display: none; }

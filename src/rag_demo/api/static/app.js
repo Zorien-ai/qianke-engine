@@ -74,7 +74,8 @@ async function loadWhoami() {
   // 权限面板的数据单独拉：必须 await，否则调用方（保存/授权后）写提示文案时
   // 会被后面异步完成的 renderPermissions 清空——表现为"保存成功了但提示是空的"
   if (CAPS.ops) await loadPermissions();
-  if (canManageAccounts()) await loadAccounts();
+  // 员工管理（#/staff）的数据不在这里拉：console.js 只在进入视图时懒加载，
+  // 否则每次 whoami 都会多一次 /admin/users 请求，且与视图状态无关。
 
   el("stats-panel").hidden = !CAPS.stats;
   if (CAPS.stats) loadStats();
@@ -763,182 +764,6 @@ function renderCompare(data) {
   el("compare-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-/* ---------- 账号管理（系统管理员 / 企业管理员） ----------
- * 待审核账号列表 + 角色分配 + 停用/启用。
- * 企业管理员只能看到本企业的人；企业账号本身只有系统管理员能审核。
- * 这些限制在后端也各有一份（前端只是不给他点，后端才是拦住）。
- */
-let ACCOUNTS = null;
-
-async function loadAccounts() {
-  try {
-    const res = await apiFetch("/admin/users");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    ACCOUNTS = await res.json();
-    renderAccounts();
-  } catch (e) {
-    el("accounts-status").textContent = `账号列表加载失败：${e.message}`;
-  }
-}
-
-function renderAccounts() {
-  if (!ACCOUNTS) return;
-  const users = ACCOUNTS.users || [];
-  const roles = ACCOUNTS.roles || [];
-  const enterprises = ACCOUNTS.enterprises || [];
-  const me = ACCOUNTS.me || {};
-  const isSys = !!me.is_system_admin;
-  const entMap = {};
-  enterprises.forEach((e) => { entMap[e.id] = e; });
-
-  // 同一个面板，两种管辖范围：系统管理员管全部，企业管理员管本企业成员。
-  // 标题跟着范围变，避免企业管理员以为自己能看到别家企业的人。
-  el("accounts-title").textContent = isSys ? "账号管理" : "本企业成员";
-  el("accounts-intro").textContent = isSys
-    ? "企业账号审核通过后创建企业库并生成邀请码；员工账号由所属企业管理员审核并分配角色。角色决定默认等级 → 决定能看到什么。"
-    : "本企业员工由你审核并分配角色；把邀请码发给同事，他们注册时填写。企业账号的审核由系统管理员负责。";
-
-  el("accounts-status").textContent =
-    ACCOUNTS.scope === "all" ? `全部账号 ${users.length} 个` : `本企业账号 ${users.length} 个`;
-
-  const myEnt = me.enterprise_id ? entMap[me.enterprise_id] : null;
-  const box = el("enterprise-box");
-  if (myEnt && myEnt.invite_code) {
-    box.hidden = false;
-    el("ent-name").textContent = myEnt.name;
-    el("ent-code").textContent = myEnt.invite_code;
-  } else {
-    box.hidden = true;
-  }
-
-  const roleOptions = (current) =>
-    roles
-      .map(
-        (r) =>
-          `<option value="${r.value}" ${r.value === current ? "selected" : ""}>${escapeHtml(r.label)}（${r.level}）</option>`
-      )
-      .join("");
-
-  el("accounts-list").innerHTML = users.length
-    ? users
-        .map((u) => {
-          const ent = u.enterprise_id ? entMap[u.enterprise_id] : null;
-          const pending = u.status === "pending";
-          const rejected = u.status === "rejected";
-          // 待审核 / 已拒绝都没拿到角色，操作区都要给「通过」；只有 pending 才需要「拒绝」
-          const waiting = pending || rejected;
-          const statusCls = pending
-            ? "is-warn"
-            : rejected || u.status === "disabled"
-              ? "is-danger"
-              : "";
-          return `<div class="account-row">
-            <div class="acc-main">
-              <span class="acc-name">${escapeHtml(u.display_name || u.username)}</span>
-              <span class="acc-username">@${escapeHtml(u.username)}</span>
-              <span class="pu-level">${escapeHtml(u.account_type_label || "")}</span>
-              <span class="acc-status ${statusCls}">${escapeHtml(u.status_label || u.status)}</span>
-              ${ent ? `<span class="pu-meta">${escapeHtml(ent.name)}</span>` : ""}
-            </div>
-            <div class="acc-actions">
-              ${
-                waiting
-                  ? u.account_type === "enterprise"
-                    ? isSys
-                      ? `<span class="pu-meta">企业账号</span>
-                         <button type="button" class="perm-btn is-primary" data-approve="${u.id}">${rejected ? "改判通过" : "通过"}</button>
-                         ${pending ? `<button type="button" class="perm-btn is-danger" data-reject="${u.id}">拒绝</button>` : ""}`
-                      : `<span class="pu-meta">企业账号 · 待系统管理员审核</span>`
-                    : `<select data-approve-role="${u.id}">${roleOptions("cs")}</select>
-                       <button type="button" class="perm-btn is-primary" data-approve="${u.id}">${rejected ? "改判通过" : "通过"}</button>
-                       ${pending ? `<button type="button" class="perm-btn is-danger" data-reject="${u.id}">拒绝</button>` : ""}`
-                  : u.is_system_admin
-                    ? `<span class="pu-meta">系统管理员</span>`
-                    : u.is_enterprise_admin
-                      ? `<span class="pu-meta">企业管理员</span>`
-                      : `<select data-role="${u.id}">${roleOptions(u.role)}</select>`
-              }
-              ${
-                u.is_system_admin || waiting || (u.account_type === "enterprise" && !isSys)
-                  ? ""
-                  : u.status === "disabled"
-                    ? `<button type="button" class="perm-btn" data-enable="${u.id}">启用</button>`
-                    : `<button type="button" class="perm-btn is-danger" data-disable="${u.id}">停用</button>`
-              }
-            </div>
-            <div class="acc-meta">
-              ${escapeHtml(u.created_at || "")}
-              ${u.reviewed_by ? ` · 审核：${escapeHtml(u.reviewed_by)}` : ""}
-              ${u.last_login_at ? ` · 最近登录 ${escapeHtml(u.last_login_at)}` : ""}
-            </div>
-          </div>`;
-        })
-        .join("")
-    : `<div class="tp-empty">还没有账号</div>`;
-}
-
-async function approveAccount(id, role) {
-  el("accounts-status").textContent = "审核中…";
-  try {
-    const res = await apiFetch(`/admin/users/${id}/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    await loadWhoami();
-    el("accounts-status").textContent = "已通过审核，权限立即生效";
-  } catch (e) {
-    el("accounts-status").textContent = `审核失败：${e.message}`;
-  }
-}
-
-async function changeAccountRole(id, role) {
-  try {
-    const res = await apiFetch(`/admin/users/${id}/role`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    await loadWhoami();
-    el("accounts-status").textContent = "角色已更新，下一个请求即按新等级判定";
-  } catch (e) {
-    el("accounts-status").textContent = `改角色失败：${e.message}`;
-  }
-}
-
-async function rejectAccount(id) {
-  el("accounts-status").textContent = "处理中…";
-  try {
-    const res = await apiFetch(`/admin/users/${id}/reject`, { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    await loadWhoami();
-    el("accounts-status").textContent = "已拒绝该申请（账号保留，可改判通过）";
-  } catch (e) {
-    el("accounts-status").textContent = `拒绝失败：${e.message}`;
-  }
-}
-
-async function setAccountStatus(id, status) {
-  try {
-    const res = await apiFetch(`/admin/users/${id}/status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    await loadWhoami();
-    el("accounts-status").textContent = status === "disabled" ? "账号已停用（会话立即失效）" : "账号已启用";
-  } catch (e) {
-    el("accounts-status").textContent = `操作失败：${e.message}`;
-  }
-}
-
 /* ---------- 权限管理（管理员） ----------
  * 前端只负责把配置渲染成人能看懂的样子：
  * 能力目录、等级目录、角色清单、默认值全部来自 GET /admin/permissions，
@@ -1149,30 +974,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // 账号管理：通过审核 / 改角色 / 停用启用
-  el("accounts-list").addEventListener("click", (e) => {
-    const approve = e.target.closest("button[data-approve]");
-    if (approve) {
-      const id = approve.dataset.approve;
-      const sel = document.querySelector(`select[data-approve-role="${id}"]`);
-      approveAccount(id, sel ? sel.value : "cs");
-      return;
-    }
-    const reject = e.target.closest("button[data-reject]");
-    if (reject) {
-      const ok = window.confirm("确认拒绝该注册申请？账号将无法登录（之后可以改判通过）。");
-      if (!ok) return undefined;
-      return rejectAccount(reject.dataset.reject);
-    }
-    const disable = e.target.closest("button[data-disable]");
-    if (disable) return setAccountStatus(disable.dataset.disable, "disabled");
-    const enable = e.target.closest("button[data-enable]");
-    if (enable) return setAccountStatus(enable.dataset.enable, "active");
-  });
-  el("accounts-list").addEventListener("change", (e) => {
-    const sel = e.target.closest("select[data-role]");
-    if (sel) changeAccountRole(sel.dataset.role, sel.value);
-  });
+  // 账号管理（通过 / 拒绝 / 改角色 / 停用启用）已整体迁到 console.js：
+  // 它和 #/staff 视图一起懒加载，且不再每次 whoami 都重拉一次成员列表。
 
   // 权限管理面板：元素常驻，事件只绑一次（内容是重新渲染的，容器本身不换）
   el("perm-save").addEventListener("click", savePermissions);

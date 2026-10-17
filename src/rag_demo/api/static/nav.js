@@ -128,8 +128,14 @@
   }
   if (backdrop) backdrop.addEventListener("click", closeDrawer);
 
-  // app.js 的 loadWhoami 是异步的：等它拿到账号后再同步一次导航与欢迎卡
-  window.addEventListener("rag:capabilities", syncNav);
+  // app.js 的 loadWhoami 是异步的：等它拿到账号后再同步一次导航与欢迎卡。
+  // 同时要重新 route：直接刷新在 #/staff 的管理员，页面加载那一刻还没有能力，
+  // route() 会把他送回首页；能力到达后必须按新权限再显示一次目标视图，
+  // 否则地址栏是 #/staff、画面却停在首页。
+  window.addEventListener("rag:capabilities", function () {
+    syncNav();
+    route();
+  });
   route();
   syncNav();
   setTimeout(syncNav, 800);

@@ -6,6 +6,7 @@
   <title>用户画像 RAG 智能问答</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/nav.css">
+  <link rel="stylesheet" href="/static/console.css">
 </head>
 <body>
   <!-- 左侧导航（M3 前端改造）：功能从「一长页」拆成视图，用 hash 路由切换。
@@ -29,6 +30,8 @@
     </nav>
     <div class="sidebar-foot">
       <span id="nav-account">未登录</span>
+      <!-- 新版界面（Vue 3）入口：由后端把 web/dist 挂到 /v2；构建产物不存在时该链接会 404 -->
+      <a class="sidebar-version" href="/v2/">新版界面（Beta）</a>
     </div>
   </aside>
 
@@ -81,23 +84,130 @@
 
     <!-- ============ 视图：员工管理 ============ -->
     <div class="view" data-view="staff">
-    <!-- 账号管理：系统管理员管全部账号；企业管理员只管本企业员工 -->
+    <!-- 企业邀请码卡：企业管理员看本企业；系统管理员没有企业（入口在企业总览的行内） -->
+    <section class="panel" id="staff-invite-panel">
+      <div class="panel-head">
+        <h2>企业邀请</h2>
+        <span class="panel-tag" id="staff-invite-status">读取中…</span>
+      </div>
+
+      <!-- 保留 enterprise-box / ent-name / ent-code：这是邀请码的唯一展示位置 -->
+      <div class="enterprise-box" id="enterprise-box" hidden>
+        企业数据空间：<b id="ent-name"></b>
+        · 数据集 <code id="ent-dataset"></code>
+        <span class="pu-meta">员工注册时填写邀请码，或直接打开入职链接</span>
+      </div>
+
+      <div class="invite-card" id="invite-card" hidden>
+        <div class="invite-block">
+          <div class="invite-label">企业邀请码（8 位，员工注册时填写）</div>
+          <div class="invite-code" id="ent-code">—</div>
+          <div class="invite-actions">
+            <button type="button" class="perm-btn" id="invite-copy">复制邀请码</button>
+            <button type="button" class="perm-btn is-danger" id="invite-reset">重置邀请码</button>
+          </div>
+        </div>
+        <div class="invite-block">
+          <div class="invite-label">入职链接（员工注册页）</div>
+          <div class="invite-link" id="invite-link">—</div>
+          <div class="invite-actions">
+            <button type="button" class="perm-btn" id="invite-link-copy">复制入职链接</button>
+            <a class="perm-btn" id="invite-link-open" href="/login" target="_blank" rel="noopener">打开注册页</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="console-empty" id="invite-empty" hidden>正在读取企业信息…</div>
+
+      <!-- 成员统计：数字全部来自 /admin/users（总 · 待审核 · 停用） -->
+      <div class="staff-stats" id="staff-stats">
+        <div class="staff-stat">
+          <span class="staff-stat-value" id="staff-stat-total">—</span>
+          <span class="staff-stat-label">成员总数</span>
+        </div>
+        <div class="staff-stat">
+          <span class="staff-stat-value" id="staff-stat-pending">—</span>
+          <span class="staff-stat-label">待审核（含已拒绝）</span>
+        </div>
+        <div class="staff-stat">
+          <span class="staff-stat-value" id="staff-stat-disabled">—</span>
+          <span class="staff-stat-label">已停用</span>
+        </div>
+      </div>
+      <div class="console-hint" id="invite-hint"></div>
+    </section>
+
+    <!-- 成员列表：筛选 / 搜索是纯前端过滤，数据来自 /admin/users -->
     <section class="panel" id="accounts-panel" hidden>
       <div class="panel-head">
-        <h2 id="accounts-title">账号管理</h2>
-        <span class="panel-tag" id="accounts-status">审核 · 角色</span>
+        <h2 id="accounts-title">成员列表</h2>
+        <span class="panel-tag" id="accounts-status">读取中…</span>
       </div>
       <p class="perm-intro" id="accounts-intro">
         注册后需审核：企业账号由系统管理员审核（通过后创建企业库并生成邀请码）；
         员工账号由所属企业管理员审核并分配角色。角色决定默认等级 → 决定能看到什么。
       </p>
-      <div class="enterprise-box" id="enterprise-box" hidden>
-        企业数据空间：<b id="ent-name"></b>
-        · 邀请码 <code id="ent-code"></code>
-        <span class="pu-meta">员工注册时填写，可发给同事</span>
+      <div class="member-toolbar">
+        <div class="member-filters" id="member-filters" role="tablist">
+          <button type="button" class="member-filter is-active" data-filter="all">全部 <b id="filter-count-all">0</b></button>
+          <button type="button" class="member-filter" data-filter="pending">待审核 <b id="filter-count-pending">0</b></button>
+          <button type="button" class="member-filter" data-filter="active">已启用 <b id="filter-count-active">0</b></button>
+          <button type="button" class="member-filter" data-filter="disabled">已停用 <b id="filter-count-disabled">0</b></button>
+        </div>
+        <div class="member-toolbar-right">
+          <input type="search" id="member-search" class="member-search"
+                 placeholder="搜索用户名 / 姓名 / 企业名" autocomplete="off" />
+          <button type="button" class="perm-btn" id="member-refresh">刷新</button>
+        </div>
       </div>
       <div class="accounts-list" id="accounts-list"></div>
+      <div class="console-hint" id="accounts-hint"></div>
     </section>
+
+    <!-- 企业总览：仅系统管理员（数据来自 GET /admin/enterprises） -->
+    <section class="panel" id="enterprises-panel" hidden>
+      <div class="panel-head">
+        <h2>企业总览</h2>
+        <span class="panel-tag" id="enterprises-status">读取中…</span>
+      </div>
+      <p class="perm-intro">
+        全部企业及其数据空间状态。成员 / 待审核 / 库状态 / 最近构建均来自运行时数据；
+        邀请码可复制，重置后旧码立即失效。
+      </p>
+      <div class="console-table-wrap">
+        <table class="console-table" id="enterprises-table">
+          <thead>
+            <tr>
+              <th>企业</th>
+              <th>数据集</th>
+              <th>成员</th>
+              <th>待审核</th>
+              <th>停用</th>
+              <th>库状态</th>
+              <th>最近构建</th>
+              <th>邀请码</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="enterprises-body"></tbody>
+        </table>
+      </div>
+      <div class="console-empty" id="enterprises-empty" hidden>还没有企业。</div>
+    </section>
+
+    <!-- 重置邀请码二次确认弹层 -->
+    <div class="console-modal" id="invite-reset-modal" hidden>
+      <div class="console-modal-mask" data-close="1"></div>
+      <div class="console-modal-box" role="dialog" aria-modal="true" aria-labelledby="invite-reset-title">
+        <h3 id="invite-reset-title">重置邀请码？</h3>
+        <p class="console-modal-text" id="invite-reset-text"></p>
+        <div class="console-hint" id="invite-reset-hint"></div>
+        <div class="console-modal-actions">
+          <button type="button" class="perm-btn" id="invite-reset-cancel">取消</button>
+          <button type="button" class="perm-btn is-primary" id="invite-reset-confirm">确认重置</button>
+        </div>
+      </div>
+    </div>
     </div><!-- /视图：员工管理 -->
 
     <!-- ============ 视图：权限配置 ============ -->
@@ -300,23 +410,112 @@
     </section>
     </div><!-- /视图：对话 -->
 
-    <!-- ============ 视图：知识库管理（M3 排期，先给入口） ============ -->
+    <!-- ============ 视图：知识库管理 ============ -->
     <div class="view" data-view="kb">
+      <!-- 概况：GET /api/kb/overview（契约 A），数据全部运行时读取 -->
       <section class="panel" id="kb-panel">
         <div class="panel-head">
           <h2>知识库管理</h2>
-          <span class="panel-tag">规划中</span>
+          <span class="panel-tag" id="kb-dataset-tag">读取中…</span>
         </div>
-        <p class="perm-intro">
-          这里将列出本企业已导入的文档与切片：每篇文档的篇数、最近一次构建时间、
-          重建与清空入口。导入与构建请走左侧「数据导入」，四步向导的上传和构建在那里完成。
-        </p>
-        <div class="welcome-actions">
-          <a class="perm-btn is-primary" href="/wizard">去导入数据</a>
-          <a class="perm-btn" href="#/chat">开始提问</a>
+
+        <!-- 只读原因：员工 / 系统管理员（demo 只读）会走这里 -->
+        <div class="console-banner" id="kb-readonly" hidden></div>
+
+        <div class="kb-overview" id="kb-overview">
+          <div class="stat-card is-loading"></div>
+          <div class="stat-card is-loading"></div>
+          <div class="stat-card is-loading"></div>
+          <div class="stat-card is-loading"></div>
+        </div>
+
+        <div class="kb-fresh" id="kb-freshness" hidden>
+          <div class="kb-fresh-head">
+            <span class="kb-fresh-label">索引新鲜度</span>
+            <span class="kb-fresh-status" id="kb-fresh-status">—</span>
+            <span class="kb-fresh-reason" id="kb-fresh-reason"></span>
+          </div>
+          <div class="kb-fresh-bar"><i id="kb-fresh-fill"></i></div>
+        </div>
+
+        <div class="kb-notes" id="kb-notes" hidden></div>
+
+        <!-- 空态 / 错误态：未构建、空库、接口失败都走这里 -->
+        <div class="console-empty" id="kb-empty" hidden>
+          <div class="console-empty-title" id="kb-empty-title"></div>
+          <p class="console-empty-text" id="kb-empty-text"></p>
+          <div class="welcome-actions">
+            <a class="perm-btn is-primary" href="/wizard">去导入数据</a>
+            <button type="button" class="perm-btn" id="kb-empty-retry">刷新概况</button>
+          </div>
+        </div>
+
+        <!-- 操作区：can_write=false 时按钮禁用并显示 readonly_reason -->
+        <div class="kb-actions" id="kb-actions" hidden>
+          <button type="button" class="perm-btn is-primary" id="kb-rebuild-btn">重建索引</button>
+          <button type="button" class="perm-btn is-danger" id="kb-clear-btn">清空数据</button>
+          <button type="button" class="perm-btn" id="kb-refresh-btn">刷新概况</button>
+          <span class="console-hint" id="kb-action-hint"></span>
+        </div>
+        <div class="console-hint" id="kb-flash" hidden></div>
+        <div class="console-hint" id="kb-source-hint"></div>
+      </section>
+
+      <!-- 文档矩阵：按 chunks 占总数比例画占比条 -->
+      <section class="panel" id="kb-docs-panel" hidden>
+        <div class="panel-head">
+          <h2>文档矩阵</h2>
+          <span class="panel-tag" id="kb-docs-status">—</span>
+        </div>
+        <div class="console-table-wrap">
+          <table class="console-table kb-table">
+            <thead>
+              <tr>
+                <th>文档名</th>
+                <th>切片数</th>
+                <th>字符数</th>
+                <th>切片占比</th>
+              </tr>
+            </thead>
+            <tbody id="kb-docs-body"></tbody>
+          </table>
         </div>
       </section>
-    </div>
+
+      <!-- 重建进度：轮询 GET /api/wizard/build/{task_id} -->
+      <section class="panel" id="kb-build-panel" hidden>
+        <div class="panel-head">
+          <h2>重建进度</h2>
+          <span class="panel-tag" id="kb-build-status">准备中…</span>
+        </div>
+        <div class="kb-progress"><i class="kb-progress-fill" id="kb-build-fill"></i></div>
+        <div class="kb-progress-meta">
+          <span class="kb-progress-pct" id="kb-build-pct">0%</span>
+          <span class="console-hint" id="kb-build-note"></span>
+        </div>
+        <div class="kb-steps" id="kb-build-steps"></div>
+        <div class="console-banner is-error" id="kb-build-error" hidden></div>
+        <div class="console-hint" id="kb-build-result" hidden></div>
+      </section>
+
+      <!-- 清空确认弹层：必须输入 dataset 字面值（契约 B） -->
+      <div class="console-modal" id="kb-clear-modal" hidden>
+        <div class="console-modal-mask" data-close="1"></div>
+        <div class="console-modal-box" role="dialog" aria-modal="true" aria-labelledby="kb-clear-title">
+          <h3 id="kb-clear-title">清空当前数据空间？</h3>
+          <p class="console-modal-text">
+            此操作会删除 dataset <code id="kb-clear-dataset">—</code> 的全部画像、切片与检索索引，
+            <strong>不可恢复</strong>。请在下方原样输入 dataset 名称以确认：
+          </p>
+          <input type="text" id="kb-clear-input" autocomplete="off" spellcheck="false" />
+          <div class="console-hint" id="kb-clear-hint"></div>
+          <div class="console-modal-actions">
+            <button type="button" class="perm-btn" id="kb-clear-cancel">取消</button>
+            <button type="button" class="perm-btn is-danger" id="kb-clear-confirm" disabled>确认清空</button>
+          </div>
+        </div>
+      </div>
+    </div><!-- /视图：知识库管理 -->
   </main>
 
   <footer class="footer">
@@ -332,6 +531,8 @@
   <script src="/static/vendor/mermaid.min.js" defer></script>
   <script src="/static/markdown.js"></script>
   <script src="/static/app.js"></script>
+  <!-- 企业后台（#/staff 员工管理、#/kb 知识库管理）：只依赖 app.js 的全局量与接口，不改对话逻辑 -->
+  <script src="/static/console.js"></script>
   <!-- 视图路由放最后：它只负责「显示哪个视图」，能力显隐仍由 app.js 的 applyCapabilities 管 -->
   <script src="/static/nav.js"></script>
 </body>
