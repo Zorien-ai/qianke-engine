@@ -45,6 +45,7 @@ from rag_demo.db.connection import (
     require_write_scope,
     writes_to,
 )
+from rag_demo.db import schema_facts
 from rag_demo.db.schema import ensure_base_tables
 from rag_demo.splitter import DOC_TYPE_PROFILE, split
 
@@ -655,6 +656,11 @@ def ingest_transactions(
         on_phase("split_done", {"documents": len(documents)})
     count = write_to_db(documents, model, progress)
     logger.info("成功导入 %d 条用户画像（含结构化字段）", count)
+    # 画像变了，提示词里的条数 / 枚举 / 分位就都过期了。
+    # 必须在这里显式失效：缓存 key 是「数据集」，条数不变但取值变了的情况
+    # （重导同一批数据、只改清洗规则）光靠 TTL 是等不回来的。
+    schema_facts.invalidate()
+    logger.info("已失效表结构缓存（提示词下次会重新采集数据事实）")
     return {
         "rows": len(df_all),
         "profiles": count,

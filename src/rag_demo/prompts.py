@@ -9,8 +9,8 @@
 
 1. **一屏看全** —— 提示词决定了产品的"语气与策略"。此前它们散在 4 个模块里，
    想调一处措辞得先翻代码找它在哪
-2. **避免改漏** —— `SQL_SCHEMA` 同时被 Text2SQL 生成和 SQL 结果总结复用，
-   放在一处才不会只改一边
+2. **避免改漏** —— 同一段提示词不要在两处各维护一份
+   （表结构不是提示词，它由 `db/schema_facts.py` 从实库采集后注入）
 3. **命名可读** —— 原先 generator.py 里的 `PROMPT_TEMPLATE` 毫无信息量，
    看名字判断不出属于哪个环节
 
@@ -75,37 +75,23 @@ SQL_SUMMARY_PROMPT = """你是一位数据分析师，同事问了一个数据�
    预测模型）——没有的话就直说「这条查询只是汇总了历史数据，不是预测」，
    不要照搬别名当成结论汇报
 7. 结果里出现「数据不支持预测」这类说明性文本时，照实转述并说明原因
-   （库内只有单时点快照、没有时间序列），不要围绕它编数字
+   （原因以上面表结构里的「数据口径」为准），不要围绕它编数字
 
 回答："""
 
 
 # ==================== Text2SQL ====================
-# SQL_SCHEMA 是"素材"而非指令：既给 SQL 生成做参考，也给结果总结做枚举对照
-# （OPT-06 之所以能回答"数据里没有这个类别"，靠的就是它注入了字段取值范围）
-# 引用处：tools/sql_tool.py::text2sql、pipeline.py::_sql_result、api/main.py::qa_stream
+# 表结构（含条数 / 枚举取值 / 数值范围 / 时间覆盖 / 客单价分位）**不在本文件里**：
+# 它由 db/schema_facts.py 在运行时从当前数据集采集后注入 {schema}。
+#
+# 为什么：这一段曾经写死「约 8110 条」「12 个城市」「钻石/黄金/白银」「快照日 2024-12-30」。
+# 那些是 data/dianshuang 这份 demo 数据集的说明书，不是系统规则。换数据后模型会照旧枚举
+# 拼 WHERE、命中 0 行，再被「按字段取值范围解释空结果」的规则说成「数据里没有这一类」——
+# 一条过期枚举就这样变成了看起来可信的业务结论。
+#
+# 引用处：tools/sql_tool.py::text2sql、generation/generator.py::llm_summarize
 
-SQL_SCHEMA = """
-表 user_profile_vectors（用户画像，约 8110 条）：
-  user_id             VARCHAR   用户ID，如 U2765
-  age                 INT       年龄（18-65）
-  gender              VARCHAR   性别：男 / 女
-  city                VARCHAR   城市：北京/上海/广州/深圳/成都/杭州/武汉/西安/南京/重庆/天津/苏州
-  member_level        VARCHAR   会员等级：钻石 / 黄金 / 白银 / 普通
-  order_count         INT       累计订单数
-  total_amount        NUMERIC   累计总消费（元）
-  avg_amount          NUMERIC   平均客单价（元）
-  top_category        VARCHAR   偏好品类：电子产品 / 服装 / 家居 / 书籍 / 美妆 / 运动 / 玩具
-  days_since_last_buy INT       距最后一次购买的天数（以 2024-12-30 为数据快照日，越小越近）
-  platforms           VARCHAR   活跃平台：淘宝/京东/天猫/拼多多/苏宁易购/1688 等
-  profile_text        TEXT      自然语言画像摘要
-
-表 wiki_vectors（知识库文档分块，约 36 条）：
-  doc_name            VARCHAR   文档名，如 tag_definitions.md
-  chunk_text          TEXT      分块内容
-""".strip()
-
-# 用法：TEXT2SQL_PROMPT.format(schema=SQL_SCHEMA, question=...)
+# 用法：TEXT2SQL_PROMPT.format(schema=..., question=...)
 # 填充处：tools/sql_tool.py::text2sql
 
 TEXT2SQL_PROMPT = """你是一个 PostgreSQL 查询生成助手。请根据用户问题生成一条查询 SQL。
@@ -118,15 +104,20 @@ TEXT2SQL_PROMPT = """你是一个 PostgreSQL 查询生成助手。请根据用�
 2. 必须是 SELECT 查询，禁止 UPDATE / DELETE / INSERT / ALTER / DROP 等写操作
 3. 必须带 LIMIT（默认 LIMIT 50），防止全表扫描
 4. 只允许查询上面列出的表
-5. 业务口径参考：高客单用户 = avg_amount >= 1000；低客单用户 = avg_amount < 500
+5. 高客单 / 低客单这类**业务口径不要用固定绝对金额**：优先看下面「数据口径」里的
+   客单价分位，按分位理解（如 P75 以上算高客单）。没有分位就做相对比较
+   （如 `avg_amount > (SELECT AVG(avg_amount) FROM ...)`），不要凭空造一个阈值
 6. 统计类问题使用 COUNT / AVG / SUM / ROUND 等聚合函数，按需配合 GROUP BY
-7. 中文枚举值必须加单引号，如 top_category = '美妆'
-8. 数据是 2024 全年历史快照，没有实时数据；遇到「近30天」「本周」等时效词，
-   按 days_since_last_buy 近似处理，不要凭空捏造时间函数
-9. 库里只有 2024-12-30 的**单时点静态快照**，没有时间序列表。
-   预测 / 推演 / 明年 / 下季度等**未来时点**问题，SQL 无法回答：
-   不要用 SUM / AVG 冒充，也不要起 predicted_* / forecast_* 这类
-   **暗示结论的输出别名**（别名会被下游当成结论引用）。
+7. 中文枚举值必须加单引号（如 `WHERE 某枚举列 = '某取值'`）。
+   表结构里列出的取值是**校验用**的，不是替换候选：问题里的取值不在清单里时，
+   **不要改写成最接近的那个**（例如把「母婴」换成「玩具」——那会给出一个
+   有数字、但答错问题的结果）。按问题原值查询、让结果为空，
+   再由下游如实说明「数据里没有这一类」
+8. 时效词（「近30天」「本周」等）按「数据口径」说明的时间列近似处理，
+   不要凭空捏造时间函数；「数据口径」说没有时间列时，直接说明数据不支持该口径
+9. 若「数据口径」说明**没有时间序列表**，则预测 / 推演 / 明年 / 下季度等
+   **未来时点**问题 SQL 无法回答：不要用 SUM / AVG 冒充，也不要起
+   predicted_* / forecast_* 这类**暗示结论的输出别名**（别名会被下游当成结论引用）。
    这种情况输出 `SELECT '数据不支持预测：库内无时间序列' AS message LIMIT 1`
 
 用户问题：{question}
@@ -136,8 +127,11 @@ SQL："""
 
 # ==================== 多路检索规划 + 路由复核 + SQL 判定 ====================
 # 一次调用同时产出三样东西：路由复核结论、是否需要 SQL 路、检索变体
-# 用法：MULTI_QUERY_PROMPT.format(question=...)
+# 用法：MULTI_QUERY_PROMPT.format(question=..., time_capability=...)
 # 填充处：retrieval/query_processor.py::plan_queries
+#   time_capability 由 db/schema_facts.get_time_capability() 从当前数据集采集：
+#   改造前这里写死「库里只有 2024-12-30 单时点快照」，接入有时间序列的库后
+#   会把 SQL 路永久关掉。
 #
 # 两条设计约束：
 # 1. 「路由」只分 chitchat / rag 两类——SQL 不再是路由选项，而是多路里的一路。
@@ -169,9 +163,10 @@ MULTI_QUERY_PROMPT = """你是多路检索规划助手。先判断问题归属�
        例：「钻石会员有什么权益」「流失预警怎么判定」→ 不需要
 - 不需要（**必须写不需要**）：预测 / 推演 / 假设 / 未来时点类问题，
        如「明年 GMV 多少」「下季度会怎样」「如果能…会如何」。
-       库里只有 2024-12-30 的单时点静态画像快照，**没有时间序列**，
-       SUM / AVG / COUNT 只能重述历史，算不出未来值。
-       这种情况下 SQL 只会给出一个看起来像结论、实际没做过任何预测的数字。
+       当前数据的时间能力：{time_capability}
+       它决定 SQL 能查到什么范围。但**即使有时间序列**，SUM / AVG / COUNT
+       也只是重述历史、没有任何外推，算不出未来值——SQL 只会给出一个
+       看起来像结论、实际没做过任何预测的数字。
 拿不准就写「不需要」——SQL 路有执行成本，只有确实需要统计时才值得开。
 
 第三步，判断需要哪几种资料检索方式（不是每个问题都要全跑）：

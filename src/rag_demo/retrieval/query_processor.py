@@ -37,6 +37,7 @@ from rag_demo.config import (
     TOP_K_RRF,
     TOP_K_WIKI,
 )
+from rag_demo.db.schema_facts import get_time_capability
 from rag_demo.generation.generator import chat_completion
 from rag_demo.prompts import MULTI_QUERY_PROMPT
 from rag_demo.retrieval.hybrid_retriever import get_model, hybrid_search
@@ -219,7 +220,14 @@ def plan_queries(question: str) -> QueryPlan:
 
     try:
         resp = chat_completion(
-            messages=[{"role": "user", "content": MULTI_QUERY_PROMPT.format(question=question)}],
+            messages=[{
+                "role": "user",
+                # 时间能力从当前数据集采集：写死「只有单时点快照」会让有时间序列的库
+                # 也被判成「不需要 SQL」，等于用 demo 的数据属性关掉了真实能力。
+                "content": MULTI_QUERY_PROMPT.format(
+                    question=question, time_capability=get_time_capability()
+                ),
+            }],
             temperature=0,
         )
         route, need_sql, extra = _parse_response(resp.choices[0].message.content or "")

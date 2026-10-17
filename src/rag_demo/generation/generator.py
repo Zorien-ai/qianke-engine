@@ -14,6 +14,7 @@ from rag_demo.config import (
     SQL_CELL_MAX_CHARS,
     SQL_ROWS_MAX,
 )
+from rag_demo.db.schema_facts import get_sql_schema
 from rag_demo.prompts import RAG_ANSWER_PROMPT, SQL_SUMMARY_PROMPT
 
 # ================= 配置区 =================
@@ -270,12 +271,13 @@ def llm_summarize(question: str, sql_result: dict, schema: str = "") -> str:
     参数:
         question:   用户原始问题
         sql_result: sql_tool.query() 的返回值 {"sql", "rows", "error"}
-        schema:     表结构说明（含字段取值范围）
+        schema:     表结构说明（含字段取值范围）。不传则自动从当前数据集采集。
 
-                    必须传入，否则 0 行结果无法解释——LLM 不知道枚举有哪些，
+                    必须有，否则 0 行结果无法解释——LLM 不知道枚举有哪些，
                     只能笼统地说"没有符合条件的记录"。典型场景 OPT-06：
                     问「母婴偏好用户」，而 top_category 枚举里根本没有"母婴"，
                     用户无法区分这是「数据缺失」还是「查询写错了」。
+                    注意这里要的是**当前数据集**的枚举，不能是写死的 demo 枚举。
 
     返回:
         自然语言回答字符串
@@ -287,7 +289,7 @@ def llm_summarize(question: str, sql_result: dict, schema: str = "") -> str:
     rows_text = "\n".join(str(r) for r in rows[:50]) or "（空结果）"
 
     prompt = SQL_SUMMARY_PROMPT.format(
-        schema=schema or "（未提供）",
+        schema=schema or get_sql_schema(),
         question=question,
         sql=sql_result.get("sql", ""),
         row_count=len(rows),

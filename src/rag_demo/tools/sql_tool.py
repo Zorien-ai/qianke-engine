@@ -10,13 +10,15 @@ import logging
 import re
 
 from rag_demo.db.connection import get_conn
+from rag_demo.db.schema_facts import get_sql_schema
 from rag_demo.generation.generator import chat_completion
-from rag_demo.prompts import SQL_SCHEMA, TEXT2SQL_PROMPT
+from rag_demo.prompts import TEXT2SQL_PROMPT
 
 logger = logging.getLogger(__name__)
 
-# 表结构说明与 SQL 生成提示词见 rag_demo/prompts.py
-# （SQL_SCHEMA 同时被 pipeline / api 的结果总结复用）
+# SQL 生成提示词见 rag_demo/prompts.py；
+# 表结构 + 取值分布由 db/schema_facts.py 从**当前数据集**实时采集（带缓存），
+# 不再写死在提示词里——否则换了数据模型仍会照旧枚举拼条件。
 
 # ================= 安全校验配置 =================
 # 禁止出现的关键字（写操作 / DDL / DCL）
@@ -47,8 +49,12 @@ def text2sql(question: str) -> str:
     把自然语言问题转成 SQL（只生成，不校验）
 
     temperature=0 保证同样的问题生成稳定的 SQL。
+
+    schema 每次从当前数据集取（内部有缓存）：条数、枚举取值、时间覆盖、
+    客单价分位都跟着数据走，换数据集不需要改提示词。
     """
-    prompt = TEXT2SQL_PROMPT.format(schema=SQL_SCHEMA, question=question)
+    schema = get_sql_schema()
+    prompt = TEXT2SQL_PROMPT.format(schema=schema, question=question)
     resp = chat_completion(
         messages=[{"role": "user", "content": prompt}],
         temperature=0,

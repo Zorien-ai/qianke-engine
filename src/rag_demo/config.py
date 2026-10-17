@@ -117,6 +117,14 @@ KEYWORD_RETRIEVER = "bm25"
 SEARCH_INDEX_TABLE = "search_index"
 SPARSE_VEC_DIM = 250002   # BGE-M3 词表大小，即 sparsevec 的维度上限
 
+# ---------- 提示词里的数据事实（运行时从实库采集） ----------
+# 表结构里的条数、枚举取值、数值范围、时间覆盖、客单价分位都来自当前数据集，
+# 不再写死在提示词里（原因见 db/schema_facts.py 模块注释）。
+# 采集结果按数据集缓存：每次问答都重扫分布没有价值，而数据只在 ingest 后变化，
+# 那条路径会显式失效缓存（见 ingest_data 末尾的 invalidate）。
+SQL_SCHEMA_CACHE_TTL = 300     # 秒；兜底过期时间，防止绕过 invalidate 的写入
+SQL_SCHEMA_ENUM_LIMIT = 20     # 每个枚举列最多展示多少个取值（按条数降序）
+
 # 稠密向量的维度：bge-m3 输出 1024 维，建表时用来声明 embedding vector(1024)。
 # 单独提出来是因为它同时出现在建表 DDL 和检索 SQL 的 %s::vector 转换里，
 # 散着写迟早对不上。
