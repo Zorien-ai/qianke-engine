@@ -41,6 +41,20 @@ body {
 .hero h1 { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: .3px; }
 .hero-sub { margin: 0; font-size: 14px; opacity: .92; max-width: 720px; }
 
+/* 边界说明：承重点（没有登录），不能做成小字灰字。
+   放在 Hero 里是为了在**上传之前**被读到——藏到页脚等于没说。 */
+.scope-note {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  max-width: 820px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .16);
+  border: 1px solid rgba(255, 255, 255, .38);
+  font-size: 13px;
+  line-height: 1.72;
+}
+.scope-note strong { color: #fff; font-weight: 650; }
+
 .stepper {
   display: flex;
   gap: 6px;
