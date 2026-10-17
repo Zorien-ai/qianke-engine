@@ -17,6 +17,9 @@
       <div class="role-bar">
         <label for="role-select">当前身份</label>
         <select id="role-select" title="Demo 切换器：生产环境的身份应来自登录态，而不是页面自选"></select>
+        <label for="user-input" title="Demo：模拟指定人员。管理员可在「权限管理」里对某个用户单独授权，覆盖角色默认等级">用户</label>
+        <input id="user-input" placeholder="可留空" autocomplete="off" />
+        <span class="level-badge" id="level-badge" hidden></span>
         <span class="role-note" id="role-note"></span>
       </div>
     </div>
@@ -35,6 +38,42 @@
         <div class="stat-card is-loading"></div>
         <div class="stat-card is-loading"></div>
       </div>
+    </section>
+
+    <!-- 权限管理：仅具备「运维 / 权限管理」能力的身份可见（默认只有管理员） -->
+    <section class="panel" id="perm-panel" hidden>
+      <div class="panel-head">
+        <h2>权限管理</h2>
+        <span class="panel-tag" id="perm-status">L1~L4 · 保存后立即生效</span>
+      </div>
+      <p class="perm-intro">
+        这里配的是「<strong>等级能做什么</strong>」：角色决定默认等级，人员授权可对指定用户覆盖角色等级。
+        改动写入 <code id="perm-path">var/permissions.json</code>，保存后<strong>下一个请求就按新配置判定</strong>，不需要重启。
+      </p>
+
+      <div class="perm-toolbar">
+        <button type="button" id="perm-open-all" class="perm-btn">一键：L1~L4 全部可访问全部信息</button>
+        <button type="button" id="perm-save" class="perm-btn is-primary">保存配置</button>
+        <button type="button" id="perm-reset" class="perm-btn is-danger">恢复默认</button>
+        <span class="perm-hint" id="perm-hint"></span>
+      </div>
+
+      <div class="detail-title">等级 → 能力</div>
+      <div class="perm-matrix-wrap">
+        <table class="perm-table" id="perm-matrix"></table>
+      </div>
+
+      <div class="detail-title">角色默认等级</div>
+      <div class="perm-roles" id="perm-roles"></div>
+
+      <div class="detail-title">人员授权（覆盖角色默认等级）</div>
+      <form class="perm-grant" id="perm-grant-form">
+        <input id="perm-user" placeholder="用户 ID，例如 u_1001" autocomplete="off" />
+        <select id="perm-level"></select>
+        <button type="submit" class="perm-btn is-primary">授权 / 提权</button>
+        <span class="perm-hint" id="perm-grant-hint"></span>
+      </form>
+      <div class="perm-users" id="perm-users"></div>
     </section>
 
     <!-- 提问 -->

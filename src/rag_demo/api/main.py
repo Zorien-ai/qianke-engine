@@ -16,8 +16,12 @@
 
 权限（Demo 过渡态，详见 README「角色与访问权限」）：
     角色由请求头 `X-Role` 传入：admin / exec / analyst / ops / cs / guest，
+    用户由可选的 `X-User` 传入（用于「对指定人员提权」）。
     交互页面可切换。⚠ **调用方可以自报身份，这不是安全边界**，只是演示开关——
-    接入电商系统后角色必须来自登录态，见 config.DEFAULT_API_ROLE 的说明。
+    接入电商系统后角色/用户必须来自登录态，见 config.DEFAULT_API_ROLE 的说明。
+
+    等级与权限由管理员在页面上动态配置（L1~L4 → 能力），落盘 var/permissions.json，
+    改完**不用重启**即生效：每个请求都会重新解析身份并读最新配置。
 
 前置条件：
     1. PostgreSQL(pgvector) 已启动，且已跑过 ingest_data.py 与 ingest_docs.py
@@ -74,9 +78,10 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 # ================= 角色与权限 =================
-# ⚠ 角色来源目前是**请求头**，即调用方可自报。这不是安全边界，是演示开关：
-#   接入电商系统后必须改为「登录态 → 角色」，并把 config.DEFAULT_API_ROLE 改成 guest。
+# ⚠ 角色/用户来源目前是**请求头**，即调用方可自报。这不是安全边界，是演示开关：
+#   接入电商系统后必须改为「登录态 → 角色/用户」，并把 config.DEFAULT_API_ROLE 改成 guest。
 ROLE_HEADER = "X-Role"
+USER_HEADER = "X-User"
 
 
 def _role(x_role: str | None) -> str:
@@ -84,15 +89,25 @@ def _role(x_role: str | None) -> str:
     return permissions.resolve_role(x_role, default=DEFAULT_API_ROLE)
 
 
-def _require(role: str, cap: str) -> None:
+def _user(x_user: str | None) -> str | None:
+    """解析请求里的用户 ID：空白视为未指定（走角色默认等级）"""
+    return permissions.normalize_user(x_user)
+
+
+def _require(role: str, cap: str, user: str | None = None) -> None:
     """
     能力校验：不满足就 403
 
     用 403 而不是 404/静默忽略——调用方明确知道"这条路不通"，
     比"看起来成功了但字段没了"更容易排查。
+
+    能力按 **用户覆盖后的有效等级** 计算，所以管理员刚授的权下一个请求就生效。
     """
-    if not permissions.has(role, cap):
-        logger.warning("权限拦截: role=%s 缺少能力 %s", role, cap)
+    if not permissions.has(role, cap, user):
+        logger.warning(
+            "权限拦截: role=%s user=%s level=%s 缺少能力 %s",
+            role, user or "-", permissions.resolve_level(role, user), cap,
+        )
         raise HTTPException(status_code=403, detail=permissions.FORBIDDEN_DETAIL)
 
 
@@ -228,6 +243,25 @@ class StatusResponse(BaseModel):
     status: str
 
 
+# ---------- 权限配置（管理员） ----------
+class PermissionConfigIn(BaseModel):
+    """整份保存：等级→能力 + 角色→等级（+ 可选的人员覆盖）"""
+
+    levels: dict[str, list[str]]
+    role_levels: dict[str, str]
+    # None = 保留现有的人员授权（页面只管矩阵与角色，人员授权走 grant 接口）
+    user_levels: dict[str, str] | None = None
+
+
+class GrantIn(BaseModel):
+    """单点授权/提权：给某个角色或某个人员设定等级"""
+
+    target_type: str  # "role" | "user"
+    target: str
+    level: str
+    note: str | None = None
+
+
 # ================= 静态资源与页面 =================
 # 向导（M2）先注册：它自带 /static/wizard 挂载点，必须排在下面那个 /static 之前，
 # 否则 /static/wizard/* 会被 /static 吃掉并 404（Starlette 按注册顺序匹配前缀）。
@@ -244,31 +278,50 @@ def index() -> FileResponse:
 
 
 @app.get("/whoami")
-def whoami(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
+def whoami(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
     """
     当前身份的能力清单——**前端据此决定渲染什么**
 
     为什么不让前端硬编码权限表：那会变成两份真源，改一处漏一处。
     前端只认这个接口返回的 `can`，与后端 permissions.py 是同一份定义。
+
+    返回里带 `level`（L1~L4）：管理员改完配置，这里立刻反映新等级与新能力。
     """
-    info = permissions.describe(_role(x_role))
+    role, user = _role(x_role), _user(x_user)
+    info = permissions.describe(role, user)
     info["topk_range"] = {"min": TOP_K_PROFILE_MIN, "max": TOP_K_PROFILE_MAX}
+    # 「可用」按角色默认等级算：管理员把某个角色提到 L1 以上，它就会出现在下拉框里
     info["roles"] = [
-        {"value": r, "label": permissions.ROLE_LABELS[r], "usable": permissions.has(r, permissions.CAP_ANSWER)}
+        {
+            "value": r,
+            "label": permissions.ROLE_LABELS[r],
+            "usable": permissions.has(r, permissions.CAP_ANSWER),
+            "level": permissions.resolve_level(r),
+        }
         for r in permissions.ROLE_SELECTOR_ORDER
     ]
     info["default_role"] = permissions.DEFAULT_UI_ROLE
-    # Demo 声明：权限申请不做处理，只声明现状（尚未接入电商系统）
+    info["levels"] = [
+        {"value": lv, "label": permissions.LEVEL_LABELS[lv]} for lv in permissions.LEVELS
+    ]
+    # Demo 声明：身份由请求头自报，尚未接入电商系统
     info["note"] = (
         "当前为 Demo，身份由请求头自报，尚未接入电商系统。"
-        "正式权限应以登录态为准；权限申请需走电商系统审批流程。"
+        "正式权限应以登录态为准；管理员可在「权限管理」里调整等级与人员授权。"
     )
     return info
 
 
 # ================= 接口 =================
 @app.post("/qa")
-def qa(req: QueryRequest, x_role: str | None = Header(default=None, alias=ROLE_HEADER)):
+def qa(
+    req: QueryRequest,
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+):
     """
     统一问答入口
 
@@ -279,25 +332,31 @@ def qa(req: QueryRequest, x_role: str | None = Header(default=None, alias=ROLE_H
     top_k 是「返回多少个用户」，只有运营及以上角色能生效，其余角色静默忽略。
     响应**按角色裁剪**后才返回（见 permissions.render 与 README 权限矩阵）。
     """
-    role = _role(x_role)
-    _require(role, permissions.CAP_ANSWER)
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_ANSWER, user)
 
-    limit = permissions.clamp_top_k(role, req.top_k, TOP_K_PROFILE_MAX, TOP_K_PROFILE_MIN)
+    limit = permissions.clamp_top_k(
+        role, req.top_k, TOP_K_PROFILE_MAX, TOP_K_PROFILE_MIN, user
+    )
 
     # dept 不接受调用方自报：它决定召回范围，等同越权口子（ODD-09 暴露的正是这一点）。
     # 目前只有管理员能显式覆盖，其余角色一律走默认过滤；接入电商系统后应改为
     # 「由登录身份推导部门」，届时这个参数应整体从请求模型里删掉。
-    dept = req.dept if permissions.has(role, permissions.CAP_OPS) else None
+    dept = req.dept if permissions.has(role, permissions.CAP_OPS, user) else None
 
     result = answer_question(
         req.question, dept, keyword_mode=req.retriever, profile_limit=limit,
         deep_thinking=req.deep_thinking,
     )
-    return permissions.render(result, role)
+    return permissions.render(result, role, user)
 
 
 @app.post("/search")
-def search(req: SearchRequest, x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
+def search(
+    req: SearchRequest,
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
     """
     仅召回、不生成 —— 用于对比 BM25 与 BGE-M3 稀疏向量召回了什么
 
@@ -307,8 +366,8 @@ def search(req: SearchRequest, x_role: str | None = Header(default=None, alias=R
     ⚠ 这是**最敏感**的接口：它绕过精排与生成，直接吐出知识库原文片段，
     等于"不经过任何加工地扒库"。只对系统管理员开放。
     """
-    role = _role(x_role)
-    _require(role, permissions.CAP_RAW_SEARCH)
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_RAW_SEARCH, user)
 
     question = (req.question or "").strip()
     if not question:
@@ -343,14 +402,17 @@ def search(req: SearchRequest, x_role: str | None = Header(default=None, alias=R
 
 
 @app.get("/stats")
-def stats(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
+def stats(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
     """
     数据概况，供首页展示（画像规模 / 知识库规模 / 会员等级分布）
 
     ⚠ 它等价于「免 SQL 的聚合统计」：会员等级分布、钻石占比直接给出，
     还附带画像表的字段数（等于泄露 schema 规模）。故只对系统管理员开放。
     """
-    _require(_role(x_role), permissions.CAP_STATS)
+    _require(_role(x_role), permissions.CAP_STATS, _user(x_user))
 
     conn = get_conn()
     cur = conn.cursor()
@@ -404,7 +466,10 @@ def stats(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
 
 
 @app.get("/admin/index-status")
-def index_status(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
+def index_status(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
     """
     检索索引新鲜度：索引是否已经落后于源表
 
@@ -417,7 +482,7 @@ def index_status(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -
     会**静默**用旧索引检索（详见 data/new-dianshuang/README.md 6.4）。
     status: fresh（一致）/ stale（源表变了）/ unknown（无基线指纹）
     """
-    _require(_role(x_role), permissions.CAP_STATS)
+    _require(_role(x_role), permissions.CAP_STATS, _user(x_user))
     return index_freshness()
 
 
@@ -427,7 +492,11 @@ def _sse(event: str, data: dict) -> str:
 
 
 @app.post("/qa/stream")
-def qa_stream(req: QueryRequest, x_role: str | None = Header(default=None, alias=ROLE_HEADER)):
+def qa_stream(
+    req: QueryRequest,
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+):
     """
     流式问答（SSE）
 
@@ -449,16 +518,18 @@ def qa_stream(req: QueryRequest, x_role: str | None = Header(default=None, alias
     漏一个就是一次越权，而这类漏在 code review 里极难发现，因为四个分支长得不像。
     缓存里存的是**完整结果**，裁剪只发生在发出前，所以角色不进缓存键。
     """
-    role = _role(x_role)
-    _require(role, permissions.CAP_ANSWER)
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_ANSWER, user)
 
-    limit = permissions.clamp_top_k(role, req.top_k, TOP_K_PROFILE_MAX, TOP_K_PROFILE_MIN)
+    limit = permissions.clamp_top_k(
+        role, req.top_k, TOP_K_PROFILE_MAX, TOP_K_PROFILE_MIN, user
+    )
     # 与 /qa 同一口径：dept 不接受自报，仅管理员可覆盖
-    dept = req.dept if permissions.has(role, permissions.CAP_OPS) else None
+    dept = req.dept if permissions.has(role, permissions.CAP_OPS, user) else None
 
     def meta(payload: dict, **extra) -> str:
         """构造 meta 事件：先裁剪再序列化，避免各处漏裁剪"""
-        return _sse("meta", permissions.render(payload, role) | extra)
+        return _sse("meta", permissions.render(payload, role, user) | extra)
 
     def event_stream():
         try:
@@ -570,16 +641,22 @@ def qa_stream(req: QueryRequest, x_role: str | None = Header(default=None, alias
 
 
 @app.get("/cache/stats")
-def cache_stats(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> dict:
+def cache_stats(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
     """问答缓存命中情况——用于验证缓存是否真的生效（运维信息，仅管理员）"""
-    _require(_role(x_role), permissions.CAP_OPS)
+    _require(_role(x_role), permissions.CAP_OPS, _user(x_user))
     return answer_cache.stats()
 
 
 @app.post("/admin/clear-cache")
-def clear_cache(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> StatusResponse:
+def clear_cache(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> StatusResponse:
     """数据或配置更新后清空问答缓存（写操作，仅管理员）"""
-    _require(_role(x_role), permissions.CAP_OPS)
+    _require(_role(x_role), permissions.CAP_OPS, _user(x_user))
     answer_cache.clear()
     logger.info("问答缓存已清空")
     return {"status": "cleared"}
@@ -592,8 +669,165 @@ def health() -> StatusResponse:
 
 
 @app.post("/admin/reload")
-def admin_reload(x_role: str | None = Header(default=None, alias=ROLE_HEADER)) -> StatusResponse:
+def admin_reload(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> StatusResponse:
     """数据更新后重建 BM25 内存索引（写操作 + 影响性能，仅管理员）"""
-    _require(_role(x_role), permissions.CAP_OPS)
+    _require(_role(x_role), permissions.CAP_OPS, _user(x_user))
     reload_bm25()
     return {"status": "reloaded"}
+
+
+# ================= 权限配置（管理员） =================
+# 为什么放在 API 层而不是 permissions.py：
+# 权限模块只管"配好之后怎么判"，HTTP 语义、请求模型、错误码属于接口边界。
+# 每次写操作都会落盘（var/permissions.json），并对下一个请求立即生效——
+# 判定路径每次都会重新解析身份 + 读最新配置，没有"改了要重启"这回事。
+
+
+def _actor(role: str, user: str | None) -> str:
+    """审计用：谁改的（用户 ID 优先，没有就记角色）"""
+    return f"{role}:{user}" if user else role
+
+
+@app.get("/admin/permissions")
+def get_permissions(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
+    """
+    读取当前权限配置 + 能力/等级/角色目录
+
+    目录由后端给：前端若自己写一份能力清单，加新能力时必然漏改一处。
+    """
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_OPS, user)
+    view = permissions.admin_view()
+    view["actor"] = {
+        "role": role,
+        "user": user,
+        "level": permissions.resolve_level(role, user),
+    }
+    return view
+
+
+@app.put("/admin/permissions")
+def put_permissions(
+    cfg: PermissionConfigIn,
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
+    """
+    整份保存「等级→能力」与「角色→等级」
+
+    校验失败返回 400 且**不落盘**：宁可整体拒绝，也不要写进去一半
+    （管理员会以为已经生效，实际某条被静默忽略）。
+    """
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_OPS, user)
+
+    def _apply(cur: dict) -> dict:
+        cur["levels"] = cfg.levels
+        cur["role_levels"] = cfg.role_levels
+        if cfg.user_levels is not None:
+            cur["user_levels"] = cfg.user_levels
+        return cur
+
+    try:
+        new = permissions.update(_apply, _actor(role, user))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "saved", "config": new}
+
+
+@app.post("/admin/permissions/grant")
+def grant_permission(
+    payload: GrantIn,
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
+    """
+    单点授权/提权：`target_type=role` 改角色默认等级；`target_type=user` 改指定人员
+
+    典型用法：
+        {"target_type": "user", "target": "u_1001", "level": "L4"}
+        —— 把某个销售人员从 L1 提到 L4（覆盖角色等级，立刻生效）
+        {"target_type": "role", "target": "cs", "level": "L4"}
+        —— 让所有销售都能看全部信息
+    """
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_OPS, user)
+
+    level = (payload.level or "").strip().upper()
+    if level not in permissions.LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"等级非法: {payload.level}（可选 {'/'.join(permissions.LEVELS)}）",
+        )
+
+    target_type = (payload.target_type or "").strip().lower()
+    actor = _actor(role, user)
+
+    def _apply(cur: dict) -> dict:
+        if target_type == "role":
+            target = (payload.target or "").strip().lower()
+            if target not in permissions.ROLES:
+                raise ValueError(f"角色非法: {payload.target}")
+            if target == permissions.ROLE_GUEST:
+                raise ValueError("未识别身份固定为 L0，不能授予等级")
+            cur["role_levels"][target] = level
+        elif target_type == "user":
+            uid = permissions.normalize_user(payload.target)
+            if not uid:
+                raise ValueError("用户 ID 不能为空")
+            cur["user_levels"][uid] = {
+                "level": level,
+                "note": payload.note or "",
+                "updated_at": permissions._now(),  # noqa: SLF001 内部时间戳，避免重复实现
+                "updated_by": actor,
+            }
+        else:
+            raise ValueError(f"target_type 只能是 role / user，收到 {payload.target_type!r}")
+        return cur
+
+    try:
+        new = permissions.update(_apply, actor)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "granted", "config": new}
+
+
+@app.delete("/admin/permissions/user/{user_id}")
+def revoke_user_permission(
+    user_id: str,
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
+    """撤销某个人员的等级覆盖（回到所属角色的默认等级）"""
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_OPS, user)
+
+    uid = permissions.normalize_user(user_id)
+    if not uid:
+        raise HTTPException(status_code=400, detail="用户 ID 不能为空")
+
+    def _apply(cur: dict) -> dict:
+        if uid in cur["user_levels"]:
+            cur["user_levels"].pop(uid)
+        return cur
+
+    new = permissions.update(_apply, _actor(role, user))
+    return {"status": "revoked", "config": new}
+
+
+@app.post("/admin/permissions/reset")
+def reset_permissions(
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
+    """恢复默认配置（= 代码里的等级表，与改造前行为一致）"""
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_OPS, user)
+    new = permissions.reset_config(_actor(role, user))
+    return {"status": "reset", "config": new}

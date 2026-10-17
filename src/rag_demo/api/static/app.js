@@ -25,13 +25,17 @@ const el = (id) => document.getElementById(id);
  *   而不是因为"藏起来就安全"。
  */
 let currentRole = null;
+// 指定人员（Demo 用）：留空 = 只按角色等级；填了 = 该用户的人员授权优先于角色默认等级
+let currentUser = "";
 let CAPS = {};
+let CURRENT_LEVEL = "";
 let TOPK_RANGE = { min: 1, max: 30 };
 
-/* 所有请求都带上当前角色（后端按它裁剪响应） */
+/* 所有请求都带上当前角色/用户（后端按它裁剪响应） */
 function apiFetch(url, options = {}) {
   const opts = { ...options, headers: { ...(options.headers || {}) } };
   if (currentRole) opts.headers["X-Role"] = currentRole;
+  if (currentUser) opts.headers["X-User"] = currentUser;
   return fetch(url, opts);
 }
 
@@ -51,13 +55,31 @@ async function loadWhoami() {
   }
 
   currentRole = select.value;
-  const mine = await (await apiFetch("/whoami")).json(); // 带上角色，拿自己的能力清单
+  const mine = await (await apiFetch("/whoami")).json(); // 带上角色/用户，拿自己的能力清单
   CAPS = mine.can || {};
+  CURRENT_LEVEL = mine.level || "";
   TOPK_RANGE = mine.topk_range || TOPK_RANGE;
 
-  // 权限申请只做声明、不做处理：尚未接入电商系统，页面上说清楚
+  // 等级徽章：管理员改完配置后，当前身份能直接看到自己现在是哪一级。
+  // 「人员授权」优先于角色默认，所以有用户 ID 时要说明这是个人等级。
+  const badge = el("level-badge");
+  if (CURRENT_LEVEL) {
+    badge.hidden = false;
+    badge.textContent = mine.level_label || CURRENT_LEVEL;
+    badge.title = mine.user
+      ? `用户 ${mine.user} 的有效等级（人员授权优先于角色默认）`
+      : "角色默认等级";
+  } else {
+    badge.hidden = true;
+  }
+
+  // Demo 声明：身份由请求头自报，尚未接入电商系统
   el("role-note").textContent = mine.note || "";
   applyCapabilities();
+
+  // 权限面板的数据单独拉：必须 await，否则调用方（保存/授权后）写提示文案时
+  // 会被后面异步完成的 renderPermissions 清空——表现为"保存成功了但提示是空的"
+  if (CAPS.ops) await loadPermissions();
 
   el("stats-panel").hidden = !CAPS.stats;
   if (CAPS.stats) loadStats();
@@ -65,6 +87,10 @@ async function loadWhoami() {
 }
 
 function applyCapabilities() {
+  // 权限管理：没有「运维 / 权限管理」能力就连面板都不渲染（默认只有管理员）。
+  // 面板数据由 loadWhoami 里 await loadPermissions() 负责，这里只管显隐。
+  el("perm-panel").hidden = !CAPS.ops;
+
   // 数据概况：无权限直接不渲染
   if (!CAPS.stats) el("stats-grid").innerHTML = "";
 
@@ -703,22 +729,242 @@ function renderCompare(data) {
   el("compare-panel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/* ---------- 权限管理（管理员） ----------
+ * 前端只负责把配置渲染成人能看懂的样子：
+ * 能力目录、等级目录、角色清单、默认值全部来自 GET /admin/permissions，
+ * 页面里不抄第二份权限表——否则加一个能力就会漏改一处。
+ *
+ * 改动是**即时生效**的：后端每次鉴权都重新解析身份并读最新配置，
+ * 所以保存后只要再拉一次 /whoami，界面就和实际判定一致了。
+ */
+let PERM = null;
+
+async function loadPermissions() {
+  try {
+    const res = await apiFetch("/admin/permissions");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    PERM = await res.json();
+    renderPermissions();
+  } catch (e) {
+    el("perm-status").textContent = `权限配置加载失败：${e.message}`;
+  }
+}
+
+function renderPermissions() {
+  if (!PERM) return;
+  const { config, capabilities, levels, roles } = PERM;
+  const cfg = config || {};
+
+  el("perm-path").textContent = PERM.path || "var/permissions.json";
+  el("perm-status").textContent = cfg.updated_at
+    ? `v${cfg.version} · ${cfg.updated_at} 由 ${cfg.updated_by || "-"} 保存`
+    : "默认配置（尚未修改）";
+  el("perm-hint").textContent = "";
+
+  // 1) 等级 × 能力矩阵
+  const head = capabilities
+    .map((c) => `<th title="${escapeHtml(c.description)}">${escapeHtml(c.label)}</th>`)
+    .join("");
+  const body = levels
+    .map((lv) => {
+      const on = new Set((cfg.levels || {})[lv.value] || []);
+      const cells = capabilities
+        .map(
+          (c) => `<td><input type="checkbox" data-level="${lv.value}" data-cap="${c.value}"
+                    title="${escapeHtml(lv.label)} · ${escapeHtml(c.label)}"
+                    ${on.has(c.value) ? "checked" : ""}></td>`
+        )
+        .join("");
+      const name = String(lv.label).replace(lv.value, "").trim();
+      return `<tr>
+        <th title="${escapeHtml(lv.description)}"><span class="perm-lv">${lv.value}</span>${escapeHtml(name)}</th>
+        ${cells}
+      </tr>`;
+    })
+    .join("");
+  el("perm-matrix").innerHTML = `<thead><tr><th>等级</th>${head}</tr></thead><tbody>${body}</tbody>`;
+
+  // 2) 角色默认等级（guest 固定 L0，不给入口）
+  el("perm-roles").innerHTML = roles
+    .map((r) => {
+      if (r.value === "guest") {
+        return `<div class="perm-role">
+          <span class="perm-role-name">${escapeHtml(r.label)}</span>
+          <span class="pu-level">L0</span>
+          <span class="perm-role-tag">未识别身份固定无权限</span>
+        </div>`;
+      }
+      const opts = levels
+        .map(
+          (lv) =>
+            `<option value="${lv.value}" ${r.level === lv.value ? "selected" : ""}>${escapeHtml(lv.label)}</option>`
+        )
+        .join("");
+      return `<div class="perm-role">
+        <span class="perm-role-name">${escapeHtml(r.label)}</span>
+        <select data-role="${r.value}">${opts}</select>
+        <span class="perm-role-tag">默认等级</span>
+      </div>`;
+    })
+    .join("");
+
+  // 3) 人员授权
+  el("perm-level").innerHTML = levels
+    .map((lv) => `<option value="${lv.value}">${escapeHtml(lv.label)}</option>`)
+    .join("");
+  const users = cfg.user_levels || {};
+  const ids = Object.keys(users);
+  el("perm-users").innerHTML = ids.length
+    ? ids
+        .map((uid) => {
+          const item = users[uid] || {};
+          return `<div class="perm-user">
+            <span class="pu-id">${escapeHtml(uid)}</span>
+            <span class="pu-level">${escapeHtml(item.level || "-")}</span>
+            ${item.note ? `<span class="pu-note">${escapeHtml(item.note)}</span>` : ""}
+            <span class="pu-meta">${escapeHtml(item.updated_by || "")} ${escapeHtml(item.updated_at || "")}</span>
+            <button type="button" class="perm-btn is-danger" data-revoke="${escapeHtml(uid)}">撤销</button>
+          </div>`;
+        })
+        .join("")
+    : `<div class="tp-empty">还没有人员授权——所有人按角色默认等级判定</div>`;
+}
+
+/* 收集矩阵 + 角色下拉 → 保存请求体 */
+function collectPermissions() {
+  const levels = {};
+  document.querySelectorAll("#perm-matrix input[data-level]").forEach((box) => {
+    if (!box.checked) return;
+    (levels[box.dataset.level] = levels[box.dataset.level] || []).push(box.dataset.cap);
+  });
+  const role_levels = {};
+  document.querySelectorAll("#perm-roles select[data-role]").forEach((sel) => {
+    role_levels[sel.dataset.role] = sel.value;
+  });
+  return { levels, role_levels };
+}
+
+async function savePermissions() {
+  const hint = el("perm-hint");
+  hint.textContent = "保存中…";
+  try {
+    const res = await apiFetch("/admin/permissions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectPermissions()),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    await loadWhoami(); // 重新拉能力：后端已按新配置判定，界面要跟上
+    el("perm-hint").textContent = "已保存，立即生效";
+  } catch (e) {
+    hint.textContent = `保存失败：${e.message}`;
+  }
+}
+
+/* 典型操作：L1~L4 全部可访问全部信息（勾满后直接保存） */
+async function openAllPermissions() {
+  document.querySelectorAll("#perm-matrix input[data-level]").forEach((box) => {
+    box.checked = true;
+  });
+  await savePermissions();
+}
+
+async function resetPermissions() {
+  el("perm-hint").textContent = "正在恢复默认…";
+  try {
+    const res = await apiFetch("/admin/permissions/reset", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    await loadWhoami();
+    el("perm-hint").textContent = "已恢复默认配置";
+  } catch (e) {
+    el("perm-hint").textContent = `恢复失败：${e.message}`;
+  }
+}
+
+/* 典型操作：把某个销售人员从 L1 提到 L4（覆盖角色等级） */
+async function grantPermission(event) {
+  event.preventDefault();
+  const hint = el("perm-grant-hint");
+  const target = el("perm-user").value.trim();
+  const level = el("perm-level").value;
+  if (!target) {
+    hint.textContent = "请先填用户 ID";
+    return;
+  }
+  hint.textContent = "提交中…";
+  try {
+    const res = await apiFetch("/admin/permissions/grant", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_type: "user", target, level }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    el("perm-user").value = "";
+    await loadWhoami();
+    el("perm-grant-hint").textContent = `${target} → ${level}，已生效`;
+  } catch (e) {
+    hint.textContent = `授权失败：${e.message}`;
+  }
+}
+
+async function revokeUserPermission(uid) {
+  try {
+    const res = await apiFetch(`/admin/permissions/user/${encodeURIComponent(uid)}`, {
+      method: "DELETE",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    await loadWhoami();
+    el("perm-grant-hint").textContent = `已撤销 ${uid} 的人员授权`;
+  } catch (e) {
+    el("perm-grant-hint").textContent = `撤销失败：${e.message}`;
+  }
+}
+
 /* ---------- 初始化 ---------- */
 document.addEventListener("DOMContentLoaded", async () => {
   renderExamples();
   initRetriever();
   el("compare-btn").addEventListener("click", compareRecall);
 
-  // 切换身份：必须先清空上一个身份留下的结果。
+  // 切换身份/用户：必须先清空上一个身份留下的结果。
   // 不清的话，降权后旧的高权内容还挂在页面上，会让人以为"权限没生效"。
-  el("role-select").addEventListener("change", async () => {
-    currentRole = el("role-select").value;
+  const resetOutputs = () => {
     el("result-panel").hidden = true;
     el("detail-panel").hidden = true;
     el("compare-panel").hidden = true;
     el("error-panel").hidden = true;
     el("answer-body").innerHTML = "";
+  };
+
+  el("role-select").addEventListener("change", async () => {
+    currentRole = el("role-select").value;
+    resetOutputs();
     await loadWhoami();
+  });
+
+  // 指定人员：切完立刻按「人员授权 > 角色默认」重新算能力。
+  // 这样管理员把 u_1001 提到 L4 后，页面把用户填成 u_1001 就能当场验证。
+  el("user-input").addEventListener("change", async () => {
+    currentUser = el("user-input").value.trim();
+    resetOutputs();
+    await loadWhoami();
+  });
+
+  // 权限管理面板：元素常驻，事件只绑一次（内容是重新渲染的，容器本身不换）
+  el("perm-save").addEventListener("click", savePermissions);
+  el("perm-open-all").addEventListener("click", openAllPermissions);
+  el("perm-reset").addEventListener("click", resetPermissions);
+  el("perm-grant-form").addEventListener("submit", grantPermission);
+  el("perm-matrix").addEventListener("change", () => {
+    el("perm-hint").textContent = "有未保存的改动";
+  });
+  el("perm-users").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-revoke]");
+    if (btn) revokeUserPermission(btn.dataset.revoke);
   });
 
   // 先定身份，再决定渲染什么（loadStats 由 applyCapabilities 按能力触发）
