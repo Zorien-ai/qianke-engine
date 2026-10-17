@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+web/node_modules/
 
 # 运行期日志与一次性调试产物（不入库）
 logs/

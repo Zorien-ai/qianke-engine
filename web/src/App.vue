@@ -1,0 +1,187 @@
+<script setup>
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, RouterLink, RouterView } from "vue-router";
+import { hasCap, isManager, logout, store } from "./store";
+import { toggleTheme } from "./theme";
+import ToastHost from "./components/ToastHost.vue";
+
+const route = useRoute();
+const drawerOpen = ref(false);
+const collapsed = ref(false);
+
+const ICONS = {
+  dashboard:
+    '<rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/>',
+  chat: '<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01"/>',
+  kb: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  staff:
+    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  settings:
+    '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+  wizard:
+    '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
+  collapse: '<polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>',
+  logout:
+    '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+};
+
+const navItems = computed(() => {
+  const items = [
+    { to: "/", key: "dashboard", label: "工作台", icon: ICONS.dashboard },
+    { to: "/chat", key: "chat", label: "对话", icon: ICONS.chat },
+    { to: "/kb", key: "kb", label: "知识库", icon: ICONS.kb },
+  ];
+  if (isManager()) items.push({ to: "/staff", key: "staff", label: "员工管理", icon: ICONS.staff });
+  if (hasCap("ops"))
+    items.push({ to: "/settings", key: "settings", label: "权限配置", icon: ICONS.settings });
+  return items;
+});
+
+const pageTitle = computed(() => (route.meta && route.meta.title) || "工作台");
+const accountName = computed(() => {
+  const a = store.account;
+  if (!a) return "未登录";
+  return a.display_name || a.username || "未知账号";
+});
+const avatarChar = computed(() => {
+  const n = accountName.value;
+  return n ? n.slice(0, 1).toUpperCase() : "?";
+});
+const enterpriseName = computed(() => {
+  const ent = store.account && store.account.enterprise;
+  return ent ? ent.name : store.account && store.account.is_system_admin ? "平台方" : "—";
+});
+const roleLine = computed(() => {
+  const a = store.account;
+  if (!a) return "";
+  return [a.account_type_label, store.roleLabel].filter(Boolean).join(" · ");
+});
+
+function onResize() {
+  if (window.innerWidth > 900) drawerOpen.value = false;
+}
+
+onMounted(() => {
+  try {
+    collapsed.value = localStorage.getItem("rag-v2-sidebar") === "1";
+  } catch {
+    /* 忽略 */
+  }
+  window.addEventListener("resize", onResize);
+});
+
+watch(collapsed, (v) => {
+  try {
+    localStorage.setItem("rag-v2-sidebar", v ? "1" : "0");
+  } catch {
+    /* 忽略 */
+  }
+});
+
+function closeDrawer() {
+  drawerOpen.value = false;
+}
+</script>
+
+<template>
+  <div class="app-shell" :class="{ 'is-collapsed': collapsed, 'is-drawer-open': drawerOpen }">
+    <!-- 未登录/初始化失败：路由守卫已拦截，这里只负责给出可读状态 -->
+    <div v-if="!store.booted" class="boot-screen">
+      <div v-if="!store.bootError" class="boot-box">
+        <span class="spinner" />
+        <p>正在确认登录状态…</p>
+      </div>
+      <div v-else class="boot-box boot-error">
+        <h2>无法完成初始化</h2>
+        <p>{{ store.bootError }}</p>
+        <div class="row-actions">
+          <button class="btn btn-primary" @click="$router.go(0)">重试</button>
+          <a class="btn btn-ghost" href="/login">去登录页</a>
+        </div>
+      </div>
+    </div>
+
+    <template v-else>
+      <div class="nav-backdrop" :class="{ show: drawerOpen }" @click="closeDrawer" />
+
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-logo">R</div>
+          <div class="brand-text">
+            <strong>用户画像 RAG</strong>
+            <span>新版工作台</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <RouterLink
+            v-for="item in navItems"
+            :key="item.key"
+            :to="item.to"
+            class="nav-item"
+            active-class=""
+            exact-active-class=""
+            :class="{ 'is-active': route.path === item.to }"
+            :title="item.label"
+            @click="closeDrawer"
+          >
+            <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${item.icon}</svg>`" />
+            <span class="nav-label">{{ item.label }}</span>
+          </RouterLink>
+        </nav>
+
+        <div class="sidebar-foot">
+          <a href="/wizard" class="nav-item nav-external" title="数据导入向导（独立页面）">
+            <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.wizard}</svg>`" />
+            <span class="nav-label">数据导入</span>
+          </a>
+          <button class="collapse-btn" type="button" @click="collapsed = !collapsed" :title="collapsed ? '展开侧边栏' : '折叠侧边栏'">
+            <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.collapse}</svg>`" />
+            <span class="nav-label">收起侧边栏</span>
+          </button>
+        </div>
+      </aside>
+
+      <div class="main-col">
+        <header class="topbar">
+          <button class="icon-btn menu-btn" type="button" @click="drawerOpen = true" aria-label="打开菜单">
+            <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'>${ICONS.menu}</svg>`" />
+          </button>
+          <h1 class="page-title">{{ pageTitle }}</h1>
+
+          <div class="topbar-right">
+            <span v-if="store.level" class="level-badge" :title="`当前账号的有效等级：${store.levelLabel}`">
+              {{ store.levelLabel }}
+            </span>
+            <button class="icon-btn theme-btn" type="button" @click="toggleTheme" :title="store.theme === 'dark' ? '切换到浅色' : '切换到深色'">
+              <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>${store.theme === 'dark' ? ICONS.sun : ICONS.moon}</svg>`" />
+            </button>
+            <div class="account-chip" :title="`${enterpriseName} · ${roleLine}`">
+              <span class="avatar">{{ avatarChar }}</span>
+              <span class="account-meta">
+                <strong>{{ accountName }}</strong>
+                <small>{{ enterpriseName }}</small>
+              </span>
+            </div>
+            <button class="icon-btn" type="button" title="退出登录" @click="logout">
+              <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.logout}</svg>`" />
+            </button>
+          </div>
+        </header>
+
+        <main class="content">
+          <RouterView v-slot="{ Component }">
+            <transition name="page" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </RouterView>
+        </main>
+      </div>
+    </template>
+
+    <ToastHost />
+  </div>
+</template>
