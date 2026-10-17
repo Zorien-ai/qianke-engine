@@ -115,20 +115,20 @@ COLUMN_MAP = {
     "消费金额": "amount",
 }
 
-# 数据集说明书（data/dianshuang/数据集详情.md）登记的 6 个平台。
-# 注意：用户上传时「文件名恰好叫天猫.csv」会被当作平台名——这是**有意保留**的，
-# 因为那正是命中的情况；不命中就落到 UNKNOWN_PLATFORM，不会被误认。
+# 平台识别：**文件名默认就是平台名，只排除明确不是平台的来源**。
 #
-# 为什么需要白名单：**文件名 ≠ 平台名**。目录里还有 `ecommerce_data.csv`，
-# 它不在说明书登记的平台之列。实测（2026-10-16）：
-#   · 与 6 个平台文件的行级重叠（用户ID+商品ID+购买时间）= 0 / 1000，
-#     即它不是这些平台的合并或超集（不存在重复计数）
+# 为什么不再用白名单：
+#   旧做法把「data/dianshuang/数据集详情.md 登记过哪 6 个平台」当成了系统规则。
+#   用户上传「抖音.csv」「快手.csv」全落到「未标注来源」，而这个值还会写进画像文本。
+#   实测 demo 库：8110 个画像里 **7277 个**的平台是「未标注来源」——
+#   目录里的 `ecommerce_data.csv` 也在数据里，白名单之外的一切都被拒了。
+#   那是「一份演示数据集的说明书」越权管了入库规则。
+#
+# 现在反过来：默认接受，个别排除。`ecommerce_data.csv` 是合并表，实测：
+#   · 与 6 个平台文件的行级重叠（用户ID+商品ID+购买时间）= 0 / 1000
 #   · 15000 行，占全量 21000 行的 71%；唯一商品 13802，而平台文件各约 994
-#     （SKU 空间大一个量级），时间窗同为 2024 全年
-# 此前按「文件名即平台」处理，它被当成第 7 个平台，并以
-# 「活跃平台：ecommerce_data」写进了绝大多数画像文本——对用户是误导（它不是平台）。
-# 未登记的来源统一记为 UNKNOWN_PLATFORM，原文件名只留在日志里以便追溯。
-KNOWN_PLATFORMS = {"天猫", "淘宝", "京东", "拼多多", "苏宁易购", "1688"}
+# 把它当平台，会把「活跃平台：ecommerce_data」写进绝大多数画像，对用户是误导。
+NON_PLATFORM_SOURCES = {"ecommerce_data"}
 UNKNOWN_PLATFORM = "未标注来源"
 # ==========================================
 
@@ -322,8 +322,8 @@ def load_transactions(
                 M2 由用户在字段确认页选出的映射反推而来，见 column_map_from_confirmed
     data_dir  : 仅在 csv_paths 为 None 时生效
 
-    经 KNOWN_PLATFORMS 白名单识别平台名；未登记的文件统一记为 UNKNOWN_PLATFORM，
-    原文件名只留在日志里——不能让文件名冒充平台名写进画像文本（原因见常量处注释）。
+    平台名取文件名，**默认接受、只排除明确不是平台的来源**（NON_PLATFORM_SOURCES）。
+    不做白名单：那等于让一份演示数据集的说明书决定谁能入库（原因见常量处注释）。
 
     编码固定按 utf-8-sig（带 BOM 的 UTF-8）读：M2 的上传接口在落盘时
     已把 GBK 等来源统一转成 UTF-8，所以这里不需要（也不应该）再猜编码。
@@ -340,28 +340,28 @@ def load_transactions(
     mapping = COLUMN_MAP if column_map is None else column_map
 
     frames = []
-    unregistered: list[tuple[str, int]] = []
+    excluded: list[tuple[str, int]] = []
     for f in csv_files:
         stem = os.path.splitext(os.path.basename(f))[0]
-        registered = stem in KNOWN_PLATFORMS
-        platform = stem if registered else UNKNOWN_PLATFORM
+        is_platform = stem not in NON_PLATFORM_SOURCES
+        platform = stem if is_platform else UNKNOWN_PLATFORM
         df = pd.read_csv(f, encoding="utf-8-sig")  # 注意 BOM
         df["platform"] = platform
         frames.append(df)
-        if registered:
+        if is_platform:
             logger.info("  [平台] %s: %d 条", stem, len(df))
         else:
-            unregistered.append((stem, len(df)))
+            excluded.append((stem, len(df)))
             logger.warning(
-                "  [未登记来源] %s: %d 条 -> 记为「%s」（不在数据集说明书的平台清单内）",
+                "  [非平台来源] %s: %d 条 -> 记为「%s」（在 NON_PLATFORM_SOURCES 里）",
                 stem, len(df), UNKNOWN_PLATFORM,
             )
 
-    if unregistered:
-        logger.warning(
-            "未登记来源共 %d 个文件 / %d 行，已统一记为「%s」。"
-            "若其中确有需要参与画像的平台，请显式加进 KNOWN_PLATFORMS。",
-            len(unregistered), sum(n for _, n in unregistered), UNKNOWN_PLATFORM,
+    if excluded:
+        logger.info(
+            "非平台来源共 %d 个文件 / %d 行，已记为「%s」。"
+            "若它其实是一个平台，把它从 NON_PLATFORM_SOURCES 移出即可。",
+            len(excluded), sum(n for _, n in excluded), UNKNOWN_PLATFORM,
         )
 
     df_all = pd.concat(frames, ignore_index=True)

@@ -361,9 +361,6 @@ function renderDetail({ sources, sqlText, rowsCount, sqlRows, sqlError, trace })
         ? `<span class="tp-chip is-sql">LLM 判定：需要 SQL</span>`
         : `<span class="tp-chip">LLM 判定：不需要 SQL</span>`
     );
-    if (trace.sql_blocked) {
-      chips.push(`<span class="tp-chip is-warn">SQL 路被「预测类」规则否决</span>`);
-    }
   } else {
     chips.push(`<span class="tp-chip is-warn">缓存结果，无过程数据</span>`);
   }

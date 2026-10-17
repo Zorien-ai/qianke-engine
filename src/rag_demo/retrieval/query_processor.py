@@ -62,48 +62,20 @@ FIELD_TO_STRATEGY = {
     "假设": STRATEGY_HYDE,
 }
 
-# ==================== 预测类问题的规则拦截 ====================
-# 为什么需要：SQL 判定是 LLM 给出的「软约束」，它可能把「预测明年 GMV」判成需要 SQL。
-# 但库内只有 2024-12-30 的单时点静态快照，没有时间序列，SUM / AVG 只能重述历史、
-# 算不出未来值 —— 最终会产出一个「有来源标记、无实际依据」的数字（EDGE-02 实测）。
-# 这里做一次硬复核，不依赖模型是否守规矩。
+# ==================== 预测类问题：交给提示词 + 数据能力判断 ====================
+# 这里原来有一组关键词（明年 / 预测 / 下季度 / 如果…多少）做的硬拦截：
+# 命中就关闭 SQL 路，理由是「库内是单时点快照，SUM/AVG 算不出未来值」。
 #
-# 误伤控制：**只在 need_sql 已为真时才复核**。即它不会改变「本来就不需要 SQL」的问题
-# （业务知识类，如「明年会员等级会不会调整」），只否决「既要算数 + 又是未来时点」这个
-# 交集 —— 而这个交集恰好就是 SQL 必然答不好的那批。
-# 局限：仍是关键词匹配，措辞绕开这些词就无法命中；详见 bug 文档「局限性」。
-
-FUTURE_TIME_MARKERS = (
-    "明年", "后年", "下一年", "次年",
-    "下个月", "下个季度", "下季度", "下一季度",
-    "未来", "将来",
-)
-
-PREDICTIVE_ACTION_MARKERS = (
-    "预测", "预估", "预计", "推算", "推演", "展望",
-    "会增长", "会减少", "会下降", "会达到", "会突破", "会变成",
-)
-
-# 反事实推演：「如果……多少 / 涨降 / 达到」（如「不发券 GMV 会少多少」）
-# 不要求出现「会」字——「会员」「优惠」都含「会」，加这个词会引入大量假阳性
-_COUNTERFACTUAL_RE = re.compile(
-    r"如果.{0,30}?(多少|金额|GMV|占比|比例|数量|人数|涨|降|增|减|达到|变化)"
-)
-
-
-def looks_predictive(question: str) -> bool:
-    """
-    问题是否属于「预测 / 未来时点 / 反事实推演」——SQL 路无法回答的那一类
-
-    只做否定性判断（用于关闭 SQL 路），不参与路由：
-    命中也只是「不给数字」，问题仍会走 RAG 检索，不会被拦成闲聊。
-    """
-    q = question or ""
-    if any(m in q for m in FUTURE_TIME_MARKERS):
-        return True
-    if any(m in q for m in PREDICTIVE_ACTION_MARKERS):
-        return True
-    return bool(_COUNTERFACTUAL_RE.search(q))
+# 已删除。两个原因：
+#   1. 判断依据写死成「本 demo 库没有时间序列」这个数据现状。换到有日粒度流水的库，
+#      这条规则照样拦——属于「demo 规则当系统规则」（见 bug/10.17）。
+#   2. 它拦的是「用聚合冒充预测」这个逻辑错误，而那是提示词的职责：
+#      MULTI_QUERY_PROMPT 已经注入了当前数据的真实时间能力（get_time_capability），
+#      TEXT2SQL_PROMPT 也要求不把 SUM/AVG 起成 predicted_* 别名。
+#      用关键词硬兜底会让「能不能答」由一个词表决定，而不是由数据决定。
+#
+# 代价是判定退回模型（不再有确定性兜底）。可接受：这一层只影响「要不要多查一次」，
+# 查错了是答案质量下降，不是系统故障。
 
 
 class RetrievalUnavailableError(RuntimeError):
@@ -138,9 +110,6 @@ class QueryPlan:
     # 只存摘要（策略名 / 检索式 / 命中数 / 前几条来源），**不存全文**——
     # 多路 × top30 全带上会让响应体失控。
     trace: dict = field(default_factory=dict)
-    # LLM 判了「需要 SQL」但被预测类规则否决——单独记着，否则前端看到
-    # need_sql=False 会以为模型没判出来，看不出是复核拦下的。
-    sql_blocked: bool = False
 
 
 def _parse_response(text: str) -> tuple[str, bool, list[tuple[str, str]]]:
@@ -237,14 +206,6 @@ def plan_queries(question: str) -> QueryPlan:
 
     variants.extend(extra[:MULTI_QUERY_MAX_VARIANTS])
 
-    # SQL 判定复核：LLM 判「需要」但问题属预测类 -> 关闭 SQL 路（硬兜底，
-    # 与上面的路由复核并列；提示词是软约束，这里不依赖模型守不守规矩）
-    sql_blocked = False
-    if need_sql and looks_predictive(question):
-        logger.info("SQL 判定复核：问题属预测类，关闭 SQL 路 -> %s", question)
-        need_sql = False
-        sql_blocked = True
-
     if route != ROUTE_RAG:
         logger.info("路由复核改道 -> %s（入口路由原判 RAG）: %s", route, question)
         # 这是**带免费标签**的一次数据：入口判 RAG、LLM 复核说 chitchat = 一次漏判。
@@ -257,8 +218,7 @@ def plan_queries(question: str) -> QueryPlan:
             "需要" if need_sql else "不需要",
         )
 
-    return QueryPlan(route=route, need_sql=need_sql, variants=variants,
-                     sql_blocked=sql_blocked)
+    return QueryPlan(route=route, need_sql=need_sql, variants=variants)
 
 
 def build_query_variants(question: str) -> list[tuple[str, str]]:
@@ -559,7 +519,6 @@ def multi_query_search(
         # 原问题一起带走：前端要对照「原问题 vs 改写后的检索式」才看得出改写做了什么
         "question": question,
         "need_sql": plan.need_sql,
-        "sql_blocked": plan.sql_blocked,
         "variants": per_variant,
         # 合并去重后的候选总数（不是各路之和——同一条被多路选中只算一份）
         "fused_count": len(plan.candidates),

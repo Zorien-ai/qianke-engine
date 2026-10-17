@@ -67,7 +67,7 @@ from rag_demo.splitter import split_wiki_documents
 from rag_demo.mvp import uploads
 from rag_demo.mvp.mock_data import (
     BUILD_STEPS,
-    EXAMPLE_COMMON,
+    EXAMPLE_DOC_TEMPLATE,
     EXAMPLE_TEMPLATES,
     FIELD_DEFS,
     match_column,
@@ -83,9 +83,9 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # 完全相同的那条路。理由：示例的意义是「不准备文件也能先走一遍真流程」，
 # 用假清单走完，到 M4 拿真 CSV 测时才暴露「列名对不上、编码读不出」——那等于没测。
 #
-# 只取 6 个登记平台的 CSV：`ecommerce_data.csv` 不在平台清单内
-# （见 ingest_data.KNOWN_PLATFORMS），放进示例只会让用户一上来就收到一条
-# 「未登记来源」警告，那是我们在解释自己的数据问题，不是他的问题。
+# 只取 6 个平台文件的 CSV：`ecommerce_data.csv` 是合并表、在
+# ingest_data.NON_PLATFORM_SOURCES 里，放进示例会让用户一上来就看到一条
+# 「非平台来源」说明——那是我们在解释自己的数据问题，不是他的问题。
 SAMPLE_CSV_NAMES = ("天猫.csv", "淘宝.csv", "京东.csv", "拼多多.csv", "苏宁易购.csv", "1688.csv")
 SAMPLE_CSV_DIR = os.path.join(uploads.BASE_DIR, "data", "dianshuang")
 SAMPLE_DOC_DIR = os.path.join(uploads.BASE_DIR, "data", "docs")
@@ -815,28 +815,83 @@ def query(req: QueryRequest) -> dict:
     }
 
 
+def _sample_values(csv_paths: list[str], column: str, limit: int = 1) -> list[str]:
+    """
+    从上传文件里取某个原始列的真实取值（去重、保持出现顺序）
+
+    为什么读盘而不是查库：这个接口在第 2 步（字段确认页）被调用，此时用户
+    还没点构建，数据库里没有他的数据。写死取值（改前的「深圳/钻石/美妆」）
+    就是把 demo 的取值塞进他自己的界面——字段映射对了，示例却指着一个
+    他库里根本不存在的值。
+
+    pandas 局部 import：本模块顶层刻意不引重依赖（见文件头注释），
+    读 500 行 CSV 是毫秒级，不值得为它把服务启动拖到十几秒。
+    """
+    import pandas as pd
+
+    for path in csv_paths:
+        try:
+            df = pd.read_csv(path, encoding="utf-8-sig", nrows=500)
+        except Exception:  # noqa: BLE001 读不出来就当这列没取值
+            continue
+        if column not in df.columns:
+            continue
+        values: list[str] = []
+        for raw in df[column].dropna():
+            text = str(raw).strip()
+            if text and text not in values:
+                values.append(text)
+            if len(values) >= limit:
+                break
+        if values:
+            return values
+    return []
+
+
 @router.get("/examples")
 def examples(upload_id: str = "") -> dict:
     """
-    示例问题：根据**已确认的字段**动态生成
+    示例问题：根据**已确认的字段**与**上传文件里的真实取值**动态生成
 
     只出检索类问句。统计类问句（"有多少高价值客户"）MVP 答不上来，
     示例里放出来等于挖坑（见 docs/MVP产品目标.md 第六条）。
+
+    取值来源有三档，依次退让、绝不编造：
+        1. 字段映射到了某列 -> 读该列的真实取值填进模板
+        2. 读不到取值 -> 用不含具体值的通用问法
+        3. 连字段都没映射 -> 这一条不出
     """
+    csv_paths: list[str] = []
     doc_names: list[str] = []
     if upload_id:
         try:
-            doc_names = [os.path.basename(p) for p in uploads.paths(upload_id)[1]]
+            csvs, mds = uploads.paths(upload_id)
+            csv_paths = csvs
+            doc_names = [os.path.basename(p) for p in mds]
         except uploads.UploadError:
             pass
+
     with _STATE_LOCK:
-        fields = {k for k, v in (_CONFIRMED_FIELDS.get(upload_id) or {}).items() if v}
+        fields = {
+            k: v for k, v in (_CONFIRMED_FIELDS.get(upload_id) or {}).items() if v
+        }
 
     questions: list[str] = []
-    for key, qs in EXAMPLE_TEMPLATES.items():
-        if key in fields:
-            questions.extend(qs)
-    questions.extend(EXAMPLE_COMMON)
+    for key, (template, fallback) in EXAMPLE_TEMPLATES.items():
+        column = fields.get(key)
+        if not column:
+            continue
+        if "{v}" not in template:
+            questions.append(template)
+            continue
+        values = _sample_values(csv_paths, column, limit=1)
+        # 商品名可能很长，示例里只留一个能看懂的短前缀
+        questions.append(template.format(v=values[0][:12]) if values else fallback)
+
+    # 文档类示例：只有真的上传了文档才给，且只说「里是怎么规定的」，
+    # 不猜这篇讲什么（主题从文件名推不出来，猜错等于把人往空答案上引）
+    if doc_names:
+        questions.append(EXAMPLE_DOC_TEMPLATE.format(doc=doc_names[0]))
 
     # 去重后截断：示例问题超过 5 个就不再是「示例」，而是一面墙
     seen, result = set(), []

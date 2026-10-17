@@ -274,7 +274,7 @@ def prepare(
          "sources": [...], "trace": {...}}
             其余：交给 generate_stream
             trace 是检索过程留痕（每路的策略/检索式/命中数、融合后数量、
-            SQL 判定是否被预测类规则否决），供前端把中间步骤展示出来
+            LLM 的 SQL 判定结果），供前端把中间步骤展示出来
     """
     if route(question) == ROUTE_CHITCHAT:
         return {"route": ROUTE_CHITCHAT, "answer": build_reply(), "sources": []}
