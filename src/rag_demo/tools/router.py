@@ -79,6 +79,26 @@ OFFTOPIC_QUESTION_HINTS = [
 CHITCHAT_MAX_LEN = 12
 
 
+# ---------- 业务词兜底：优先级高于 BERT / 规则 ----------
+# 实测 BERT 会把「很能花钱的女生都有谁」判成闲聊（P(闲聊) ≥ 阈值）。这类问题含明确业务词，
+# 只是表达比较口语化；拒答真业务问题比漏拦闲聊代价大得多。命中业务信号时直接判 rag
+# （via=business_guard），不调模型；寒暄/域外短句（你好、今天天气怎么样）不含这些词，
+# 仍会按原逻辑被拦掉。
+BUSINESS_SIGNALS = [
+    "消费", "花钱", "下单", "购买", "订单", "客单", "金额", "用户", "画像", "会员",
+    "标签", "偏好", "品类", "商品", "年龄", "性别", "女生", "男生", "女性", "男性",
+    "城市", "地区", "运营", "营销", "召回", "流失", "沉默", "活跃", "销售", "客服",
+    "权益", "统计", "占比", "分布", "排名", "人数", "规模", "美妆", "推荐", "sop",
+    "流程", "规则", "分群", "高价值", "高客单", "低客单", "复购", "转化",
+]
+
+
+def has_business_signal(question: str) -> bool:
+    """问题里是否出现明确的业务信号词（用于兜住口语化业务问题）。"""
+    q = (question or "").strip().lower()
+    return any(word in q for word in BUSINESS_SIGNALS)
+
+
 def rule_is_chitchat(question: str) -> bool:
     """
     关键词规则判定（改造前的线上逻辑，现在是回退与对照基线）
@@ -111,11 +131,19 @@ def decide(question: str) -> tuple[bool, float | None, str]:
     判定来源 via：
         rule          配置强制走规则（INTENT_ROUTER="rule"）或 hybrid 下规则短路
         bert          模型判定
+        business_guard 命中业务词，强制判 rag（优先于规则/模型，避免口语化业务问题被误杀）
         rule_fallback 模型不可用（目录缺失 / 加载失败 / 推理异常）回退规则
 
     为什么要把 via 带出来：埋点必须能区分「模型判的」和「规则兜的」。
     混在一起统计会把模型能力算错——规则回退期间的真实流量不代表模型水平。
     """
+    if not question:
+        return False, None, "rule"
+
+    # 业务词优先级最高：BERT 对口语化业务问句会误判闲聊，这里直接判 rag。
+    if has_business_signal(question):
+        return False, None, "business_guard"
+
     mode = config.INTENT_ROUTER
 
     if mode == "rule":
