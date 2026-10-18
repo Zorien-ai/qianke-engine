@@ -363,6 +363,8 @@ uv run python scripts/run_eval.py --min-pass-rate 0.85
 | [项目背景](docs/项目背景.md) | 业务痛点、技术路线与能力边界 |
 | [MVP 产品目标](docs/MVP产品目标.md) | 产品范围与里程碑 |
 | [原始流程图](docs/千客引擎-流程图.md) | 手绘 Excalidraw 版 RAG 数据流 |
+| [产品宣传片脚本](docs/video_script.md) | 75s Demo 分镜、配音文案、字幕与事实核验 |
+| [录屏操作指南](docs/recording_guide.md) | 演示账号/数据准备、逐镜头点击步骤、Auto-Pilot |
 | [评测报告](tests/eval_report.md) | 最新 33 题逐题结果与失败复盘 |
 
 ## 开发与贡献
