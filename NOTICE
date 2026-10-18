@@ -1,0 +1,29 @@
+用户画像 RAG 智能分析助手 (User Portrait RAG)
+Copyright 2026 zzq
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software and services developed by third parties.
+The following list is illustrative, not exhaustive; each component remains
+subject to its own license and terms:
+
+Core runtime and services
+  - FastAPI, Uvicorn, Pydantic (MIT / BSD-family licenses)
+  - PostgreSQL and pgvector (PostgreSQL License)
+  - pgvector-python (MIT)
+  - DeepSeek API (DeepSeek service terms; API access requires your own key)
+
+Retrieval and generation
+  - BAAI BGE-M3 and bge-reranker-v2-m3 model weights (MIT)
+  - FlagEmbedding (MIT)
+  - LangChain / langchain-text-splitters (MIT)
+  - rank-bm25 (MIT)
+  - HuggingFace Transformers, Sentence Transformers, Datasets (Apache-2.0)
+  - OpenAI Python SDK (Apache-2.0)
+
+Frontend
+  - Vue 3 (MIT), Vue Router (MIT), Vite (MIT), Three.js (MIT)
+
+Other Python dependencies are listed in pyproject.toml and uv.lock;
+frontend dependencies are listed in web/package.json and web/package-lock.json.
+This NOTICE does not alter the terms of any third-party license.

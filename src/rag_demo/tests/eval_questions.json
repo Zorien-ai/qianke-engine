@@ -191,11 +191,11 @@
   {
     "id": "MQ-02",
     "module": "运营/市场",
-    "question": "上海钻石会员里喜欢美妆的有谁，他们的客单价是多少",
+    "question": "上海白银会员里喜欢美妆的有谁，他们的客单价是多少",
     "type": "multi_query",
     "expect_wiki": false,
     "expect_sources": ["user_profile"],
-    "acceptance": "同时满足城市=上海、等级=钻石、品类=美妆三个条件，并给出客单价数值"
+    "acceptance": "同时满足城市=上海、等级=白银、品类=美妆三个条件，列出命中用户并给出客单价；不得混入其他城市或其他等级的用户"
   },
   {
     "id": "MQ-03",

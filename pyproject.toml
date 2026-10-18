@@ -28,7 +28,8 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "scikit-learn>=1.9.1",
     "sentence-transformers>=3.0.0",
-    "torch==2.14.1",
+    # 跨平台可复现：从 PyPI 解析；CUDA 用户可按 README 用官方 PyTorch 索引覆盖安装
+    "torch>=2.4,<3",
     "transformers>=5.19.0",
     "uvicorn>=0.54.0",
 ]
@@ -36,14 +37,6 @@ dependencies = [
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
-
-[tool.uv.sources]
-torch = { path = "wheels/torch-2.14.1+cu126-cp312-cp312-win_amd64.whl" }
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
 
 [dependency-groups]
 dev = [
@@ -54,3 +47,5 @@ dev = [
 # 只收 tests/ 下的单测：src/rag_demo/tests 里是历史评测脚本（要模型/数据/网络），
 # 不是 pytest 用例，被自动收进来会一跑就红。
 testpaths = ["tests"]
+# 让源码目录可直接导入，无需先安装为包；也避免不同机器的 cwd 影响导入。
+pythonpath = ["src"]

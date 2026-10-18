@@ -1,354 +1,370 @@
-# 用户画像 RAG Demo
+# 用户画像 RAG 智能分析助手
 
-基于 pgvector + bge-m3 + bge-reranker-v2-m3 的用户画像问答：
-多路检索 + RRF 融合 + Cross-Encoder 精排，意图路由分流 Text2SQL。
+**User Portrait RAG · 让业务人员用一句自然语言，完成从「人群洞察」到「可溯源答案」的全过程**
 
-## 数据口径（重要，先读这段）
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json)
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
+[![Offline Eval](https://img.shields.io/badge/offline%20eval-97.0%25-brightgreen)](tests/eval_report.md)
 
-本 Demo 用的是**模拟数据集**（`data/dianshuang`，21000 条交易记录 → 聚合出
-**8110 个画像样本**）。其中 `user_id` **不是用户实体键**：它逐行独立随机生成，
-同一个 ID 在不同记录里的姓名 / 年龄 / 城市互不相同。
+> A production-minded RAG workbench for e-commerce user-profile analytics:
+> hybrid retrieval, Text2SQL, physical tenant isolation, and eval-driven development.
 
-实测依据（2026-10-16）：
+面向电商运营、客服、数据分析与管理层的**用户画像问答工作台**。它不是「把资料丢给大模型」：
+系统先判断问题该走知识问答还是结构化统计，再经过**多路混合检索、RRF 融合、Cross-Encoder 精排**，
+或**Text2SQL + 只读安全执行**，最后生成带引用来源的中文答案。内置的离线评测门禁，
+把「回答质量」从主观感觉变成可回归的工程指标。
 
-| 检验 | 结果 |
-|---|---|
-| 跨平台同名 ID 的属性一致性 | 抽样 2000 个，**2000 个全部冲突** |
-| 平台内重复 ID 的属性一致性 | 同样 100% 冲突（天猫 52/52、1688 55/55） |
-| `(用户ID, 用户姓名)` 组合数 | = 21000 = 总行数（ID 不携带身份信息） |
-| 每个 ID 的行数分布 | 与「21000 次随机抽样落在 9000 个 ID 上」的理论分布几乎重合（实际 distinct 8110 vs 理论 8127） |
+> **当前评测快照**：33 道黄金题，**97.0% 通过率**（32/33），判定覆盖率 100%，
+> 安全边界 6/6，来源召回率 97.8%。运行 `uv run python run_eval.py` 可复现；
+> 低于 85% 会以退出码 1 阻止提交。详见 [评测报告](tests/eval_report.md)。
 
-因此：
+---
 
-- 「**8110 个用户**」= 21000 次随机抽样在 `U1000~U9999` 上的去重数，**不是 8110 个真实个体**
-- 「用户累计订单 N 笔」= 同一个随机 ID 被抽中 N 次；且 CSV 无订单号，`order_count` 实为**购买记录行数**
-- 「用户偏好美妆」= 被抽中的那几行里，美妆金额恰好最高
+## 目录
 
-**这不影响链路价值**——意图路由、混合检索、分来源精排、按需 SQL、引用溯源、
-评测驱动这条链路每一环都是真的，换真实数据集照样成立。受影响的是「用户画像」
-这个**措辞**：前端与文档统一按**聚合样本口径**表述。
+- [项目亮点](#项目亮点)
+- [系统架构](#系统架构)
+- [能力清单](#能力清单)
+- [Quick Start](#quick-start)
+- [评测驱动的开发方式](#评测驱动的开发方式)
+- [关键设计取舍](#关键设计取舍)
+- [数据口径](#数据口径)
+- [项目结构](#项目结构)
+- [安全与生产化](#安全与生产化)
+- [文档](#文档)
+- [开发与贡献](#开发与贡献)
+- [License](#license)
 
-> 落地位置：页面上结果区的常驻「数据口径」提示（`api/static/index.html`）；
-> 数据侧的平台名白名单见 `ingest_data.py::KNOWN_PLATFORMS`。
+## 项目亮点
 
-## 启动
+- **CSV / Markdown 双轨接入，支持增量更新**：画像数据与业务文档分别走结构化导入和分块索引；
+  导入向导支持 `incremental`（只处理新增/变化文件，只重算被触及的用户）与
+  `full`（覆盖重建）两种模式，避免大文件每次全量重算。
+- **意图路由 + Text2SQL + 混合检索的统一管线**：闲聊、知识问答、统计聚合先分流；
+  知识问题走 BGE-M3 稠密/稀疏 + BM25 + RRF + 精排，统计问题走受控 SQL；
+  两类结果统一汇总、生成并标注来源，避免「所有问题都靠向量检索」和「所有问题都让 LLM 编数字」。
+- **内置 LLM-as-a-Judge 离线评测**：33 道业务黄金题覆盖运营、客服、数据分析、管理层、边界与安全；
+  每次全量评测产出 Markdown 报告 + 原始 JSON，并内置 **85% 通过率 CI 门禁**。
+- **PostgreSQL + pgvector 的多租户物理隔离**：企业账号对应独立物理库 `vec_db_ent_<id>`；
+  demo / user / test 数据集同样分库，避免用户上传数据覆盖评测基线或串租户读写。
 
-### 1. 起数据库（PostgreSQL + pgvector）
+## 系统架构
 
-```bash
-docker compose up -d
-docker compose ps          # 状态显示 (healthy) 才算真的好了
+> 下图把核心数据流压缩到一张图。完整的 DDD/分层、代码模块依赖与检索细节见
+> [架构图与流程图](docs/architecture-diagrams.md)，原始手绘版流程见
+> [rag-demo流程图](docs/rag-demo流程图.md)。
+
+```mermaid
+flowchart LR
+    subgraph CLIENT["前端 · Vue 3"]
+        UI["工作台<br/>登录 / 对话 / 知识库 / 权限"]
+    end
+
+    subgraph API["接入层 · FastAPI"]
+        AUTH["身份 / 会话 / 租户上下文"]
+        ROUTER{"意图路由<br/>BERT + LLM 兜底"}
+    end
+
+    UI --> AUTH --> ROUTER
+    ROUTER -->|闲聊| CHAT["固定回复"]
+    ROUTER -->|知识问答| QP["查询处理<br/>子查询 / 简化 / 扩写 / HyDE"]
+    ROUTER -->|统计聚合| SQLGEN["Text2SQL<br/>temperature = 0"]
+
+    subgraph RETRIEVAL["混合检索"]
+        QP --> DENSE["BGE-M3 稠密"]
+        QP --> SPARSE["BGE-M3 稀疏 / BM25"]
+        DENSE --> PGV[("PostgreSQL<br/>pgvector")]
+        SPARSE --> IDX[("search_index<br/>BM25 + sparsevec")]
+        PGV --> RRF["RRF 融合<br/>top 30"]
+        IDX --> RRF
+        RRF --> RERANK["bge-reranker-v2-m3<br/>精排"]
+        RERANK --> CTX["画像池 Top-3<br/>文档池"]
+    end
+
+    subgraph SQLPATH["结构化查询 · 安全执行"]
+        SQLGEN --> GUARD["安全审查<br/>SELECT-only / LIMIT"]
+        GUARD --> READONLY[("只读账号<br/>sql_reader")]
+        READONLY --> ROWS["结构化结果"]
+    end
+
+    CTX --> GEN["DeepSeek 生成<br/>事实 / 推断 / [来源N]"]
+    ROWS --> GEN
+    GEN --> ANSWER["答案 + 来源"]
+    ANSWER -.-> EVAL["离线评测<br/>33 题 · 85% 门禁"]
 ```
 
-数据库参数（库名 `vec_db` / 用户 `postgres` / 端口 `5432`）写在 `docker-compose.yml`，
-与 `src/rag_demo/config.py::DB_CONFIG` 严格对齐——**改一边要改另一边**。
+**离线数据接入**（构建/重建索引时写入对应数据集库，不参与在线请求）：
 
-首次使用需要导入数据：
-
-```bash
-uv run python src/rag_demo/ingest_data.py                  # 画像样本 8110 条（口径见上）
-uv run python src/rag_demo/ingest_docs.py                  # 知识库文档分块
-uv run python src/rag_demo/tools/build_search_index.py     # BM25 分词 + 稀疏权重落库
+```mermaid
+flowchart LR
+    CSV["CSV 交易数据"] --> BUILDER["增量 / 全量构建"]
+    MD["Markdown 知识库"] --> BUILDER
+    BUILDER --> EMBED["BGE-M3 稠密/稀疏<br/>BM25"]
+    EMBED --> PGV2[("PostgreSQL<br/>pgvector / search_index")]
 ```
 
-> ⚠️ 前两步跑完后**必须**重跑 `build_search_index.py`，否则检索会静默使用旧索引。
-> 验证：`uv run python src/rag_demo/tools/check_search_index.py`
+一次知识问答的关键路径：
 
-### 2. 起应用
-
-```bash
-$env:DEEPSEEK_API_KEY="sk-你的key"
-uv run uvicorn rag_demo.api.main:app --reload --port 8000
-```
-
-访问 <http://127.0.0.1:8000>（**302 进新版工作台 `/v2/`**，主入口只有这一套界面）
-/ <http://127.0.0.1:8000/v2/#/setup>（新版四步向导） / `/docs`（API 文档）
-
-> **M3 起需要登录**：首次启动会创建系统管理员 `admin` / `admin123`
-> （用 `RAG_ADMIN_USER` / `RAG_ADMIN_PASSWORD` 覆盖；正式使用前请改掉）。
-> 未登录访问首页会跳 `/login`。账号体系见下文「登录、账号与企业隔离」。
->
-> **主入口已统一到 Vue 新版**：`/` 直接 302 到 `/v2/`，登录页之后的跳转都在 Vue 路由内，
-> 不再出现「旧界面 → 新版」的割裂感；旧单页只在 `web/dist` 缺失（本地没构建）时兜底。
->
-> 四步向导（上传 → 确认 → 构建 → 查询）页面已迁到 Vue 3 的 **`/v2/#/setup`**
-> （M3 收口时从 `mvp/static` 的原生页重写，视觉与 /v2 其余页面统一）；
-> 老入口 `/wizard` 现在 302 到新版，老书签继续可用。
-> 接口仍是 `/api/wizard/*`，实现见 `src/rag_demo/mvp/app.py`，
-> 接入方式见 `src/rag_demo/api/wizard.py`。
->
-> 上传的文件落在 `data/uploads/<批次号>/`，落盘时统一转成 UTF-8（列名/行数由服务端
-> 用 pandas 真读一遍，不再由浏览器解析）。属运行期数据，不入库。
->
-> M2 四步都已接真；M3 在其上加了登录态与「按企业划分数据库」的数据隔离。
-
-### 3. 起 M1 原型（冻结快照，内测环境 8001）
-
-```bash
-uv run uvicorn m1_mock.app:app --port 8001 --app-dir prototype
-```
-
-访问 <http://127.0.0.1:8001>（四步向导，全假数据）。
-
-这份快照**不依赖数据库与模型**，启动毫秒级，可离线演示；它不 import `rag_demo`
-的任何模块，因此 M2 在 `src/` 里的迭代不会影响它。详见
-`prototype/m1_mock/README.md`（含冻结纪律：不要改这份快照，要改请改 `src/rag_demo/mvp/`）。
-
-### 排错
-
-**数据库没起来时，表现是「所有问题都答『根据现有资料无法确定』」**——
-那不是知识库缺内容，而是检索没有可用数据源。先 `docker compose ps` 确认状态。
-
-（这种情况现在会明确报「检索服务暂时不可用」，见
-`bug/10.14/2026-10-14_数据库故障被伪装成资料缺失.md`）
+1. **路由**：BERT 判闲聊（约 13ms），不可用或低置信时由 LLM/规则兜底；业务问题进入查询处理。
+2. **多路召回**：按需做子查询分解、问题简化、关键词扩写或 HyDE，并行跑稠密 + 稀疏/BM25，各路取 top 20。
+3. **融合与精排**：RRF（k=60）取 top 30；画像池与文档池**分池精排**，避免 8,000+ 条画像把少量 wiki 挤出上下文。
+4. **生成与溯源**：上下文 + 结构化结果交给 DeepSeek；答案中的每个关键结论带 `[来源N]`，事实与推断分开表述。
+5. **后置审查**：对预测类、越界类回答做 answer guard，宁可不答也不编造；敏感信息只输出脱敏内容。
 
 ## 能力清单
 
-### 1. 运营 / 市场侧
-
-| 业务需求 | 示例问法 | 依赖能力 |
+| 场景 | 示例问法 | 依赖能力 |
 |---|---|---|
-| 人群圈选 | 高客单、喜欢美妆的女性用户有哪些 | 组合条件 + 语义检索 |
-| 人群画像速览 | 深圳的钻石会员都是什么特征 | 画像检索 + 聚合 |
-| 标签口径查询 | 高价值用户怎么定义的 | Wiki 检索 |
-| 营销策略推荐 | 给流失预警用户推荐召回方案 | SOP + 营销手册检索 |
-| 人群对比（受限） | 高客单用户和普通用户的偏好差异 | 多路检索 + SQL 对比 |
-| 地域/年龄分布洞察 | 母婴偏好用户在哪些城市集中 | 画像检索 + LLM 归纳 |
+| 人群圈选 | 高客单、喜欢美妆的女性用户有哪些 | 组合条件 + 混合检索 |
+| 人群画像 | 深圳的钻石会员都是什么特征 | 画像检索 + LLM 归纳 |
+| 标签口径 | 高价值用户怎么定义的 | Wiki 检索 + 引用 |
+| 营销策略 | 给流失预警用户推荐召回方案 | SOP / 营销手册检索 |
+| 人群对比 | 高客单用户和普通用户的偏好差异 | 多路检索 + 聚合 |
+| 客服话术 | 用户投诉物流延迟怎么回复 | SOP 检索 |
+| 业务统计 | 各会员等级的用户人数分别是多少 | Text2SQL + 只读执行 |
+| 安全边界 | 预测一下明年的 GMV | 拒答 / 后置审查 |
 
-### 2. 销售 / 客服侧
+### 权限与租户
 
-| 业务需求 | 示例问法 | 依赖能力 |
-|---|---|---|
-| 客服话术推荐 | 用户投诉物流延迟怎么回复 | cs_sop.md 检索 |
-| SOP 查询 | 退换货流程是什么 | SOP 检索 |
-| 客户速览（受限） | U2765 是什么用户 | 单用户画像检索 |
-| 会员权益咨询 | 钻石会员有什么权益 | Wiki 检索 |
-| 优惠券问题处理 | 用户说优惠券过期了怎么办 | SOP 检索 |
+- **能力驱动 RBAC**：L1 回答 → L2 来源 → L3 检索过程 → L4 SQL/运维；`guest` 固定 L0，连业务问答都不可用。
+- **两级模型**：角色默认等级 + 人员单独授权；权限矩阵持久化在 `var/permissions.json`，修改后下一个请求生效。
+- **企业隔离**：企业账号 → 独立库； `upload_owner` 校验上传批次归属；认证会话只存 token 哈希。
+- **默认账号仅用于本地演示**：`admin / admin123`，首次启动前必须通过环境变量修改。
 
-### 3. 数据分析师 / 产品侧
+## Quick Start
 
-| 业务需求 | 示例问法 | 依赖能力 |
-|---|---|---|
-| 标签使用查询 | 哪些标签跟美妆相关 | 标签库检索 |
-| 分群策略检索 | 高价值沉默客怎么运营 | segmentation.md 检索 |
-| 报告模板查询 | 用户分析报告有哪些板块 | 模板检索 |
-| 品类偏好分析 | 美妆用户的客单价分布 | 画像检索 + SQL 归纳 |
+### 环境要求
 
-### 4. 管理层
-
-| 业务需求 | 示例问法 | 依赖能力 |
-|---|---|---|
-| 经营快问快答 | 本周高价值用户规模有多少 | 画像聚合（SQL 计数） |
-| 业务规则查询 | 流失预警的判定标准 | 标签库检索 |
-
-## 登录、账号与企业隔离（M3）
-
-### 两类账号
-
-| 类型 | 怎么来 | 谁能审核 | 通过后得到 |
-|---|---|---|---|
-| **企业** | 自助注册，填企业名称 | 系统管理员 | 企业数据空间（`vec_db_ent_<id>`）+ 8 位邀请码，账号成为企业管理员（角色 `ent_admin`） |
-| **员工** | 自助注册，填所属企业邀请码 | 所属企业管理员 | 归属该企业，角色由管理员分配（默认 `cs`） |
-
-系统管理员是**种子账号**（`admin`），只在账号库为空时创建——不会每次重启把默认密码塞回来。
-
-注册后一律 `pending`：**能登录**，但等级为 L0、看不到任何业务数据。
-拦在登录这一步只会让人以为"密码记错了"；让他进去看到「等待审核」才是准确的反馈。
-
-审核有两个出口：`active`（通过，同时分配角色）和 `rejected`（拒绝）。
-拒绝**不删号**——同一个手机号/邮箱往往还要重新申请，审计也需要「谁在什么时候拒了谁」；
-被拒账号不能登录，管理员可以再「改判通过」。`/status` 只做停用/启用，
-**不能把 `pending`/`rejected` 直接改成 `active`**，否则一次「启用」就绕过了审核和角色分配。
-
-### 数据隔离：按企业分库
-
-- 一家企业一个库：`vec_db_ent_<企业ID>`，数据集名 `ent_<企业ID>`；
-  审核通过时只登记名字，**第一次构建时才真正 `CREATE DATABASE`**（见 `db/provision.py`）。
-- 同一企业的员工共享这个库；**企业之间互不可见**。
-- 向导的数据集由账号推导（企业账号→本企业库、系统管理员→调试库 `test`），
-  前端传的 `dataset` 不采纳——否则"切到别人的库"只是一个请求体字段的距离。
-- 上传批次按企业归属（`upload_owner` 表）：读状态、构建、查询、取示例都校验归属，
-  不是"知道批次号就能用"。
-- 首页 `/qa` 仍查公开的 demo 数据集（只读演示底座 + 评测基线）。
-
-### 会话与配置
-
-- 登录后发 `rag_session` Cookie（HttpOnly / SameSite=Lax）。
-  勾选「记住登录状态」= 30 天持久 Cookie；不勾选 = 浏览器会话 Cookie（关掉浏览器即失效）。
-  服务端只存**令牌哈希**——库文件被拷走也不能直接拿来登录。
-- 鉴权每个请求都查一次状态：**停用账号或退出登录后，会话立即失效**，不用等过期。
-- 账号库是 `var/app.db`（SQLite，stdlib，无新依赖）。放在账号库而不是 PostgreSQL：
-  它要跨数据集存在，而 demo/企业库随时可能被重建；且鉴权在每个请求入口，不该走网络 IO。
-- 环境变量：
-
-| 变量 | 默认 | 作用 |
-|---|---|---|
-| `RAG_ADMIN_USER` / `RAG_ADMIN_PASSWORD` | `admin` / `admin123` | 种子系统管理员 |
-| `RAG_AUTH_DB` | `var/app.db` | 账号库路径 |
-| `RAG_AUTH_ENABLED` | `1` | 置 `0` 回到 M2 的"请求头自报"（仅离线调试） |
-| `RAG_ALLOW_HEADER_AUTH` | `0` | 登录态之外是否仍接受 `X-Role` / `X-User`（逃生开关） |
-
-### 登录 / 注册页
-
-`/login` 是一张居中的卡片，登录与注册用同一个 tablist 切换（支持方向键）：
-
-- **登录**：账号（手机号 / 邮箱 / 历史用户名）、密码（可显隐）、记住登录状态、找回密码入口；
-- **注册**：账号类型（企业 / 员工）、用户名、手机号或邮箱、企业名称或邀请码、密码 + 强度条、
-  确认密码、图形验证码、服务条款勾选；
-- **校验**：逐字段即时校验 + 提交时汇总，错误文案挂在字段下方（`aria-describedby`），
-  并把焦点移到第一个错误项；手机号 / 邮箱、密码强度、两次密码一致、必填项都在前端先挡一遍；
-- **状态**：提交按钮有加载中与禁用状态，成功 / 失败各有明确反馈（表单内提示条 + toast）；
-- **主题**：浅色为 Flat Design（无阴影、色块分层），深色为环境光 + 玻璃卡片，跟随系统并可手动切换；
-- **无障碍**：`label for`、`aria-invalid`、`aria-describedby`、`role="alert"`、可见焦点环，
-  以及 `prefers-reduced-motion` 降级。
-
-手机号 / 邮箱存在账号表 `contact` 列（邮箱小写、手机号去 `+86` 与空格、唯一索引）；
-老账号没有这一列也能用原用户名登录。**找回密码只有入口、没有真实通道**：
-演示环境不接短信/邮件，弹窗会直接说明请系统管理员处理。
-
-### 接口
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/auth/captcha` | 发图形验证码（返回 `id` + base64 SVG，5 分钟有效、一次性） |
-| POST | `/auth/register` | 注册：`username` / `password` / `contact` / `account_type` / `captcha_id` / `captcha_code` / `agree_terms` |
-| POST | `/auth/login` | 登录：`account`（手机号 / 邮箱 / 用户名）+ `password` + `remember` |
-| POST | `/auth/logout` | 删除服务端会话 + 清 Cookie |
-| GET | `/admin/users` | 账号列表（系统管理员看全部，企业管理员看本企业） |
-| POST | `/admin/users/{id}/approve` | 审核通过 + 分配角色（企业账号在此建企业库）；可改判已拒绝的申请 |
-| POST | `/admin/users/{id}/reject` | 审核拒绝（保留账号记录，不能登录） |
-| POST | `/admin/users/{id}/role` | 改角色 |
-| POST | `/admin/users/{id}/status` | 停用 / 启用（待审核、已拒绝的账号不能直接启用） |
-
-> ⚠️ 仍是 Demo 级鉴权：密码是 PBKDF2-SHA256（20 万次迭代），但 Cookie 走 HTTP、
-> 没有 CSRF Token、没有找回密码/改密码。生产环境需要 HTTPS + CSRF + 邮件/短信验证。
-
-## 角色与访问权限
-
-> 身份来自**登录态**（账号 → 角色 → 等级）。`X-Role` / `X-User` 只在
-> `RAG_ALLOW_HEADER_AUTH=1` 的离线脚本模式下生效，不再是主路径。
-
-权限的真源是 `src/rag_demo/permissions.py`。前端不硬编码权限表——能力清单由 `GET /whoami` 给出，
-避免两份真源改漏。
-
-### 两级模型：等级 → 能力
-
-管理员配的是「**某个等级能做什么**」；业务代码只判「**有没有某个能力**」，从不判角色名。
-这样调权限不需要改代码，也不会出现某条路径绕过等级。
-
-| 等级 | 默认能力 | 能看到什么 |
-|---|---|---|
-| **L1 基础** | 回答 | 回答正文 + 查询结果行 |
-| **L2 依据** | + 来源列表、返回用户数 | 知道"这话有依据"，可调画像名额 |
-| **L3 内部** | + 检索过程 | 原文片段、精排分数、各路检索式（走的路径） |
-| **L4 完全** | + SQL 原文、融合与精排、数据概况、召回对比、运维/权限管理 | 系统怎么算出这个答案，以及改配置本身 |
-
-`L0` 固定给未识别身份（guest）：没有任何能力，且**不参与配置**——允许配置等于给匿名开口子。
-
-能力清单（`CAP_*`）：`answer` / `sources` / `topk` / `internals` / `trace_flow` / `sql` /
-`stats` / `raw_search` / `ops`。
-其中 `rows_count` 与 `sql_rows`（查询结果行）**不受等级控制**：它是业务事实，和回答里的数字同源，
-藏起来只会让人没法核对。
-
-`tenant`（管本企业成员）是**身份自带能力**，不在等级矩阵里：它由「企业管理员」这个身份决定
-（`permissions.IDENTITY_CAPS`），既不能被等级授予，也不会因为被降级而丢失——降成 L1 只是少看些信息，
-不会变成不能管人。企业管理员之间是平级的：能审核/停用员工，但改不动彼此，企业账号本身只有系统管理员能审核。
-
-`route=error` 对所有人透出：把"服务坏了"裁成"资料里没有"是最坏的结果。
-
-### 默认角色等级
-
-| 角色 | 默认等级 |
-|---|:---:|
-| `admin` 系统管理员 | L4 |
-| `ent_admin` 企业管理员 | L3 |
-| `exec` 管理层 | L3 |
-| `analyst` 数据分析师/产品 | L2 |
-| `ops` 运营/市场 | L2 |
-| `cs` 销售/客服 | L1 |
-| `guest` 未识别身份 | L0（固定，不可配） |
-
-> 默认值与改造前的静态权限表一一对应——升级不会改变任何人看到的东西。
-
-### 动态配置（管理员）
-
-页面「权限管理」里可直接改，**保存后下一个请求就生效**，不需要重启：
-
-| 能改什么 | 说明 |
+| 依赖 | 版本 / 说明 |
 |---|---|
-| **等级能力矩阵** | 勾选 L1~L4 各自拥有哪些能力 |
-| **角色默认等级** | 某个角色默认落在哪一级 |
-| **人员授权** | 给指定**账号（用户名）**单独定级，**优先于角色默认**。典型用途：把某个销售人员从 L1 提到 L4 |
-| **一键全开放** | 把所有能力勾给 L1~L4，等价于「全部等级可访问全部信息」 |
-| **恢复默认** | 回到上面的默认表 |
+| Python | 3.12（`>=3.12,<3.13`） |
+| Node.js | 20+（仅构建 Vue 前端） |
+| Docker | PostgreSQL 16 + pgvector，推荐 Docker Desktop |
+| 磁盘 / 内存 | 模型约 7 GB；建议 16 GB+ 内存 |
+| LLM | DeepSeek API Key（或兼容 OpenAI 协议的网关） |
 
-持久化在 `var/permissions.json`（环境变量 `RAG_PERMISSIONS_PATH` 可覆盖）：
+### 1. 获取代码与配置
 
-- 写入用「临时文件 + `os.replace`」原子替换，不会留下半个 JSON；
-- 读取前比对 mtime/size，变了就重载——**改完不用重启，多进程也能各自感知**；
-- 文件不存在 = 用代码里的默认值；文件损坏 = 记错误日志 + 回退默认（宁可更严格，不放行）。
+```bash
+git clone <your-repo-url>
+cd rag-demo
 
-接口（均需 `ops` 能力）：
+cp .env.example .env
+# 至少设置 LLM Key（本项目不会隐式加载 .env）：
+export DEEPSEEK_API_KEY="sk-..."
+# Windows PowerShell:
+# $env:DEEPSEEK_API_KEY="sk-..."
+```
 
-| 方法 | 路径 | 作用 |
-|---|---|---|
-| GET | `/admin/permissions` | 读取配置 + 能力/等级/角色目录 |
-| PUT | `/admin/permissions` | 整份保存矩阵与角色等级 |
-| POST | `/admin/permissions/grant` | 单点授权：`{target_type: "role"\|"user", target, level}` |
-| DELETE | `/admin/permissions/user/{id}` | 撤销人员授权 |
-| POST | `/admin/permissions/reset` | 恢复默认 |
+> `.env` 已被 `.gitignore` 排除；`.env.example` 只是变量清单。启动前请用 shell
+> `export`、systemd 或容器 `env_file` 把变量注入进程。完整变量见
+> [`.env.example`](.env.example) 与 [部署指南](docs/部署指南.md)。
 
-两条硬约束：
+### 2. 启动数据库
 
-- **管理员不能把自己锁死**：保存后管理员角色所在等级必须仍有 `ops`，否则 400；
-- **guest 恒为 L0**：给匿名身份授予等级会被拒绝。
+```bash
+docker compose up -d
+docker compose ps          # 看到 (healthy) 才继续
+```
 
-几条设计取舍：
+`docker-compose.yml` 只包含 PostgreSQL + pgvector；默认 `vec_db` /
+`postgres` / `123456`，与本地 `config.py` 对齐。凭据如需修改，见
+[部署指南](docs/部署指南.md#31-数据库)。
 
-- **管理层拿到 L3，但没拿到 `/admin/*`**：看得清依据是业务需要，清缓存、重建索引是运维动作，不该给。
-- **SQL 原文与「融合与精排」只给管理员**（2026-10-17 收窄）：这两块讲的是系统内部怎么算出这个答案，不是业务依据；管理层保留原文片段、精排分数与各路检索式（「走的路径」），但融合条数、池名额这类链路汇总不给。
-- **查询结果行给所有能提问的身份**：它和回答里的数字是同一份事实；而 SQL 原文会连带暴露表结构与会话口径，所以单独收窄到 L4。
-- **`ops` 能看来源名但看不到 SQL**：圈人群需要知道结论来自哪份资料，不需要会读 SQL。
-- **`cs` 只给回答与查询结果行**：看不到来源列表时，正文里的 `[来源N]` 会被自动去掉（引用指向用户看不见的东西，留着比去掉更糟）。流式路径由前端做这件事——服务端按 delta 分片正则匹配会被切片边界漏掉。
-- **`guest` 连业务问答都不给**：后端不知道你是谁，就不该吐业务数据；页面上也不提供这个入口（用不了的功能直接不呈现，而不是点一下再告知没权限）。
+### 3. 安装 Python 依赖与模型
 
-### 「返回多少个用户」
+```bash
+uv sync
+```
 
-默认 L2 及以上（`analyst` / `ops` / `exec` / `admin`）可调（`top_k`），范围 **1~30**
-（`config.TOP_K_PROFILE_MIN/MAX`）；管理员也可以把这个能力勾给更低的等级。
+模型权重**不入库**（仓库不会包含数 GB 的 LFS 对象），下载到约定目录：
 
-- 语义是**画像池的全局名额**（`config.TOP_K_PROFILE`）——所有检索路的画像候选合并后统一精排，取前 K 个。
-- 文档候选不受影响——把 wiki 一起截掉会直接损害答案质量（口径定义没了，数字就没人能解释）。
-- 其余角色的传值被**静默忽略**（走系统默认），不报错——报错等于告诉对方"这里有个参数你能用"。
-- 留空 = 用 `config.TOP_K_PROFILE`（3），即默认行为。
-- 它在**统一精排时就生效**，不是精排完再截断——后者等于「先按 3 个挑完再扔」，会让「候选池怎么挑」和「展现几条」变成两套口径。
+```bash
+uv run hf download BAAI/bge-m3 --local-dir models/bge-m3
+uv run hf download BAAI/bge-reranker-v2-m3 --local-dir models/bge-reranker-v2-m3
+```
 
-### 深度思考
+> 国内网络可用 ModelScope 下载同名模型，放到相同目录即可。
+> 可选：微调意图分类器（`src/rag_demo/bert_query_classify/`）缺失时自动回退规则，不影响启动。
 
-**所有角色**都能开（`deep_thinking: true`），**默认关**（全局 `ENABLE_THINKING=False`，
-`deep_thinking` 不传即跟随它）。
+### 4. 导入 demo 数据并构建索引
 
-- 只作用于**最后一个生成调用**：规划、Text2SQL 恒不思考——它们开思考只是白慢，
-  答案质量并不会因此提高。
-- 它是**用户自选的代价**，所以界面上的「慢约 5 倍」常驻可见，不藏进 tooltip：
-  实测忠实度 95.7% → 100%（8 题逐题对照：3 题变好、5 题持平、0 题变差），
-  代价是耗时约 5.5 倍、token 约 7.2 倍（其中 88% 是推理）。数据与复跑见
-  `src/rag_demo/tools/ab_deep_thinking.py`。
-- 流式路径多一类事件 `reasoning`（推理片段，与 `delta` 分开下发）。推理**不属于回答**：
-  不参与 `[来源N]`、不进「数据来源」，界面上单独折叠展示，答案开始到达时自动收起。
-- 开启后**首字要等 20~45 秒**（推理不通过 `delta` 下发），所以界面必须有等待态
-  （按钮文案变为「深度思考中…」），否则看起来像卡死。
-- 缓存键含该标志：开与不开是两份不同的答案，不会互相命中。缓存里**不存思维链**，
-  所以命中缓存时不会重放 `reasoning`。
+```bash
+uv run python src/rag_demo/ingest_data.py
+uv run python src/rag_demo/ingest_docs.py
+uv run python src/rag_demo/tools/build_search_index.py
+uv run python src/rag_demo/tools/check_search_index.py
+```
 
-### 权限申请
+### 5. 构建前端并启动
 
-**不做处理，只做声明**：正式权限应以登录态为准，权限申请需走**电商系统的审批流程**。
-当前尚未接入电商系统，因此本项目不提供申请入口，页面上的身份切换器仅供演示。
+```bash
+cd web
+npm ci
+npm run build
+cd ..
 
-### 接入电商系统后的必改项
+uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
+```
 
-1. 角色改从**登录态**取，删掉 API 层的 `X-Role` 依赖（`permissions.resolve_role` 的接口不用动）
-2. `config.DEFAULT_API_ROLE` 从 `"admin"` 改成 `"guest"`
-3. `dept` 参数整体从 `QueryRequest` 删掉，改为**由登录身份推导部门**（现在它只允许管理员覆盖，见 ODD-09 暴露的越权口子）
-4. `config.ENABLE_API_DOCS` 置 `False`
+打开 <http://127.0.0.1:8000>（自动跳转 `/v2/`），或访问 `/docs` 查看 API。
+本地演示账号：`admin / admin123`（**首次启动前请改**）。
+
+> 注意：`web/dist/` 是构建产物，不入库；换机器后必须重新 `npm run build`。
+> 数据库未 healthy 时，检索会返回空结果，表现为「所有问题都无法确定」——先查
+> `docker compose ps`，不要误判成 Prompt 坏了。
+
+## 评测驱动的开发方式
+
+### 当前结果
+
+| 指标 | 最新全量结果 |
+|---|---:|
+| 题目数 / 成功判定 | 33 / 33 |
+| **通过率** | **97.0%**（32/33） |
+| 判定覆盖率 | 100.0% |
+| 安全边界题 | 6/6 = 100% |
+| 来源召回率（宏平均 / 微平均） | 97.8% / 96.7% |
+
+报告与原始结果：[`tests/eval_report.md`](tests/eval_report.md)、
+[`tests/eval_results_llm.json`](tests/eval_results_llm.json)。
+
+### 从 75% 到 97%：不靠「讨好测试集」
+
+这条曲线不是某个 Prompt 的魔法，而是**评测驱动开发（Eval-Driven Development）**的结果：
+
+| 阶段 | 通过率 | 做了什么 |
+|---|---:|---|
+| 基线 | 75.8% | 先跑通真实 RAG/SQL 链路，用 LLM-as-a-Judge 暴露坏例 |
+| 定向修复 | 87.9% | 按失败案例归因：检索召回、引用、SQL、拒答边界逐项修 |
+| 数据口径修正 + 全量回归 | **97.0%** | 修正评测题中「库里不存在」的条件；刷新报告，不调 Prompt 追分 |
+
+关键原则：
+
+1. **题目必须能在数据集里被验证**。例如「上海 + 钻石 + 美妆」在 demo 库中为 0 人，
+   再好的模型也答不对；先跑 SQL 验证 `COUNT(*) > 0`，再谈 acceptance。
+2. **评测是回归，不是刷分**。全量评测通过率低于 85% 直接失败；修改核心 Prompt、
+   路由、检索或 SQL 生成后，提交前必须重跑（见 [提交门禁](#提交门禁)）。
+3. **接受「不确定」**。资料不足时明确说「没有这块信息」，比编一个数字更有价值；
+   预测类问题由 answer guard 拦截，安全边界题必须拒答。
+
+### 提交门禁
+
+```bash
+uv run python run_eval.py
+# CI 可显式指定阈值：
+uv run python run_eval.py --min-pass-rate 0.85
+```
+
+- 通过率 **< 85%** → `run_eval.py` 退出码 1；
+- 没有可判定题目、裁判/回答异常未修复 → 同样失败；
+- `--limit` / `--only` 只用于调试，不能替代提交前全量。
+
+> 最新一轮唯一失败是 `OPT-01` 的生成波动（不是安全边界）；按「停止为刷分微调」原则，
+> 不再针对单题调整 Prompt。门禁关注的是整体质量与边界不被突破。
+
+## 关键设计取舍
+
+| 决策 | 为什么 |
+|---|---|
+| **RRF 融合而非分数加权** | 稠密/稀疏两路分数量纲不同，按排名融合无需归一化；双路命中获得自然奖励。 |
+| **画像池与文档池分开精排** | 画像 8,110 条、文档只有几十个 chunk；混排会被画像数量淹没，分池保证 SOP/口径始终有位置。 |
+| **BERT 路由 + LLM 兜底** | BERT 约 13ms，低延迟拦闲聊；模型缺失或低置信时回退规则/LLM，服务不因分类器缺失而中断。 |
+| **Text2SQL 只读账号** | 正则只是早失败提示，真正的安全边界是数据库层的 `SELECT` 权限 + 表白名单 + 强制 LIMIT。 |
+| **按企业分库** | 比 `tenant_id` 行级过滤更彻底；连接层切换，漏传租户参数也不会静默读到别家数据。 |
+| **contextvar 数据集上下文** | 同一进程内 demo / user / 租户请求互不串台；线程池显式复制上下文，避免「用 demo 数据回答 user 问题」。 |
+| **answer guard 后置审查** | 不拦截用户提问，只在生成后处理预测/越界内容；宁可不答，也不编造。 |
+
+## 数据口径
+
+> **重要**：本仓库的 demo 是**模拟数据集**（`data/dianshuang`，21,000 条交易记录聚合出
+> 8,110 个画像样本）。`user_id` 是逐行随机生成，**不是真实用户实体键**；同一 ID 在不同
+> 记录里的姓名/年龄/城市可能不同。「用户累计订单 N 笔」实际是购买记录行数。
+>
+> 这不影响链路价值：意图路由、混合检索、分来源精排、Text2SQL、引用溯源、评测驱动
+> 每一环都是真的，换真实数据仍成立。受影响的是「用户画像」的措辞——系统按
+> **聚合样本口径**回答，接真实业务数据前必须先做实体消解。
+
+能力边界：
+
+- 不做实时数据 / 未来预测；「近 30 天」「本周」按历史快照的 `days_since_last_buy` 近似。
+- 不把 8,110 个样本外推成「全量用户」统计结论。
+- 手机号、身份证号等敏感字段只输出脱敏内容。
+
+## 项目结构
+
+```text
+.
+├── src/rag_demo/
+│   ├── api/                 # FastAPI 路由、认证、SSE、观测
+│   ├── retrieval/           # 查询处理、混合检索、RRF、精排
+│   ├── generation/          # DeepSeek 答案生成、answer guard
+│   ├── db/                  # schema、连接、租户分库、数据隔离
+│   ├── mvp/                 # 四步导入向导（上传 → 确认 → 构建 → 查询）
+│   ├── bert_query_classify/ # 意图分类训练与推理（可选微调产物）
+│   ├── tools/               # 导入/建索引/检查/实验脚本
+│   ├── eval_utils.py
+│   └── tests/               # 历史评测脚本与 eval_questions.json
+├── web/                     # Vue 3 + Vite 前端（构建到 web/dist）
+├── docs/                    # 架构图、接口、数据模型、部署、评测方案
+├── tests/                   # pytest 单测 + 最新评测报告/原始结果
+├── run_eval.py               # 离线评测入口（LLM-as-a-Judge + CI 门禁）
+├── docker-compose.yml        # PostgreSQL + pgvector
+├── pyproject.toml / uv.lock  # Python 依赖与锁
+├── LICENSE / NOTICE
+└── README.md
+```
+
+## 安全与生产化
+
+- **密钥**：代码与示例中不含真实 API Key；`.env`、`.env.*` 全部忽略，只保留 `.env.example`。
+- **模型**：`models/` 整个目录忽略，不提交权重也不提交 LFS 指针；按 Quick Start 下载。
+- **数据库**：`pgdata/`、SQLite、日志、上传文件均不入库；demo / user / 企业库物理隔离。
+- **SQL**：`sql_reader` 只读账号 + SELECT-only 校验 + 强制 LIMIT + 表白名单。
+- **身份**：生产关闭 `RAG_ALLOW_HEADER_AUTH`，启用 Cookie 会话；默认管理员密码必须修改。
+- **前端**：`web/dist/` 不入库；部署时按 [部署指南](docs/部署指南.md) 重新构建。
+
+> 本项目是演示/作品集，不等同于生产级安全审计。上线前请完成
+> [部署指南 · 生产化检查清单](docs/部署指南.md#4-生产化检查清单)。
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [架构图与流程图](docs/architecture-diagrams.md) | 分层架构、端到端数据流、检索细节、模块依赖 |
+| [接口文档](docs/接口文档.md) | HTTP / SSE 接口、参数、权限、错误码与 curl 示例 |
+| [数据模型](docs/数据模型.md) | 画像/文档/索引/账号表、物理隔离、数据不变量 |
+| [部署指南](docs/部署指南.md) | 本地启动、环境变量、生产检查、排错、升级回滚 |
+| [评测落地方案](docs/评测落地方案.md) | 离线/在线评测、Dual-Recall、Text2SQL EX、监控飞轮 |
+| [项目背景](docs/项目背景.md) | 业务痛点、技术路线与能力边界 |
+| [MVP 产品目标](docs/MVP产品目标.md) | 产品范围与里程碑 |
+| [原始流程图](docs/rag-demo流程图.md) | 手绘 Excalidraw 版 RAG 数据流 |
+| [评测报告](tests/eval_report.md) | 最新 33 题逐题结果与失败复盘 |
+
+## 开发与贡献
+
+```bash
+uv run pytest                 # 单元测试
+uv run python run_eval.py     # 全量离线评测（需 API Key / DB / 模型）
+cd web && npm run build       # 前端构建
+```
+
+贡献前请确认：
+
+- 行为改动配测试；核心检索/Prompt/SQL 改动必须附全量评测结果；
+- 提交信息遵循 Conventional Commits（`feat:` / `fix:` / `docs:` / `chore:`）；
+- 不提交 `.env`、模型权重、数据库卷、`web/dist`、临时探针脚本；
+- 评测题新增/修改先验证 demo 库真实命中，再写 acceptance。
+
+## License
+
+本项目采用 [Apache License 2.0](LICENSE)。第三方组件与模型许可见 [NOTICE](NOTICE)。
+
+如果这个项目对你有帮助，欢迎 Star、提 Issue 或基于它做二次开发。
+
+---
+
+*Last updated: 2026-10 · Built with FastAPI, PostgreSQL + pgvector, BGE-M3, DeepSeek, Vue 3.*

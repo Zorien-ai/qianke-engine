@@ -15,11 +15,15 @@
     # 只跑指定题
     uv run python run_eval.py --only OPT-01,EDGE-01
 
+    # CI 门禁（默认通过率 >= 85%，低于阈值退出码为 1）
+    uv run python run_eval.py --min-pass-rate 0.85
+
 环境变量：
     DEEPSEEK_API_KEY    必需（裁判与回答生成共用；Windows 下会尝试从用户环境变量补齐）
     DEEPSEEK_BASE_URL   可选，默认 https://api.deepseek.com/v1
     DEEPSEEK_MODEL      可选，回答生成用的模型（由 generator 读取）
     EVAL_JUDGE_MODEL    可选，裁判模型，默认 deepseek-chat
+    EVAL_MIN_PASS_RATE  可选，CI 通过率阈值，默认 0.85
 """
 from __future__ import annotations
 
@@ -97,6 +101,12 @@ def parse_args() -> argparse.Namespace:
         help="裁判模型（默认 deepseek-chat，可用 EVAL_JUDGE_MODEL 覆盖）",
     )
     parser.add_argument("--judge-retries", type=int, default=3, help="裁判 JSON 解析失败时的重试次数")
+    parser.add_argument(
+        "--min-pass-rate",
+        type=float,
+        default=float(os.getenv("EVAL_MIN_PASS_RATE", "0.85")),
+        help="CI 门禁：通过率低于该值退出码为 1（默认 0.85）",
+    )
     return parser.parse_args()
 
 
@@ -327,7 +337,22 @@ def run(args: argparse.Namespace) -> int:
     print(f"报告: {report_path}")
     print(f"原始结果: {results_path}")
     print(f"总耗时: {elapsed_total:.1f}s")
-    return 0 if summary["pass_rate"] is not None else 1
+    if summary["pass_rate"] is None:
+        print("[门禁失败] 没有可判定的题目，无法证明通过率。", flush=True)
+        return 1
+    if summary["pass_rate"] < args.min_pass_rate:
+        print(
+            f"[门禁失败] 通过率 {summary['pass_rate'] * 100:.1f}% "
+            f"低于阈值 {args.min_pass_rate * 100:.1f}%。",
+            flush=True,
+        )
+        return 1
+    print(
+        f"[门禁通过] 通过率 {summary['pass_rate'] * 100:.1f}% "
+        f">= 阈值 {args.min_pass_rate * 100:.1f}%。",
+        flush=True,
+    )
+    return 0
 
 
 def main() -> None:

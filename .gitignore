@@ -6,9 +6,21 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
+# Virtual environments / dependency caches
 .venv
 web/node_modules/
+.pytest_cache/
+.idea/
+.DS_Store
+
+# Secrets & local environment (keep the template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.*
+
 # Vue 新版前端的构建产物：本地 npm run build 生成、后端按目录挂到 /v2。
 # 它是「构建结果」不是源码（换机器一条命令就能重出），且带 hash 文件名会天天变化。
 web/dist/
@@ -17,6 +29,26 @@ web/dist/
 logs/
 *.log
 *.err
+
+# 本地数据库数据卷 / 临时 SQLite 文件
+pgdata/
+.pgdata/
+*.sqlite
+*.sqlite3
+*.db
+
+# 根目录一次性探针 / 提交辅助脚本（不属于产品代码，统一不入库）
+_probe_*.py
+_commit_*.py
+p0_*_test.py
+
+# 本地开发辅助 / 内部笔记 / 截图素材，不进入开源仓库
+CLAUDE.md
+任务描述.md
+.workbuddy/
+_pw/
+image/
+ui/
 
 # 向导上传的用户文件（落盘后统一转 UTF-8）。属运行期数据：里面有别人的真实业务数据，
 # 且随时可被删改，入库只会让仓库变脏——它不是源码，也不是可复现的实验结果。
@@ -37,9 +69,13 @@ data/uploads/
 /stream_check2.txt
 /ab_result.json
 
-# 微调后的模型权重（约 390MB，train.py 一分钟内可重训复现，不入库）
+# 微调后的模型权重（可由 train.py 重训复现，不入库）
 src/rag_demo/bert_query_classify/models/
 
-# 预训练基座模型权重（本地下发，不入库）
-# 注意：models/bge-m3、models/bge-reranker-v2-m3 为有意入库，故只忽略本目录而非整个 models/
-models/bert-base-chinese/
+# 预训练 / 重排模型权重：体积数 GB，按 README Quick Start 从 HuggingFace 下载到本地
+# 绝不入库（包括 Git LFS 指针），避免克隆/推送仓库时被迫拉取数 GB 模型
+models/
+
+# 本地模型缓存与 Ollama / HuggingFace 缓存
+.cache/
+.huggingface/
