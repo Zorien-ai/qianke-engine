@@ -554,9 +554,15 @@
 }
 .l-show-row {
   display: grid;
+  /* 图大文小：正排「图左文右」= 1.32fr / 0.68fr */
   grid-template-columns: minmax(0, 1.32fr) minmax(0, 0.68fr);
   align-items: center;
   gap: clamp(28px, 4.5vw, 72px);
+}
+/* 反排必须把轨道也一起镜像，否则 media 被 order 塞进 0.68fr 窄列 → 第二张图明显偏小、
+   与第一/第三张不在同一视觉尺度上（客户反馈「图片太小、不协调」）。 */
+.l-show-row.is-reverse {
+  grid-template-columns: minmax(0, 0.68fr) minmax(0, 1.32fr);
 }
 .l-show-row.is-reverse .l-show-media {
   order: 2;
@@ -829,6 +835,10 @@
 @media (max-width: 1100px) {
   .l-show-row {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  }
+  /* 反排轨道同步镜像，保持三张图视觉宽度一致 */
+  .l-show-row.is-reverse {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   }
 }
 
