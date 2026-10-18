@@ -1,7 +1,7 @@
 [project]
-name = "rag-demo"
+name = "qianke-engine"
 version = "0.1.0"
-description = "用户画像 RAG Demo"
+description = "千客引擎（Qianke Engine）—— 专为电商打造的轻量级 AI 用户画像与业务分析引擎"
 readme = "README.md"
 authors = [
     { name = "zzq", email = "q93304989@gmail.com" }
@@ -37,6 +37,10 @@ dependencies = [
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
+
+# 项目/仓库名改为 qianke-engine，但 Python 包名仍保持 rag_demo（避免 import 大迁移）。
+[tool.uv.build-backend]
+module-name = "rag_demo"
 
 [dependency-groups]
 dev = [

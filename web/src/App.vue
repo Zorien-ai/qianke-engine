@@ -41,6 +41,14 @@ const navItems = computed(() => {
 });
 
 const pageTitle = computed(() => (route.meta && route.meta.title) || "工作台");
+// 登录后的工作台统一 Tab 标题；公开营销页 /home 由 Landing 自己设置更完整的标题
+watch(
+  () => route.path,
+  () => {
+    if (!(route.meta && route.meta.public)) document.title = "千客引擎 · 新版工作台";
+  },
+  { immediate: true },
+);
 // 公开营销页（/home）不套应用外壳：它自带极简导航与暖白底色
 const isPublicRoute = computed(() => !!(route.meta && route.meta.public));
 const accountName = computed(() => {
@@ -117,9 +125,9 @@ function closeDrawer() {
 
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-logo">R</div>
+          <div class="brand-logo">Q</div>
           <div class="brand-text">
-            <strong>用户画像 RAG</strong>
+            <strong>千客引擎</strong>
             <span>新版工作台</span>
           </div>
         </div>

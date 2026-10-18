@@ -7,16 +7,16 @@
 
 用法（项目根目录）：
     # 小规模试跑（只跑前 3 题，报告/原始结果写到 trial 文件，避免覆盖正式报告）
-    uv run python run_eval.py --limit 3 --report tests/eval_report_trial.md --results tests/eval_results_trial.json
+    uv run python scripts/run_eval.py --limit 3 --report tests/eval_report_trial.md --results tests/eval_results_trial.json
 
     # 全量
-    uv run python run_eval.py
+    uv run python scripts/run_eval.py
 
     # 只跑指定题
-    uv run python run_eval.py --only OPT-01,EDGE-01
+    uv run python scripts/run_eval.py --only OPT-01,EDGE-01
 
     # CI 门禁（默认通过率 >= 85%，低于阈值退出码为 1）
-    uv run python run_eval.py --min-pass-rate 0.85
+    uv run python scripts/run_eval.py --min-pass-rate 0.85
 
 环境变量：
     DEEPSEEK_API_KEY    必需（裁判与回答生成共用；Windows 下会尝试从用户环境变量补齐）
@@ -35,7 +35,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
 DEFAULT_QUESTIONS = ROOT / "src" / "rag_demo" / "tests" / "eval_questions.json"
 DEFAULT_REPORT = ROOT / "tests" / "eval_report.md"
 DEFAULT_RESULTS = ROOT / "tests" / "eval_results_llm.json"

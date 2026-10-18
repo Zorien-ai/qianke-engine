@@ -1,35 +1,37 @@
-# 用户画像 RAG 智能分析助手
+# 千客引擎 (Qianke Engine)
 
-**User Portrait RAG · 让业务人员用一句自然语言，完成从「人群洞察」到「可溯源答案」的全过程**
+**专为电商打造的轻量级 AI 用户画像与业务分析引擎**
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json)
 [![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json)
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
 [![Offline Eval](https://img.shields.io/badge/offline%20eval-97.0%25-brightgreen)](tests/eval_report.md)
 
-> A production-minded RAG workbench for e-commerce user-profile analytics:
-> hybrid retrieval, Text2SQL, physical tenant isolation, and eval-driven development.
+> Qianke Engine is a lightweight, evaluation-driven RAG engine for e-commerce
+> user-profile analytics: hybrid retrieval, Text2SQL, anti-hallucination guard,
+> physical tenant isolation, and an offline LLM-as-a-Judge gate.
 
-面向电商运营、客服、数据分析与管理层的**用户画像问答工作台**。它不是「把资料丢给大模型」：
+面向电商运营、客服、数据分析与管理层的**千客引擎工作台**。它不是「把资料丢给大模型」：
 系统先判断问题该走知识问答还是结构化统计，再经过**多路混合检索、RRF 融合、Cross-Encoder 精排**，
 或**Text2SQL + 只读安全执行**，最后生成带引用来源的中文答案。内置的离线评测门禁，
 把「回答质量」从主观感觉变成可回归的工程指标。
 
 > **当前评测快照**：33 道黄金题，**97.0% 通过率**（32/33），判定覆盖率 100%，
-> 安全边界 6/6，来源召回率 97.8%。运行 `uv run python run_eval.py` 可复现；
+> 安全边界 6/6，来源召回率 97.8%。运行 `uv run python scripts/run_eval.py` 可复现；
 > 低于 85% 会以退出码 1 阻止提交。详见 [评测报告](tests/eval_report.md)。
 
 ---
 
 ## 目录
 
-- [项目亮点](#项目亮点)
+- [核心特性](#核心特性)
 - [系统架构](#系统架构)
 - [能力清单](#能力清单)
-- [Quick Start](#quick-start)
-- [评测驱动的开发方式](#评测驱动的开发方式)
+- [快速开始](#快速开始)
+- [评测与方法论](#评测与方法论)
 - [关键设计取舍](#关键设计取舍)
 - [数据口径](#数据口径)
 - [项目结构](#项目结构)
@@ -38,24 +40,41 @@
 - [开发与贡献](#开发与贡献)
 - [License](#license)
 
-## 项目亮点
+## 核心特性
 
-- **CSV / Markdown 双轨接入，支持增量更新**：画像数据与业务文档分别走结构化导入和分块索引；
-  导入向导支持 `incremental`（只处理新增/变化文件，只重算被触及的用户）与
-  `full`（覆盖重建）两种模式，避免大文件每次全量重算。
-- **意图路由 + Text2SQL + 混合检索的统一管线**：闲聊、知识问答、统计聚合先分流；
-  知识问题走 BGE-M3 稠密/稀疏 + BM25 + RRF + 精排，统计问题走受控 SQL；
-  两类结果统一汇总、生成并标注来源，避免「所有问题都靠向量检索」和「所有问题都让 LLM 编数字」。
-- **内置 LLM-as-a-Judge 离线评测**：33 道业务黄金题覆盖运营、客服、数据分析、管理层、边界与安全；
-  每次全量评测产出 Markdown 报告 + 原始 JSON，并内置 **85% 通过率 CI 门禁**。
-- **PostgreSQL + pgvector 的多租户物理隔离**：企业账号对应独立物理库 `vec_db_ent_<id>`；
-  demo / user / test 数据集同样分库，避免用户上传数据覆盖评测基线或串租户读写。
+1. **增量更新**：CSV / Markdown 双轨接入；导入向导支持 `incremental`（只处理新增/变化文件，
+   只重算被触及的用户）与 `full`（覆盖重建），大文件不必每次全量重算。
+2. **双轨检索**：BGE-M3 稠密向量 + BM25/稀疏向量双路召回，经 RRF 融合、Cross-Encoder 精排；
+   画像池与文档池分池保留，避免几千条画像把 SOP/口径挤出上下文。
+3. **防幻觉审查**：生成后置 answer guard 拦截预测/越界内容；关键结论必须带 `[来源N]`，
+   事实与推断分开表述；资料不足时明确说「没有这块信息」，宁可不答也不编造。
+4. **多租户隔离**：企业账号对应独立物理库 `vec_db_ent_<id>`，demo / user / test 数据集分库；
+   连接层切换 + 上传批次归属校验，漏传租户参数也不会静默读到别家数据。
+5. **97% 离线评测通过率**：33 道业务黄金题，LLM-as-a-Judge 全量回归；内置 85% 通过率
+   CI 门禁，报告与原始结果随仓库归档，核心 Prompt/路由改动必须可复现。
 
 ## 系统架构
 
-> 下图把核心数据流压缩到一张图。完整的 DDD/分层、代码模块依赖与检索细节见
+### 端到端数据流
+
+```mermaid
+flowchart LR
+    INGEST["数据接入<br/>CSV 画像 / Markdown 文档"] --> INDEX["索引构建<br/>BGE-M3 稠密+稀疏 / BM25 / pgvector"]
+    INDEX --> ROUTE{"意图路由<br/>BERT + LLM 兜底"}
+    ROUTE -->|知识问答| HYBRID["混合检索<br/>Dense + Sparse + BM25 → RRF → Rerank"]
+    ROUTE -->|统计聚合| SQL["Text2SQL<br/>只读账号 / SELECT-only / LIMIT"]
+    ROUTE -->|闲聊| CHAT["固定回复"]
+    HYBRID --> GEN["生成<br/>DeepSeek + [来源N]"]
+    SQL --> GEN
+    GEN --> GUARD["生成后审查<br/>answer guard / PII 脱敏"]
+    GUARD --> ANSWER["答案 + 来源"]
+    ANSWER -.全量回归.-> EVAL["离线评测<br/>LLM-as-a-Judge · 33 题 · 85% 门禁"]
+    EVAL -.Prompt / 检索 / SQL 修复.-> ROUTE
+```
+
+> 下面是更细的分层架构与数据接入流程。完整的 DDD/分层、代码模块依赖与检索细节见
 > [架构图与流程图](docs/architecture-diagrams.md)，原始手绘版流程见
-> [rag-demo流程图](docs/rag-demo流程图.md)。
+> [千客引擎-流程图](docs/千客引擎-流程图.md)。
 
 ```mermaid
 flowchart LR
@@ -134,7 +153,7 @@ flowchart LR
 - **企业隔离**：企业账号 → 独立库； `upload_owner` 校验上传批次归属；认证会话只存 token 哈希。
 - **默认账号仅用于本地演示**：`admin / admin123`，首次启动前必须通过环境变量修改。
 
-## Quick Start
+## 快速开始
 
 ### 环境要求
 
@@ -149,8 +168,8 @@ flowchart LR
 ### 1. 获取代码与配置
 
 ```bash
-git clone <your-repo-url>
-cd rag-demo
+git clone https://github.com/<your-org>/qianke-engine.git
+cd qianke-engine
 
 cp .env.example .env
 # 至少设置 LLM Key（本项目不会隐式加载 .env）：
@@ -163,16 +182,15 @@ export DEEPSEEK_API_KEY="sk-..."
 > `export`、systemd 或容器 `env_file` 把变量注入进程。完整变量见
 > [`.env.example`](.env.example) 与 [部署指南](docs/部署指南.md)。
 
-### 2. 启动数据库
+### 2. 启动数据库（Docker Compose 一键拉起）
 
 ```bash
 docker compose up -d
 docker compose ps          # 看到 (healthy) 才继续
 ```
 
-`docker-compose.yml` 只包含 PostgreSQL + pgvector；默认 `vec_db` /
-`postgres` / `123456`，与本地 `config.py` 对齐。凭据如需修改，见
-[部署指南](docs/部署指南.md#31-数据库)。
+`docker-compose.yml` 拉起 PostgreSQL 16 + pgvector（默认 `vec_db` / `postgres` / `123456`，
+与 `config.py` 对齐）。凭据如需修改，见 [部署指南](docs/部署指南.md#31-数据库)。
 
 ### 3. 安装 Python 依赖与模型
 
@@ -217,7 +235,7 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 > 数据库未 healthy 时，检索会返回空结果，表现为「所有问题都无法确定」——先查
 > `docker compose ps`，不要误判成 Prompt 坏了。
 
-## 评测驱动的开发方式
+## 评测与方法论
 
 ### 当前结果
 
@@ -232,9 +250,11 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 报告与原始结果：[`tests/eval_report.md`](tests/eval_report.md)、
 [`tests/eval_results_llm.json`](tests/eval_results_llm.json)。
 
-### 从 75% 到 97%：不靠「讨好测试集」
+### 从 75% 到 97%：LLM-as-a-Judge + 提示词靶向修复
 
 这条曲线不是某个 Prompt 的魔法，而是**评测驱动开发（Eval-Driven Development）**的结果：
+用 LLM-as-a-Judge 把每个失败案例变成可归因的修复项，再针对路由、检索、SQL 与拒答边界
+做提示词靶向修复，最后用全量回归确认「没有为了单题刷分而破坏其他能力」。
 
 | 阶段 | 通过率 | 做了什么 |
 |---|---:|---|
@@ -254,12 +274,12 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 ### 提交门禁
 
 ```bash
-uv run python run_eval.py
+uv run python scripts/run_eval.py
 # CI 可显式指定阈值：
-uv run python run_eval.py --min-pass-rate 0.85
+uv run python scripts/run_eval.py --min-pass-rate 0.85
 ```
 
-- 通过率 **< 85%** → `run_eval.py` 退出码 1；
+- 通过率 **< 85%** → `scripts/run_eval.py` 退出码 1；
 - 没有可判定题目、裁判/回答异常未修复 → 同样失败；
 - `--limit` / `--only` 只用于调试，不能替代提交前全量。
 
@@ -311,7 +331,7 @@ uv run python run_eval.py --min-pass-rate 0.85
 ├── web/                     # Vue 3 + Vite 前端（构建到 web/dist）
 ├── docs/                    # 架构图、接口、数据模型、部署、评测方案
 ├── tests/                   # pytest 单测 + 最新评测报告/原始结果
-├── run_eval.py               # 离线评测入口（LLM-as-a-Judge + CI 门禁）
+├── scripts/                  # 离线评测入口 run_eval.py（LLM-as-a-Judge + CI 门禁）
 ├── docker-compose.yml        # PostgreSQL + pgvector
 ├── pyproject.toml / uv.lock  # Python 依赖与锁
 ├── LICENSE / NOTICE
@@ -321,7 +341,7 @@ uv run python run_eval.py --min-pass-rate 0.85
 ## 安全与生产化
 
 - **密钥**：代码与示例中不含真实 API Key；`.env`、`.env.*` 全部忽略，只保留 `.env.example`。
-- **模型**：`models/` 整个目录忽略，不提交权重也不提交 LFS 指针；按 Quick Start 下载。
+- **模型**：`models/` 整个目录忽略，不提交权重也不提交 LFS 指针；按[快速开始](#快速开始)下载。
 - **数据库**：`pgdata/`、SQLite、日志、上传文件均不入库；demo / user / 企业库物理隔离。
 - **SQL**：`sql_reader` 只读账号 + SELECT-only 校验 + 强制 LIMIT + 表白名单。
 - **身份**：生产关闭 `RAG_ALLOW_HEADER_AUTH`，启用 Cookie 会话；默认管理员密码必须修改。
@@ -341,14 +361,14 @@ uv run python run_eval.py --min-pass-rate 0.85
 | [评测落地方案](docs/评测落地方案.md) | 离线/在线评测、Dual-Recall、Text2SQL EX、监控飞轮 |
 | [项目背景](docs/项目背景.md) | 业务痛点、技术路线与能力边界 |
 | [MVP 产品目标](docs/MVP产品目标.md) | 产品范围与里程碑 |
-| [原始流程图](docs/rag-demo流程图.md) | 手绘 Excalidraw 版 RAG 数据流 |
+| [原始流程图](docs/千客引擎-流程图.md) | 手绘 Excalidraw 版 RAG 数据流 |
 | [评测报告](tests/eval_report.md) | 最新 33 题逐题结果与失败复盘 |
 
 ## 开发与贡献
 
 ```bash
 uv run pytest                 # 单元测试
-uv run python run_eval.py     # 全量离线评测（需 API Key / DB / 模型）
+uv run python scripts/run_eval.py     # 全量离线评测（需 API Key / DB / 模型）
 cd web && npm run build       # 前端构建
 ```
 

@@ -9,7 +9,7 @@
 加载 `models/bge-reranker-v2-m3` 时日志出现：
 
 ```text
-INFO:sentence_transformers.base.model:No modules.json found for F:\workspace\python\rag-demo\models\bge-reranker-v2-m3, initializing a new CrossEncoder model.
+INFO:sentence_transformers.base.model:No modules.json found for F:\workspace\python\qianke-engine\models\bge-reranker-v2-m3, initializing a new CrossEncoder model.
 ```
 
 ## 原因

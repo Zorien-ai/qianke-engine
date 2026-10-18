@@ -560,7 +560,7 @@ onMounted(() => {
   updateNavState();
   window.__heroFreeze = freezeStoryForQa;
   window.__heroResume = resumeStoryForQa;
-  document.title = "用户画像 RAG · 让你的电商数据，听懂中国话";
+  document.title = "千客引擎 · 让你的电商数据，听懂中国话";
 });
 
 onBeforeUnmount(() => {
@@ -594,9 +594,9 @@ onBeforeUnmount(() => {
     <!-- ============ 极简导航（Hero 上透明亮色，滚出后浅色吸顶） ============ -->
     <header class="l-nav" :class="{ 'is-dark': navDark, 'is-scrolled': navScrolled }">
       <div class="l-shell l-nav-inner">
-        <RouterLink to="/home" class="l-brand" aria-label="用户画像 RAG 官网首页">
-          <span class="l-logo">R</span>
-          <span class="l-brand-text"><b>用户画像 RAG</b></span>
+        <RouterLink to="/home" class="l-brand" aria-label="千客引擎（Qianke Engine）官网首页">
+          <span class="l-logo">Q</span>
+          <span class="l-brand-text"><b>千客引擎</b></span>
         </RouterLink>
 
         <nav class="l-nav-links" aria-label="页面导航">
@@ -828,7 +828,7 @@ onBeforeUnmount(() => {
     <!-- ============ Footer ============ -->
     <footer class="l-footer">
       <div class="l-shell l-footer-inner">
-        <span class="l-footer-brand">© 2026 用户画像 RAG</span>
+        <span class="l-footer-brand">© 2026 千客引擎</span>
         <nav class="l-footer-links" aria-label="页脚链接">
           <a href="/docs" target="_blank" rel="noopener">产品文档</a>
           <a v-if="!isAuthed" href="/login">登录</a>

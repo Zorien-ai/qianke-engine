@@ -2,7 +2,7 @@
 """离线评测（LLM-as-a-Judge）的纯函数工具。
 
 把「裁判 prompt / JSON 解析 / 来源召回 / 指标聚合 / Markdown 报告」放在这里，
-`run_eval.py` 只负责跑批与 I/O，这样核心口径可以被 pytest 单测覆盖。
+`scripts/run_eval.py` 只负责跑批与 I/O，这样核心口径可以被 pytest 单测覆盖。
 
 评测口径：
   - 每道题的得分只来自裁判模型（0/1），不做字符串匹配；
@@ -204,7 +204,7 @@ def render_markdown_report(
     lines.append(f"- 数据集：`{dataset}`（固定离线评测库，不经过前端 API）")
     lines.append(f"- 题目文件：`{questions_path}`")
     lines.append(f"- 裁判模型：`{judge_model}`")
-    lines.append(f"- 运行命令：`uv run python run_eval.py`（可加 `--limit` / `--only` 做子集试跑）")
+    lines.append(f"- 运行命令：`uv run python scripts/run_eval.py`（可加 `--limit` / `--only` 做子集试跑）")
     lines.append(f"- 题目数：**{summary['total']}**；成功判定：{summary['judged']}；"
                  f"裁判异常：{summary['judge_errors']}；回答异常：{summary['answer_errors']}")
     lines.append(f"- 总耗时：{elapsed_total:.1f}s（平均 {summary['elapsed_avg']:.1f}s/题）")

@@ -1,3 +1,4 @@
+# 千客引擎（Qianke Engine）—— 开源仓库忽略清单
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -5,6 +6,12 @@ build/
 dist/
 wheels/
 *.egg-info
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # Virtual environments / dependency caches
 .venv

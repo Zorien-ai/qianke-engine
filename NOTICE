@@ -1,5 +1,7 @@
-用户画像 RAG 智能分析助手 (User Portrait RAG)
-Copyright 2026 zzq
+千客引擎 (Qianke Engine)
+Copyright 2026 The Qianke Engine Authors
+
+Qianke Engine Copyright 2026. Includes FastAPI, pgvector, Vue 3, etc.
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 

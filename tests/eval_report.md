@@ -4,7 +4,7 @@
 - 数据集：`demo`（固定离线评测库，不经过前端 API）
 - 题目文件：`src\rag_demo\tests\eval_questions.json`
 - 裁判模型：`deepseek-chat`
-- 运行命令：`uv run python run_eval.py`（可加 `--limit` / `--only` 做子集试跑）
+- 运行命令：`uv run python scripts/run_eval.py`（可加 `--limit` / `--only` 做子集试跑）
 - 题目数：**33**；成功判定：33；裁判异常：0；回答异常：0
 - 总耗时：204.6s（平均 5.3s/题）
 

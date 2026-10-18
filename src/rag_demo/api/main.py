@@ -384,7 +384,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="用户画像 RAG Demo",
+    title="千客引擎 (Qianke Engine)",
     lifespan=lifespan,
     # 生产环境关掉：/docs 与 /openapi.json 会一次性暴露所有接口与字段结构
     **({} if ENABLE_API_DOCS else {

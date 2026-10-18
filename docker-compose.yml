@@ -47,6 +47,6 @@ services:
 volumes:
   pgdata:
     # 固定卷名（不加 compose 项目前缀），从而复用已有的 pgdata 卷 —— 现有数据不会丢。
-    # 若写成普通卷，compose 会创建 rag-demo_pgdata，那是一个空库，
+    # 若写成普通卷，compose 会创建 qianke-engine_pgdata，那是一个空库，
     # 表现为「应用能连上但一张表都没有」。
     name: pgdata
