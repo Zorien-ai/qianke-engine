@@ -1,6 +1,6 @@
 /* =========================================================
-   官网 Landing Page（/v2/#/home）—— 极简高级风
-   深空黑全屏 Hero（Canvas 星云背景）+ 暖白内容区
+   官网 Landing Page（/v2/#/home）—— 极简高级风 · 第二版质感（task-11）
+   暗夜星云 Hero（无悬浮卡 / DOF 粒子 / Ambient Glow）+ 暖白内容区
    只服务于营销首页，不影响登录后的工作台主题
    ========================================================= */
 
@@ -17,8 +17,8 @@
   --l-accent: #b45309;
   --l-gold: #f5b35a;
   --l-serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", STSong, Georgia, serif;
-  --l-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --l-sans: Inter, system-ui, -apple-system, "SF Pro Display", "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   --l-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
   --l-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 
@@ -48,13 +48,8 @@
   cursor: pointer;
 }
 
-/* 只在手机端生效的换行，让大字报断句自然 */
-.l-br-mobile {
-  display: none;
-}
-
 .l-shell {
-  width: min(1280px, calc(100% - 56px));
+  width: min(1320px, calc(100% - 56px));
   margin: 0 auto;
 }
 
@@ -79,27 +74,41 @@
   box-shadow: none;
   backdrop-filter: none;
 }
-.l-nav.is-dark .l-brand-text b {
-  color: #f7f3ea;
+/* 在 Hero 内部滚动时，暗色导航加一层向下淡出的暗底，避免文字从导航后穿出来 */
+.l-nav.is-dark.is-scrolled {
+  background: linear-gradient(180deg, rgba(7, 7, 11, 0.72), rgba(7, 7, 11, 0));
+  backdrop-filter: blur(10px);
 }
-.l-nav.is-dark .l-logo {
-  background: linear-gradient(135deg, #f5b35a, #c2410c 62%, #1c1917);
-  color: #1a1208;
+.l-nav.is-dark .l-brand-text b {
+  color: #ffffff;
 }
 .l-nav.is-dark .l-nav-link {
-  color: rgba(244, 240, 232, 0.7);
+  color: rgba(255, 255, 255, 0.6);
 }
 .l-nav.is-dark .l-nav-link:hover {
   color: #ffffff;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.06);
 }
 .l-nav.is-dark .l-nav-login {
-  color: #f7f3ea;
-  border-color: rgba(244, 240, 232, 0.24);
+  color: #f2f2f4;
+  border-color: rgba(255, 255, 255, 0.2);
 }
 .l-nav.is-dark .l-nav-login:hover {
-  border-color: rgba(244, 240, 232, 0.55);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.05);
+}
+.l-logo {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(140deg, #f5b35a, #c2410c 62%, #1c1917);
+  color: #1a1208;
+  font-family: var(--l-sans);
+  font-size: 15px;
+  font-weight: 800;
+  box-shadow: 0 8px 20px -10px rgba(245, 179, 90, 0.5);
 }
 .l-nav-inner {
   display: flex;
@@ -113,19 +122,6 @@
   gap: 10px;
   flex: 0 0 auto;
 }
-.l-logo {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #c2410c, #b45309 55%, #1c1917);
-  color: #fff7ed;
-  font-family: var(--l-serif);
-  font-size: 15px;
-  font-weight: 700;
-  box-shadow: 0 8px 18px -10px rgba(124, 45, 18, 0.7);
-}
 .l-brand-text {
   display: flex;
   flex-direction: column;
@@ -134,8 +130,8 @@
 .l-brand-text b {
   color: var(--l-ink);
   font-size: 14px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 .l-nav-links {
   display: flex;
@@ -169,7 +165,7 @@
 .l-nav-login {
   font-size: 13.5px;
   color: var(--l-ink);
-  font-weight: 650;
+  font-weight: 700;
   padding: 7px 14px;
   border: 1px solid var(--l-line-strong);
   border-radius: 999px;
@@ -180,7 +176,7 @@
   background: #fff;
 }
 
-/* ---------- 按钮 / 共享元素 ---------- */
+/* ---------- 按钮 ---------- */
 .l-btn {
   display: inline-flex;
   align-items: center;
@@ -193,7 +189,7 @@
   font-weight: 650;
   line-height: 1.2;
   white-space: nowrap;
-  transition: transform 0.2s ease, box-shadow 0.22s ease, background 0.2s ease,
+  transition: transform 0.2s ease, box-shadow 0.25s ease, background 0.2s ease,
     border-color 0.2s ease, color 0.2s ease;
 }
 .l-btn:hover {
@@ -204,7 +200,7 @@
 }
 .l-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.18);
+  box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.2);
 }
 .l-btn-primary {
   background: var(--l-ink);
@@ -213,7 +209,6 @@
 }
 .l-btn-primary:hover {
   background: #000;
-  box-shadow: 0 22px 38px -20px rgba(26, 26, 26, 0.65);
 }
 .l-btn-ghost {
   background: transparent;
@@ -232,7 +227,6 @@
   padding: 8px 16px;
   font-size: 13.5px;
 }
-/* 链接按钮：.landing a { color: inherit } 会盖掉按钮颜色，这里抬高优先级 */
 .landing a.l-btn-primary {
   color: #faf8f4;
 }
@@ -252,109 +246,188 @@
   min-height: 100vh;
   min-height: 100svh;
   margin-top: -68px;
-  padding: calc(68px + 48px) 24px 96px;
+  padding: calc(68px + 72px) 24px 150px;
   overflow: hidden;
   isolation: isolate;
-  background: #05060a;
+  color: #ffffff;
+  /* 深空微渐变：不是纯黑；多层静态径向暖/冷光当 Ambient Glow，零每帧成本 */
+  background:
+    radial-gradient(52% 42% at 50% 44%, rgba(245, 179, 90, 0.09), transparent 68%),
+    radial-gradient(36% 32% at 78% 18%, rgba(120, 148, 190, 0.07), transparent 70%),
+    radial-gradient(30% 28% at 20% 82%, rgba(255, 196, 120, 0.05), transparent 70%),
+    radial-gradient(120% 90% at 50% 50%, transparent 46%, rgba(0, 0, 0, 0.55) 100%),
+    linear-gradient(180deg, #07070b 0%, #0b0b12 56%, #111118 100%);
 }
 .l-hero-bg {
   position: absolute;
   inset: 0;
   z-index: 0;
 }
+.nebula {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.nebula-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 .l-hero-content {
   position: relative;
   z-index: 2;
-  max-width: 980px;
+  width: 100%;
+  max-width: 860px;
   text-align: center;
   animation: l-hero-in 1s var(--l-ease) both;
 }
 .l-hero-title {
   margin: 0;
-  color: #f7f3ea;
-  font-family: var(--l-serif);
-  font-size: clamp(42px, 6.6vw, 86px);
-  font-weight: 600;
-  line-height: 1.14;
-  letter-spacing: -0.02em;
+  color: #ffffff;
+  font-family: var(--l-sans);
+  font-size: clamp(54px, 6.8vw, 104px);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
   text-wrap: balance;
-}
-.l-hero-title em {
-  display: inline-block;
-  font-style: normal;
-  color: var(--l-gold);
+  -webkit-font-smoothing: antialiased;
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.35);
 }
 .l-hero-sub {
-  margin: 26px 0 0;
-  color: rgba(244, 240, 232, 0.62);
-  font-size: clamp(15px, 1.5vw, 18px);
-  letter-spacing: 0.02em;
+  margin: 34px 0 0;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: clamp(15px, 1.2vw, 17px);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.7;
 }
 .l-hero-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 14px;
-  margin-top: 42px;
+  margin-top: 52px;
 }
 .l-hero .l-btn-primary {
-  background: var(--l-gold);
+  background: #f5b35a;
   color: #241505;
-  box-shadow: 0 18px 40px -24px rgba(245, 179, 90, 0.8);
+  border-color: transparent;
+  box-shadow:
+    0 18px 44px -22px rgba(245, 179, 90, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .l-hero .l-btn-primary:hover {
   background: #ffc978;
   color: #241505;
+  box-shadow:
+    0 22px 52px -22px rgba(245, 179, 90, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 .l-hero .l-btn-ghost {
-  color: #f7f3ea;
-  border-color: rgba(244, 240, 232, 0.26);
-  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
 }
 .l-hero .l-btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(244, 240, 232, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.36);
+  box-shadow: 0 0 24px rgba(255, 255, 255, 0.06);
 }
 .landing .l-hero a.l-btn-primary {
   color: #241505;
 }
 .landing .l-hero a.l-btn-ghost {
-  color: #f7f3ea;
+  color: rgba(255, 255, 255, 0.9);
 }
 
-/* 首屏底部：一个无文字的细箭头 */
+/* Hero 底部 → 第二屏：240px 呼吸过渡，不硬切 */
+.l-hero-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  z-index: 1;
+  height: 240px;
+  pointer-events: none;
+}
+.l-hero-fade::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(249, 249, 248, 0) 0%,
+    rgba(250, 247, 241, 0.18) 34%,
+    rgba(249, 248, 245, 0.72) 72%,
+    #f9f9f8 100%
+  );
+}
+.l-hero-fade::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -46%;
+  width: 118%;
+  height: 150%;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse 52% 46% at 50% 62%,
+    rgba(245, 179, 90, 0.28) 0%,
+    rgba(245, 179, 90, 0.09) 38%,
+    transparent 62%
+  );
+  -webkit-mask-image: linear-gradient(180deg, transparent 6%, #000 52%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 6%, #000 52%, transparent 100%);
+  opacity: 1;
+}
+.l-hero-fade .l-hero-grid-fade {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(26, 26, 26, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26, 26, 26, 0.06) 1px, transparent 1px);
+  background-size: 84px 84px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.55) 55%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.55) 55%, transparent 100%);
+  opacity: 0.7;
+}
+
+/* 首屏底部：无文字细箭头 */
 .l-scroll-hint {
   position: absolute;
   left: 50%;
-  bottom: 28px;
-  z-index: 2;
+  bottom: 264px;
+  z-index: 3;
   display: grid;
   place-items: center;
   width: 36px;
   height: 36px;
   margin-left: -18px;
   border-radius: 50%;
-  border: 1px solid rgba(244, 240, 232, 0.2);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.02);
   transition: border-color 0.25s ease, background 0.25s ease;
 }
 .l-scroll-hint:hover {
-  border-color: rgba(244, 240, 232, 0.5);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.06);
 }
 .l-scroll-hint span {
   width: 8px;
   height: 8px;
-  border-right: 1px solid rgba(244, 240, 232, 0.7);
-  border-bottom: 1px solid rgba(244, 240, 232, 0.7);
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.6);
   transform: rotate(45deg) translate(-1px, -1px);
-  animation: l-hint 2.4s ease-in-out infinite;
+  animation: l-hint 2.6s ease-in-out infinite;
 }
 @keyframes l-hint {
   0%,
   100% {
     transform: rotate(45deg) translate(-1px, -1px);
-    opacity: 0.45;
+    opacity: 0.4;
   }
   50% {
     transform: rotate(45deg) translate(3px, 3px);
@@ -372,197 +445,25 @@
   }
 }
 
-/* ---------- Canvas 粒子星云（Hero 背景层） ---------- */
-.nebula {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  container-type: size;
-}
-.nebula-canvas {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  -webkit-mask-image: radial-gradient(
-    ellipse 82% 76% at 50% 48%,
-    #000 0 50%,
-    rgba(0, 0, 0, 0.85) 66%,
-    rgba(0, 0, 0, 0.38) 82%,
-    transparent 100%
-  );
-  mask-image: radial-gradient(
-    ellipse 82% 76% at 50% 48%,
-    #000 0 50%,
-    rgba(0, 0, 0, 0.85) 66%,
-    rgba(0, 0, 0, 0.38) 82%,
-    transparent 100%
-  );
-}
-.nebula-overlay {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-/* 全幅背景：canvas 边缘就是视口边缘，不需要再用 CSS mask（全屏 mask 太吃帧） */
-.nebula.is-full .nebula-canvas {
-  -webkit-mask-image: none;
-  mask-image: none;
-}
-
-/* 阶段1：从四周向中心汇聚的 CSV 胶囊 */
-.nebula-chip {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 11px;
-  border-radius: 12px;
-  background: rgba(15, 17, 25, 0.66);
-  border: 1px solid rgba(245, 179, 90, 0.26);
-  box-shadow:
-    0 18px 36px -22px rgba(0, 0, 0, 0.9),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(8px);
-  opacity: 0;
-  transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y))) scale(0.94);
-}
-.nebula.is-phase-0 .nebula-chip {
-  animation: nebula-chip-in 2.35s cubic-bezier(0.42, 0, 0.2, 1) both;
-  animation-delay: var(--delay, 0ms);
-}
-.nebula-chip-file {
-  color: #ffe2b8;
-  font-family: var(--l-mono);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.nebula-chip-meta {
-  color: rgba(244, 240, 232, 0.48);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-/* 阶段2：一次白金光 flash */
-.nebula-flash {
-  position: absolute;
-  inset: -12%;
-  background: radial-gradient(
-    circle at 50% 50%,
-    rgba(255, 246, 228, 0.42),
-    rgba(245, 179, 90, 0.14) 34%,
-    transparent 64%
-  );
-  animation: nebula-flash 0.8s ease-out both;
-}
-
-/* 阶段3：半透明玻璃拟态画像卡（全幅模式下贴四角，避开居中文字） */
-.nebula-card {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 190px;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(18, 20, 28, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(14px) saturate(140%);
-  box-shadow:
-    0 26px 60px -28px rgba(0, 0, 0, 0.9),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  opacity: 0;
-  transform: translate(calc(-50% + var(--tw)), calc(-50% + var(--th))) scale(0.82);
-  transition: opacity 0.55s ease, transform 0.9s var(--l-ease);
-  transition-delay: var(--delay, 0ms);
-}
-.nebula.is-phase-2 .nebula-card {
-  opacity: 1;
-  transform: translate(calc(-50% + var(--tw)), calc(-50% + var(--th))) scale(1);
-}
-.nebula-card-1 {
-  left: 12%;
-  top: 72%;
-}
-.nebula-card-2 {
-  left: 88%;
-  top: 68%;
-}
-.nebula-card-3 {
-  left: 84%;
-  top: 22%;
-}
-.nebula-card-avatar {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--accent);
-  font-family: var(--l-serif);
-  font-size: 14px;
-  font-weight: 700;
-}
-.nebula-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.nebula-card-name {
-  color: #f7f3ea;
-  font-size: 12.5px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-.nebula-card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.nebula-card-tags span {
-  padding: 1px 7px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
-  color: color-mix(in srgb, var(--accent) 82%, #ffffff);
-  font-size: 10px;
-  white-space: nowrap;
-}
-/* 全幅模式：小屏不显示画像卡（避免和居中文字打架） */
-@media (max-width: 1099px) {
-  .nebula.is-full .nebula-card {
-    display: none;
-  }
-}
-
 /* ---------- 产品：三张大图 + 三行标题 ---------- */
 .l-showcase {
-  padding: clamp(96px, 12vw, 168px) 0;
+  padding: clamp(104px, 12vw, 176px) 0;
+  background: var(--l-bg);
 }
 .l-showcase-list {
   display: flex;
   flex-direction: column;
-  gap: clamp(96px, 13vw, 168px);
+  gap: clamp(104px, 13vw, 176px);
 }
 .l-show-row {
   display: grid;
-  /* 图大文小：正排「图左文右」= 1.32fr / 0.68fr */
-  grid-template-columns: minmax(0, 1.32fr) minmax(0, 0.68fr);
+  grid-template-columns: minmax(0, 1.42fr) minmax(0, 0.68fr);
   align-items: center;
-  gap: clamp(28px, 4.5vw, 72px);
+  gap: clamp(32px, 4.5vw, 76px);
 }
-/* 反排必须把轨道也一起镜像，否则 media 被 order 塞进 0.68fr 窄列 → 第二张图明显偏小、
-   与第一/第三张不在同一视觉尺度上（客户反馈「图片太小、不协调」）。 */
+/* 反向行把宽轨道放在第二列，保证三张图的媒体轨道等宽 */
 .l-show-row.is-reverse {
-  grid-template-columns: minmax(0, 0.68fr) minmax(0, 1.32fr);
+  grid-template-columns: minmax(0, 0.68fr) minmax(0, 1.42fr);
 }
 .l-show-row.is-reverse .l-show-media {
   order: 2;
@@ -580,10 +481,11 @@
   margin: 0;
   color: var(--l-ink);
   font-family: var(--l-serif);
-  font-size: clamp(26px, 2.9vw, 38px);
+  font-size: clamp(26px, 2.5vw, 34px);
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.42;
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 .l-show-index {
   color: var(--l-accent);
@@ -593,25 +495,27 @@
   letter-spacing: 0.18em;
 }
 
-/* Mac 浏览器外框 */
+/* Mac 浏览器外框：大范围柔和弥散阴影，像被真实光线托住 */
 .l-mac {
   position: relative;
-  border-radius: 16px;
-  border: 1px solid var(--l-line);
+  border-radius: 18px;
+  border: 1px solid rgba(15, 18, 28, 0.08);
   background: var(--l-card);
   overflow: hidden;
   box-shadow:
-    0 2px 0 rgba(255, 255, 255, 0.7) inset,
-    0 50px 100px -60px rgba(31, 26, 20, 0.55),
-    0 12px 28px -26px rgba(31, 26, 20, 0.4);
-  transition: transform 0.35s ease, box-shadow 0.35s ease;
+    0 2px 0 rgba(255, 255, 255, 0.75) inset,
+    0 70px 140px -52px rgba(15, 18, 28, 0.42),
+    0 26px 64px -34px rgba(15, 18, 28, 0.22),
+    0 10px 26px -18px rgba(15, 18, 28, 0.12);
+  transition: transform 0.4s var(--l-ease), box-shadow 0.4s var(--l-ease);
 }
 .l-mac:hover {
   transform: translateY(-4px);
   box-shadow:
-    0 2px 0 rgba(255, 255, 255, 0.7) inset,
-    0 64px 116px -64px rgba(31, 26, 20, 0.6),
-    0 16px 34px -26px rgba(31, 26, 20, 0.45);
+    0 2px 0 rgba(255, 255, 255, 0.8) inset,
+    0 84px 160px -52px rgba(15, 18, 28, 0.46),
+    0 30px 70px -34px rgba(15, 18, 28, 0.24),
+    0 12px 30px -18px rgba(15, 18, 28, 0.12);
 }
 .l-mac-bar {
   display: flex;
@@ -690,10 +594,10 @@
 /* 截图上的 CSS 高亮标注 */
 .l-highlight {
   position: absolute;
-  border: 2px solid rgba(217, 119, 6, 0.9);
+  border: 2px solid rgba(217, 119, 6, 0.85);
   border-radius: 10px;
-  background: rgba(251, 191, 36, 0.08);
-  box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.12);
+  background: rgba(251, 191, 36, 0.07);
+  box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.1);
   pointer-events: none;
   animation: l-mark 3.6s ease-in-out infinite;
 }
@@ -714,10 +618,10 @@
 @keyframes l-mark {
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.12);
+    box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.1);
   }
   50% {
-    box-shadow: 0 0 0 9px rgba(217, 119, 6, 0.05);
+    box-shadow: 0 0 0 9px rgba(217, 119, 6, 0.04);
   }
 }
 
@@ -743,7 +647,8 @@
   align-items: flex-end;
   text-align: right;
 }
-/* 大字报：大字 = 痛点问句（衬线 display），小字 = 一句回答（muted 正文） */
+/* 大字报：大字 = 痛点问句（衬线 display），小字 = 一句回答（muted 正文）。
+   注意保持这个方向：task-11 重写 CSS 时曾把两者字号写反（问句小、回答大），已回归。 */
 .l-pain-q {
   margin: 0;
   color: var(--l-ink);
@@ -760,6 +665,9 @@
   font-size: clamp(16px, 1.5vw, 19px);
   letter-spacing: 0.01em;
   line-height: 1.6;
+}
+.l-br-mobile {
+  display: none;
 }
 
 /* ---------- 私有化：一句 Slogan + 一个按钮 ---------- */
@@ -832,19 +740,9 @@
 }
 
 /* ---------- 响应式 ---------- */
-@media (max-width: 1100px) {
-  .l-show-row {
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
-  }
-  /* 反排轨道同步镜像，保持三张图视觉宽度一致 */
-  .l-show-row.is-reverse {
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  }
-}
-
 @media (max-width: 900px) {
   .l-shell {
-    width: min(1220px, calc(100% - 40px));
+    width: min(1320px, calc(100% - 40px));
   }
   .l-nav-inner {
     height: 62px;
@@ -859,10 +757,19 @@
   .l-hero {
     margin-top: -62px;
     min-height: 100svh;
-    padding: calc(62px + 40px) 22px 88px;
+    padding: calc(62px + 56px) 22px 140px;
+  }
+  .l-hero-title {
+    font-size: clamp(46px, 8.4vw, 72px);
+  }
+  .l-hero-sub {
+    margin-top: 26px;
+  }
+  .l-hero-actions {
+    margin-top: 40px;
   }
   .l-showcase {
-    padding: clamp(72px, 11vw, 120px) 0;
+    padding: clamp(80px, 11vw, 120px) 0;
   }
   .l-show-row,
   .l-show-row.is-reverse {
@@ -889,13 +796,14 @@
 
 @media (max-width: 640px) {
   .l-shell {
-    width: min(1220px, calc(100% - 32px));
+    width: min(1320px, calc(100% - 32px));
   }
   .l-hero-title {
-    font-size: clamp(36px, 10.4vw, 48px);
+    font-size: clamp(40px, 10.8vw, 54px);
+    letter-spacing: -0.035em;
   }
   .l-hero-sub {
-    margin-top: 20px;
+    margin-top: 22px;
     font-size: 14.5px;
   }
   .l-hero-actions {
@@ -906,8 +814,11 @@
   .l-hero .l-btn-lg {
     width: 100%;
   }
+  .l-hero-fade {
+    height: 200px;
+  }
   .l-scroll-hint {
-    bottom: 20px;
+    bottom: 216px;
   }
   .l-showcase-list {
     gap: clamp(72px, 16vw, 96px);
@@ -921,8 +832,11 @@
   .l-br-mobile {
     display: inline;
   }
-  .l-pain-a {
+  .l-pain-q {
     font-size: clamp(30px, 8.6vw, 40px);
+  }
+  .l-pain-a {
+    font-size: 16px;
   }
   .l-private {
     padding: 88px 0 108px;
@@ -949,12 +863,8 @@
     animation: none;
     opacity: 0.8;
   }
-  .landing .nebula-chip,
-  .landing .nebula-card,
-  .landing .nebula-flash,
   .landing .l-highlight {
     animation: none !important;
-    transition: none !important;
   }
   .landing .reveal {
     opacity: 1;

@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
         <div class="l-hero-content">
           <h1 class="l-hero-title">
             让你的电商数据，<br />
-            <em>听懂中国话。</em>
+            <span>听懂中国话。</span>
           </h1>
           <p class="l-hero-sub">无需 SQL 的 AI 用户画像助理</p>
           <div class="l-hero-actions">
@@ -238,6 +238,11 @@ onBeforeUnmount(() => {
               查看文档
             </a>
           </div>
+        </div>
+
+        <!-- Hero 底部 → 第二屏白底：200~260px 呼吸过渡（暖白渐变 + 暖金光弧 + 网格淡出） -->
+        <div class="l-hero-fade" aria-hidden="true">
+          <span class="l-hero-grid-fade" />
         </div>
 
         <button class="l-scroll-hint" type="button" aria-label="向下滚动" @click="scrollTo('#product')">

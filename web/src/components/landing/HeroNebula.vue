@@ -1,73 +1,34 @@
 <script setup>
 /**
- * Hero 右侧暗黑粒子星云（原生 Canvas，无第三方依赖）。
+ * Hero 暗夜星云背景（原生 Canvas，无第三方依赖）。
  *
- * 一张 canvas 画：慢速漂移的粒子星座 + 细线连接 + 中心暖金光核（呼吸）+ 阶段特效
- * （阶段1 向心流星 / 阶段2 冲击波 + 闪光 / 阶段3 三条发光贝塞尔曲线 + 流动光点）。
- * DOM 覆盖层负责 CSV 胶囊、玻璃拟态画像卡与 flash。
- *
- * 性能与生命周期：
- *   - 单 rAF 循环、dt 钳制 48ms、DPR 上限 1.75；
- *   - ResizeObserver 自适应，粒子数按面积在 70~130 间调整（小屏进一步下调）；
- *   - IntersectionObserver + visibilitychange：不可见/离开视口暂停；
- *   - prefers-reduced-motion：只画一帧静态（星云 + 曲线 + 卡片），不跑循环；
- *   - 卸载 cancelAnimationFrame、断开两个 observer、移除监听、清空引用。
+ * 质感要点（task-11）：
+ *   - 深空微渐变上的景深粒子：近景大 + 柔和 bokeh 光晕，远景小/暗/锐利；
+ *   - 连线只发生在近景少数粒子之间，更细更淡，不再“蜘蛛网”；
+ *   - Ambient Glow 单独用低分辨率 canvas + CSS 缓慢漂移（暖金 + 极淡冷色），不占每帧预算；
+ *   - 三阶段氛围：向心流星 → 爆发冲击波 → 中心向外发柔和能量光带（无任何卡片 DOM）；
+ *   - 单 rAF、dt 钳制、DPR 上限 1.75、全幅模式低缩放渲染后拉伸，ResizeObserver 自适应；
+ *   - 离屏/后台暂停，prefers-reduced-motion 只画一帧静态，卸载完整清理。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
-  // 0 散落 / 1 爆发 / 2 吐出
+  // 0 散落 / 1 爆发 / 2 能量释放
   phase: { type: Number, default: 0 },
   reducedMotion: { type: Boolean, default: false },
-  // 全幅背景模式：Canvas 铺满 Hero，作为文字后的背景层；模式内中心更暗、卡片贴角
-  fullBleed: { type: Boolean, default: false },
+  fullBleed: { type: Boolean, default: true },
 });
 
 const wrapRef = ref(null);
 const canvasRef = ref(null);
 
-const CHIPS = [
-  // 四象限入场 + 错峰，避免向心途中叠成一坨
-  { file: "orders.csv", meta: "user_id · amount", x: -32, y: -27, delay: 0 },
-  { file: "用户表.csv", meta: "member_level · city", x: 31, y: -30, delay: 80 },
-  { file: "rules.md", meta: "高价值客户 · 流失预警", x: -33, y: 25, delay: 160 },
-  { file: "trade_2024.csv", meta: "order_id · pay_time", x: 32, y: 28, delay: 240 },
-];
-
-const CARDS = [
-  {
-    avatar: "高",
-    name: "高价值客户",
-    tags: ["高客单", "美妆偏好"],
-    tx: -6,
-    ty: -4,
-    delay: "0ms",
-    accent: "#f5b35a",
-  },
-  {
-    avatar: "复",
-    name: "复购用户",
-    tags: ["近 30 天活跃", "母婴"],
-    tx: 8,
-    ty: -2,
-    delay: "110ms",
-    accent: "#7dd3c0",
-  },
-  {
-    avatar: "预",
-    name: "流失预警",
-    tags: ["待召回", "沉睡用户"],
-    tx: 0,
-    ty: 10,
-    delay: "220ms",
-    accent: "#b9a6ff",
-  },
-];
-
 const TAU = Math.PI * 2;
-const CORE_COLOR = "245, 179, 90"; // 暖金
+const WARM = "245, 179, 90";
+const COOL = "148, 176, 214";
+const BG = "7, 7, 11";
 const MAX_DPR = 1.75;
 const MAX_DT = 48;
+const FULL_RENDER_SCALE = 0.46;
 
 let canvas = null;
 let ctx = null;
@@ -83,64 +44,60 @@ let running = false;
 let visible = true;
 let rafId = 0;
 let lastTs = 0;
+let lastDt = 16;
 let frameCount = 0;
 let phaseStart = 0;
+let startedAt = 0;
+let meteorTimer = 0;
 let currentPhase = props.phase;
 let reduce = props.reducedMotion;
 
 let resizeObserver = null;
 let intersectionObserver = null;
+let visHandler = null;
 
-function rand(min, max) {
-  return min + Math.random() * (max - min);
-}
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+const rand = (min, max) => min + Math.random() * (max - min);
 
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-
-/* ---------- 初始化 / 自适应 ---------- */
+/* ---------- 粒子 / 景深 ---------- */
 function particleCount() {
   const area = width * height;
-  let count;
-  if (props.fullBleed) {
-    // 全幅背景：像素多，粒子上限收到 110，移动端再降一档
-    count = clamp(Math.round(area / 12000), 70, 110);
-  } else {
-    count = clamp(Math.round(area / 3500), 70, 130);
-  }
-  if (width < 480) count = Math.min(count, props.fullBleed ? 52 : 62);
-  return count;
+  if (props.fullBleed) return clamp(Math.round(area / 32000), 40, 56);
+  return clamp(Math.round(area / 3500), 70, 130);
 }
 
 function initParticles() {
   const count = particleCount();
   particles = [];
   for (let i = 0; i < count; i++) {
-    const star = Math.random() < 0.14;
+    // depth：0 远景 / 1 近景；指数让远景更多、近景更少
+    const depth = Math.pow(Math.random(), 1.7);
+    const speed = 0.004 + depth * 0.02;
+    const angle = rand(0, TAU);
+    const star = depth > 0.55 && Math.random() < 0.22;
     particles.push({
       x: rand(0, width),
       y: rand(0, height),
-      vx: rand(-0.011, 0.011),
-      vy: rand(-0.011, 0.011),
-      r: star ? rand(1.3, 2.1) : rand(0.6, 1.4),
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      depth,
+      r: 0.5 + depth * 2.1 + (star ? 0.5 : 0),
       star,
+      halo: depth > 0.6 && !star,
       twinkle: rand(0, TAU),
-      twinkleSpeed: rand(0.0006, 0.0018),
+      twinkleSpeed: rand(0.0005, 0.0016),
     });
   }
 }
 
+/* ---------- 尺寸 ---------- */
 function resize() {
   if (!wrap || !canvas) return;
   const nextW = wrap.clientWidth;
   const nextH = wrap.clientHeight;
   if (!nextW || !nextH) return;
-  const nextDpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-  // 全幅背景铺满整屏时，按 0.78 渲染再拉伸（软一点但省一半以上像素，帧率更稳）
-  const renderScale = props.fullBleed ? 0.78 : 1;
-  const nextScale = nextDpr * renderScale;
-  // ResizeObserver 首次回调会和 onMounted 的 resize 重复，尺寸没变就不重排/重画
+  const baseDpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+  const nextScale = baseDpr * (props.fullBleed ? FULL_RENDER_SCALE : 1);
   if (ctx && nextW === width && nextH === height && nextScale === dpr) return;
   width = nextW;
   height = nextH;
@@ -156,79 +113,32 @@ function resize() {
   else if (running) draw(performance.now());
 }
 
-/* ---------- 绘制工具 ---------- */
-function drawCore(t) {
-  const full = props.fullBleed;
-  const pulse = 0.85 + 0.15 * Math.sin(t * 0.0021);
-  const since = t - phaseStart;
-  const burst = currentPhase === 1 ? 1 + 0.45 * Math.max(0, 1 - since / 650) : 1;
-  const cx = width / 2;
-  const cy = height * 0.5;
-  const coreR =
-    Math.min(width, height) * (full ? 0.052 : 0.072) * pulse * (full ? 1 : burst);
-
-  // 外层暖光（全幅背景模式下中心压暗，保证文字可读）
-  const outerR = Math.min(coreR * (full ? 4.2 : 5.2), Math.min(width, height) * (full ? 0.42 : 0.58));
-  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR);
-  g.addColorStop(0, `rgba(255, 238, 205, ${(full ? 0.24 : 0.42) * (full ? 1 : burst)})`);
-  g.addColorStop(0.32, `rgba(${CORE_COLOR}, ${full ? 0.13 : 0.18})`);
-  g.addColorStop(1, `rgba(${CORE_COLOR}, 0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(cx, cy, outerR, 0, TAU);
-  ctx.fill();
-
-  // 旋转的细弧线（增强科技感）
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(t * 0.00018);
-  ctx.strokeStyle = `rgba(${CORE_COLOR}, ${full ? 0.16 : 0.22})`;
-  ctx.lineWidth = 1;
-  for (let k = 0; k < 3; k++) {
-    ctx.beginPath();
-    ctx.arc(0, 0, coreR * (1.7 + k * 0.42), k * 1.9, k * 1.9 + 1.15);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // 高亮光核
-  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
-  g2.addColorStop(0, "rgba(255, 255, 255, 1)");
-  g2.addColorStop(0.28, "rgba(255, 246, 228, 0.98)");
-  g2.addColorStop(0.62, `rgba(${CORE_COLOR}, 0.9)`);
-  g2.addColorStop(1, `rgba(${CORE_COLOR}, 0)`);
-  ctx.fillStyle = g2;
-  ctx.beginPath();
-  ctx.arc(cx, cy, coreR, 0, TAU);
-  ctx.fill();
-}
-
+/* ---------- 粒子网络（DOF） ---------- */
 function drawParticleNetwork(t) {
-  const full = props.fullBleed;
-  const threshold = Math.min(width, height) * (full ? 0.17 : 0.22);
-  const cx = width / 2;
-  const cy = height * 0.5;
+  const threshold = Math.min(width, height) * (props.fullBleed ? 0.1 : 0.14);
 
-  // 细线连接：按亮度分 4 桶批量描边（逐条 stroke 在整屏画布上太贵）
-  const lineBuckets = [[], [], [], []];
+  // 连线：只有双方都偏近景时才连，数量少、更细更淡
+  const lineBuckets = [[], [], []];
   for (let i = 0; i < particles.length; i++) {
     const a = particles[i];
+    if (a.depth < 0.58) continue;
     for (let j = i + 1; j < particles.length; j++) {
       const b = particles[j];
+      if (b.depth < 0.58) continue;
       const dx = a.x - b.x;
       const dy = a.y - b.y;
       const d2 = dx * dx + dy * dy;
       if (d2 > threshold * threshold) continue;
       const k = 1 - Math.sqrt(d2) / threshold;
-      const bucket = Math.min(3, Math.floor(k * 4));
+      const bucket = Math.min(2, Math.floor(k * 3));
       lineBuckets[bucket].push(a.x, a.y, b.x, b.y);
     }
   }
-  const lineAlpha = full ? [0.05, 0.1, 0.15, 0.2] : [0.06, 0.12, 0.18, 0.24];
-  ctx.lineWidth = 0.7;
+  const lineAlpha = [0.03, 0.06, 0.11];
+  ctx.lineWidth = 0.65;
   lineBuckets.forEach((pts, idx) => {
     if (!pts.length) return;
-    ctx.strokeStyle = `rgba(${CORE_COLOR}, ${lineAlpha[idx]})`;
+    ctx.strokeStyle = `rgba(${WARM}, ${lineAlpha[idx]})`;
     ctx.beginPath();
     for (let k = 0; k < pts.length; k += 4) {
       ctx.moveTo(pts[k], pts[k + 1]);
@@ -237,89 +147,171 @@ function drawParticleNetwork(t) {
     ctx.stroke();
   });
 
-  // 粒子本体：按 twinkle 亮度分 4 桶批量 fill；星点单独带十字光
-  const dotBuckets = [[], [], [], []];
-  const stars = [];
+  // 粒子：远景小而暗且锐利；近景大 + 柔和 bokeh 光晕
+  const far = [];
+  const mid = [];
+  const near = [];
+  const nearHalo = [];
+  const starDots = [];
   for (const p of particles) {
     if (p.star) {
-      stars.push(p);
-      continue;
+      starDots.push(p);
+    } else if (p.depth < 0.35) {
+      far.push(p);
+    } else if (p.depth < 0.62) {
+      mid.push(p);
+    } else {
+      near.push(p);
+      if (p.halo) nearHalo.push(p);
     }
-    const twinkle = 0.55 + 0.45 * Math.sin(t * p.twinkleSpeed + p.twinkle);
-    const bucket = Math.min(3, Math.floor(twinkle * 4));
-    dotBuckets[bucket].push(p);
-  }
-  const dotAlpha = full ? [0.16, 0.24, 0.32, 0.4] : [0.18, 0.28, 0.38, 0.48];
-  dotBuckets.forEach((list, idx) => {
-    if (!list.length) return;
-    ctx.fillStyle = `rgba(${CORE_COLOR}, ${dotAlpha[idx]})`;
-    ctx.beginPath();
-    for (const p of list) {
-      ctx.moveTo(p.x + p.r, p.y);
-      ctx.arc(p.x, p.y, p.r, 0, TAU);
-    }
-    ctx.fill();
-  });
-  if (stars.length) {
-    ctx.beginPath();
-    for (const p of stars) {
-      const tw = 0.55 + 0.45 * Math.sin(t * p.twinkleSpeed + p.twinkle);
-      const r = p.r * (1 + tw * 0.2);
-      ctx.moveTo(p.x + r, p.y);
-      ctx.arc(p.x, p.y, r, 0, TAU);
-      ctx.moveTo(p.x - p.r * 3.4, p.y);
-      ctx.lineTo(p.x + p.r * 3.4, p.y);
-      ctx.moveTo(p.x, p.y - p.r * 3.4);
-      ctx.lineTo(p.x, p.y + p.r * 3.4);
-    }
-    ctx.fillStyle = "rgba(255, 250, 240, 0.72)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255, 250, 240, 0.2)";
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
   }
 
-  // 中心附近留白：把光核区域压暗一点点，让核心更突出
-  const hole = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(width, height) * 0.075);
-  hole.addColorStop(0, "rgba(5, 6, 10, 0.55)");
-  hole.addColorStop(1, "rgba(5, 6, 10, 0)");
-  ctx.fillStyle = hole;
+  // bokeh：两层低透明度大圆近似柔光晕（批量绘制，不用渐变/滤镜）
+  if (nearHalo.length) {
+    ctx.fillStyle = "rgba(255, 214, 160, 0.045)";
+    ctx.beginPath();
+    for (const p of nearHalo) {
+      const r = p.r * 3.6;
+      ctx.moveTo(p.x + r, p.y);
+      ctx.arc(p.x, p.y, r, 0, TAU);
+    }
+    ctx.fill();
+    ctx.fillStyle = "rgba(255, 222, 175, 0.08)";
+    ctx.beginPath();
+    for (const p of nearHalo) {
+      const r = p.r * 2.1;
+      ctx.moveTo(p.x + r, p.y);
+      ctx.arc(p.x, p.y, r, 0, TAU);
+    }
+    ctx.fill();
+  }
+
+  if (far.length) {
+    ctx.fillStyle = `rgba(${WARM}, 0.24)`;
+    ctx.beginPath();
+    for (const p of far) {
+      const r = p.r * 0.7;
+      ctx.moveTo(p.x + r, p.y);
+      ctx.arc(p.x, p.y, r, 0, TAU);
+    }
+    ctx.fill();
+  }
+  if (mid.length) {
+    ctx.fillStyle = `rgba(${WARM}, 0.4)`;
+    ctx.beginPath();
+    for (const p of mid) {
+      const r = p.r * 0.95;
+      ctx.moveTo(p.x + r, p.y);
+      ctx.arc(p.x, p.y, r, 0, TAU);
+    }
+    ctx.fill();
+  }
+  if (near.length) {
+    ctx.fillStyle = "rgba(255, 240, 214, 0.78)";
+    ctx.beginPath();
+    for (const p of near) {
+      const r = p.r;
+      ctx.moveTo(p.x + r, p.y);
+      ctx.arc(p.x, p.y, r, 0, TAU);
+    }
+    ctx.fill();
+  }
+  if (starDots.length) {
+    ctx.beginPath();
+    for (const p of starDots) {
+      const r = p.r;
+      ctx.moveTo(p.x + r, p.y);
+      ctx.arc(p.x, p.y, r, 0, TAU);
+      ctx.moveTo(p.x - r * 3, p.y);
+      ctx.lineTo(p.x + r * 3, p.y);
+      ctx.moveTo(p.x, p.y - r * 3);
+      ctx.lineTo(p.x, p.y + r * 3);
+    }
+    ctx.fillStyle = "rgba(255, 250, 240, 0.7)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 250, 240, 0.16)";
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+  }
+}
+
+/* ---------- 中心光核（呼吸 + 极缓慢漂移） ---------- */
+function drawCore(t) {
+  const pulse = 0.86 + 0.14 * Math.sin(t * 0.0019);
+  const since = t - phaseStart;
+  const burst = currentPhase === 1 ? 1 + 0.35 * Math.max(0, 1 - since / 700) : 1;
+  // Ambient Glow 的“缓慢漂移”揉进光核中心，不再额外加一层全屏图层
+  const cx = width / 2 + Math.sin(t * 0.00009) * width * 0.018;
+  const cy = height * 0.5 + Math.cos(t * 0.00012) * height * 0.014;
+  const coreR = Math.min(width, height) * 0.05 * pulse * burst;
+
+  const outerR = Math.min(width, height) * 0.22 * (0.9 + 0.1 * pulse) * burst;
+  // 窄屏把大范围光晕再压淡，避免整块暖光糊在字后面
+  const narrow = width < 480 ? 0.5 : 1;
+  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR);
+  g.addColorStop(0, `rgba(255, 240, 214, ${0.2 * burst * narrow})`);
+  g.addColorStop(0.3, `rgba(${WARM}, ${0.09 * narrow})`);
+  g.addColorStop(1, `rgba(${WARM}, 0)`);
+  ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.arc(cx, cy, Math.min(width, height) * 0.075, 0, TAU);
+  ctx.arc(cx, cy, outerR, 0, TAU);
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(t * 0.00014);
+  ctx.strokeStyle = `rgba(${WARM}, 0.14)`;
+  ctx.lineWidth = 0.8;
+  for (let k = 0; k < 2; k++) {
+    ctx.beginPath();
+    ctx.arc(0, 0, coreR * (2.1 + k * 1.05), k * 2.4, k * 2.4 + 1.1);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
+  g2.addColorStop(0, "rgba(255, 255, 255, 1)");
+  g2.addColorStop(0.3, "rgba(255, 246, 228, 0.95)");
+  g2.addColorStop(0.66, `rgba(${WARM}, 0.8)`);
+  g2.addColorStop(1, `rgba(${WARM}, 0)`);
+  ctx.fillStyle = g2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, coreR, 0, TAU);
   ctx.fill();
 }
 
+/* ---------- 阶段1：向心流星 ---------- */
 function drawMeteors(dt) {
-  // 阶段1：从边缘向中心汇聚的流星拖尾
   const cx = width / 2;
   const cy = height * 0.5;
   for (const m of meteors) {
     m.age += dt;
     const p = clamp(m.age / m.duration, 0, 1);
     const ease = p * p * (3 - 2 * p);
-    const x = m.sx + (cx - m.sx) * ease;
-    const y = m.sy + (cy - m.sy) * ease;
-    const tailP = clamp(ease - 0.16, 0, 1);
-    const tx = m.sx + (cx - m.sx) * tailP;
-    const ty = m.sy + (cy - m.sy) * tailP;
-    const alpha = Math.sin(Math.PI * p) * 0.85;
+    const x = m.sx + (cx - m.sx) * ease * 0.9;
+    const y = m.sy + (cy - m.sy) * ease * 0.9;
+    const tailP = clamp(ease - 0.14, 0, 1);
+    const tx = m.sx + (cx - m.sx) * tailP * 0.9;
+    const ty = m.sy + (cy - m.sy) * tailP * 0.9;
+    const alpha = Math.sin(Math.PI * p) * 0.42;
     const grad = ctx.createLinearGradient(tx, ty, x, y);
-    grad.addColorStop(0, `rgba(${CORE_COLOR}, 0)`);
+    grad.addColorStop(0, `rgba(${WARM}, 0)`);
     grad.addColorStop(1, `rgba(255, 244, 222, ${alpha})`);
     ctx.strokeStyle = grad;
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.moveTo(tx, ty);
     ctx.lineTo(x, y);
     ctx.stroke();
-    ctx.fillStyle = `rgba(255, 250, 240, ${alpha})`;
+    ctx.fillStyle = `rgba(255, 250, 240, ${alpha * 0.9})`;
     ctx.beginPath();
-    ctx.arc(x, y, 1.7, 0, TAU);
+    ctx.arc(x, y, 1.4, 0, TAU);
     ctx.fill();
   }
   meteors = meteors.filter((m) => m.age < m.duration);
 }
 
+/* ---------- 阶段2：爆发冲击波 + 微 flash ---------- */
 function drawShockwaves(dt) {
   const cx = width / 2;
   const cy = height * 0.5;
@@ -328,169 +320,121 @@ function drawShockwaves(dt) {
     w.age += dt;
     if (w.age < 0) continue;
     const p = clamp(w.age / w.duration, 0, 1);
-    const alpha = (1 - p) * (props.fullBleed ? 0.4 : 0.55);
+    const alpha = (1 - p) * 0.34;
     if (alpha <= 0.01) continue;
-    ctx.strokeStyle = `rgba(${CORE_COLOR}, ${alpha})`;
-    ctx.lineWidth = 2.4 * (1 - p) + 0.6;
-    ctx.beginPath();
-    ctx.arc(cx, cy, base * (0.06 + p * 0.52), 0, TAU);
-    ctx.stroke();
-    ctx.strokeStyle = `rgba(255, 250, 240, ${alpha * 0.5})`;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(${WARM}, ${alpha})`;
+    ctx.lineWidth = 2 * (1 - p) + 0.5;
     ctx.beginPath();
     ctx.arc(cx, cy, base * (0.05 + p * 0.46), 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255, 250, 240, ${alpha * 0.4})`;
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.arc(cx, cy, base * (0.045 + p * 0.4), 0, TAU);
     ctx.stroke();
   }
   shockwaves = shockwaves.filter((w) => w.age < w.duration);
 }
 
-function cubicPoint(p0, p1, p2, p3, t) {
-  const mt = 1 - t;
-  return {
-    x: mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x,
-    y: mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y,
-  };
-}
-
-function curveTargets() {
-  // 与 CSS 里 .nebula-card-N 的锚点保持一致（全幅 / ≤900 / ≤640 有各自的重排）
-  if (props.fullBleed) {
-    return [
-      { x: width * 0.12, y: height * 0.72 },
-      { x: width * 0.88, y: height * 0.68 },
-      { x: width * 0.84, y: height * 0.22 },
-    ];
-  }
-  const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
-  if (vw <= 640) {
-    return [
-      { x: width * 0.27, y: height * 0.3 },
-      { x: width * 0.72, y: height * 0.22 },
-      { x: width * 0.5, y: height * 0.8 },
-    ];
-  }
-  if (vw <= 900) {
-    return [
-      { x: width * 0.2, y: height * 0.28 },
-      { x: width * 0.8, y: height * 0.24 },
-      { x: width * 0.5, y: height * 0.8 },
-    ];
-  }
-  return [
-    { x: width * 0.17, y: height * 0.27 },
-    { x: width * 0.83, y: height * 0.24 },
-    { x: width * 0.51, y: height * 0.79 },
-  ];
-}
-
-function drawEmitCurves(t) {
-  if (currentPhase !== 2 && !reduce) return;
-  // 全幅模式下小屏不显示画像卡，曲线也一起省略
-  if (
-    props.fullBleed &&
-    typeof window !== "undefined" &&
-    window.innerWidth < 1100 &&
-    !reduce
-  ) {
-    return;
-  }
-  const since = t - phaseStart;
-  const progress = reduce ? 1 : clamp(since / 700, 0, 1);
-  const cx = width / 2;
-  const cy = height * 0.5;
-  const targets = curveTargets();
-
-  targets.forEach((target, i) => {
-    const p0 = { x: cx, y: cy };
-    const p3 = target;
-    const p1 = { x: cx + (p3.x - cx) * 0.42, y: cy + (p3.y - cy) * 0.02 };
-    const p2 = { x: p3.x - (p3.x - cx) * 0.2, y: p3.y + (p3.y - cy) * 0.32 };
-    const alpha = (props.fullBleed ? 0.68 : 0.55) * progress;
-
-    ctx.save();
-    ctx.strokeStyle = `rgba(${CORE_COLOR}, ${alpha * 0.35})`;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    for (let s = 0; s <= 1.001; s += 0.05) {
-      const pt = cubicPoint(p0, p1, p2, p3, s);
-      if (s === 0) ctx.moveTo(pt.x, pt.y);
-      else ctx.lineTo(pt.x, pt.y);
-    }
-    ctx.stroke();
-    ctx.strokeStyle = `rgba(255, 246, 226, ${alpha})`;
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-    ctx.restore();
-
-    // 沿线流动光点
-    if (!reduce) {
-      for (let k = 0; k < 2; k++) {
-        const tt = (t * 0.00042 + i * 0.17 + k * 0.5) % 1;
-        const pt = cubicPoint(p0, p1, p2, p3, tt);
-        const dotAlpha = Math.sin(Math.PI * tt) * 0.9;
-        ctx.fillStyle = `rgba(255, 248, 232, ${dotAlpha})`;
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 2.4, 0, TAU);
-        ctx.fill();
-        ctx.fillStyle = `rgba(${CORE_COLOR}, ${dotAlpha * 0.35})`;
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 6.5, 0, TAU);
-        ctx.fill();
-      }
-    }
-  });
-}
-
 function drawFlash(t) {
   if (currentPhase !== 1 || reduce) return;
   const since = t - phaseStart;
-  if (since > 700) return;
-  const alpha = Math.max(0, 1 - since / 700) * (props.fullBleed ? 0.3 : 0.42);
+  if (since > 650) return;
+  const alpha = Math.max(0, 1 - since / 650) * 0.2;
   const cx = width / 2;
   const cy = height * 0.5;
-  const flashR = Math.min(width, height) * (props.fullBleed ? 0.36 : 0.44);
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, flashR);
-  g.addColorStop(0, `rgba(255, 252, 244, ${alpha})`);
-  g.addColorStop(0.45, `rgba(${CORE_COLOR}, ${alpha * 0.3})`);
-  g.addColorStop(1, `rgba(${CORE_COLOR}, 0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(cx, cy, flashR, 0, TAU);
-  ctx.fill();
-}
-
-function drawFullScrim() {
-  if (!props.fullBleed) return;
-  // 中心压暗融进画布，省掉一层全屏 DOM 渐变合成（软件渲染下明显更省帧）
-  const cx = width / 2;
-  const cy = height * 0.46;
-  const r = Math.max(width * 0.62, height * 0.62);
+  const r = Math.min(width, height) * 0.3;
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  g.addColorStop(0, "rgba(5, 6, 10, 0.58)");
-  g.addColorStop(0.55, "rgba(5, 6, 10, 0.22)");
-  g.addColorStop(1, "rgba(5, 6, 10, 0)");
+  g.addColorStop(0, `rgba(255, 252, 244, ${alpha})`);
+  g.addColorStop(0.5, `rgba(${WARM}, ${alpha * 0.3})`);
+  g.addColorStop(1, `rgba(${WARM}, 0)`);
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, TAU);
   ctx.fill();
-  // 底部渐隐，衔接到下方暖白内容区
-  const lg = ctx.createLinearGradient(0, height * 0.8, 0, height);
-  lg.addColorStop(0, "rgba(5, 6, 10, 0)");
-  lg.addColorStop(1, "rgba(5, 6, 10, 0.9)");
-  ctx.fillStyle = lg;
-  ctx.fillRect(0, height * 0.8, width, height * 0.2);
 }
 
+/* ---------- 阶段3：中心向外发柔和能量光带 ---------- */
+function drawEnergyBands(t) {
+  if (currentPhase !== 2 && !reduce) return;
+  const since = reduce ? 1200 : t - phaseStart;
+  const fadeIn = clamp(since / 520, 0, 1);
+  const fadeOut = currentPhase === 2 ? 1 - clamp((since - 2150) / 520, 0, 1) : 1;
+  const fade = fadeIn * fadeOut;
+  if (fade <= 0.01) return;
+
+  const cx = width / 2;
+  const cy = height * 0.5;
+  const base = Math.min(width, height);
+  const rot = t * 0.000055;
+  for (let i = 0; i < 3; i++) {
+    const angle = rot + i * (TAU / 3) + 0.4;
+    const len = base * (0.34 + i * 0.03);
+    const end = { x: cx + Math.cos(angle) * len, y: cy + Math.sin(angle) * len * 0.82 };
+    const mid = {
+      x: cx + Math.cos(angle + 0.32) * len * 0.55,
+      y: cy + Math.sin(angle + 0.32) * len * 0.55,
+    };
+    const g = ctx.createLinearGradient(cx, cy, end.x, end.y);
+    g.addColorStop(0, `rgba(${WARM}, ${0.18 * fade})`);
+    g.addColorStop(0.55, `rgba(255, 236, 205, ${0.12 * fade})`);
+    g.addColorStop(1, `rgba(${WARM}, 0)`);
+    ctx.strokeStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.quadraticCurveTo(mid.x, mid.y, end.x, end.y);
+    // 两层即可：宽柔光 + 细亮线（少画一层大面积描边，帧率更稳）
+    ctx.lineWidth = 13;
+    ctx.globalAlpha = 0.42;
+    ctx.stroke();
+    ctx.lineWidth = 2.2;
+    ctx.globalAlpha = 1;
+    ctx.stroke();
+
+    // 沿线向外流动的光点
+    if (!reduce) {
+      for (let k = 0; k < 2; k++) {
+        const f = (t * 0.00032 + i * 0.19 + k * 0.5) % 1;
+        const mt = 1 - f;
+        const px = mt * mt * cx + 2 * mt * f * mid.x + f * f * end.x;
+        const py = mt * mt * cy + 2 * mt * f * mid.y + f * f * end.y;
+        const a = Math.sin(Math.PI * f) * 0.75;
+        ctx.fillStyle = `rgba(255, 248, 232, ${a})`;
+        ctx.beginPath();
+        ctx.arc(px, py, 1.8, 0, TAU);
+        ctx.fill();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- 中心压暗（保证文字可读，颜色跟深空底一致） ---------- */
+function drawScrim() {
+  const cx = width / 2;
+  const cy = height * 0.48;
+  const r = Math.max(width * 0.6, height * 0.62);
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  g.addColorStop(0, `rgba(${BG}, 0.52)`);
+  g.addColorStop(0.52, `rgba(${BG}, 0.24)`);
+  g.addColorStop(1, `rgba(${BG}, 0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, TAU);
+  ctx.fill();
+}
+
+/* ---------- 单帧绘制 ---------- */
 function draw(t) {
   if (!ctx || !width || !height) return;
   ctx.clearRect(0, 0, width, height);
   drawParticleNetwork(t);
   drawCore(t);
+  drawScrim();
   if (currentPhase === 0) drawMeteors(lastDt);
   drawShockwaves(lastDt);
   drawFlash(t);
-  drawEmitCurves(t);
-  drawFullScrim();
+  drawEnergyBands(t);
   frameCount++;
   if (window.__nebulaDebug) {
     window.__nebulaDebug.frames = frameCount;
@@ -500,72 +444,76 @@ function draw(t) {
   }
 }
 
-/* ---------- 主循环 ---------- */
-let lastDt = 16;
-
-function simulate(dt, t) {
+/* ---------- 模拟 ---------- */
+function simulate(dt) {
   const cx = width / 2;
   const cy = height * 0.5;
-  const pull = currentPhase === 0 ? 0.000028 : 0;
-  const burstBoost = currentPhase === 1 ? 1.9 : 1;
-
+  const pull = currentPhase === 0 ? 0.00002 : 0;
   for (const p of particles) {
     if (pull) {
       p.vx += (cx - p.x) * pull * dt * 0.02;
       p.vy += (cy - p.y) * pull * dt * 0.02;
     }
-    p.x += p.vx * dt * burstBoost;
-    p.y += p.vy * dt * burstBoost;
-    // 轻微阻尼 + 限速，避免越聚越快
-    p.vx *= 0.999;
-    p.vy *= 0.999;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
     const speed = Math.hypot(p.vx, p.vy);
-    if (speed > 0.05) {
-      p.vx = (p.vx / speed) * 0.05;
-      p.vy = (p.vy / speed) * 0.05;
+    const maxSpeed = 0.004 + p.depth * 0.02;
+    if (speed > maxSpeed) {
+      p.vx = (p.vx / speed) * maxSpeed;
+      p.vy = (p.vy / speed) * maxSpeed;
     }
-    if (p.x < -12) p.x = width + 12;
-    if (p.x > width + 12) p.x = -12;
-    if (p.y < -12) p.y = height + 12;
-    if (p.y > height + 12) p.y = -12;
+    if (p.x < -16) p.x = width + 16;
+    if (p.x > width + 16) p.x = -16;
+    if (p.y < -16) p.y = height + 16;
+    if (p.y > height + 16) p.y = -16;
   }
 
-  // 阶段1：周期生成向心流星
   if (currentPhase === 0 && !reduce) {
     meteorTimer += dt;
-    if (meteorTimer > 170) {
+    if (meteorTimer > 260) {
       meteorTimer = 0;
       const angle = rand(0, TAU);
-      const radius = Math.max(width, height) * rand(0.5, 0.72);
+      const radius = Math.max(width, height) * rand(0.5, 0.7);
       meteors.push({
         sx: cx + Math.cos(angle) * radius,
         sy: cy + Math.sin(angle) * radius,
         age: 0,
-        duration: rand(880, 1350),
+        duration: rand(1000, 1500),
       });
     }
   }
 }
 
-let meteorTimer = 0;
+/* ---------- rAF ----------
+   自适应画布帧率：GPU 环境画满 60fps；软件渲染/低端机若单帧绘制超过 ~11ms，
+   就隔帧绘制（约 30fps 星云背景），让页面 rAF 仍保持 60fps，不拖垮整页。 */
+let drawAccum = 0;
+let drawCost = 0;
 
 function loop(ts) {
   if (!running) return;
   rafId = requestAnimationFrame(loop);
   const dt = lastTs ? Math.min(MAX_DT, ts - lastTs) : 16;
   lastTs = ts;
-  lastDt = dt;
-  const t = ts - startedAt;
-  simulate(dt, t);
-  draw(t);
+  drawAccum += dt;
+  const minInterval = drawCost > 11 ? 30 : 0;
+  if (drawAccum < minInterval) return;
+  const step = Math.min(MAX_DT, drawAccum);
+  drawAccum = 0;
+  lastDt = step;
+  simulate(step);
+  const t0 = performance.now();
+  draw(ts - startedAt);
+  const cost = performance.now() - t0;
+  drawCost = drawCost ? drawCost * 0.9 + cost * 0.1 : cost;
 }
-
-let startedAt = 0;
 
 function start() {
   if (reduce || running || !ctx) return;
   running = true;
   lastTs = 0;
+  drawAccum = 0;
+  drawCost = 0;
   startedAt = performance.now();
   if (window.__nebulaDebug) window.__nebulaDebug.running = true;
   rafId = requestAnimationFrame(loop);
@@ -578,17 +526,16 @@ function stop() {
   if (window.__nebulaDebug) window.__nebulaDebug.running = false;
 }
 
-/* ---------- 降低动效：只画一帧 ---------- */
+/* ---------- reduced-motion：只画一帧 ---------- */
 function drawStatic() {
   if (!ctx || !width || !height) return;
   currentPhase = 2;
-  // 静态星云：固定种子式刷新一次粒子位置
   initParticles();
   ctx.clearRect(0, 0, width, height);
   drawParticleNetwork(0);
   drawCore(0);
-  drawEmitCurves(0);
-  drawFullScrim();
+  drawEnergyBands(0);
+  drawScrim();
   frameCount++;
   if (window.__nebulaDebug) {
     window.__nebulaDebug.frames = frameCount;
@@ -599,9 +546,7 @@ function drawStatic() {
   }
 }
 
-/* ---------- 生命周期 ---------- */
-let visHandler = null;
-
+/* ---------- 挂载 / 监听 ---------- */
 onMounted(() => {
   wrap = wrapRef.value;
   canvas = canvasRef.value;
@@ -624,7 +569,6 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(() => resize());
     resizeObserver.observe(wrap);
   }
-
   if (typeof IntersectionObserver !== "undefined") {
     intersectionObserver = new IntersectionObserver(
       (entries) => {
@@ -638,18 +582,14 @@ onMounted(() => {
     );
     intersectionObserver.observe(wrap);
   }
-
   visHandler = () => {
     if (document.hidden) stop();
     else if (visible) start();
   };
   document.addEventListener("visibilitychange", visHandler);
 
-  if (reduce) {
-    // resize() 里已经按 reduce 画过静态一帧，这里不再重复画
-  } else {
-    start();
-  }
+  if (reduce) drawStatic();
+  else start();
 
   if (window.__nebulaDebug) {
     window.__nebulaDebug.dpr = dpr;
@@ -665,7 +605,7 @@ watch(
     if (next === 1) {
       shockwaves = [
         { age: 0, duration: 950 },
-        { age: -170, duration: 1050 },
+        { age: -180, duration: 1100 },
       ];
     }
     if (next === 0) {
@@ -716,55 +656,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="wrapRef" class="nebula" :class="[`is-phase-${phase}`, { 'is-full': fullBleed }]">
+  <div ref="wrapRef" class="nebula" :data-phase="phase">
     <canvas ref="canvasRef" class="nebula-canvas" aria-hidden="true" />
-
-    <div class="nebula-overlay" aria-hidden="true">
-      <!-- 阶段1：向心汇聚的 CSV 胶囊（全幅背景模式只用 Canvas 氛围，不铺文字胶囊） -->
-      <template v-if="!fullBleed">
-        <span
-          v-for="chip in CHIPS"
-          :key="chip.file"
-          class="nebula-chip"
-          :style="{
-            '--x': `${chip.x}cqw`,
-            '--y': `${chip.y}cqw`,
-            '--x-mid': `${(chip.x * 0.82).toFixed(1)}cqw`,
-            '--y-mid': `${(chip.y * 0.82).toFixed(1)}cqw`,
-            '--x-late': `${(chip.x * 0.38).toFixed(1)}cqw`,
-            '--y-late': `${(chip.y * 0.38).toFixed(1)}cqw`,
-            '--delay': `${chip.delay}ms`,
-          }"
-        >
-          <span class="nebula-chip-file">{{ chip.file }}</span>
-          <span class="nebula-chip-meta">{{ chip.meta }}</span>
-        </span>
-      </template>
-
-      <!-- 阶段2：一次白金光 flash -->
-      <span v-if="phase === 1" class="nebula-flash" />
-
-      <!-- 阶段3：三张玻璃拟态画像卡（位置在 CSS，移动端可重排） -->
-      <article
-        v-for="(card, i) in CARDS"
-        :key="card.name"
-        class="nebula-card"
-        :class="`nebula-card-${i + 1}`"
-        :style="{
-          '--tw': `${card.tx}px`,
-          '--th': `${card.ty}px`,
-          '--delay': card.delay,
-          '--accent': card.accent,
-        }"
-      >
-        <span class="nebula-card-avatar">{{ card.avatar }}</span>
-        <span class="nebula-card-body">
-          <span class="nebula-card-name">{{ card.name }}</span>
-          <span class="nebula-card-tags">
-            <span v-for="tag in card.tags" :key="tag">{{ tag }}</span>
-          </span>
-        </span>
-      </article>
-    </div>
   </div>
 </template>
