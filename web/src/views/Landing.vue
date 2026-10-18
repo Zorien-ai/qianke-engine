@@ -21,14 +21,63 @@ const shot = (name) => shotModules[`../assets/shots/${name}.png`] || "";
 
 const isAuthed = computed(() => !!store.authenticated);
 
-/* ==================== 七秒叙事时间轴 ==================== */
+/* ==================== 对话式叙事时间轴（task-15，约 8.2s） ==================== */
 const QUESTION = "找出最近一个月高客单的美妆女性用户";
-const TYPE_MS = 35;
-const EVENTS = [
-  { at: 2000, stage: "absorb" },
-  { at: 4500, stage: "result" },
-  { at: 6000, stage: "final" },
-  { at: 7000, stage: "done" },
+const TYPE_MS = 80;
+const TYPING_START_MS = 120;
+const BASE_EVENTS = [
+  { at: 1600, stage: "send" },
+  { at: 2400, stage: "process" },
+  { at: 4400, stage: "cards" },
+  { at: 6000, stage: "return" },
+  { at: 7000, stage: "final" },
+  { at: 8200, stage: "done" },
+];
+const FALLBACK_USERS = [
+  {
+    uid: "U7380",
+    gender: "女",
+    age: 25,
+    member_level: "白银",
+    order_count: 4,
+    avg_amount: 3105.37,
+    top_category: "美妆",
+    city: "成都",
+    days_since_last_buy: 29,
+  },
+  {
+    uid: "U6126",
+    gender: "女",
+    age: 30,
+    member_level: "普通",
+    order_count: 4,
+    avg_amount: 2453.93,
+    top_category: "美妆",
+    city: "广州",
+    days_since_last_buy: 13,
+  },
+  {
+    uid: "U4911",
+    gender: "女",
+    age: 35,
+    member_level: "普通",
+    order_count: 2,
+    avg_amount: 2244.6,
+    top_category: "美妆",
+    city: "广州",
+    days_since_last_buy: 24,
+  },
+  {
+    uid: "U3790",
+    gender: "女",
+    age: 30,
+    member_level: "普通",
+    order_count: 2,
+    avg_amount: 1780.99,
+    top_category: "美妆",
+    city: "成都",
+    days_since_last_buy: 1,
+  },
 ];
 
 function prefersReducedMotion() {
@@ -40,7 +89,7 @@ function prefersReducedMotion() {
 }
 
 const reducedMotion = ref(prefersReducedMotion());
-const stage = ref("search");
+const stage = ref("typing");
 const typed = ref("");
 const copyVisible = ref(false);
 
@@ -82,6 +131,53 @@ const legendText = computed(() =>
     : `每个光点，都是一位 demo 用户 · 共 ${totalProfilesDisplay.value} 位`
 );
 
+/* 4 张用户卡：优先 matched_users（任务要求取前 4），不足用 users 兜底，仍不足用静默 fallback */
+const storyCards = computed(() => {
+  const pool = [];
+  const seen = new Set();
+  const push = (u) => {
+    if (!u || !u.uid || seen.has(u.uid)) return;
+    seen.add(u.uid);
+    pool.push(u);
+  };
+  demoMatchedUsers.value.forEach((u) => {
+    if (pool.length < 4) push(u);
+  });
+  demoUsers.value.forEach((u) => {
+    if (pool.length < 4) push(u);
+  });
+  FALLBACK_USERS.forEach((u) => {
+    if (pool.length < 4) push(u);
+  });
+  return pool.slice(0, 4);
+});
+
+function formatCardAmount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return Math.round(n).toLocaleString("zh-CN");
+}
+
+function genderSymbol(gender) {
+  if (gender === "女") return "♀";
+  if (gender === "男") return "♂";
+  return "·";
+}
+
+const answerVisible = computed(() => stage.value === "return" || stage.value === "final");
+const humanMessageVisible = computed(() =>
+  ["process", "cards", "return", "final"].includes(stage.value)
+);
+const cardsMounted = computed(() =>
+  stage.value === "cards" || stage.value === "return" || stage.value === "final"
+);
+const cardsSettled = computed(() => stage.value === "final");
+const nebulaStage = computed(() => {
+  if (stage.value === "typing" || stage.value === "send") return "search";
+  if (stage.value === "process") return "absorb";
+  return "final";
+});
+
 async function fetchDemoUsers() {
   try {
     const res = await fetch("/api/public/demo/users?limit=400", {
@@ -104,7 +200,8 @@ let pausedAt = 0;
 let typingTimer = null;
 let debugTimer = null;
 let timers = [];
-let storyDone = false;
+let storyDone = ref(false);
+let timelineEvents = BASE_EVENTS.slice();
 
 function clearStoryTimers() {
   timers.forEach((id) => clearTimeout(id));
@@ -126,25 +223,27 @@ function syncDebug() {
   window.__heroStoryDebug = {
     phase: stage.value,
     elapsed: Number(e.toFixed(2)),
-    cards: stage.value === "result" || stage.value === "final" || storyDone ? 1 : 0,
+    cards: cardsMounted.value ? 4 : 0,
   };
 }
 
 function startTyping() {
   if (typingTimer) clearInterval(typingTimer);
+  // 用「已用时间」反推打字进度，而不是逐次累加：SwiftShader 下主线程被渲染占用时也不会漏字
   typingTimer = setInterval(() => {
-    if (typed.value.length >= QUESTION.length) {
+    const since = elapsedMs() - TYPING_START_MS;
+    const len = Math.max(0, Math.min(QUESTION.length, Math.floor(since / TYPE_MS) + 1));
+    if (typed.value.length !== len) typed.value = QUESTION.slice(0, len);
+    if (len >= QUESTION.length) {
       clearInterval(typingTimer);
       typingTimer = null;
-      return;
     }
-    typed.value = QUESTION.slice(0, typed.value.length + 1);
-  }, TYPE_MS);
+  }, 45);
 }
 
 function applyStage(next) {
   if (next === "done") {
-    storyDone = true;
+    storyDone.value = true;
     copyVisible.value = true;
     clearStoryTimers();
     stage.value = "final";
@@ -158,16 +257,16 @@ function applyStage(next) {
 
 function scheduleFrom(elapsed) {
   clearStoryTimers();
-  // 打字机：等 800ms 再开始，保证 1.2s 截图时仍在逐字输入
-  if (stage.value === "search" && typed.value.length < QUESTION.length) {
-    const delay = Math.max(0, 800 - elapsed);
+  // 打字机：120ms 后开始（1.6s 时应有完整问题）
+  if (stage.value === "typing" && typed.value.length < QUESTION.length) {
+    const delay = Math.max(0, TYPING_START_MS - elapsed);
     timers.push(
       setTimeout(() => {
         startTyping();
       }, delay)
     );
   }
-  for (const ev of EVENTS) {
+  for (const ev of timelineEvents) {
     if (ev.at <= elapsed) continue;
     timers.push(
       setTimeout(() => {
@@ -175,6 +274,46 @@ function scheduleFrom(elapsed) {
       }, ev.at - elapsed)
     );
   }
+}
+
+/* 发送按钮：typing 阶段点击可提前发送；done 后点击重播整段 */
+function onSendClick() {
+  if (storyDone.value) {
+    replayStory();
+    return;
+  }
+  if (stage.value !== "typing") return;
+  const anchor = elapsedMs();
+  typed.value = QUESTION;
+  clearStoryTimers();
+  timelineEvents = [
+    { at: anchor, stage: "send" },
+    { at: anchor + 800, stage: "process" },
+    { at: anchor + 2800, stage: "cards" },
+    { at: anchor + 4400, stage: "return" },
+    { at: anchor + 5400, stage: "final" },
+    { at: anchor + 6600, stage: "done" },
+  ];
+  applyStage("send");
+  scheduleFrom(anchor + 1);
+}
+
+function replayStory() {
+  clearStoryTimers();
+  storyStart = performance.now();
+  pausedTotal = 0;
+  pausedAt = 0;
+  typed.value = "";
+  copyVisible.value = false;
+  storyDone.value = false;
+  stage.value = "typing";
+  timelineEvents = BASE_EVENTS.slice();
+  if (reducedMotion.value) {
+    finishStatic();
+    return;
+  }
+  scheduleFrom(0);
+  syncDebug();
 }
 
 /* QA 冻结钩子：截图验收时冻结时间轴 + CSS 动画 + Canvas rAF，保证时间点准确 */
@@ -214,11 +353,11 @@ function resumeStoryForQa() {
     /* ignore */
   }
   if (typeof window.__nebulaResume === "function") window.__nebulaResume();
-  if (!storyDone) scheduleFrom(elapsedMs());
+  if (!storyDone.value) scheduleFrom(elapsedMs());
 }
 
 function onVisibilityChange() {
-  if (reducedMotion.value || storyDone) return;
+  if (reducedMotion.value || storyDone.value) return;
   if (document.hidden) {
     if (!pausedAt) {
       pausedAt = performance.now();
@@ -228,12 +367,12 @@ function onVisibilityChange() {
     pausedTotal += performance.now() - pausedAt;
     pausedAt = 0;
     const elapsed = elapsedMs();
-    const passed = EVENTS.filter((ev) => ev.at <= elapsed);
+    const passed = timelineEvents.filter((ev) => ev.at <= elapsed);
     if (passed.length) {
       const last = passed[passed.length - 1];
       applyStage(last.stage === "done" ? "final" : last.stage);
       if (last.stage === "done") {
-        storyDone = true;
+        storyDone.value = true;
         clearStoryTimers();
         return;
       }
@@ -242,20 +381,26 @@ function onVisibilityChange() {
   }
 }
 
+function finishStatic() {
+  storyDone.value = true;
+  stage.value = "final";
+  typed.value = QUESTION;
+  copyVisible.value = true;
+  window.__heroStoryDebug = { phase: "final", elapsed: 0, cards: 4 };
+}
+
 function startStory() {
   storyStart = performance.now();
   pausedTotal = 0;
   pausedAt = 0;
-  stage.value = "search";
+  stage.value = "typing";
   typed.value = "";
   copyVisible.value = false;
-  storyDone = false;
+  storyDone.value = false;
+  timelineEvents = BASE_EVENTS.slice();
 
   if (reducedMotion.value) {
-    stage.value = "final";
-    typed.value = QUESTION;
-    copyVisible.value = true;
-    window.__heroStoryDebug = { phase: "final", elapsed: 0, cards: 1 };
+    finishStatic();
     return;
   }
 
@@ -408,7 +553,7 @@ onMounted(() => {
   };
   window.addEventListener("hero-nebula-ready", beginStory, { once: true });
   storyBeginHandler = beginStory;
-  storySafetyTimer = setTimeout(beginStory, 1800);
+  storySafetyTimer = setTimeout(beginStory, 4000);
   if (reducedMotion.value) beginStory();
   window.addEventListener("scroll", updateNavState, { passive: true });
   window.addEventListener("resize", updateNavState);
@@ -481,7 +626,10 @@ onBeforeUnmount(() => {
           <!-- 左：文案（初始隐藏，6s 后 stagger 登场；result 起轻微左移视差） -->
           <div
             class="l-hero-copy"
-            :class="{ 'is-in': copyVisible, 'is-shifted': stage === 'result' || stage === 'final' }"
+            :class="{
+              'is-in': copyVisible,
+              'is-shifted': stage === 'return' || stage === 'final',
+            }"
           >
             <h1 class="l-hero-title">
               让你的电商数据，<br />
@@ -499,44 +647,99 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- 右：叙事舞台（Canvas 星云只在这个 50% 列内播放 + DOM 玻璃拟态） -->
+          <!-- 右：对话式叙事舞台（星云 + 输入/发送 + 用户卡 + 返回答案） -->
           <div ref="heroStageEl" class="l-hero-stage">
             <HeroNebula
-              :stage="stage"
+              :stage="nebulaStage"
               :reduced-motion="reducedMotion"
               :users="demoUsers"
               :matched-users="demoMatchedUsers"
               :tooltip-target="heroStageEl"
             />
-            <!-- Phase 1：毛玻璃搜索框 + 打字机 -->
-            <div class="story-search" :class="`is-stage-${stage}`" aria-hidden="true">
-              <span class="story-search-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-                  <circle cx="11" cy="11" r="6.5" />
-                  <path d="m16 16 4.5 4.5" />
+
+            <!-- Phase 1：顶部「你」的毛玻璃输入框 + 圆形发送按钮 -->
+            <div class="chat-dock" :class="{ 'is-sent': stage !== 'typing' }">
+              <div class="chat-input" aria-hidden="true">
+                <span class="chat-avatar">你</span>
+                <span class="chat-text">{{ typed }}<i class="chat-caret" /></span>
+              </div>
+              <span v-if="storyDone" class="chat-replay-hint">重播演示</span>
+              <button
+                type="button"
+                class="chat-send"
+                :class="{
+                  'is-firing': stage === 'send',
+                  'is-replay': storyDone,
+                  'is-hidden': ['process', 'cards', 'return', 'final'].includes(stage) && !storyDone,
+                }"
+                :aria-label="storyDone ? '重播演示' : '发送问题'"
+                :title="storyDone ? '重播演示' : '发送'"
+                @click="onSendClick"
+              >
+                <svg v-if="!storyDone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 19V5" />
+                  <path d="m5 12 7-7 7 7" />
                 </svg>
-              </span>
-              <span class="story-search-text">{{ typed }}<i class="story-caret" /></span>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12a9 9 0 1 1-3.5-7.1" />
+                  <path d="M21 3v6h-6" />
+                </svg>
+                <span class="chat-send-ripple" aria-hidden="true" />
+              </button>
             </div>
 
-            <!-- Phase 2：从粒子处飘散的数据标签（来自 demo 数据实时统计） -->
-            <div v-if="stage === 'absorb'" class="story-labels" aria-hidden="true">
-              <span
-                v-for="(label, i) in demoLabels"
-                :key="label + i"
-                class="story-label"
-                :class="`story-label-${i + 1}`"
-              >{{ label }}</span>
+            <!-- 发送落地后：顶部保留「你」的问题气泡，形成「你问 → 星云答」的对话结构 -->
+            <div v-if="humanMessageVisible" class="human-msg" aria-hidden="true">
+              <span class="chat-avatar">你</span>
+              <span class="human-bubble">{{ QUESTION }}</span>
             </div>
 
-            <!-- Phase 3：晶莹玻璃结果卡（演示数据 = demo 库实时统计） -->
+            <!-- Phase 2：问题胶囊沿弧线飞向星云中心（同一条消息的克隆） -->
+            <div v-if="stage === 'send'" class="chat-capsule" aria-hidden="true">
+              {{ QUESTION }}<i class="chat-capsule-tail" />
+            </div>
+
+            <!-- Phase 3：星云处理中 -->
+            <div v-if="stage === 'process'" class="process-row" aria-hidden="true">
+              <span>星云处理中</span>
+              <i></i><i></i><i></i>
+            </div>
+
+            <!-- Phase 4：星云吐出 4 张 demo 用户画像卡 -->
+            <div v-if="cardsMounted" class="user-cards" :class="{ 'is-settled': cardsSettled }" aria-hidden="true">
+              <div
+                v-for="(user, i) in storyCards"
+                :key="user.uid + i"
+                class="u-card"
+                :class="{ 'is-final': cardsSettled }"
+              >
+                <span class="u-avatar">{{ genderSymbol(user.gender) }}</span>
+                <span class="u-info">
+                  <b class="u-uid">{{ user.uid }}</b>
+                  <span class="u-meta">{{ user.gender }} · {{ user.age }} 岁</span>
+                  <span class="u-amount">客单价 ¥{{ formatCardAmount(user.avg_amount) }}</span>
+                  <span class="u-tag">{{ user.member_level }}<template v-if="user.top_category"> · 偏好{{ user.top_category }}</template></span>
+                </span>
+              </div>
+              <span class="u-card-more">共 4 位 demo 用户</span>
+            </div>
+
+            <!-- Phase 5：返回胶囊沿弧线飞向答案槽 -->
+            <div v-if="stage === 'return'" class="return-pill" aria-hidden="true">
+              返回<i class="return-tail" /><i class="return-spark" />
+            </div>
+
+            <!-- Phase 5/6：星云返回的答案卡（真实 demo 统计） -->
             <div
-              v-if="stage === 'result' || stage === 'final'"
-              class="story-result"
-              :class="{ 'is-in': stage === 'result' || stage === 'final' }"
+              v-if="answerVisible"
+              class="story-result answer-card"
+              :class="{ 'is-in': answerVisible }"
               aria-hidden="true"
             >
-              <span class="story-result-badge">演示</span>
+              <div class="answer-head">
+                <span class="story-result-role">星云</span>
+                <span class="story-result-badge">演示</span>
+              </div>
               <p class="story-result-title">已匹配 <b>{{ matchedDisplay }}</b> 位用户</p>
               <p class="story-result-body">
                 核心特征：{{ ageRangeDisplay }} 岁，客单价均值 <b>{{ avgAmountDisplay }}</b> 元。

@@ -42,8 +42,8 @@ npm run dev        # http://127.0.0.1:5173；vite.config.js 已把
 
 ```
 dist/index.html                  1.13 kB │ gzip:  0.75 kB
-dist/assets/index-*.css         85.49 kB │ gzip: 16.43 kB
-dist/assets/index-*.js         820.64 kB │ gzip: 233.53 kB  # 含 three.js 0.186（WebGL 星云）
+dist/assets/index-*.css         95.90 kB │ gzip: 18.35 kB
+dist/assets/index-*.js         824.87 kB │ gzip: 234.73 kB  # 含 three.js 0.186（WebGL 星云）
 dist/assets/{setup,chat,kb}-*.png  共约 627 kB（官网场景截图）
 ```
 
@@ -110,16 +110,19 @@ web/
 
 - **匿名访问策略**：`/home` 的 `meta.public=true`，未登录可直接看；未登录访问其它页面 → 回 `/home`（不再粗暴跳 `/login`）；已登录访问 `/home` 正常展示，主按钮变「进入工作台」→ `/`。`store.doBoot()` 不再负责跳转，只记录 `authenticated`，跳转交给路由守卫。
 - **应用外壳**：`route.meta.public` 的页面不渲染侧边栏 / topbar / 移动抽屉，只有 RouterView + ToastHost；未登录时 `store.account` 为空也不会报错。
-- **结构（task-12/13/14 首屏叙事）**：Hero 改为 **左右 50/50**——左侧文案初始隐藏，右侧 WebGL 星云播放 **7 秒产品叙事**：
-  `0–2s` 星云呼吸 → 毛玻璃搜索框浮现 + 打字机（「找出最近一个月高客单的美妆女性用户」）
-  → `2–4.5s` 搜索框 blur(10px)+缩到 0.15 被吸入中心、Bloom ×3 爆闪 + 闪光环、数据标签飞散
-  → `4.5–6s` 玻璃结果卡从 blur(0)→blur(20px) 浮出（数据来自 demo 接口实时统计）
-  → `6–7s` 左侧标题/副标题/按钮 stagger 登场；结束后固定最终态（文案 + 结果卡 + 呼吸星云），不循环，刷新重放。
-  时间轴是 Vue 状态机 + setTimeout；页面隐藏暂停、回来按已用时间续播；卸载清空所有 timer；`prefers-reduced-motion` 直接最终静态排版（无 timer，仍可悬停看画像）。调试：`window.__heroStoryDebug = { phase, elapsed, cards }`、`window.__nebulaDebug`，QA 冻结钩子 `__heroFreeze/__nebulaPause`。
-- **demo 数据（task-14）**：`GET /api/public/demo/users?limit=400`（匿名只读，demo 合成数据，不碰企业库）挂载时请求一次；`users` 映射到每颗粒子（`users[i % users.length]`）。阶段 2 标签 = API `labels`；结果卡 = `query` 的 `matched` / `age_min-age_max` / `avg_amount`（千分位）；图例 = `每个光点，都是一位 demo 用户 · 共 total_profiles 位`。**接口失败静默降级**回旧文案/数字/图例（无 JS 报错）。
+- **结构（task-15 对话式叙事）**：Hero 左右 50/50——左侧文案初始隐藏，右侧 WebGL 星云播放 **约 8.2 秒「人和星云的对话」**：
+  `typing 0–1.6s` 顶部「你」毛玻璃输入框 + 打字机（问题「找出最近一个月高客单的美妆女性用户」）+ 右侧圆形发送按钮（呼吸光晕）
+  → `send 1.6–2.4s` 发送按钮按下/ripple，问题胶囊沿弧线（抬升+加速+blur 0→8px+scale→0.25+光尾迹）飞向星云中心
+  → `process 2.4–4.4s` 胶囊没入，Bloom 爆闪 + 旋转加速 +「星云处理中 ···」跳动点
+  → `cards 4.4–6s` 星云吐出 4 张真实 demo 用户画像卡（深色玻璃底 `rgba(10,9,8,.66)` + backdrop blur，错峰 90~120ms 从中心飞向四槽位；cards/final 阶段星云整体压暗 ~15% 提升可读性）
+  → `return 6–7s` 带「返回」标签的发光胶囊沿弧线飞向答案槽（尾迹+沿线光点），到达后答案卡 blur(0)→blur(20px) 浮出（带「星云」角色标签 +「演示」角标）
+  → `final 7–8.2s` 星云恢复呼吸，左侧文案 stagger 登场；顶部保留「你」的问题气泡（小头像 + 完整问题，形成「你问 → 星云答」结构），4 张用户卡轻移四角/opacity 0.82，答案卡保持；done 后固定不循环。
+  发送/返回都走真实动效；typing 阶段仍是输入框，send 用同一条消息的克隆飞行，落地后顶部人消息气泡保持（不会同时出现两条）。发送按钮在 typing 阶段点击立即发送（跳过剩余打字）；done 后按钮变为「重播」并固定在舞台右上角留白处（不压卡片/答案），点击重播整段（重置时间轴，无需刷新）。暂停/续播、卸载清空 timer、`prefers-reduced-motion` 直接最终静态排版均保留。调试：`window.__heroStoryDebug = { phase, elapsed, cards }`、`window.__nebulaDebug`，QA 冻结钩子 `__heroFreeze/__nebulaPause`。
+- **demo 数据（task-14/15）**：`GET /api/public/demo/users?limit=400`（匿名只读，demo 合成数据，不碰企业库）挂载时请求一次；`users` 映射到每颗粒子（`users[i % users.length]`）。用户卡优先取 `matched_users` 前 4 条（不足用 `users`/内置 fallback 兜底），卡片展示真实 `uid/性别/年龄/会员等级/客单价/偏好品类`；答案卡 = `query` 的 `matched` / `age_min-age_max` / `avg_amount`（floor + 千分位）；图例 = `每个光点，都是一位 demo 用户 · 共 total_profiles 位`。**接口失败静默降级**回旧文案/数字/图例（无 JS 报错）。
 - **星云节点交互（task-14）**：3D 粒子每帧投影到屏幕，鼠标 14px 内最近点命中；玻璃 tooltip 显示 demo 用户 `uid / 性别 / 年龄 / 会员等级 / 客单价 / 订单数 / 偏好品类 / 城市 / 最近购买`（缺字段自动隐藏）；`cursor: pointer`；点击 pin/unpin（空白处取消、pinned 卡加强高亮），移动端 390 可 tap；命中/固定状态同步到 `__nebulaDebug.hovered/pinned`。只读、不改时间轴。
 - **Hero 视觉**：背景近纯黑 `#050506`；文案纯白、无斜体；主按钮白底黑字、次按钮微光通透。**WebGL 星云只在右 50% 舞台内播放**（不是整屏背景）：`HeroNebula` 挂载在 `.l-hero-stage` 内、canvas 100% 占满右列，`mask-image`（左右 9% + 椭圆径向，`mask-composite: intersect`）让右列边缘融入黑底、无矩形边界；左半屏只有 CSS 深色渐变。搜索框/标签/结果卡均为右列内的 DOM + CSS 玻璃拟态。
-- **首屏文字量**：1064 → 约 **270 字**（去掉空白字符的 textContent，含结果卡演示文案）。
+- **首屏文字量**：1064 → 约 **310 字**（去掉空白字符的 textContent，含 4 张用户卡演示字段与答案卡文案）。
+- **移动端（390）**：上下结构；4 张用户卡在窄屏只展示 2 张 + 「共 4 位 demo 用户」计数，答案卡在下方；发送按钮可 tap、无横向滚动；图例在窄屏隐藏避免遮挡。
 - **Hero 字体**：主标题纯白 `#FFFFFF`、现代无衬线（Inter / system-ui / SF Pro / PingFang SC）、`font-weight: 800`、`letter-spacing: -0.03em`，无背景渐变/无斜体；副标题 17px、`rgba(255,255,255,.48)`；文案区占左半屏。
 - **顶部导航**：品牌 + 2 个锚点（产品 / 安全）+「文档 / 登录」；Hero 上透明亮色（`is-dark`），滚出 Hero 后切浅色吸顶（`is-scrolled`，白底/深字/阴影）；锚点滚动补偿导航高度。
 - **Hero 背景（task-13 终极特效）**：`three@0.186` WebGL 渲染——3D 粒子云 1600 颗（近大远小 + additive + 正弦扰动）、中心暖金泛光 sprite、`EffectComposer + RenderPass + UnrealBloomPass + OutputPass` Bloom（strength 1.25，absorb 瞬间 ×3）、~280 颗 kNN 密集网络连线（LineSegments additive）+ 缓慢自转；整体只在右 50% 舞台内。**WebGL 不可用时降级 Canvas2D**（大 radial gradient + `lighter` + 正弦粒子 + 600 条连线），不会白屏；卸载 dispose 所有 geometry/material/texture/renderer。

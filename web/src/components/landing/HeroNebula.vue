@@ -100,6 +100,7 @@ let resizeObserver = null;
 let intersectionObserver = null;
 let visHandler = null;
 let disposed = false;
+let readyDispatched = false;
 let runStartedAt = 0;
 let fpsChecked = 0;
 
@@ -277,7 +278,8 @@ function initWebGL() {
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // cards/final 阶段整体压暗 ~15%，让用户卡/答案卡在金色网络上更清晰
+  renderer.toneMappingExposure = currentStage === "final" ? 0.88 : 1.05;
   canvas = renderer.domElement;
   canvas.className = "nebula-canvas";
   canvas.setAttribute("aria-hidden", "true");
@@ -532,6 +534,11 @@ function renderFrame(ts) {
   if (composer) composer.render();
   frameCount++;
   lastRenderTs = ts;
+  if (!readyDispatched) {
+    readyDispatched = true;
+    // 第一帧真正画完后再让 Landing 启动叙事，避免 shader 编译阻塞把打字机/时间轴挤乱
+    window.dispatchEvent(new Event("hero-nebula-ready"));
+  }
   updateInteraction(ts / 1000);
   updateDebug();
 }
@@ -877,6 +884,10 @@ function renderFallback(ts) {
   ctx2d.globalAlpha = 1;
   frameCount++;
   lastRenderTs = ts;
+  if (!readyDispatched) {
+    readyDispatched = true;
+    window.dispatchEvent(new Event("hero-nebula-ready"));
+  }
   updateInteraction(ts / 1000);
   updateDebug();
 }
@@ -1035,7 +1046,6 @@ function tryStart() {
   } else {
     start();
   }
-  window.dispatchEvent(new Event("hero-nebula-ready"));
 }
 
 function onVisibility() {
@@ -1113,7 +1123,8 @@ watch(
     currentStage = next;
     stageStart = performance.now();
     if (next === "absorb") absorbStart = performance.now();
-    if (next === "final") absorbStart = -1;
+    if (next === "search" || next === "final") absorbStart = -1;
+    if (renderer) renderer.toneMappingExposure = next === "final" ? 0.88 : 1.05;
     if (reduce) renderStatic();
     updateDebug();
   }
