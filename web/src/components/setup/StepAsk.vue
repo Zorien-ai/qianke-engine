@@ -11,11 +11,15 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { getJson, postJson } from "../../api";
 import { renderMarkdown } from "../../lib/markdown";
+import { humanizeStatusText } from "../../lib/wizardCache";
 
 const props = defineProps({
   uploadId: { type: String, required: true },
   buildNote: { type: String, default: "" },
 });
+
+// 构建完成提示里可能带「索引新鲜度 fresh」这类技术词：展示前降维，技术值只留在 title
+const buildNoteText = computed(() => humanizeStatusText(props.buildNote));
 
 const emit = defineEmits(["back"]);
 
@@ -176,7 +180,7 @@ onMounted(loadExamples);
       <RouterLink to="/chat" class="btn btn-ghost btn-sm">去完整对话页 →</RouterLink>
     </div>
 
-    <div v-if="buildNote" class="alert is-info">{{ buildNote }}</div>
+    <div v-if="buildNoteText" class="alert is-info">{{ buildNoteText }}</div>
 
     <div class="ask-examples">
       <span class="ask-examples-label">示例问句</span>

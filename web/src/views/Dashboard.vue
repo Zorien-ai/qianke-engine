@@ -6,6 +6,7 @@
 import { computed, onMounted, ref } from "vue";
 import { getJson } from "../api";
 import { hasCap, isManager, store, toastError } from "../store";
+import { freshnessReason, freshnessText } from "../lib/wizardCache";
 
 const stats = ref(null);
 const statsLoading = ref(false);
@@ -140,14 +141,29 @@ const quickCapHint = computed(() => {
 
 const freshness = computed(() => {
   const f = (overview.value && overview.value.freshness) || null;
-  if (!f) return { status: "unknown", label: "未知", reason: "暂无新鲜度数据", cls: "is-unknown", pct: 0 };
+  if (!f) {
+    return {
+      status: "unknown",
+      label: freshnessText("unknown"),
+      reason: freshnessReason("unknown"),
+      cls: "is-unknown",
+      pct: 0,
+    };
+  }
+  // 文案降维：技术值（fresh/stale/unknown）只放在 title，正文一律人话
   const map = {
-    fresh: { label: "索引新鲜", cls: "is-fresh", pct: 100 },
-    stale: { label: "索引已过期", cls: "is-warn", pct: 55 },
-    unknown: { label: "无基线", cls: "is-unknown", pct: 12 },
+    fresh: { cls: "is-fresh", pct: 100 },
+    stale: { cls: "is-warn", pct: 55 },
+    unknown: { cls: "is-unknown", pct: 12 },
   };
   const m = map[f.status] || map.unknown;
-  return { status: f.status, ...m, reason: f.reason || "" };
+  return {
+    status: f.status,
+    label: freshnessText(f.status),
+    ...m,
+    // 后端 reason 是技术口径（如「索引与源表一致」），展示时降维成人话
+    reason: freshnessReason(f.status, f.reason),
+  };
 });
 
 const modeLabel = computed(() => {
@@ -271,8 +287,8 @@ onMounted(async () => {
               <dd>{{ overview.built_at || "—" }}</dd>
             </div>
             <div class="meta-row">
-              <dt>索引新鲜度</dt>
-              <dd>
+              <dt>数据状态</dt>
+              <dd :title="`技术值：${overview.freshness?.status || 'unknown'}`">
                 <span class="status-dot" :class="freshness.cls"></span>
                 {{ freshness.label }}
               </dd>

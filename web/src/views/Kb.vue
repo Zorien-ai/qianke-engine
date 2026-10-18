@@ -1,15 +1,16 @@
 <script setup>
 /**
- * 知识库页：GET /api/kb/overview 概况 + 文档矩阵 + 索引新鲜度；
+ * 知识库页：GET /api/kb/overview 概况 + 文档矩阵 + 数据状态；
  * 企业管理员（overview.can_write）可重建 / 清空。
  *
- * 重建复用既有向导接口：POST /api/wizard/build（upload_id + fields）→ 轮询
+ * 重建复用既有向导接口：POST /api/wizard/build（upload_id + fields + mode）→ 轮询
  * GET /api/wizard/build/{task_id} 显示步骤进度。**绝不传 dataset**：读哪个库
  * 由登录账号推导（红线）。清空要手输 dataset 字面值做二次确认。
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { getJson, postJson } from "../api";
 import { toast, toastError } from "../store";
+import { freshnessReason, freshnessText } from "../lib/wizardCache";
 
 const overview = ref(null);
 const loading = ref(true);
@@ -42,14 +43,30 @@ const canRebuild = computed(() => !rebuildDisabledReason.value);
 
 const freshness = computed(() => {
   const f = (overview.value && overview.value.freshness) || null;
-  if (!f) return { status: "unknown", label: "未知", reason: "", pct: 0, cls: "is-muted" };
+  if (!f) {
+    return {
+      status: "unknown",
+      label: freshnessText("unknown"),
+      reason: freshnessReason("unknown"),
+      pct: 0,
+      cls: "is-muted",
+    };
+  }
+  // 文案降维：技术值只放 title（见模板），正文给人话
   const map = {
-    fresh: { label: "索引新鲜", pct: 100, cls: "is-success" },
-    stale: { label: "索引落后于源表", pct: 55, cls: "is-warn" },
-    unknown: { label: "无基线指纹", pct: 14, cls: "is-muted" },
+    fresh: { pct: 100, cls: "is-success" },
+    stale: { pct: 55, cls: "is-warn" },
+    unknown: { pct: 14, cls: "is-muted" },
   };
   const m = map[f.status] || map.unknown;
-  return { status: f.status, label: m.label, pct: m.pct, cls: m.cls, reason: f.reason || "" };
+  return {
+    status: f.status,
+    label: freshnessText(f.status),
+    pct: m.pct,
+    cls: m.cls,
+    // 后端 reason 是技术口径（如「索引与源表一致」），展示时降维成人话
+    reason: freshnessReason(f.status, f.reason),
+  };
 });
 
 const maxChunks = computed(() => {
@@ -121,17 +138,21 @@ async function rebuild() {
   build.note = "正在提交构建任务…";
   build.error = "";
   try {
-    // 只传 upload_id + fields；dataset 由后端按账号推导（红线）
+    // 只传 upload_id + fields + mode；dataset 由后端按账号推导（红线）。
+    // 知识库页的「重建」语义就是清空重写（覆盖重建）；第五轮起构建默认是
+    // 「追加更新」，不显式传 mode=full 会被增量预检拦下（没有新增文件可追加）。
     const res = await postJson("/api/wizard/build", {
       upload_id: src.upload_id,
       fields: src.fields || {},
+      mode: "full",
     });
     build.taskId = res.task_id || "";
     build.dataset = res.dataset || "";
     build.status = "running";
     build.note = "构建任务已启动，正在清理并重写数据…";
     stopPolling();
-    build.pollTimer = setInterval(pollBuild, 1200);
+    // 第五轮统一：构建进度轮询 3000ms（与向导一致，低频更新即可）
+    build.pollTimer = setInterval(pollBuild, 3000);
     await pollBuild();
   } catch (e) {
     build.busy = false;
@@ -230,7 +251,7 @@ function stepIcon(status) {
           <div class="empty-emoji">🌱</div>
           <div class="empty-title">这个数据空间还没有构建</div>
           <div class="empty-desc">
-            上传 CSV / Markdown 并完成一次构建后，这里会显示文档数、切片数、画像数、索引新鲜度与文档矩阵。
+            上传 CSV / Markdown 并完成一次构建后，这里会显示文档数、切片数、画像数、数据状态与文档矩阵。
           </div>
           <RouterLink class="btn btn-primary" to="/setup">去数据导入向导</RouterLink>
         </div>
@@ -259,16 +280,20 @@ function stepIcon(status) {
               {{ overview.built_at || "—" }}
             </div>
             <div class="stat-label">最近构建时间</div>
-            <div class="stat-extra">{{ overview.freshness?.reason || "无新鲜度说明" }}</div>
+            <div class="stat-extra">{{ freshness.reason || "暂无数据状态信息" }}</div>
           </div>
         </div>
 
-        <!-- 索引新鲜度 -->
-        <div class="freshness-card">
+        <!-- 数据状态 -->
+        <div
+          class="freshness-card"
+          :title="`技术值：${overview.freshness?.status || 'unknown'}`"
+        >
           <span class="status-dot" :class="`is-${overview.freshness?.status || 'unknown'}`"></span>
           <div>
+            <div class="freshness-kicker">数据状态</div>
             <div class="freshness-text">{{ freshness.label }}</div>
-            <div class="freshness-reason">{{ freshness.reason || "没有可用的新鲜度基线" }}</div>
+            <div class="freshness-reason">{{ freshness.reason || "暂无数据状态信息" }}</div>
           </div>
           <div class="freshness-bar progress progress-lg" :class="freshness.cls">
             <div class="progress-fill" :style="{ width: `${freshness.pct}%` }"></div>
@@ -353,7 +378,7 @@ function stepIcon(status) {
                 <span class="card-sub" v-if="build.dataset">目标数据集 {{ build.dataset }}</span>
               </div>
               <div class="progress progress-lg" :class="{ 'is-danger': build.status === 'failed' }">
-                <div class="progress-fill" :style="{ width: `${build.percent}%` }"></div>
+                <div class="progress-fill is-gpu" :style="{ transform: `scaleX(${build.percent / 100})` }"></div>
               </div>
               <p class="build-note" v-if="build.note">{{ build.note }}</p>
               <div class="build-steps">
@@ -361,7 +386,7 @@ function stepIcon(status) {
                   <span class="step-dot" :class="`is-${st.status}`">{{ stepIcon(st.status) }}</span>
                   <span class="build-step-label">{{ st.label }}</span>
                   <div class="progress" :class="{ 'is-success': st.status === 'done', 'is-muted': st.status === 'skipped' }">
-                    <div class="progress-fill" :style="{ width: `${st.percent || 0}%` }"></div>
+                    <div class="progress-fill is-gpu" :style="{ transform: `scaleX(${(st.percent || 0) / 100})` }"></div>
                   </div>
                   <span class="build-step-pct">{{ st.percent || 0 }}%</span>
                 </div>

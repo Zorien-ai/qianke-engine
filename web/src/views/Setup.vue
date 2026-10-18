@@ -12,13 +12,17 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { getJson, postForm, postJson } from "../api";
 import { toast, toastError } from "../store";
+import {
+  clearBuildTaskId,
+  readBuildTaskId,
+  readUploadId,
+  writeUploadId,
+} from "../lib/wizardCache";
 import SetupStepper from "../components/setup/SetupStepper.vue";
 import StepUpload from "../components/setup/StepUpload.vue";
 import StepFields from "../components/setup/StepFields.vue";
 import StepBuild from "../components/setup/StepBuild.vue";
 import StepAsk from "../components/setup/StepAsk.vue";
-
-const UPLOAD_KEY = "v2-wizard-upload-id";
 
 const STEPS = [
   { key: "upload", title: "上传数据", desc: "CSV / Markdown" },
@@ -44,6 +48,8 @@ const fieldValues = reactive({});
 const buildRunning = ref(false);
 const buildDone = ref(false);
 const buildRecord = ref(null);
+// 从 /api/wizard/build/active（或 localStorage 里的 task_id）恢复出来的任务
+const resumeTask = ref(null);
 
 const transitionName = computed(() => `step-${direction.value}`);
 const hasFiles = computed(() => {
@@ -72,12 +78,7 @@ function clearMessage() {
 function applyState(data) {
   analysis.value = data || null;
   uploadId.value = (data && data.upload_id) || "";
-  try {
-    if (uploadId.value) localStorage.setItem(UPLOAD_KEY, uploadId.value);
-    else localStorage.removeItem(UPLOAD_KEY);
-  } catch {
-    /* 隐私模式下写不了 localStorage，忽略 */
-  }
+  writeUploadId(uploadId.value);
   for (const key of Object.keys(fieldValues)) delete fieldValues[key];
   for (const f of (data && data.fields) || []) fieldValues[f.key] = f.column || "";
   rejected.value = (data && data.rejected) || [];
@@ -142,6 +143,7 @@ async function onFiles(kind, files) {
   try {
     const data = await postForm("/api/wizard/upload", form);
     applyState(data);
+    resetBuildState();
     const all = localRejected.concat(data.rejected || []);
     rejected.value = all;
     if (all.length) {
@@ -172,6 +174,7 @@ async function onRemove(kind, name) {
       name,
     });
     applyState(data);
+    resetBuildState();
     setMessage(`已移除 ${name}。`, "info");
   } catch (e) {
     toastError(e);
@@ -188,6 +191,7 @@ async function loadSample() {
   try {
     const data = await getJson("/api/wizard/sample");
     applyState(data);
+    resetBuildState();
     const s = data.summary || {};
     setMessage(
       `示例数据已填好（${s.csv_count || 0} 个 CSV / ${s.md_count || 0} 篇文档，共 ${Number(
@@ -204,6 +208,19 @@ async function loadSample() {
 }
 
 /* ---------- 步骤流转 ---------- */
+/**
+ * 上传批次内容变了（新增/移除/示例）：之前的构建结果与恢复任务都作废，
+ * 清掉 task_id，第 3 步重新读 plan；第 4 步随之重新上锁。
+ */
+function resetBuildState() {
+  buildDone.value = false;
+  buildRecord.value = null;
+  resumeTask.value = null;
+  buildRunning.value = false;
+  clearBuildTaskId();
+  if (step.value === 1) maxStep.value = 1;
+}
+
 function goFields() {
   if (!hasFiles.value) return;
   clearMessage();
@@ -220,11 +237,15 @@ function onFieldUpdate(key, value) {
 
 function onBuildRunning(running) {
   buildRunning.value = !!running;
+  // 恢复出来的任务已经交给 StepBuild 继续轮询，父层的引用可以释放了
+  if (running) resumeTask.value = null;
 }
 
 function onBuildDone(payload) {
   buildDone.value = true;
   buildRecord.value = payload || null;
+  resumeTask.value = null;
+  clearBuildTaskId();
   maxStep.value = Math.max(maxStep.value, 4);
 }
 
@@ -233,14 +254,9 @@ function goAsk() {
   goStep(4);
 }
 
-/* ---------- 刷新恢复 ---------- */
+/* ---------- 刷新 / 离开后恢复 ---------- */
 async function restoreUpload() {
-  let saved = "";
-  try {
-    saved = localStorage.getItem(UPLOAD_KEY) || "";
-  } catch {
-    return;
-  }
+  const saved = readUploadId();
   if (!saved) return;
   restoring.value = true;
   try {
@@ -255,11 +271,7 @@ async function restoreUpload() {
       );
     }
   } catch (e) {
-    try {
-      localStorage.removeItem(UPLOAD_KEY);
-    } catch {
-      /* 忽略 */
-    }
+    writeUploadId("");
     analysis.value = null;
     uploadId.value = "";
     // 404 / 403（批次没了 / 不是自己的批次）静默回空态，不打扰用户
@@ -271,7 +283,95 @@ async function restoreUpload() {
   }
 }
 
-onMounted(restoreUpload);
+/** 把一条构建任务应用到页面状态（active 接口 / localStorage 兜底共用） */
+async function applyRestoredTask(task) {
+  if (!task || !task.task_id) {
+    clearBuildTaskId();
+    return;
+  }
+  // 任务所属批次可能和当前恢复的批次不同：以任务为准，尽量把上传状态也换成那一批
+  const taskUploadId = task.upload_id || "";
+  if (taskUploadId && taskUploadId !== uploadId.value) {
+    try {
+      const state = await getJson(`/api/wizard/upload/${encodeURIComponent(taskUploadId)}`);
+      applyState(state);
+    } catch {
+      // 批次文件可能已被清掉：仍然展示任务进度/结果，不因为拿不到文件列表就丢掉恢复
+      uploadId.value = taskUploadId;
+      writeUploadId(taskUploadId);
+    }
+  }
+
+  if (task.status === "running") {
+    buildDone.value = false;
+    buildRecord.value = null;
+    resumeTask.value = task;
+    maxStep.value = Math.max(maxStep.value, 3);
+    step.value = 3;
+    direction.value = "forward";
+    toast("检测到正在进行的构建，已恢复进度", "info", 3600);
+  } else if (task.status === "done") {
+    buildDone.value = true;
+    buildRecord.value = {
+      note: task.note || "",
+      result: task.result || null,
+      mode: (task.result && task.result.mode) || task.mode || "full",
+    };
+    maxStep.value = Math.max(maxStep.value, 4);
+    step.value = 3;
+    direction.value = "forward";
+    clearBuildTaskId();
+  } else {
+    // failed：交给 StepBuild 展示错误 + 重试
+    resumeTask.value = task;
+    maxStep.value = Math.max(maxStep.value, 3);
+    step.value = 3;
+    direction.value = "forward";
+  }
+}
+
+/**
+ * 回到 /setup 时先问服务端有没有进行中的构建：
+ *   - running → 自动进第 3 步继续轮询；
+ *   - 刚完成 → 展示结果并解锁第 4 步；
+ *   - 都没有 → 再用 localStorage 的 task_id 兜底（后端 /active 未就绪时也能恢复），
+ *     过期 id（404）清掉。
+ */
+async function restoreActiveBuild() {
+  let task = null;
+  let activeChecked = false;
+  try {
+    const data = await getJson("/api/wizard/build/active");
+    activeChecked = true;
+    task = (data && data.task) || null;
+  } catch {
+    // /active 未就绪（404/网络）：下面用 localStorage 里的 task_id 兜底
+    activeChecked = false;
+  }
+
+  if (!task) {
+    const savedTaskId = readBuildTaskId();
+    if (savedTaskId) {
+      try {
+        task = await getJson(`/api/wizard/build/${encodeURIComponent(savedTaskId)}`);
+      } catch (e) {
+        // 任务过期（后端重启）或不属于当前账号：清掉，避免每次回来都 404
+        clearBuildTaskId();
+        if (activeChecked && e && e.status && e.status !== 404 && e.status !== 403) {
+          // 非预期错误不打扰用户：下次进入还会再试
+        }
+      }
+    }
+  }
+
+  if (!task) return;
+  await applyRestoredTask(task);
+}
+
+onMounted(async () => {
+  await restoreUpload();
+  await restoreActiveBuild();
+});
 </script>
 
 <template>
@@ -291,7 +391,7 @@ onMounted(restoreUpload);
         <div class="setup-hero-meta">
           <span class="setup-chip">仅管理员可操作</span>
           <span class="setup-chip">示例数据一键填满</span>
-          <span class="setup-chip">构建会清空并重写当前数据空间</span>
+          <span class="setup-chip">构建期间可离开页面，进度自动恢复</span>
         </div>
       </div>
       <span class="setup-hero-orb setup-hero-orb-a" aria-hidden="true" />
@@ -338,6 +438,7 @@ onMounted(restoreUpload);
         :fields="fieldsPayload"
         :summary="summary"
         :previous-result="buildRecord"
+        :initial-task="resumeTask"
         @back="goStep(2)"
         @done="onBuildDone"
         @running="onBuildRunning"
