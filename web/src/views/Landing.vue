@@ -123,6 +123,46 @@ function scheduleFrom(elapsed) {
   }
 }
 
+/* QA 冻结钩子：截图验收时冻结时间轴 + CSS 动画 + Canvas rAF，保证时间点准确 */
+function freezeStoryForQa() {
+  if (!storyStart) return;
+  if (!pausedAt) {
+    pausedAt = performance.now();
+    clearStoryTimers();
+  }
+  try {
+    document.getAnimations().forEach((anim) => {
+      try {
+        anim.pause();
+      } catch (e) {
+        /* ignore */
+      }
+    });
+  } catch (e) {
+    /* ignore */
+  }
+  if (typeof window.__nebulaPause === "function") window.__nebulaPause();
+}
+
+function resumeStoryForQa() {
+  if (!pausedAt) return;
+  pausedTotal += performance.now() - pausedAt;
+  pausedAt = 0;
+  try {
+    document.getAnimations().forEach((anim) => {
+      try {
+        anim.play();
+      } catch (e) {
+        /* ignore */
+      }
+    });
+  } catch (e) {
+    /* ignore */
+  }
+  if (typeof window.__nebulaResume === "function") window.__nebulaResume();
+  if (!storyDone) scheduleFrom(elapsedMs());
+}
+
 function onVisibilityChange() {
   if (reducedMotion.value || storyDone) return;
   if (document.hidden) {
@@ -266,6 +306,9 @@ const scenes = [
 ];
 
 let motionQuery = null;
+let storyStarted = false;
+let storySafetyTimer = null;
+let storyBeginHandler = null;
 function onMotionChange() {
   const reduce = prefersReducedMotion();
   if (reduce === reducedMotion.value) return;
@@ -295,15 +338,38 @@ onMounted(() => {
     if (motionQuery.addEventListener) motionQuery.addEventListener("change", onMotionChange);
     else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
   }
-  startStory();
+  // 等 WebGL 星云初始化完成再启动 7s 时间轴，避免 shader 编译阻塞把打字/分镜时间点挤在一起
+  const beginStory = () => {
+    if (storyStarted) return;
+    storyStarted = true;
+    if (storySafetyTimer) {
+      clearTimeout(storySafetyTimer);
+      storySafetyTimer = null;
+    }
+    startStory();
+  };
+  window.addEventListener("hero-nebula-ready", beginStory, { once: true });
+  storyBeginHandler = beginStory;
+  storySafetyTimer = setTimeout(beginStory, 1800);
+  if (reducedMotion.value) beginStory();
   window.addEventListener("scroll", updateNavState, { passive: true });
   window.addEventListener("resize", updateNavState);
   updateNavState();
+  window.__heroFreeze = freezeStoryForQa;
+  window.__heroResume = resumeStoryForQa;
   document.title = "用户画像 RAG · 让你的电商数据，听懂中国话";
 });
 
 onBeforeUnmount(() => {
   clearStoryTimers();
+  if (storySafetyTimer) {
+    clearTimeout(storySafetyTimer);
+    storySafetyTimer = null;
+  }
+  if (storyBeginHandler) {
+    window.removeEventListener("hero-nebula-ready", storyBeginHandler);
+    storyBeginHandler = null;
+  }
   if (debugTimer) {
     clearInterval(debugTimer);
     debugTimer = null;
@@ -315,6 +381,8 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener("scroll", updateNavState);
   window.removeEventListener("resize", updateNavState);
+  delete window.__heroFreeze;
+  delete window.__heroResume;
 });
 </script>
 
@@ -352,8 +420,11 @@ onBeforeUnmount(() => {
       <!-- ============ Hero：左右 50/50 + 七秒叙事动画 ============ -->
       <section ref="heroRef" class="l-hero">
         <div class="l-shell l-hero-split">
-          <!-- 左：文案（初始隐藏，6s 后 stagger 登场） -->
-          <div class="l-hero-copy" :class="{ 'is-in': copyVisible }">
+          <!-- 左：文案（初始隐藏，6s 后 stagger 登场；result 起轻微左移视差） -->
+          <div
+            class="l-hero-copy"
+            :class="{ 'is-in': copyVisible, 'is-shifted': stage === 'result' || stage === 'final' }"
+          >
             <h1 class="l-hero-title">
               让你的电商数据，<br />
               <span>听懂中国话。</span>
@@ -405,15 +476,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-
-        <!-- Hero 底部 → 第二屏白底：240px 呼吸过渡 -->
-        <div class="l-hero-fade" aria-hidden="true">
-          <span class="l-hero-grid-fade" />
-        </div>
-
-        <button class="l-scroll-hint" type="button" aria-label="向下滚动" @click="scrollTo('#product')">
-          <span aria-hidden="true" />
-        </button>
       </section>
 
       <!-- ============ 产品：三张大图 + 三行标题 ============ -->

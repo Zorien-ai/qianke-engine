@@ -1,18 +1,22 @@
 <script setup>
 /**
- * Hero 叙事 Canvas（task-12，原生 Canvas，无第三方依赖）。
+ * Hero 叙事星云（task-13 终极特效版）。
  *
- * 只负责背景星云与粒子：DOF 星云、中心光核呼吸/漂移、阶段2 的爆亮与高亮粒子；
- * 搜索框 / 数据标签 / 结果卡全部由 Landing.vue 用 DOM + CSS 玻璃拟态渲染，文字更清晰。
+ * 渲染优先级：
+ *   1) WebGL / Three.js：3D 粒子云（1200~2000 颗、近大远小、additive、正弦扰动）+ 中心泛光 sprite
+ *      + UnrealBloomPass 强泛光 + ~250 颗 kNN 密集网络连线（LineSegments additive）+ 缓慢自转；
+ *   2) WebGL 不可用时降级 Canvas2D：大 radial gradient 光晕 + lighter 叠加 + 正弦扰动粒子 + 密集连线。
  *
- * props.stage：search → absorb → result → final（时间轴由 Landing.vue 状态机驱动）
- *   - search：缓慢呼吸，部分粒子被点亮；
- *   - absorb：中心瞬间爆亮（AI 思考），少量粒子高亮并向中心收；
- *   - result：高亮粒子向外发射、回落，星云逐渐恢复；
- *   - final：稳定呼吸态（不循环重播）。
- * 保留：单 rAF、dt 钳制、DPR 上限 1.75、低比例渲染、离屏暂停、reduced-motion 单帧静态、卸载清理。
+ * 阶段（由 Landing.vue 的 7s 时间轴驱动）：search → absorb → result → final。
+ *   absorb：Bloom ×~3 爆闪 0.15~0.25s + 一次性闪光环 + 粒子轻微向内收。
+ * 生命周期：页面隐藏/离屏暂停；卸载 dispose geometry/material/texture/renderer 与 rAF；reduced-motion 只渲染单帧。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const props = defineProps({
   stage: { type: String, default: "search" },
@@ -20,452 +24,795 @@ const props = defineProps({
 });
 
 const wrapRef = ref(null);
-const canvasRef = ref(null);
 
 const TAU = Math.PI * 2;
-const WARM = "245, 179, 90";
-const BG = "5, 5, 6";
-const MAX_DPR = 1.75;
 const MAX_DT = 48;
-const FULL_RENDER_SCALE = 0.56;
+const BLOOM_BASE = 1.25;
+const WEBGL_RENDER_SCALE = 0.6;
+const FALLBACK_SCALE = 0.62;
+const PARTICLE_COUNT = 1600;
+const LINK_COUNT = 280;
 
-let canvas = null;
-let ctx = null;
 let wrap = null;
-
-let width = 0;
-let height = 0;
-let dpr = 1;
-let particles = [];
-let highlights = [];
+let canvas = null;
+let mode = "webgl"; // webgl | canvas2d
 let running = false;
 let visible = true;
+let reduce = props.reducedMotion;
+let currentStage = props.stage;
 let rafId = 0;
 let lastTs = 0;
-let lastDt = 16;
 let frameCount = 0;
 let stageStart = 0;
-let startedAt = 0;
-let currentStage = props.stage;
-let reduce = props.reducedMotion;
+let absorbStart = -1;
+let hiddenAt = 0;
+
+let renderer = null;
+let composer = null;
+let bloomPass = null;
+let scene = null;
+let camera = null;
+let cloud = null;
+let points = null;
+let linkLines = null;
+let coreSprite = null;
+let outerSprite = null;
+let flashRing = null;
+let coreTex = null;
+let coreMat = null;
+let outerMat = null;
+let flashMat = null;
+let pointsGeom = null;
+let pointsMat = null;
+let linkGeom = null;
+let linkMat = null;
+let basePositions = null;
+let linkPairs = null;
+let linkPositions = null;
+
+let ctx2d = null;
+let fallbackParticles = [];
+let fallbackPairs = [];
+let spriteTex2d = null;
 
 let resizeObserver = null;
 let intersectionObserver = null;
 let visHandler = null;
+let disposed = false;
+let runStartedAt = 0;
+let fpsChecked = 0;
+
+/* 自适应画质档位：SwiftShader/低端 GPU 自动降分辨率，真机保持高画质 */
+const WebGLQuality = { level: 0, scale: WEBGL_RENDER_SCALE, bloomScale: 0.5 };
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const rand = (min, max) => min + Math.random() * (max - min);
 const easeOut = (p) => 1 - Math.pow(1 - clamp(p, 0, 1), 3);
 
-/* ---------- 焦点位置：Canvas 只存在于右列舞台内，中心就是舞台中心 ---------- */
-function focusPoint() {
-  return { x: width * 0.5, y: height * 0.5 };
+/* ---------------- 工具：纹理 ---------------- */
+function makeGlowTexture(inner = "rgba(255,255,255,1)", mid = "rgba(255,214,150,0.5)") {
+  const size = 256;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, inner);
+  grad.addColorStop(0.25, mid);
+  grad.addColorStop(0.55, "rgba(245,179,90,0.18)");
+  grad.addColorStop(1, "rgba(245,179,90,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
 }
 
-/* ---------- 粒子 / 景深 ---------- */
-function particleCount() {
-  const area = width * height;
-  return clamp(Math.round(area / 30000), 34, 54);
+function makePointTexture() {
+  const size = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.35, "rgba(255,246,230,0.9)");
+  grad.addColorStop(0.7, "rgba(255,220,175,0.25)");
+  grad.addColorStop(1, "rgba(255,220,175,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
-function initParticles() {
-  const count = particleCount();
-  particles = [];
+/* ---------------- Three.js 粒子云 ---------------- */
+const vertexShader = /* glsl */ `
+  attribute float aSize;
+  attribute float aPhase;
+  attribute float aTwinkle;
+  attribute vec3 aColor;
+  uniform float uTime;
+  uniform float uPixelRatio;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    vec3 p = position;
+    float t = uTime;
+    p.x += sin(t * 0.55 + aPhase) * 0.24;
+    p.y += cos(t * 0.47 + aPhase * 1.7) * 0.2;
+    p.z += sin(t * 0.4 + aPhase * 0.7) * 0.18;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    gl_PointSize = aSize * uPixelRatio * (45.0 / max(0.6, -mv.z));
+    gl_Position = projectionMatrix * mv;
+    vColor = aColor;
+    vAlpha = 0.62 + 0.38 * sin(t * aTwinkle + aPhase);
+  }
+`;
+
+const fragmentShader = /* glsl */ `
+  uniform float uOpacity;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    float d = length(gl_PointCoord - vec2(0.5));
+    float a = smoothstep(0.5, 0.0, d);
+    a = pow(a, 2.1);
+    gl_FragColor = vec4(vColor, a * uOpacity * vAlpha);
+  }
+`;
+
+function buildCloudData() {
+  const count = PARTICLE_COUNT;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+  const phases = new Float32Array(count);
+  const twinkles = new Float32Array(count);
+
   for (let i = 0; i < count; i++) {
-    const depth = Math.pow(Math.random(), 1.7);
-    const speed = 0.004 + depth * 0.02;
-    const angle = rand(0, TAU);
+    const r = 1.2 + Math.pow(Math.random(), 0.56) * 3.2;
+    const theta = Math.random() * TAU;
+    const phi = Math.acos(rand(-1, 1)) * 0.82;
+    const spiral = r * 0.55;
+    const x = Math.cos(theta + spiral) * r * Math.sin(phi);
+    const z = Math.sin(theta + spiral) * r * Math.sin(phi);
+    const y = Math.cos(phi) * r * 0.58;
+    positions[i * 3] = x;
+    positions[i * 3 + 1] = y;
+    positions[i * 3 + 2] = z;
+
+    const depth = clamp((r - 1.2) / 3.2, 0, 1);
+    sizes[i] = 0.38 + (1 - depth) * 0.75 + Math.pow(Math.random(), 2.2) * 0.5;
+
+    const kind = Math.random();
+    let cr;
+    let cg;
+    let cb;
+    if (kind < 0.68) {
+      cr = 1;
+      cg = rand(0.86, 0.96);
+      cb = rand(0.72, 0.86);
+    } else if (kind < 0.9) {
+      cr = 1;
+      cg = rand(0.62, 0.78);
+      cb = rand(0.28, 0.46);
+    } else {
+      cr = rand(0.55, 0.75);
+      cg = rand(0.72, 0.86);
+      cb = rand(0.92, 1);
+    }
+    colors[i * 3] = cr;
+    colors[i * 3 + 1] = cg;
+    colors[i * 3 + 2] = cb;
+    phases[i] = rand(0, TAU);
+    twinkles[i] = rand(0.4, 1.5);
+  }
+
+  // kNN 连线：~250 颗，每颗连最近 2~3 颗（总线段 ~550）
+  const linkable = [];
+  for (let i = 0; i < count; i++) {
+    const x = positions[i * 3];
+    const y = positions[i * 3 + 1];
+    const z = positions[i * 3 + 2];
+    const r = Math.sqrt(x * x + y * y + z * z);
+    if (r < 3.9) linkable.push(i);
+  }
+  const picked = [];
+  const step = Math.max(1, Math.floor(linkable.length / LINK_COUNT));
+  for (let i = 0; i < linkable.length && picked.length < LINK_COUNT; i += step) {
+    picked.push(linkable[i]);
+  }
+  const pairs = [];
+  for (const i of picked) {
+    const ax = positions[i * 3];
+    const ay = positions[i * 3 + 1];
+    const az = positions[i * 3 + 2];
+    const dists = [];
+    for (const j of picked) {
+      if (j === i) continue;
+      const dx = ax - positions[j * 3];
+      const dy = ay - positions[j * 3];
+      const dz = az - positions[j * 3];
+      dists.push({ j, d: Math.sqrt(dx * dx + dy * dy + dz * dz) });
+    }
+    dists.sort((a, b) => a.d - b.d);
+    const need = 2;
+    for (let k = 0; k < Math.min(need, dists.length); k++) {
+      pairs.push([i, dists[k].j]);
+    }
+  }
+  return { positions, colors, sizes, phases, twinkles, pairs };
+}
+
+function initWebGL() {
+  renderer = new THREE.WebGLRenderer({
+    antialias: false,
+    alpha: false,
+    powerPreference: "high-performance",
+    preserveDrawingBuffer: false,
+  });
+  renderer.setClearColor(0x050506, 1);
+  renderer.setPixelRatio(1);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+  canvas = renderer.domElement;
+  canvas.className = "nebula-canvas";
+  canvas.setAttribute("aria-hidden", "true");
+  wrap.appendChild(canvas);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050506);
+  camera = new THREE.PerspectiveCamera(58, 1, 0.1, 100);
+  camera.position.set(0, 0, 7.2);
+
+  cloud = new THREE.Group();
+  scene.add(cloud);
+
+  const data = buildCloudData();
+  basePositions = data.positions;
+  pointsGeom = new THREE.BufferGeometry();
+  pointsGeom.setAttribute("position", new THREE.BufferAttribute(data.positions, 3));
+  pointsGeom.setAttribute("aColor", new THREE.BufferAttribute(data.colors, 3));
+  pointsGeom.setAttribute("aSize", new THREE.BufferAttribute(data.sizes, 1));
+  pointsGeom.setAttribute("aPhase", new THREE.BufferAttribute(data.phases, 1));
+  pointsGeom.setAttribute("aTwinkle", new THREE.BufferAttribute(data.twinkles, 1));
+
+  const pointTex = makePointTexture();
+  pointsMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uPixelRatio: { value: 1 },
+      uOpacity: { value: 0.95 },
+      uMap: { value: pointTex },
+    },
+    vertexShader,
+    fragmentShader,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  points = new THREE.Points(pointsGeom, pointsMat);
+  cloud.add(points);
+
+  // 密集网络连线
+  linkPairs = data.pairs;
+  linkPositions = new Float32Array(linkPairs.length * 2 * 3);
+  linkGeom = new THREE.BufferGeometry();
+  linkGeom.setAttribute("position", new THREE.BufferAttribute(linkPositions, 3));
+  linkMat = new THREE.LineBasicMaterial({
+    color: 0xf5c07a,
+    transparent: true,
+    opacity: 0.1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  linkLines = new THREE.LineSegments(linkGeom, linkMat);
+  cloud.add(linkLines);
+
+  // 中心强泛光 sprite（两层）
+  coreTex = makeGlowTexture();
+  coreMat = new THREE.SpriteMaterial({
+    map: coreTex,
+    color: 0xffe2b4,
+    transparent: true,
+    opacity: 0.8,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  coreSprite = new THREE.Sprite(coreMat);
+  coreSprite.scale.set(1.15, 1.15, 1);
+  coreSprite.position.set(0, -0.5, 0);
+  scene.add(coreSprite);
+
+  outerMat = new THREE.SpriteMaterial({
+    map: coreTex,
+    color: 0xf5b35a,
+    transparent: true,
+    opacity: 0.2,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  outerSprite = new THREE.Sprite(outerMat);
+  outerSprite.scale.set(2.6, 2.6, 1);
+  outerSprite.position.set(0, -0.55, -0.1);
+  scene.add(outerSprite);
+
+  // 体积雾感：两片超低透明度的大 sprite，让云有「星云」而不是纯线框
+  for (const [x, y, z, s, op] of [
+    [-1.4, 0.6, -1.8, 7.2, 0.04],
+    [1.5, -0.9, -2.4, 8.6, 0.035],
+  ]) {
+    const hazeMat = new THREE.SpriteMaterial({
+      map: coreTex,
+      color: 0xf0b46a,
+      transparent: true,
+      opacity: op,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const haze = new THREE.Sprite(hazeMat);
+    haze.position.set(x, y, z);
+    haze.scale.set(s, s * 0.8, 1);
+    scene.add(haze);
+  }
+
+  // 一次性闪光环
+  flashMat = new THREE.MeshBasicMaterial({
+    color: 0xffe3b8,
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  flashRing = new THREE.Mesh(new THREE.RingGeometry(0.985, 1.0, 96), flashMat);
+  flashRing.position.z = 0.1;
+  scene.add(flashRing);
+
+  composer = new EffectComposer(renderer);
+  composer.setPixelRatio(1);
+  composer.addPass(new RenderPass(scene, camera));
+  const size = currentSize();
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(Math.max(64, size.w * WEBGL_RENDER_SCALE * 0.45), Math.max(64, size.h * WEBGL_RENDER_SCALE * 0.45)),
+    BLOOM_BASE,
+    0.72,
+    0.2
+  );
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+
+  setSize();
+  mode = "webgl";
+  updateDebug();
+}
+
+/* ---------------- 尺寸 ---------------- */
+function currentSize() {
+  const w = wrap ? wrap.clientWidth : 0;
+  const h = wrap ? wrap.clientHeight : 0;
+  return { w: Math.max(1, w), h: Math.max(1, h) };
+}
+
+function setSize() {
+  if (!wrap) return;
+  const { w, h } = currentSize();
+  if (mode === "webgl" && renderer) {
+    const rw = Math.max(160, Math.round(w * WebGLQuality.scale));
+    const rh = Math.max(160, Math.round(h * WebGLQuality.scale));
+    renderer.setSize(rw, rh, false);
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    if (camera) {
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    }
+    if (composer) composer.setSize(rw, rh);
+    if (bloomPass) {
+      bloomPass.setSize(
+        Math.round(rw * WebGLQuality.bloomScale),
+        Math.round(rh * WebGLQuality.bloomScale)
+      );
+    }
+    if (pointsMat) pointsMat.uniforms.uPixelRatio.value = (w * WebGLQuality.scale) / w;
+  } else if (mode === "canvas2d" && ctx2d) {
+    const rw = Math.max(160, Math.round(w * FALLBACK_SCALE));
+    const rh = Math.max(160, Math.round(h * FALLBACK_SCALE));
+    canvas.width = rw;
+    canvas.height = rh;
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    initFallbackParticles();
+  }
+}
+
+function applyQuality(level) {
+  if (mode !== "webgl" || WebGLQuality.level === level) return;
+  WebGLQuality.level = level;
+  if (level >= 2) {
+    WebGLQuality.scale = 0.42;
+    WebGLQuality.bloomScale = 0.3;
+  } else if (level === 1) {
+    WebGLQuality.scale = 0.5;
+    WebGLQuality.bloomScale = 0.38;
+  }
+  setSize();
+  updateDebug();
+}
+
+/* ---------------- 每帧 ---------------- */
+function updateLinks(time) {
+  if (!linkGeom || !linkPairs) return;
+  const pos = linkPositions;
+  for (let p = 0; p < linkPairs.length; p++) {
+    const pair = linkPairs[p];
+    for (let s = 0; s < 2; s++) {
+      const i = pair[s];
+      const bx = basePositions[i * 3];
+      const by = basePositions[i * 3 + 1];
+      const bz = basePositions[i * 3 + 2];
+      const phase = i * 0.37;
+      const x = bx + Math.sin(time * 0.55 + phase) * 0.24;
+      const y = by + Math.cos(time * 0.47 + phase * 1.7) * 0.2;
+      const z = bz + Math.sin(time * 0.4 + phase * 0.7) * 0.18;
+      const o = (p * 2 + s) * 3;
+      pos[o] = x;
+      pos[o + 1] = y;
+      pos[o + 2] = z;
+    }
+  }
+  linkGeom.attributes.position.needsUpdate = true;
+}
+
+function renderFrame(ts) {
+  const time = ts / 1000;
+  if (pointsMat) pointsMat.uniforms.uTime.value = time;
+  if (cloud) {
+    cloud.rotation.y = time * 0.055;
+    cloud.rotation.x = Math.sin(time * 0.12) * 0.06;
+  }
+  updateLinks(time);
+
+  const since = absorbStart >= 0 ? ts - absorbStart : Infinity;
+  const absorbPulse = absorbStart >= 0 && since < 700 ? 1 - clamp(since / 700, 0, 1) : 0;
+  let bloomBoost = absorbPulse * 0.3;
+  if (absorbStart >= 0 && since < 220) {
+    bloomBoost = BLOOM_BASE * 2.1 * (1 - clamp(since / 220, 0, 1));
+  }
+
+  if (coreSprite) {
+    const pulse = 1 + Math.sin(time * 1.9) * 0.05 + absorbPulse * 0.55;
+    coreSprite.scale.set(1.15 * pulse, 1.15 * pulse, 1);
+    coreMat.opacity = 0.8 + absorbPulse * 0.18;
+  }
+  if (outerSprite) {
+    outerSprite.scale.set(2.6 + absorbPulse * 1.8, 2.6 + absorbPulse * 1.8, 1);
+    outerMat.opacity = 0.22 + absorbPulse * 0.16;
+  }
+  if (pointsMat) pointsMat.uniforms.uOpacity.value = 0.9 + absorbPulse * 0.1;
+  if (linkMat) linkMat.opacity = 0.1 + absorbPulse * 0.08;
+  if (bloomPass) bloomPass.strength = BLOOM_BASE + bloomBoost;
+
+  if (flashRing && flashMat) {
+    if (absorbStart >= 0 && since < 700) {
+      const p = easeOut(clamp(since / 700, 0, 1));
+      const s = 0.5 + p * 4.6;
+      flashRing.scale.set(s, s, 1);
+      flashMat.opacity = 0.42 * (1 - p);
+    } else {
+      flashMat.opacity = 0;
+    }
+  }
+
+  if (composer) composer.render();
+  frameCount++;
+  updateDebug();
+}
+
+/* ---------------- Canvas2D 降级 ---------------- */
+function initFallbackCanvas() {
+  canvas = document.createElement("canvas");
+  canvas.className = "nebula-canvas";
+  canvas.setAttribute("aria-hidden", "true");
+  wrap.appendChild(canvas);
+  ctx2d = canvas.getContext("2d");
+  spriteTex2d = makePointTexture().image;
+  mode = "canvas2d";
+  initFallbackParticles();
+  setSize();
+  updateDebug();
+}
+
+function initFallbackParticles() {
+  const w = canvas ? canvas.width : 800;
+  const h = canvas ? canvas.height : 600;
+  const count = 1200;
+  const particles = [];
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * TAU;
+    const r = Math.pow(Math.random(), 0.55) * Math.min(w, h) * 0.46;
+    const x = w / 2 + Math.cos(a) * r;
+    const y = h / 2 + Math.sin(a) * r * 0.78;
+    const depth = Math.pow(Math.random(), 1.6);
     particles.push({
-      x: rand(0, width),
-      y: rand(0, height),
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
+      x,
+      y,
+      r: 0.6 + depth * 2.4,
+      phase: rand(0, TAU),
+      twinkle: rand(0.5, 1.6),
+      warm: Math.random() < 0.82,
       depth,
-      r: 0.5 + depth * 2.1,
-      star: depth > 0.6 && Math.random() < 0.24,
-      halo: depth > 0.6,
-      twinkle: rand(0, TAU),
-      twinkleSpeed: rand(0.0005, 0.0016),
     });
   }
-  pickHighlights();
-}
-
-function pickHighlights() {
-  const pool = particles.filter((p) => p.depth > 0.5);
-  highlights = [];
-  const used = new Set();
-  const want = Math.min(7, pool.length);
-  while (highlights.length < want && used.size < pool.length) {
-    const idx = Math.floor(Math.random() * pool.length);
-    if (used.has(idx)) continue;
-    used.add(idx);
-    highlights.push(pool[idx]);
-  }
-}
-
-/* ---------- 尺寸 ---------- */
-function resize() {
-  if (!wrap || !canvas) return;
-  const nextW = wrap.clientWidth;
-  const nextH = wrap.clientHeight;
-  if (!nextW || !nextH) return;
-  const baseDpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-  const nextScale = baseDpr * FULL_RENDER_SCALE;
-  if (ctx && nextW === width && nextH === height && nextScale === dpr) return;
-  width = nextW;
-  height = nextH;
-  dpr = nextScale;
-  canvas.width = Math.round(width * dpr);
-  canvas.height = Math.round(height * dpr);
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-  ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  initParticles();
-  if (reduce) drawStatic();
-  else if (running) draw(performance.now());
-}
-
-/* ---------- 星云粒子（DOF） ---------- */
-function drawParticleNetwork(t) {
-  const threshold = Math.min(width, height) * 0.1;
-
-  const lineBuckets = [[], [], []];
-  for (let i = 0; i < particles.length; i++) {
+  fallbackParticles = particles;
+  const pairs = [];
+  const maxD = Math.min(w, h) * 0.075;
+  for (let i = 0; i < particles.length && pairs.length < 900; i += 4) {
     const a = particles[i];
-    if (a.depth < 0.58) continue;
-    for (let j = i + 1; j < particles.length; j++) {
+    let best = -1;
+    let bestD = Infinity;
+    let best2 = -1;
+    let best2D = Infinity;
+    for (let j = 0; j < particles.length; j += 3) {
+      if (j === i) continue;
       const b = particles[j];
-      if (b.depth < 0.58) continue;
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 > threshold * threshold) continue;
-      const k = 1 - Math.sqrt(d2) / threshold;
-      const bucket = Math.min(2, Math.floor(k * 3));
-      lineBuckets[bucket].push(a.x, a.y, b.x, b.y);
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d < bestD) {
+        best2 = best;
+        best2D = bestD;
+        best = j;
+        bestD = d;
+      } else if (d < best2D) {
+        best2 = j;
+        best2D = d;
+      }
     }
+    if (best >= 0 && bestD < maxD) pairs.push([i, best]);
+    if (best2 >= 0 && best2D < maxD) pairs.push([i, best2]);
   }
-  const lineAlpha = [0.03, 0.06, 0.1];
-  ctx.lineWidth = 0.65;
-  lineBuckets.forEach((pts, idx) => {
-    if (!pts.length) return;
-    ctx.strokeStyle = `rgba(${WARM}, ${lineAlpha[idx]})`;
-    ctx.beginPath();
-    for (let k = 0; k < pts.length; k += 4) {
-      ctx.moveTo(pts[k], pts[k + 1]);
-      ctx.lineTo(pts[k + 2], pts[k + 3]);
-    }
-    ctx.stroke();
-  });
-
-  const far = [];
-  const mid = [];
-  const near = [];
-  const halo = [];
-  const stars = [];
-  for (const p of particles) {
-    if (p.star) stars.push(p);
-    else if (p.depth < 0.35) far.push(p);
-    else if (p.depth < 0.62) mid.push(p);
-    else {
-      near.push(p);
-      if (p.halo) halo.push(p);
-    }
-  }
-
-  if (halo.length) {
-    ctx.fillStyle = "rgba(255, 214, 160, 0.045)";
-    ctx.beginPath();
-    for (const p of halo) {
-      const r = p.r * 3.4;
-      ctx.moveTo(p.x + r, p.y);
-      ctx.arc(p.x, p.y, r, 0, TAU);
-    }
-    ctx.fill();
-    ctx.fillStyle = "rgba(255, 222, 175, 0.08)";
-    ctx.beginPath();
-    for (const p of halo) {
-      const r = p.r * 2;
-      ctx.moveTo(p.x + r, p.y);
-      ctx.arc(p.x, p.y, r, 0, TAU);
-    }
-    ctx.fill();
-  }
-  if (far.length) {
-    ctx.fillStyle = `rgba(${WARM}, 0.22)`;
-    ctx.beginPath();
-    for (const p of far) {
-      const r = p.r * 0.7;
-      ctx.moveTo(p.x + r, p.y);
-      ctx.arc(p.x, p.y, r, 0, TAU);
-    }
-    ctx.fill();
-  }
-  if (mid.length) {
-    ctx.fillStyle = `rgba(${WARM}, 0.38)`;
-    ctx.beginPath();
-    for (const p of mid) {
-      const r = p.r * 0.95;
-      ctx.moveTo(p.x + r, p.y);
-      ctx.arc(p.x, p.y, r, 0, TAU);
-    }
-    ctx.fill();
-  }
-  if (near.length) {
-    ctx.fillStyle = "rgba(255, 240, 214, 0.75)";
-    ctx.beginPath();
-    for (const p of near) {
-      const r = p.r;
-      ctx.moveTo(p.x + r, p.y);
-      ctx.arc(p.x, p.y, r, 0, TAU);
-    }
-    ctx.fill();
-  }
-  if (stars.length) {
-    ctx.beginPath();
-    for (const p of stars) {
-      const r = p.r;
-      ctx.moveTo(p.x + r, p.y);
-      ctx.arc(p.x, p.y, r, 0, TAU);
-      ctx.moveTo(p.x - r * 3, p.y);
-      ctx.lineTo(p.x + r * 3, p.y);
-      ctx.moveTo(p.x, p.y - r * 3);
-      ctx.lineTo(p.x, p.y + r * 3);
-    }
-    ctx.fillStyle = "rgba(255, 250, 240, 0.68)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255, 250, 240, 0.16)";
-    ctx.lineWidth = 0.7;
-    ctx.stroke();
-  }
+  fallbackPairs = pairs;
 }
 
-/* ---------- 高亮粒子（absorb/result 阶段） ---------- */
-function drawHighlights(t) {
-  if (!highlights.length) return;
-  const since = t - stageStart;
-  const focus = focusPoint();
-  let pull = 0;
-  let glow = 0;
-  if (currentStage === "absorb") {
-    const p = clamp(since / 900, 0, 1);
-    pull = 0.4 * easeOut(p);
-    glow = 0.7 + 0.7 * Math.sin(p * Math.PI);
-  } else if (currentStage === "result") {
-    const p = clamp(since / 1500, 0, 1);
-    pull = -0.28 * easeOut(p);
-    glow = 1 - 0.45 * p;
-  } else if (currentStage === "final") {
-    glow = Math.max(0, 0.3 * (1 - clamp(since / 1400, 0, 1)));
-  } else {
-    glow = 0.22;
+function renderFallback(ts) {
+  const time = ts / 1000;
+  const w = canvas.width;
+  const h = canvas.height;
+  const since = absorbStart >= 0 ? ts - absorbStart : Infinity;
+  const absorbPulse = absorbStart >= 0 && since < 700 ? 1 - clamp(since / 700, 0, 1) : 0;
+
+  ctx2d.globalCompositeOperation = "source-over";
+  ctx2d.clearRect(0, 0, w, h);
+  ctx2d.globalCompositeOperation = "lighter";
+
+  const cx = w * 0.5;
+  const cy = h * 0.5;
+  const glowR = Math.min(w, h) * (0.34 + absorbPulse * 0.1);
+  const g = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+  g.addColorStop(0, `rgba(255,248,232,${0.9 + absorbPulse * 0.1})`);
+  g.addColorStop(0.2, "rgba(255,226,180,0.5)");
+  g.addColorStop(0.5, "rgba(245,179,90,0.14)");
+  g.addColorStop(1, "rgba(245,179,90,0)");
+  ctx2d.fillStyle = g;
+  ctx2d.beginPath();
+  ctx2d.arc(cx, cy, glowR, 0, TAU);
+  ctx2d.fill();
+
+  ctx2d.strokeStyle = `rgba(245,192,122,${0.14 + absorbPulse * 0.1})`;
+  ctx2d.lineWidth = 0.7;
+  ctx2d.beginPath();
+  for (const [i, j] of fallbackPairs) {
+    const a = fallbackParticles[i];
+    const b = fallbackParticles[j];
+    const ax = a.x + Math.sin(time * 0.55 + a.phase) * 8;
+    const ay = a.y + Math.cos(time * 0.47 + a.phase * 1.7) * 7;
+    const bx = b.x + Math.sin(time * 0.55 + b.phase) * 8;
+    const by = b.y + Math.cos(time * 0.47 + b.phase * 1.7) * 7;
+    ctx2d.moveTo(ax, ay);
+    ctx2d.lineTo(bx, by);
   }
-  if (glow <= 0.02) return;
+  ctx2d.stroke();
 
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  for (const p of highlights) {
-    const dx = focus.x - p.x;
-    const dy = focus.y - p.y;
-    const x = p.x + dx * pull;
-    const y = p.y + dy * pull;
-    const r = 2 + glow * 2.4;
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 7);
-    g.addColorStop(0, `rgba(255, 250, 235, ${0.85 * glow})`);
-    g.addColorStop(0.2, `rgba(255, 214, 150, ${0.5 * glow})`);
-    g.addColorStop(1, "rgba(245, 179, 90, 0)");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r * 7, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = `rgba(255, 252, 240, ${0.95 * glow})`;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, TAU);
-    ctx.fill();
+  for (const p of fallbackParticles) {
+    const x = p.x + Math.sin(time * 0.55 + p.phase) * 8;
+    const y = p.y + Math.cos(time * 0.47 + p.phase * 1.7) * 7;
+    const tw = 0.65 + 0.35 * Math.sin(time * p.twinkle * 1.8 + p.phase);
+    const size = p.r * 7 * (0.7 + p.depth * 0.7);
+    ctx2d.globalAlpha = tw * (0.5 + p.depth * 0.4);
+    ctx2d.drawImage(spriteTex2d, x - size / 2, y - size / 2, size, size);
   }
-  ctx.restore();
-}
-
-/* ---------- 中心光核 ---------- */
-function drawCore(t) {
-  const focus = focusPoint();
-  const pulse = 0.86 + 0.14 * Math.sin(t * 0.0019);
-  const since = t - stageStart;
-  let burst = 1;
-  if (currentStage === "absorb") {
-    burst = 1.35 + 1.0 * (1 - easeOut(clamp(since / 900, 0, 1)));
-  } else if (currentStage === "result") {
-    burst = 0.95;
-  }
-  const cx = focus.x + Math.sin(t * 0.00009) * width * 0.012;
-  const cy = focus.y + Math.cos(t * 0.00012) * height * 0.01;
-  const coreR = Math.min(width, height) * 0.042 * pulse * burst;
-
-  const outerR = Math.min(width, height) * 0.2 * (0.92 + 0.08 * pulse) * burst;
-  let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR);
-  g.addColorStop(0, `rgba(255, 240, 214, ${Math.min(0.5, 0.2 * burst)})`);
-  g.addColorStop(0.3, `rgba(${WARM}, 0.09)`);
-  g.addColorStop(1, `rgba(${WARM}, 0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(cx, cy, outerR, 0, TAU);
-  ctx.fill();
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(t * 0.00014);
-  ctx.strokeStyle = `rgba(${WARM}, 0.14)`;
-  ctx.lineWidth = 0.8;
-  for (let k = 0; k < 2; k++) {
-    ctx.beginPath();
-    ctx.arc(0, 0, coreR * (2.1 + k * 1.05), k * 2.4, k * 2.4 + 1.1);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
-  g2.addColorStop(0, "rgba(255, 255, 255, 1)");
-  g2.addColorStop(0.3, "rgba(255, 246, 228, 0.95)");
-  g2.addColorStop(0.66, `rgba(${WARM}, 0.8)`);
-  g2.addColorStop(1, `rgba(${WARM}, 0)`);
-  ctx.fillStyle = g2;
-  ctx.beginPath();
-  ctx.arc(cx, cy, coreR, 0, TAU);
-  ctx.fill();
-}
-
-/* ---------- absorb 阶段中心爆亮（一次性 flash） ---------- */
-function drawFlash(t) {
-  if (currentStage !== "absorb" || reduce) return;
-  const since = t - stageStart;
-  if (since > 900) return;
-  const alpha = Math.max(0, 1 - since / 900) * 0.34;
-  const focus = focusPoint();
-  const r = Math.min(width, height) * 0.3;
-  const g = ctx.createRadialGradient(focus.x, focus.y, 0, focus.x, focus.y, r);
-  g.addColorStop(0, `rgba(255, 252, 244, ${alpha})`);
-  g.addColorStop(0.45, `rgba(${WARM}, ${alpha * 0.3})`);
-  g.addColorStop(1, `rgba(${WARM}, 0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(focus.x, focus.y, r, 0, TAU);
-  ctx.fill();
-}
-
-/* ---------- 单帧绘制 ---------- */
-function draw(t) {
-  if (!ctx || !width || !height) return;
-  ctx.clearRect(0, 0, width, height);
-  drawParticleNetwork(t);
-  drawCore(t);
-  drawHighlights(t);
-  drawFlash(t);
+  ctx2d.globalAlpha = 1;
   frameCount++;
-  if (window.__nebulaDebug) {
-    window.__nebulaDebug.frames = frameCount;
-    window.__nebulaDebug.particles = particles.length;
-    window.__nebulaDebug.running = running;
-    window.__nebulaDebug.dpr = dpr;
-  }
+  updateDebug();
 }
 
-/* ---------- 模拟 ---------- */
-function simulate(dt) {
-  const focus = focusPoint();
-  const pull = currentStage === "absorb" ? 0.000045 : 0;
-  for (const p of particles) {
-    if (pull) {
-      p.vx += (focus.x - p.x) * pull * dt * 0.02;
-      p.vy += (focus.y - p.y) * pull * dt * 0.02;
-    }
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    const speed = Math.hypot(p.vx, p.vy);
-    const maxSpeed = 0.004 + p.depth * 0.02;
-    if (speed > maxSpeed) {
-      p.vx = (p.vx / speed) * maxSpeed;
-      p.vy = (p.vy / speed) * maxSpeed;
-    }
-    if (p.x < -16) p.x = width + 16;
-    if (p.x > width + 16) p.x = -16;
-    if (p.y < -16) p.y = height + 16;
-    if (p.y > height + 16) p.y = -16;
-  }
+/* ---------------- 调试 ---------------- */
+function updateDebug() {
+  window.__nebulaDebug = {
+    mode,
+    frames: frameCount,
+    running,
+    particles: mode === "webgl" ? PARTICLE_COUNT : fallbackParticles.length,
+    links: mode === "webgl" ? (linkPairs ? linkPairs.length : 0) : fallbackPairs.length,
+    bloom: bloomPass ? Number(bloomPass.strength.toFixed(2)) : null,
+    dpr: renderer ? renderer.getPixelRatio() : 1,
+    quality: {
+      renderScale: WebGLQuality.scale,
+      bloomScale: WebGLQuality.bloomScale,
+      level: WebGLQuality.level,
+    },
+  };
 }
 
-/* ---------- rAF（自适应：软件渲染时自动隔帧，页面 rAF 保持顺滑） ---------- */
-let drawAccum = 0;
+/* ---------------- 主循环 ---------------- */
 let drawCost = 0;
-
 function loop(ts) {
   if (!running) return;
   rafId = requestAnimationFrame(loop);
   const dt = lastTs ? Math.min(MAX_DT, ts - lastTs) : 16;
   lastTs = ts;
-  drawAccum += dt;
-  const minInterval = drawCost > 11 ? 30 : 0;
-  if (drawAccum < minInterval) return;
-  const step = Math.min(MAX_DT, drawAccum);
-  drawAccum = 0;
-  lastDt = step;
-  simulate(step);
   const t0 = performance.now();
-  draw(ts - startedAt);
+  if (mode === "webgl") renderFrame(ts);
+  else renderFallback(ts);
   const cost = performance.now() - t0;
-  drawCost = drawCost ? drawCost * 0.9 + cost * 0.1 : cost;
+  drawCost = drawCost ? drawCost * 0.92 + cost * 0.08 : cost;
+  void dt;
+
+  // 低端/SwiftShader 自动降级：先降分辨率，再降 Bloom 分辨率（真机不会触发）
+  const runMs = ts - runStartedAt;
+  if (mode === "webgl" && runMs > 2200 && runMs - fpsChecked > 2500) {
+    fpsChecked = runMs;
+    const fps = frameCount / (runMs / 1000);
+    if (fps < 32 && WebGLQuality.level === 0) applyQuality(1);
+    else if (fps < 24 && WebGLQuality.level === 1) applyQuality(2);
+  }
 }
 
 function start() {
-  if (reduce || running || !ctx) return;
+  if (reduce || running) return;
+  if (mode === "webgl" && !composer) return;
+  if (mode === "canvas2d" && !ctx2d) return;
   running = true;
+  runStartedAt = performance.now();
   lastTs = 0;
-  drawAccum = 0;
-  drawCost = 0;
-  startedAt = performance.now();
-  if (window.__nebulaDebug) window.__nebulaDebug.running = true;
   rafId = requestAnimationFrame(loop);
+  updateDebug();
 }
 
 function stop() {
   running = false;
   if (rafId) cancelAnimationFrame(rafId);
   rafId = 0;
-  if (window.__nebulaDebug) window.__nebulaDebug.running = false;
+  updateDebug();
 }
 
-/* ---------- reduced-motion：只画一帧静态 ---------- */
-function drawStatic() {
-  if (!ctx || !width || !height) return;
-  initParticles();
-  ctx.clearRect(0, 0, width, height);
-  drawParticleNetwork(0);
-  drawCore(0);
-  frameCount++;
-  if (window.__nebulaDebug) {
-    window.__nebulaDebug.frames = frameCount;
-    window.__nebulaDebug.particles = particles.length;
-    window.__nebulaDebug.running = false;
-    window.__nebulaDebug.static = true;
-    window.__nebulaDebug.dpr = dpr;
+function renderStatic() {
+  if (mode === "webgl" && composer) {
+    absorbStart = -1;
+    if (bloomPass) bloomPass.strength = BLOOM_BASE;
+    renderFrame(0);
+  } else if (mode === "canvas2d" && ctx2d) {
+    absorbStart = -1;
+    renderFallback(0);
   }
 }
 
-/* ---------- 生命周期 ---------- */
+/* ---------------- 生命周期 ---------------- */
+function disposeWebGL() {
+  if (composer) {
+    composer.passes.forEach((pass) => {
+      if (pass && typeof pass.dispose === "function") pass.dispose();
+    });
+    composer.dispose();
+    composer = null;
+  }
+  if (scene) {
+    scene.traverse((obj) => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          for (const key of Object.keys(m)) {
+            const v = m[key];
+            if (v && v.isTexture) v.dispose();
+          }
+          m.dispose();
+        }
+      }
+    });
+    scene.clear();
+    scene = null;
+  }
+  if (renderer) {
+    try {
+      renderer.dispose();
+      renderer.forceContextLoss();
+    } catch (e) {
+      /* ignore */
+    }
+    renderer = null;
+  }
+  if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  points = null;
+  pointsGeom = null;
+  pointsMat = null;
+  linkLines = null;
+  linkGeom = null;
+  linkMat = null;
+  coreSprite = null;
+  outerSprite = null;
+  flashRing = null;
+  coreMat = null;
+  outerMat = null;
+  flashMat = null;
+  bloomPass = null;
+  camera = null;
+  cloud = null;
+  basePositions = null;
+  linkPairs = null;
+  linkPositions = null;
+  coreTex = null;
+  canvas = null;
+}
+
+function disposeFallback() {
+  if (canvas && canvas.parentNode) canvas.parentNode.removeChild(canvas);
+  canvas = null;
+  ctx2d = null;
+  fallbackParticles = [];
+  fallbackPairs = [];
+  spriteTex2d = null;
+}
+
+function tryStart() {
+  try {
+    initWebGL();
+  } catch (err) {
+    mode = "canvas2d";
+    disposeWebGL();
+    initFallbackCanvas();
+  }
+  if (reduce) {
+    stop();
+    renderStatic();
+  } else {
+    start();
+  }
+  window.dispatchEvent(new Event("hero-nebula-ready"));
+}
+
+function onVisibility() {
+  if (document.hidden) {
+    if (running) {
+      hiddenAt = performance.now();
+      stop();
+    }
+  } else if (visible && !running && !reduce) {
+    start();
+    if (hiddenAt) hiddenAt = 0;
+  }
+}
+
+function onResize() {
+  setSize();
+  if (reduce) renderStatic();
+}
+
 onMounted(() => {
   wrap = wrapRef.value;
-  canvas = canvasRef.value;
-  if (!wrap || !canvas) return;
+  if (!wrap) return;
   currentStage = props.stage;
   reduce = props.reducedMotion;
   stageStart = performance.now();
-  window.__nebulaDebug = { frames: 0, particles: 0, running: false, static: false, dpr: 1 };
+  if (reduce) absorbStart = -1;
 
-  resize();
+  // 延后一帧初始化 WebGL，避免阻塞 Landing 的 7s 时间轴启动（SwiftShader 下 shader 编译较慢）
+  setTimeout(() => {
+    if (!disposed) tryStart();
+  }, 0);
 
   if (typeof ResizeObserver !== "undefined") {
-    resizeObserver = new ResizeObserver(() => resize());
+    resizeObserver = new ResizeObserver(() => onResize());
     resizeObserver.observe(wrap);
   }
   if (typeof IntersectionObserver !== "undefined") {
@@ -473,22 +820,24 @@ onMounted(() => {
       (entries) => {
         entries.forEach((entry) => {
           visible = entry.isIntersecting;
-          if (visible) start();
-          else stop();
+          if (visible && !reduce) start();
+          else if (!visible) stop();
         });
       },
       { threshold: 0.05 }
     );
     intersectionObserver.observe(wrap);
   }
-  visHandler = () => {
-    if (document.hidden) stop();
-    else if (visible) start();
-  };
+  visHandler = onVisibility;
   document.addEventListener("visibilitychange", visHandler);
 
-  if (reduce) drawStatic();
-  else start();
+  // QA 冻结钩子：截图验收时暂停 rAF，保留最后一帧
+  window.__nebulaPause = () => {
+    stop();
+  };
+  window.__nebulaResume = () => {
+    if (visible && !reduce) start();
+  };
 });
 
 watch(
@@ -496,8 +845,10 @@ watch(
   (next) => {
     currentStage = next;
     stageStart = performance.now();
-    if (next === "absorb") pickHighlights();
-    if (reduce) drawStatic();
+    if (next === "absorb") absorbStart = performance.now();
+    if (next === "final") absorbStart = -1;
+    if (reduce) renderStatic();
+    updateDebug();
   }
 );
 
@@ -507,7 +858,7 @@ watch(
     reduce = next;
     if (next) {
       stop();
-      drawStatic();
+      renderStatic();
     } else {
       start();
     }
@@ -515,6 +866,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  disposed = true;
   stop();
   if (resizeObserver) {
     resizeObserver.disconnect();
@@ -528,17 +880,14 @@ onBeforeUnmount(() => {
     document.removeEventListener("visibilitychange", visHandler);
     visHandler = null;
   }
-  particles = [];
-  highlights = [];
-  ctx = null;
-  canvas = null;
-  wrap = null;
+  if (mode === "webgl") disposeWebGL();
+  else disposeFallback();
   window.__nebulaDebug = null;
+  delete window.__nebulaPause;
+  delete window.__nebulaResume;
 });
 </script>
 
 <template>
-  <div ref="wrapRef" class="nebula" :data-stage="stage">
-    <canvas ref="canvasRef" class="nebula-canvas" aria-hidden="true" />
-  </div>
+  <div ref="wrapRef" class="nebula" :data-stage="stage"></div>
 </template>
