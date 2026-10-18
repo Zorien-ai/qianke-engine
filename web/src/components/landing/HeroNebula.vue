@@ -1,22 +1,22 @@
 <script setup>
 /**
- * Hero 暗夜星云背景（原生 Canvas，无第三方依赖）。
+ * Hero 叙事 Canvas（task-12，原生 Canvas，无第三方依赖）。
  *
- * 质感要点（task-11）：
- *   - 深空微渐变上的景深粒子：近景大 + 柔和 bokeh 光晕，远景小/暗/锐利；
- *   - 连线只发生在近景少数粒子之间，更细更淡，不再“蜘蛛网”；
- *   - Ambient Glow 单独用低分辨率 canvas + CSS 缓慢漂移（暖金 + 极淡冷色），不占每帧预算；
- *   - 三阶段氛围：向心流星 → 爆发冲击波 → 中心向外发柔和能量光带（无任何卡片 DOM）；
- *   - 单 rAF、dt 钳制、DPR 上限 1.75、全幅模式低缩放渲染后拉伸，ResizeObserver 自适应；
- *   - 离屏/后台暂停，prefers-reduced-motion 只画一帧静态，卸载完整清理。
+ * 只负责背景星云与粒子：DOF 星云、中心光核呼吸/漂移、阶段2 的爆亮与高亮粒子；
+ * 搜索框 / 数据标签 / 结果卡全部由 Landing.vue 用 DOM + CSS 玻璃拟态渲染，文字更清晰。
+ *
+ * props.stage：search → absorb → result → final（时间轴由 Landing.vue 状态机驱动）
+ *   - search：缓慢呼吸，部分粒子被点亮；
+ *   - absorb：中心瞬间爆亮（AI 思考），少量粒子高亮并向中心收；
+ *   - result：高亮粒子向外发射、回落，星云逐渐恢复；
+ *   - final：稳定呼吸态（不循环重播）。
+ * 保留：单 rAF、dt 钳制、DPR 上限 1.75、低比例渲染、离屏暂停、reduced-motion 单帧静态、卸载清理。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps({
-  // 0 散落 / 1 爆发 / 2 能量释放
-  phase: { type: Number, default: 0 },
+  stage: { type: String, default: "search" },
   reducedMotion: { type: Boolean, default: false },
-  fullBleed: { type: Boolean, default: true },
 });
 
 const wrapRef = ref(null);
@@ -24,11 +24,10 @@ const canvasRef = ref(null);
 
 const TAU = Math.PI * 2;
 const WARM = "245, 179, 90";
-const COOL = "148, 176, 214";
-const BG = "7, 7, 11";
+const BG = "5, 5, 6";
 const MAX_DPR = 1.75;
 const MAX_DT = 48;
-const FULL_RENDER_SCALE = 0.46;
+const FULL_RENDER_SCALE = 0.56;
 
 let canvas = null;
 let ctx = null;
@@ -38,18 +37,16 @@ let width = 0;
 let height = 0;
 let dpr = 1;
 let particles = [];
-let meteors = [];
-let shockwaves = [];
+let highlights = [];
 let running = false;
 let visible = true;
 let rafId = 0;
 let lastTs = 0;
 let lastDt = 16;
 let frameCount = 0;
-let phaseStart = 0;
+let stageStart = 0;
 let startedAt = 0;
-let meteorTimer = 0;
-let currentPhase = props.phase;
+let currentStage = props.stage;
 let reduce = props.reducedMotion;
 
 let resizeObserver = null;
@@ -58,35 +55,52 @@ let visHandler = null;
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const rand = (min, max) => min + Math.random() * (max - min);
+const easeOut = (p) => 1 - Math.pow(1 - clamp(p, 0, 1), 3);
+
+/* ---------- 焦点位置：Canvas 只存在于右列舞台内，中心就是舞台中心 ---------- */
+function focusPoint() {
+  return { x: width * 0.5, y: height * 0.5 };
+}
 
 /* ---------- 粒子 / 景深 ---------- */
 function particleCount() {
   const area = width * height;
-  if (props.fullBleed) return clamp(Math.round(area / 32000), 40, 56);
-  return clamp(Math.round(area / 3500), 70, 130);
+  return clamp(Math.round(area / 30000), 34, 54);
 }
 
 function initParticles() {
   const count = particleCount();
   particles = [];
   for (let i = 0; i < count; i++) {
-    // depth：0 远景 / 1 近景；指数让远景更多、近景更少
     const depth = Math.pow(Math.random(), 1.7);
     const speed = 0.004 + depth * 0.02;
     const angle = rand(0, TAU);
-    const star = depth > 0.55 && Math.random() < 0.22;
     particles.push({
       x: rand(0, width),
       y: rand(0, height),
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       depth,
-      r: 0.5 + depth * 2.1 + (star ? 0.5 : 0),
-      star,
-      halo: depth > 0.6 && !star,
+      r: 0.5 + depth * 2.1,
+      star: depth > 0.6 && Math.random() < 0.24,
+      halo: depth > 0.6,
       twinkle: rand(0, TAU),
       twinkleSpeed: rand(0.0005, 0.0016),
     });
+  }
+  pickHighlights();
+}
+
+function pickHighlights() {
+  const pool = particles.filter((p) => p.depth > 0.5);
+  highlights = [];
+  const used = new Set();
+  const want = Math.min(7, pool.length);
+  while (highlights.length < want && used.size < pool.length) {
+    const idx = Math.floor(Math.random() * pool.length);
+    if (used.has(idx)) continue;
+    used.add(idx);
+    highlights.push(pool[idx]);
   }
 }
 
@@ -97,7 +111,7 @@ function resize() {
   const nextH = wrap.clientHeight;
   if (!nextW || !nextH) return;
   const baseDpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-  const nextScale = baseDpr * (props.fullBleed ? FULL_RENDER_SCALE : 1);
+  const nextScale = baseDpr * FULL_RENDER_SCALE;
   if (ctx && nextW === width && nextH === height && nextScale === dpr) return;
   width = nextW;
   height = nextH;
@@ -113,11 +127,10 @@ function resize() {
   else if (running) draw(performance.now());
 }
 
-/* ---------- 粒子网络（DOF） ---------- */
+/* ---------- 星云粒子（DOF） ---------- */
 function drawParticleNetwork(t) {
-  const threshold = Math.min(width, height) * (props.fullBleed ? 0.1 : 0.14);
+  const threshold = Math.min(width, height) * 0.1;
 
-  // 连线：只有双方都偏近景时才连，数量少、更细更淡
   const lineBuckets = [[], [], []];
   for (let i = 0; i < particles.length; i++) {
     const a = particles[i];
@@ -134,7 +147,7 @@ function drawParticleNetwork(t) {
       lineBuckets[bucket].push(a.x, a.y, b.x, b.y);
     }
   }
-  const lineAlpha = [0.03, 0.06, 0.11];
+  const lineAlpha = [0.03, 0.06, 0.1];
   ctx.lineWidth = 0.65;
   lineBuckets.forEach((pts, idx) => {
     if (!pts.length) return;
@@ -147,47 +160,41 @@ function drawParticleNetwork(t) {
     ctx.stroke();
   });
 
-  // 粒子：远景小而暗且锐利；近景大 + 柔和 bokeh 光晕
   const far = [];
   const mid = [];
   const near = [];
-  const nearHalo = [];
-  const starDots = [];
+  const halo = [];
+  const stars = [];
   for (const p of particles) {
-    if (p.star) {
-      starDots.push(p);
-    } else if (p.depth < 0.35) {
-      far.push(p);
-    } else if (p.depth < 0.62) {
-      mid.push(p);
-    } else {
+    if (p.star) stars.push(p);
+    else if (p.depth < 0.35) far.push(p);
+    else if (p.depth < 0.62) mid.push(p);
+    else {
       near.push(p);
-      if (p.halo) nearHalo.push(p);
+      if (p.halo) halo.push(p);
     }
   }
 
-  // bokeh：两层低透明度大圆近似柔光晕（批量绘制，不用渐变/滤镜）
-  if (nearHalo.length) {
+  if (halo.length) {
     ctx.fillStyle = "rgba(255, 214, 160, 0.045)";
     ctx.beginPath();
-    for (const p of nearHalo) {
-      const r = p.r * 3.6;
+    for (const p of halo) {
+      const r = p.r * 3.4;
       ctx.moveTo(p.x + r, p.y);
       ctx.arc(p.x, p.y, r, 0, TAU);
     }
     ctx.fill();
     ctx.fillStyle = "rgba(255, 222, 175, 0.08)";
     ctx.beginPath();
-    for (const p of nearHalo) {
-      const r = p.r * 2.1;
+    for (const p of halo) {
+      const r = p.r * 2;
       ctx.moveTo(p.x + r, p.y);
       ctx.arc(p.x, p.y, r, 0, TAU);
     }
     ctx.fill();
   }
-
   if (far.length) {
-    ctx.fillStyle = `rgba(${WARM}, 0.24)`;
+    ctx.fillStyle = `rgba(${WARM}, 0.22)`;
     ctx.beginPath();
     for (const p of far) {
       const r = p.r * 0.7;
@@ -197,7 +204,7 @@ function drawParticleNetwork(t) {
     ctx.fill();
   }
   if (mid.length) {
-    ctx.fillStyle = `rgba(${WARM}, 0.4)`;
+    ctx.fillStyle = `rgba(${WARM}, 0.38)`;
     ctx.beginPath();
     for (const p of mid) {
       const r = p.r * 0.95;
@@ -207,7 +214,7 @@ function drawParticleNetwork(t) {
     ctx.fill();
   }
   if (near.length) {
-    ctx.fillStyle = "rgba(255, 240, 214, 0.78)";
+    ctx.fillStyle = "rgba(255, 240, 214, 0.75)";
     ctx.beginPath();
     for (const p of near) {
       const r = p.r;
@@ -216,9 +223,9 @@ function drawParticleNetwork(t) {
     }
     ctx.fill();
   }
-  if (starDots.length) {
+  if (stars.length) {
     ctx.beginPath();
-    for (const p of starDots) {
+    for (const p of stars) {
       const r = p.r;
       ctx.moveTo(p.x + r, p.y);
       ctx.arc(p.x, p.y, r, 0, TAU);
@@ -227,7 +234,7 @@ function drawParticleNetwork(t) {
       ctx.moveTo(p.x, p.y - r * 3);
       ctx.lineTo(p.x, p.y + r * 3);
     }
-    ctx.fillStyle = "rgba(255, 250, 240, 0.7)";
+    ctx.fillStyle = "rgba(255, 250, 240, 0.68)";
     ctx.fill();
     ctx.strokeStyle = "rgba(255, 250, 240, 0.16)";
     ctx.lineWidth = 0.7;
@@ -235,22 +242,71 @@ function drawParticleNetwork(t) {
   }
 }
 
-/* ---------- 中心光核（呼吸 + 极缓慢漂移） ---------- */
-function drawCore(t) {
-  const pulse = 0.86 + 0.14 * Math.sin(t * 0.0019);
-  const since = t - phaseStart;
-  const burst = currentPhase === 1 ? 1 + 0.35 * Math.max(0, 1 - since / 700) : 1;
-  // Ambient Glow 的“缓慢漂移”揉进光核中心，不再额外加一层全屏图层
-  const cx = width / 2 + Math.sin(t * 0.00009) * width * 0.018;
-  const cy = height * 0.5 + Math.cos(t * 0.00012) * height * 0.014;
-  const coreR = Math.min(width, height) * 0.05 * pulse * burst;
+/* ---------- 高亮粒子（absorb/result 阶段） ---------- */
+function drawHighlights(t) {
+  if (!highlights.length) return;
+  const since = t - stageStart;
+  const focus = focusPoint();
+  let pull = 0;
+  let glow = 0;
+  if (currentStage === "absorb") {
+    const p = clamp(since / 900, 0, 1);
+    pull = 0.4 * easeOut(p);
+    glow = 0.7 + 0.7 * Math.sin(p * Math.PI);
+  } else if (currentStage === "result") {
+    const p = clamp(since / 1500, 0, 1);
+    pull = -0.28 * easeOut(p);
+    glow = 1 - 0.45 * p;
+  } else if (currentStage === "final") {
+    glow = Math.max(0, 0.3 * (1 - clamp(since / 1400, 0, 1)));
+  } else {
+    glow = 0.22;
+  }
+  if (glow <= 0.02) return;
 
-  const outerR = Math.min(width, height) * 0.22 * (0.9 + 0.1 * pulse) * burst;
-  // 窄屏把大范围光晕再压淡，避免整块暖光糊在字后面
-  const narrow = width < 480 ? 0.5 : 1;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const p of highlights) {
+    const dx = focus.x - p.x;
+    const dy = focus.y - p.y;
+    const x = p.x + dx * pull;
+    const y = p.y + dy * pull;
+    const r = 2 + glow * 2.4;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 7);
+    g.addColorStop(0, `rgba(255, 250, 235, ${0.85 * glow})`);
+    g.addColorStop(0.2, `rgba(255, 214, 150, ${0.5 * glow})`);
+    g.addColorStop(1, "rgba(245, 179, 90, 0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r * 7, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255, 252, 240, ${0.95 * glow})`;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ---------- 中心光核 ---------- */
+function drawCore(t) {
+  const focus = focusPoint();
+  const pulse = 0.86 + 0.14 * Math.sin(t * 0.0019);
+  const since = t - stageStart;
+  let burst = 1;
+  if (currentStage === "absorb") {
+    burst = 1.35 + 1.0 * (1 - easeOut(clamp(since / 900, 0, 1)));
+  } else if (currentStage === "result") {
+    burst = 0.95;
+  }
+  const cx = focus.x + Math.sin(t * 0.00009) * width * 0.012;
+  const cy = focus.y + Math.cos(t * 0.00012) * height * 0.01;
+  const coreR = Math.min(width, height) * 0.042 * pulse * burst;
+
+  const outerR = Math.min(width, height) * 0.2 * (0.92 + 0.08 * pulse) * burst;
   let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR);
-  g.addColorStop(0, `rgba(255, 240, 214, ${0.2 * burst * narrow})`);
-  g.addColorStop(0.3, `rgba(${WARM}, ${0.09 * narrow})`);
+  g.addColorStop(0, `rgba(255, 240, 214, ${Math.min(0.5, 0.2 * burst)})`);
+  g.addColorStop(0.3, `rgba(${WARM}, 0.09)`);
   g.addColorStop(1, `rgba(${WARM}, 0)`);
   ctx.fillStyle = g;
   ctx.beginPath();
@@ -280,147 +336,21 @@ function drawCore(t) {
   ctx.fill();
 }
 
-/* ---------- 阶段1：向心流星 ---------- */
-function drawMeteors(dt) {
-  const cx = width / 2;
-  const cy = height * 0.5;
-  for (const m of meteors) {
-    m.age += dt;
-    const p = clamp(m.age / m.duration, 0, 1);
-    const ease = p * p * (3 - 2 * p);
-    const x = m.sx + (cx - m.sx) * ease * 0.9;
-    const y = m.sy + (cy - m.sy) * ease * 0.9;
-    const tailP = clamp(ease - 0.14, 0, 1);
-    const tx = m.sx + (cx - m.sx) * tailP * 0.9;
-    const ty = m.sy + (cy - m.sy) * tailP * 0.9;
-    const alpha = Math.sin(Math.PI * p) * 0.42;
-    const grad = ctx.createLinearGradient(tx, ty, x, y);
-    grad.addColorStop(0, `rgba(${WARM}, 0)`);
-    grad.addColorStop(1, `rgba(255, 244, 222, ${alpha})`);
-    ctx.strokeStyle = grad;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(tx, ty);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.fillStyle = `rgba(255, 250, 240, ${alpha * 0.9})`;
-    ctx.beginPath();
-    ctx.arc(x, y, 1.4, 0, TAU);
-    ctx.fill();
-  }
-  meteors = meteors.filter((m) => m.age < m.duration);
-}
-
-/* ---------- 阶段2：爆发冲击波 + 微 flash ---------- */
-function drawShockwaves(dt) {
-  const cx = width / 2;
-  const cy = height * 0.5;
-  const base = Math.min(width, height);
-  for (const w of shockwaves) {
-    w.age += dt;
-    if (w.age < 0) continue;
-    const p = clamp(w.age / w.duration, 0, 1);
-    const alpha = (1 - p) * 0.34;
-    if (alpha <= 0.01) continue;
-    ctx.strokeStyle = `rgba(${WARM}, ${alpha})`;
-    ctx.lineWidth = 2 * (1 - p) + 0.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, base * (0.05 + p * 0.46), 0, TAU);
-    ctx.stroke();
-    ctx.strokeStyle = `rgba(255, 250, 240, ${alpha * 0.4})`;
-    ctx.lineWidth = 0.9;
-    ctx.beginPath();
-    ctx.arc(cx, cy, base * (0.045 + p * 0.4), 0, TAU);
-    ctx.stroke();
-  }
-  shockwaves = shockwaves.filter((w) => w.age < w.duration);
-}
-
+/* ---------- absorb 阶段中心爆亮（一次性 flash） ---------- */
 function drawFlash(t) {
-  if (currentPhase !== 1 || reduce) return;
-  const since = t - phaseStart;
-  if (since > 650) return;
-  const alpha = Math.max(0, 1 - since / 650) * 0.2;
-  const cx = width / 2;
-  const cy = height * 0.5;
+  if (currentStage !== "absorb" || reduce) return;
+  const since = t - stageStart;
+  if (since > 900) return;
+  const alpha = Math.max(0, 1 - since / 900) * 0.34;
+  const focus = focusPoint();
   const r = Math.min(width, height) * 0.3;
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  const g = ctx.createRadialGradient(focus.x, focus.y, 0, focus.x, focus.y, r);
   g.addColorStop(0, `rgba(255, 252, 244, ${alpha})`);
-  g.addColorStop(0.5, `rgba(${WARM}, ${alpha * 0.3})`);
+  g.addColorStop(0.45, `rgba(${WARM}, ${alpha * 0.3})`);
   g.addColorStop(1, `rgba(${WARM}, 0)`);
   ctx.fillStyle = g;
   ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, TAU);
-  ctx.fill();
-}
-
-/* ---------- 阶段3：中心向外发柔和能量光带 ---------- */
-function drawEnergyBands(t) {
-  if (currentPhase !== 2 && !reduce) return;
-  const since = reduce ? 1200 : t - phaseStart;
-  const fadeIn = clamp(since / 520, 0, 1);
-  const fadeOut = currentPhase === 2 ? 1 - clamp((since - 2150) / 520, 0, 1) : 1;
-  const fade = fadeIn * fadeOut;
-  if (fade <= 0.01) return;
-
-  const cx = width / 2;
-  const cy = height * 0.5;
-  const base = Math.min(width, height);
-  const rot = t * 0.000055;
-  for (let i = 0; i < 3; i++) {
-    const angle = rot + i * (TAU / 3) + 0.4;
-    const len = base * (0.34 + i * 0.03);
-    const end = { x: cx + Math.cos(angle) * len, y: cy + Math.sin(angle) * len * 0.82 };
-    const mid = {
-      x: cx + Math.cos(angle + 0.32) * len * 0.55,
-      y: cy + Math.sin(angle + 0.32) * len * 0.55,
-    };
-    const g = ctx.createLinearGradient(cx, cy, end.x, end.y);
-    g.addColorStop(0, `rgba(${WARM}, ${0.18 * fade})`);
-    g.addColorStop(0.55, `rgba(255, 236, 205, ${0.12 * fade})`);
-    g.addColorStop(1, `rgba(${WARM}, 0)`);
-    ctx.strokeStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.quadraticCurveTo(mid.x, mid.y, end.x, end.y);
-    // 两层即可：宽柔光 + 细亮线（少画一层大面积描边，帧率更稳）
-    ctx.lineWidth = 13;
-    ctx.globalAlpha = 0.42;
-    ctx.stroke();
-    ctx.lineWidth = 2.2;
-    ctx.globalAlpha = 1;
-    ctx.stroke();
-
-    // 沿线向外流动的光点
-    if (!reduce) {
-      for (let k = 0; k < 2; k++) {
-        const f = (t * 0.00032 + i * 0.19 + k * 0.5) % 1;
-        const mt = 1 - f;
-        const px = mt * mt * cx + 2 * mt * f * mid.x + f * f * end.x;
-        const py = mt * mt * cy + 2 * mt * f * mid.y + f * f * end.y;
-        const a = Math.sin(Math.PI * f) * 0.75;
-        ctx.fillStyle = `rgba(255, 248, 232, ${a})`;
-        ctx.beginPath();
-        ctx.arc(px, py, 1.8, 0, TAU);
-        ctx.fill();
-      }
-    }
-  }
-  ctx.globalAlpha = 1;
-}
-
-/* ---------- 中心压暗（保证文字可读，颜色跟深空底一致） ---------- */
-function drawScrim() {
-  const cx = width / 2;
-  const cy = height * 0.48;
-  const r = Math.max(width * 0.6, height * 0.62);
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  g.addColorStop(0, `rgba(${BG}, 0.52)`);
-  g.addColorStop(0.52, `rgba(${BG}, 0.24)`);
-  g.addColorStop(1, `rgba(${BG}, 0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, TAU);
+  ctx.arc(focus.x, focus.y, r, 0, TAU);
   ctx.fill();
 }
 
@@ -430,29 +360,25 @@ function draw(t) {
   ctx.clearRect(0, 0, width, height);
   drawParticleNetwork(t);
   drawCore(t);
-  drawScrim();
-  if (currentPhase === 0) drawMeteors(lastDt);
-  drawShockwaves(lastDt);
+  drawHighlights(t);
   drawFlash(t);
-  drawEnergyBands(t);
   frameCount++;
   if (window.__nebulaDebug) {
     window.__nebulaDebug.frames = frameCount;
-    window.__nebulaDebug.phase = currentPhase;
     window.__nebulaDebug.particles = particles.length;
     window.__nebulaDebug.running = running;
+    window.__nebulaDebug.dpr = dpr;
   }
 }
 
 /* ---------- 模拟 ---------- */
 function simulate(dt) {
-  const cx = width / 2;
-  const cy = height * 0.5;
-  const pull = currentPhase === 0 ? 0.00002 : 0;
+  const focus = focusPoint();
+  const pull = currentStage === "absorb" ? 0.000045 : 0;
   for (const p of particles) {
     if (pull) {
-      p.vx += (cx - p.x) * pull * dt * 0.02;
-      p.vy += (cy - p.y) * pull * dt * 0.02;
+      p.vx += (focus.x - p.x) * pull * dt * 0.02;
+      p.vy += (focus.y - p.y) * pull * dt * 0.02;
     }
     p.x += p.vx * dt;
     p.y += p.vy * dt;
@@ -467,26 +393,9 @@ function simulate(dt) {
     if (p.y < -16) p.y = height + 16;
     if (p.y > height + 16) p.y = -16;
   }
-
-  if (currentPhase === 0 && !reduce) {
-    meteorTimer += dt;
-    if (meteorTimer > 260) {
-      meteorTimer = 0;
-      const angle = rand(0, TAU);
-      const radius = Math.max(width, height) * rand(0.5, 0.7);
-      meteors.push({
-        sx: cx + Math.cos(angle) * radius,
-        sy: cy + Math.sin(angle) * radius,
-        age: 0,
-        duration: rand(1000, 1500),
-      });
-    }
-  }
 }
 
-/* ---------- rAF ----------
-   自适应画布帧率：GPU 环境画满 60fps；软件渲染/低端机若单帧绘制超过 ~11ms，
-   就隔帧绘制（约 30fps 星云背景），让页面 rAF 仍保持 60fps，不拖垮整页。 */
+/* ---------- rAF（自适应：软件渲染时自动隔帧，页面 rAF 保持顺滑） ---------- */
 let drawAccum = 0;
 let drawCost = 0;
 
@@ -526,42 +435,32 @@ function stop() {
   if (window.__nebulaDebug) window.__nebulaDebug.running = false;
 }
 
-/* ---------- reduced-motion：只画一帧 ---------- */
+/* ---------- reduced-motion：只画一帧静态 ---------- */
 function drawStatic() {
   if (!ctx || !width || !height) return;
-  currentPhase = 2;
   initParticles();
   ctx.clearRect(0, 0, width, height);
   drawParticleNetwork(0);
   drawCore(0);
-  drawEnergyBands(0);
-  drawScrim();
   frameCount++;
   if (window.__nebulaDebug) {
     window.__nebulaDebug.frames = frameCount;
-    window.__nebulaDebug.phase = currentPhase;
     window.__nebulaDebug.particles = particles.length;
     window.__nebulaDebug.running = false;
     window.__nebulaDebug.static = true;
+    window.__nebulaDebug.dpr = dpr;
   }
 }
 
-/* ---------- 挂载 / 监听 ---------- */
+/* ---------- 生命周期 ---------- */
 onMounted(() => {
   wrap = wrapRef.value;
   canvas = canvasRef.value;
   if (!wrap || !canvas) return;
-  currentPhase = props.phase;
+  currentStage = props.stage;
   reduce = props.reducedMotion;
-  phaseStart = performance.now();
-  window.__nebulaDebug = {
-    frames: 0,
-    phase: currentPhase,
-    particles: 0,
-    running: false,
-    static: false,
-    dpr: 1,
-  };
+  stageStart = performance.now();
+  window.__nebulaDebug = { frames: 0, particles: 0, running: false, static: false, dpr: 1 };
 
   resize();
 
@@ -590,28 +489,14 @@ onMounted(() => {
 
   if (reduce) drawStatic();
   else start();
-
-  if (window.__nebulaDebug) {
-    window.__nebulaDebug.dpr = dpr;
-    window.__nebulaDebug.canvases = document.querySelectorAll("canvas.nebula-canvas").length;
-  }
 });
 
 watch(
-  () => props.phase,
+  () => props.stage,
   (next) => {
-    currentPhase = next;
-    phaseStart = performance.now();
-    if (next === 1) {
-      shockwaves = [
-        { age: 0, duration: 950 },
-        { age: -180, duration: 1100 },
-      ];
-    }
-    if (next === 0) {
-      meteors = [];
-      meteorTimer = 0;
-    }
+    currentStage = next;
+    stageStart = performance.now();
+    if (next === "absorb") pickHighlights();
     if (reduce) drawStatic();
   }
 );
@@ -624,8 +509,6 @@ watch(
       stop();
       drawStatic();
     } else {
-      currentPhase = props.phase;
-      phaseStart = performance.now();
       start();
     }
   }
@@ -646,8 +529,7 @@ onBeforeUnmount(() => {
     visHandler = null;
   }
   particles = [];
-  meteors = [];
-  shockwaves = [];
+  highlights = [];
   ctx = null;
   canvas = null;
   wrap = null;
@@ -656,7 +538,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="wrapRef" class="nebula" :data-phase="phase">
+  <div ref="wrapRef" class="nebula" :data-stage="stage">
     <canvas ref="canvasRef" class="nebula-canvas" aria-hidden="true" />
   </div>
 </template>

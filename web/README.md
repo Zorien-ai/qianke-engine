@@ -42,8 +42,8 @@ npm run dev        # http://127.0.0.1:5173；vite.config.js 已把
 
 ```
 dist/index.html                  1.13 kB │ gzip:  0.75 kB
-dist/assets/index-*.css         79.55 kB │ gzip: 15.27 kB
-dist/assets/index-*.js         258.10 kB │ gzip: 92.13 kB
+dist/assets/index-*.css         85.01 kB │ gzip: 16.33 kB
+dist/assets/index-*.js         259.61 kB │ gzip: 92.48 kB
 dist/assets/{setup,chat,kb}-*.png  共约 627 kB（官网场景截图）
 ```
 
@@ -108,12 +108,18 @@ web/
 
 - **匿名访问策略**：`/home` 的 `meta.public=true`，未登录可直接看；未登录访问其它页面 → 回 `/home`（不再粗暴跳 `/login`）；已登录访问 `/home` 正常展示，主按钮变「进入工作台」→ `/`。`store.doBoot()` 不再负责跳转，只记录 `authenticated`，跳转交给路由守卫。
 - **应用外壳**：`route.meta.public` 的页面不渲染侧边栏 / topbar / 移动抽屉，只有 RouterView + ToastHost；未登录时 `store.account` 为空也不会报错。
-- **极简结构（task-10/11 两轮重塑后）**：全屏居中 Hero（大标题 + 一句副标题 + 两个按钮 + 无文字下滚箭头）→ 产品区 3 张大图 + 3 行标题 → 痛点区两对「大字报」→ 私有化一句 Slogan + 一个按钮 → 极简 Footer。解释性长文案全部删除（产品细节去 `/docs`）；首页文字量从 **1064 → 222** 字（去掉空白字符的 textContent，**-79.1%**）。
-- **视觉基调（task-11）**：Hero 是 `#07070B → #111118` 的深空微渐变（非纯黑）+ 暖金/极淡冷色径向 Ambient Glow + 暗角；Canvas 星云全幅背景；**首屏不再有任何悬浮画像卡/CSV 胶囊**（`.nebula-card*` DOM 数为 0），阶段3 改为中心向外发柔和能量光带；内容区暖白 `#F9F9F8`。
-- **Hero 字体**：主标题纯白 `#FFFFFF`、现代无衬线（Inter / system-ui / SF Pro / PingFang SC）、`font-weight: 800`、`letter-spacing: -0.03em`，无任何 background-clip / 渐变；副标题 17px、`rgba(255,255,255,.46)`；内容宽度 860px，上下大留白。
+- **结构（task-12 首屏叙事）**：Hero 改为 **左右 50/50**——左侧文案初始隐藏，右侧 Canvas 星云播放 **7 秒产品叙事**：
+  `0–2s` 星云呼吸 → 毛玻璃搜索框浮现 + 打字机（「找出最近一个月高客单的美妆女性用户」）
+  → `2–4.5s` 搜索框收缩吸入中心、AI 爆亮、数据标签飞散（女/28 岁、客单价 1200、偏好美妆）
+  → `4.5–6s` 高亮粒子重组为玻璃结果卡（「已匹配 2,341 位用户 / 25-35 岁，客单价均值 1540 元」，带「演示」角标）
+  → `6–7s` 左侧标题/副标题/按钮 stagger 登场；结束后固定最终态（文案 + 结果卡 + 呼吸星云），不循环，刷新重放。
+  时间轴是 Vue 状态机 + setTimeout；页面隐藏暂停、回来按已用时间续播；卸载清空所有 timer；`prefers-reduced-motion` 直接最终静态排版（无 timer）。调试：`window.__heroStoryDebug = { phase, elapsed, cards }`。
+- **Hero 视觉**：背景近纯黑 `#050506` + 极淡暖金/冷色径向光；文案纯白、无斜体；主按钮白底黑字、次按钮微光通透。**Canvas 星云只在右 50% 舞台内播放**（不是整屏背景）：`HeroNebula` 挂载在 `.l-hero-stage` 内、canvas 100% 占满右列，`mask-image`（左右 7% + 椭圆径向，`mask-composite: intersect`）让右列边缘融入黑底、无矩形边界；左半屏只有 CSS 深色渐变。搜索框/标签/结果卡均为右列内的 DOM + CSS 玻璃拟态。
+- **首屏文字量**：1064 → **275 字**（去掉空白字符的 textContent，含结果卡演示文案；innerText 258）。
+- **Hero 字体**：主标题纯白 `#FFFFFF`、现代无衬线（Inter / system-ui / SF Pro / PingFang SC）、`font-weight: 800`、`letter-spacing: -0.03em`，无背景渐变/无斜体；副标题 17px、`rgba(255,255,255,.48)`；文案区占左半屏。
 - **顶部导航**：品牌 + 2 个锚点（产品 / 安全）+「文档 / 登录」；Hero 上透明亮色（`is-dark`），滚出 Hero 后切浅色吸顶（`is-scrolled`，白底/深字/阴影）；锚点滚动补偿导航高度。
-- **Hero 背景**（`HeroNebula.vue`，原生 Canvas，无第三方依赖）：深空 DOF 粒子（近景大 + bokeh 光晕、远景小/暗/锐利），连线只在近景少数粒子间、更细更淡；Ambient Glow 用 Hero 上的静态多层径向渐变 + Canvas 光核极缓慢漂移/呼吸（避免全屏动画层掉帧）；三阶段：向心流星 → 中心爆发冲击波 → 中心向外 3 条柔和能量光带 + 流动光点。
-- **Canvas 性能与生命周期**：单 rAF、dt 钳制 48ms、DPR 上限 1.75；全幅模式低比例渲染后拉伸（0.56）并去掉全屏 CSS mask；粒子/连线和光晕全部批量绘制；绘制耗时自适应（软件渲染时自动隔帧，页面 rAF 保 60fps）；`ResizeObserver` 自适应（全幅桌面 40~64 粒子、手机更少）；`IntersectionObserver` + `visibilitychange` 停/恢复；reduced-motion 只画一帧静态；卸载 cancel + 断开 observer + 清引用。调试：`window.__nebulaDebug`（frames/phase/particles/running/dpr）。
+- **Hero 背景**（`HeroNebula.vue`，原生 Canvas，无第三方依赖）：近纯黑背景上的深空 DOF 粒子（近景大 + bokeh 光晕、远景小/暗/锐利），连线只在近景少数粒子间；Canvas 只负责环境星云、光核呼吸/漂移、`absorb` 瞬间爆亮与高亮粒子，**无流星线/能量拖尾**；搜索框、数据标签、结果卡全部是 DOM + CSS 玻璃拟态。
+- **Canvas 性能与生命周期**：单 rAF、dt 钳制 48ms、DPR 上限 1.75；右列舞台尺寸（1440 下约 715×648）低比例渲染后拉伸（0.56）；粒子/连线/光晕批量绘制；绘制耗时自适应（软件渲染时自动隔帧，页面 rAF 保 60fps；单页实测 60fps）；`ResizeObserver` 自适应（34~54 粒子）；`IntersectionObserver` + `visibilitychange` 停/恢复；reduced-motion 只画一帧静态；卸载 cancel + 断开 observer + 清引用。调试：`window.__nebulaDebug`（frames/particles/running/dpr）。
 - **产品展示区**：媒体轨道 `1.42fr`，三张 Mac 截图在 1440 / 1000 / 390 三视口宽度完全相等（实测 849/849/849、601×3、358×3），外框加大范围弥散阴影（`0 70px 140px -52px rgba(15,18,28,.42)` 等三层）模拟真实光照；每张图只配一行标题。
 - **黑→白过渡（task-11）**：Hero 底部 240px 呼吸层——透明→暖白竖向渐变 + 极淡暖金椭圆弧光 + 网格线淡出（全部 `pointer-events:none`），整页滚动看不到硬切。
 - **真实截图**：`web/src/assets/shots/setup.png`、`chat.png`、`kb.png`，`import.meta.glob` 引用（缺图不炸构建）；Mac 外框 + 绝对定位百分比高亮框，坐标按 1440×900 真机截图校准。

@@ -1,7 +1,7 @@
 /* =========================================================
-   官网 Landing Page（/v2/#/home）—— 极简高级风 · 第二版质感（task-11）
-   暗夜星云 Hero（无悬浮卡 / DOF 粒子 / Ambient Glow）+ 暖白内容区
-   只服务于营销首页，不影响登录后的工作台主题
+   官网 Landing Page（/v2/#/home）—— 大片级叙事 Hero（task-12）
+   左右 50/50：左侧文案最后登场，右侧 Canvas 星云 + DOM 玻璃拟态分镜
+   内容区保持 task-11 的暖白极简风
    ========================================================= */
 
 .landing {
@@ -37,12 +37,10 @@
 .landing *::after {
   box-sizing: border-box;
 }
-
 .landing a {
   color: inherit;
   text-decoration: none;
 }
-
 .landing button {
   font-family: inherit;
   cursor: pointer;
@@ -74,9 +72,8 @@
   box-shadow: none;
   backdrop-filter: none;
 }
-/* 在 Hero 内部滚动时，暗色导航加一层向下淡出的暗底，避免文字从导航后穿出来 */
 .l-nav.is-dark.is-scrolled {
-  background: linear-gradient(180deg, rgba(7, 7, 11, 0.72), rgba(7, 7, 11, 0));
+  background: linear-gradient(180deg, rgba(5, 5, 6, 0.72), rgba(5, 5, 6, 0));
   backdrop-filter: blur(10px);
 }
 .l-nav.is-dark .l-brand-text b {
@@ -237,26 +234,20 @@
   color: var(--l-ink);
 }
 
-/* ---------- Hero：全屏居中 + 全幅 Canvas 星云 ---------- */
+/* ---------- Hero：左右 50/50 叙事 ---------- */
 .l-hero {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   min-height: 100vh;
   min-height: 100svh;
   margin-top: -68px;
-  padding: calc(68px + 72px) 24px 150px;
   overflow: hidden;
   isolation: isolate;
   color: #ffffff;
-  /* 深空微渐变：不是纯黑；多层静态径向暖/冷光当 Ambient Glow，零每帧成本 */
   background:
-    radial-gradient(52% 42% at 50% 44%, rgba(245, 179, 90, 0.09), transparent 68%),
-    radial-gradient(36% 32% at 78% 18%, rgba(120, 148, 190, 0.07), transparent 70%),
-    radial-gradient(30% 28% at 20% 82%, rgba(255, 196, 120, 0.05), transparent 70%),
-    radial-gradient(120% 90% at 50% 50%, transparent 46%, rgba(0, 0, 0, 0.55) 100%),
-    linear-gradient(180deg, #07070b 0%, #0b0b12 56%, #111118 100%);
+    radial-gradient(46% 40% at 74% 46%, rgba(245, 179, 90, 0.07), transparent 70%),
+    radial-gradient(30% 26% at 18% 20%, rgba(120, 148, 190, 0.05), transparent 70%),
+    radial-gradient(120% 90% at 50% 50%, transparent 44%, rgba(0, 0, 0, 0.6) 100%),
+    #050506;
 }
 .l-hero-bg {
   position: absolute;
@@ -275,75 +266,351 @@
   width: 100%;
   height: 100%;
 }
-.l-hero-content {
+
+.l-hero-split {
   position: relative;
   z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
   width: 100%;
-  max-width: 860px;
-  text-align: center;
-  animation: l-hero-in 1s var(--l-ease) both;
+  max-width: none;
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: calc(68px + 56px) 0 220px;
+}
+/* 左列文案：与整站 shell 左边界对齐；右列舞台正好占右 50% */
+.l-hero-copy {
+  min-width: 0;
+  padding: 0 clamp(16px, 2.6vw, 44px) 0
+    max(clamp(24px, 4vw, 72px), calc((100vw - 1320px) / 2));
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.8s var(--l-ease), transform 0.8s var(--l-ease);
+}
+.l-hero-copy.is-in {
+  opacity: 1;
+  transform: translateY(0);
 }
 .l-hero-title {
   margin: 0;
   color: #ffffff;
   font-family: var(--l-sans);
-  font-size: clamp(54px, 6.8vw, 104px);
+  font-size: clamp(46px, 5.2vw, 78px);
+  font-style: normal;
   font-weight: 800;
   line-height: 1.12;
   letter-spacing: -0.03em;
   text-wrap: balance;
   -webkit-font-smoothing: antialiased;
-  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.35);
+}
+.l-hero-title span {
+  font-style: normal;
+}
+.l-hero-sub,
+.l-hero-actions {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.7s var(--l-ease), transform 0.7s var(--l-ease);
+}
+.l-hero-copy.is-in .l-hero-title {
+  animation: l-copy-in 0.8s var(--l-ease) both;
+}
+.l-hero-copy.is-in .l-hero-sub {
+  animation: l-copy-in 0.7s var(--l-ease) 0.14s both;
+}
+.l-hero-copy.is-in .l-hero-actions {
+  animation: l-copy-in 0.7s var(--l-ease) 0.3s both;
+}
+@keyframes l-copy-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .l-hero-sub {
-  margin: 34px 0 0;
-  color: rgba(255, 255, 255, 0.46);
+  margin: 28px 0 0;
+  color: rgba(255, 255, 255, 0.48);
   font-size: clamp(15px, 1.2vw, 17px);
-  font-weight: 400;
   letter-spacing: 0.01em;
   line-height: 1.7;
 }
 .l-hero-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
   gap: 14px;
-  margin-top: 52px;
+  margin-top: 40px;
 }
+/* Hero 按钮：白底黑字 + 微光通透 */
 .l-hero .l-btn-primary {
-  background: #f5b35a;
-  color: #241505;
+  background: #ffffff;
+  color: #0b0b0e;
   border-color: transparent;
   box-shadow:
-    0 18px 44px -22px rgba(245, 179, 90, 0.65),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    0 18px 44px -24px rgba(255, 255, 255, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .l-hero .l-btn-primary:hover {
-  background: #ffc978;
-  color: #241505;
+  background: #f2f2f4;
+  color: #0b0b0e;
   box-shadow:
-    0 22px 52px -22px rgba(245, 179, 90, 0.8),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    0 22px 52px -24px rgba(255, 255, 255, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 .l-hero .l-btn-ghost {
-  color: rgba(255, 255, 255, 0.9);
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
 }
 .l-hero .l-btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.36);
-  box-shadow: 0 0 24px rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 26px rgba(255, 255, 255, 0.08);
 }
 .landing .l-hero a.l-btn-primary {
-  color: #241505;
+  color: #0b0b0e;
 }
 .landing .l-hero a.l-btn-ghost {
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.92);
 }
 
-/* Hero 底部 → 第二屏：240px 呼吸过渡，不硬切 */
+/* 右侧叙事舞台：Canvas 只铺满这一列（右 50%），DOM 叠在其上 */
+.l-hero-stage {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+  height: min(72vh, 660px);
+  min-height: 440px;
+}
+.l-hero-stage > .nebula {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.l-hero-stage > .nebula > .nebula-canvas {
+  /* 柔和边缘：左右各 7% 淡出 + 椭圆径向淡出，融入纯黑底，不出现矩形边界 */
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%),
+    radial-gradient(ellipse 82% 78% at 50% 50%, #000 0 56%, rgba(0, 0, 0, 0.55) 78%, transparent 96%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%),
+    radial-gradient(ellipse 82% 78% at 50% 50%, #000 0 56%, rgba(0, 0, 0, 0.55) 78%, transparent 96%);
+  mask-composite: intersect;
+}
+
+/* Phase 1：毛玻璃搜索框 */
+.story-search {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(88%, 468px);
+  padding: 16px 18px;
+  border-radius: 16px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035)),
+    rgba(8, 8, 11, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 30px 70px -40px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translate(-50%, -50%);
+  transition: transform 0.9s var(--l-ease), opacity 0.7s ease, filter 0.9s var(--l-ease);
+  animation: story-search-in 0.8s var(--l-ease) both;
+  z-index: 3;
+}
+@keyframes story-search-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 18px)) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+.story-search-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.story-search-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.story-search-text {
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.story-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: rgba(255, 255, 255, 0.7);
+  animation: story-caret 0.9s steps(2, start) infinite;
+}
+@keyframes story-caret {
+  50% {
+    opacity: 0;
+  }
+}
+/* absorb：搜索框收缩为一团光晕被吸入中心 */
+.story-search.is-stage-absorb {
+  transform: translate(-50%, -50%) scale(0.18);
+  opacity: 0;
+  filter: blur(6px);
+}
+.story-search.is-stage-result,
+.story-search.is-stage-final,
+.story-search.is-stage-done {
+  display: none;
+}
+
+/* Phase 2：数据标签飞散 */
+.story-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.story-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(22, 20, 17, 0.62);
+  border: 1px solid rgba(245, 179, 90, 0.32);
+  color: rgba(255, 236, 205, 0.92);
+  font-family: var(--l-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  animation: story-label-fly 1.5s ease-out forwards;
+}
+.story-label-1 {
+  --dx: -120px;
+  --dy: -86px;
+  animation-delay: 0.1s;
+}
+.story-label-2 {
+  --dx: 128px;
+  --dy: -44px;
+  animation-delay: 0.26s;
+}
+.story-label-3 {
+  --dx: -54px;
+  --dy: 92px;
+  animation-delay: 0.42s;
+}
+@keyframes story-label-fly {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  18% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx) * 1.22), calc(-50% + var(--dy) * 1.22)) scale(1);
+  }
+}
+
+/* Phase 3：玻璃结果卡 */
+.story-result {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(90%, 430px);
+  padding: 22px 24px 20px;
+  border-radius: 20px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05)),
+    rgba(8, 8, 11, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 40px 90px -46px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 60px -30px rgba(245, 179, 90, 0.35);
+  transform: translate(-50%, calc(-50% + 18px)) scale(0.96);
+  opacity: 0;
+  transition: transform 0.9s var(--l-ease), opacity 0.7s ease;
+  z-index: 4;
+  overflow: hidden;
+}
+.story-result.is-in {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+.story-result-badge {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.story-result-title {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.story-result-title b {
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.story-result-body {
+  margin: 10px 0 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.story-result-body b {
+  color: rgba(255, 236, 205, 0.92);
+  font-weight: 700;
+}
+.story-result-glow {
+  position: absolute;
+  left: -30%;
+  top: -70%;
+  width: 120%;
+  height: 150%;
+  background: radial-gradient(ellipse at 30% 30%, rgba(255, 255, 255, 0.1), transparent 60%);
+  pointer-events: none;
+}
+
+/* 首屏底部：240px 呼吸过渡 + 下滚箭头 */
 .l-hero-fade {
   position: absolute;
   left: 0;
@@ -375,15 +642,14 @@
   transform: translateX(-50%);
   background: radial-gradient(
     ellipse 52% 46% at 50% 62%,
-    rgba(245, 179, 90, 0.28) 0%,
-    rgba(245, 179, 90, 0.09) 38%,
+    rgba(245, 179, 90, 0.26) 0%,
+    rgba(245, 179, 90, 0.08) 38%,
     transparent 62%
   );
   -webkit-mask-image: linear-gradient(180deg, transparent 6%, #000 52%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 6%, #000 52%, transparent 100%);
-  opacity: 1;
 }
-.l-hero-fade .l-hero-grid-fade {
+.l-hero-grid-fade {
   position: absolute;
   inset: 0;
   background-image:
@@ -392,10 +658,8 @@
   background-size: 84px 84px;
   -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.55) 55%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.55) 55%, transparent 100%);
-  opacity: 0.7;
+  opacity: 0.65;
 }
-
-/* 首屏底部：无文字细箭头 */
 .l-scroll-hint {
   position: absolute;
   left: 50%;
@@ -434,16 +698,6 @@
     opacity: 1;
   }
 }
-@keyframes l-hero-in {
-  from {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 /* ---------- 产品：三张大图 + 三行标题 ---------- */
 .l-showcase {
@@ -461,7 +715,6 @@
   align-items: center;
   gap: clamp(32px, 4.5vw, 76px);
 }
-/* 反向行把宽轨道放在第二列，保证三张图的媒体轨道等宽 */
 .l-show-row.is-reverse {
   grid-template-columns: minmax(0, 0.68fr) minmax(0, 1.42fr);
 }
@@ -494,8 +747,6 @@
   font-weight: 500;
   letter-spacing: 0.18em;
 }
-
-/* Mac 浏览器外框：大范围柔和弥散阴影，像被真实光线托住 */
 .l-mac {
   position: relative;
   border-radius: 18px;
@@ -590,8 +841,6 @@
   font-family: var(--l-mono);
   font-size: 12px;
 }
-
-/* 截图上的 CSS 高亮标注 */
 .l-highlight {
   position: absolute;
   border: 2px solid rgba(217, 119, 6, 0.85);
@@ -647,30 +896,27 @@
   align-items: flex-end;
   text-align: right;
 }
-/* 大字报：大字 = 痛点问句（衬线 display），小字 = 一句回答（muted 正文）。
-   注意保持这个方向：task-11 重写 CSS 时曾把两者字号写反（问句小、回答大），已回归。 */
 .l-pain-q {
   margin: 0;
-  color: var(--l-ink);
-  font-family: var(--l-serif);
-  font-size: clamp(40px, 5.2vw, 64px);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  text-wrap: balance;
+  color: var(--l-muted);
+  font-size: 14.5px;
+  letter-spacing: 0.06em;
 }
 .l-pain-a {
   margin: 0;
-  color: var(--l-muted);
-  font-size: clamp(16px, 1.5vw, 19px);
-  letter-spacing: 0.01em;
-  line-height: 1.6;
+  color: var(--l-ink);
+  font-family: var(--l-serif);
+  font-size: clamp(38px, 4.8vw, 62px);
+  font-weight: 600;
+  line-height: 1.32;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 .l-br-mobile {
   display: none;
 }
 
-/* ---------- 私有化：一句 Slogan + 一个按钮 ---------- */
+/* ---------- 私有化 ---------- */
 .l-private {
   padding: clamp(96px, 13vw, 180px) 0 clamp(112px, 14vw, 190px);
   background: linear-gradient(180deg, rgba(243, 241, 236, 0), rgba(243, 241, 236, 0.7));
@@ -724,7 +970,7 @@
   color: var(--l-ink);
 }
 
-/* ---------- 滚动淡入上浮（24px / 0.9s） ---------- */
+/* ---------- 滚动淡入（24px / 0.9s） ---------- */
 .landing .reveal {
   opacity: 0;
   transform: translateY(24px);
@@ -740,6 +986,12 @@
 }
 
 /* ---------- 响应式 ---------- */
+@media (max-width: 1100px) {
+  .l-hero-stage {
+    height: min(60vh, 540px);
+  }
+}
+
 @media (max-width: 900px) {
   .l-shell {
     width: min(1320px, calc(100% - 40px));
@@ -756,17 +1008,35 @@
   }
   .l-hero {
     margin-top: -62px;
+  }
+  .l-hero-split {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 8px;
     min-height: 100svh;
-    padding: calc(62px + 56px) 22px 140px;
+    padding: calc(62px + 34px) 0 170px;
   }
-  .l-hero-title {
-    font-size: clamp(46px, 8.4vw, 72px);
+  .l-hero-stage {
+    order: 1;
+    height: min(46vh, 400px);
+    min-height: 300px;
   }
-  .l-hero-sub {
-    margin-top: 26px;
+  .l-hero-copy {
+    order: 2;
+    text-align: center;
+    padding: 0 20px 8px;
   }
   .l-hero-actions {
-    margin-top: 40px;
+    justify-content: center;
+  }
+  .l-hero-title {
+    font-size: clamp(36px, 8.2vw, 52px);
+  }
+  .l-hero-sub {
+    margin-top: 20px;
+  }
+  .story-search {
+    width: min(92%, 420px);
   }
   .l-showcase {
     padding: clamp(80px, 11vw, 120px) 0;
@@ -792,6 +1062,9 @@
     align-items: flex-start;
     text-align: left;
   }
+  .l-scroll-hint {
+    display: none;
+  }
 }
 
 @media (max-width: 640px) {
@@ -799,26 +1072,44 @@
     width: min(1320px, calc(100% - 32px));
   }
   .l-hero-title {
-    font-size: clamp(40px, 10.8vw, 54px);
-    letter-spacing: -0.035em;
+    font-size: clamp(34px, 10vw, 44px);
+    letter-spacing: -0.03em;
   }
   .l-hero-sub {
-    margin-top: 22px;
-    font-size: 14.5px;
+    margin-top: 16px;
+    font-size: 14px;
   }
   .l-hero-actions {
     flex-direction: column;
     align-items: stretch;
-    margin-top: 34px;
+    margin-top: 26px;
   }
   .l-hero .l-btn-lg {
     width: 100%;
   }
+  .l-hero-stage {
+    height: min(40vh, 340px);
+    min-height: 260px;
+  }
+  .story-search {
+    padding: 13px 14px;
+    border-radius: 14px;
+  }
+  .story-search-text {
+    font-size: 13px;
+  }
+  .story-result {
+    padding: 18px 18px 16px;
+    border-radius: 16px;
+  }
+  .story-result-title {
+    font-size: 15px;
+  }
+  .story-result-body {
+    font-size: 12.5px;
+  }
   .l-hero-fade {
     height: 200px;
-  }
-  .l-scroll-hint {
-    bottom: 216px;
   }
   .l-showcase-list {
     gap: clamp(72px, 16vw, 96px);
@@ -832,11 +1123,8 @@
   .l-br-mobile {
     display: inline;
   }
-  .l-pain-q {
-    font-size: clamp(30px, 8.6vw, 40px);
-  }
   .l-pain-a {
-    font-size: 16px;
+    font-size: clamp(30px, 8.6vw, 40px);
   }
   .l-private {
     padding: 88px 0 108px;
@@ -850,20 +1138,40 @@
   }
 }
 
-/* ---------- 降低动效 ---------- */
+/* ---------- 降低动效：直接最终静态排版，无动画 ---------- */
 @media (prefers-reduced-motion: reduce) {
   .landing,
   .landing * {
     scroll-behavior: auto !important;
   }
-  .landing .l-hero-content {
-    animation: none;
+  .l-hero-copy,
+  .l-hero-sub,
+  .l-hero-actions {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
   }
-  .landing .l-scroll-hint span {
+  .l-hero-copy.is-in .l-hero-title,
+  .l-hero-copy.is-in .l-hero-sub,
+  .l-hero-copy.is-in .l-hero-actions {
+    animation: none !important;
+  }
+  .story-search {
+    animation: none !important;
+    transition: none !important;
+  }
+  .story-label {
+    animation: none !important;
+    display: none;
+  }
+  .story-result {
+    transition: none !important;
+  }
+  .l-scroll-hint span {
     animation: none;
     opacity: 0.8;
   }
-  .landing .l-highlight {
+  .l-highlight {
     animation: none !important;
   }
   .landing .reveal {
