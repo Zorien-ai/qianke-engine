@@ -688,7 +688,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <!-- 发送落地后：顶部保留「你」的问题气泡，形成「你问 → 星云答」的对话结构 -->
+            <!-- 发送落地后：顶部保留「你」的问题气泡，形成「你问 → 千客答」的对话结构 -->
             <div v-if="humanMessageVisible" class="human-msg" aria-hidden="true">
               <span class="chat-avatar">你</span>
               <span class="human-bubble">{{ QUESTION }}</span>
@@ -737,7 +737,7 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             >
               <div class="answer-head">
-                <span class="story-result-role">星云</span>
+                <span class="story-result-role">千客</span>
                 <span class="story-result-badge">演示</span>
               </div>
               <p class="story-result-title">已匹配 <b>{{ matchedDisplay }}</b> 位用户</p>
