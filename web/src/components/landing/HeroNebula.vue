@@ -27,7 +27,7 @@ const wrapRef = ref(null);
 
 const TAU = Math.PI * 2;
 const MAX_DT = 48;
-const BLOOM_BASE = 1.25;
+const BLOOM_BASE = 0.55;
 const WEBGL_RENDER_SCALE = 0.6;
 const FALLBACK_SCALE = 0.62;
 const PARTICLE_COUNT = 1600;
@@ -142,7 +142,7 @@ const vertexShader = /* glsl */ `
     p.y += cos(t * 0.47 + aPhase * 1.7) * 0.2;
     p.z += sin(t * 0.4 + aPhase * 0.7) * 0.18;
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    gl_PointSize = aSize * uPixelRatio * (45.0 / max(0.6, -mv.z));
+    gl_PointSize = aSize * uPixelRatio * (36.0 / max(0.6, -mv.z));
     gl_Position = projectionMatrix * mv;
     vColor = aColor;
     vAlpha = 0.62 + 0.38 * sin(t * aTwinkle + aPhase);
@@ -155,8 +155,9 @@ const fragmentShader = /* glsl */ `
   varying float vAlpha;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    float a = smoothstep(0.5, 0.0, d);
-    a = pow(a, 2.1);
+    // 收紧光点核心：泛光压低后每一颗要能看清，而不是糊成一团光
+    float a = smoothstep(0.5, 0.08, d);
+    a = pow(a, 2.6);
     gl_FragColor = vec4(vColor, a * uOpacity * vAlpha);
   }
 `;
@@ -182,7 +183,7 @@ function buildCloudData() {
     positions[i * 3 + 2] = z;
 
     const depth = clamp((r - 1.2) / 3.2, 0, 1);
-    sizes[i] = 0.38 + (1 - depth) * 0.75 + Math.pow(Math.random(), 2.2) * 0.5;
+    sizes[i] = 0.42 + (1 - depth) * 0.5 + Math.pow(Math.random(), 2.2) * 0.35;
 
     const kind = Math.random();
     let cr;
@@ -283,7 +284,7 @@ function initWebGL() {
     uniforms: {
       uTime: { value: 0 },
       uPixelRatio: { value: 1 },
-      uOpacity: { value: 0.95 },
+      uOpacity: { value: 0.82 },
       uMap: { value: pointTex },
     },
     vertexShader,
@@ -303,7 +304,7 @@ function initWebGL() {
   linkMat = new THREE.LineBasicMaterial({
     color: 0xf5c07a,
     transparent: true,
-    opacity: 0.1,
+    opacity: 0.085,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
@@ -316,12 +317,12 @@ function initWebGL() {
     map: coreTex,
     color: 0xffe2b4,
     transparent: true,
-    opacity: 0.8,
+    opacity: 0.45,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
   coreSprite = new THREE.Sprite(coreMat);
-  coreSprite.scale.set(1.15, 1.15, 1);
+  coreSprite.scale.set(0.95, 0.95, 1);
   coreSprite.position.set(0, -0.5, 0);
   scene.add(coreSprite);
 
@@ -329,19 +330,20 @@ function initWebGL() {
     map: coreTex,
     color: 0xf5b35a,
     transparent: true,
-    opacity: 0.2,
+    opacity: 0.1,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
   outerSprite = new THREE.Sprite(outerMat);
-  outerSprite.scale.set(2.6, 2.6, 1);
+  outerSprite.scale.set(2.2, 2.2, 1);
   outerSprite.position.set(0, -0.55, -0.1);
   scene.add(outerSprite);
 
   // 体积雾感：两片超低透明度的大 sprite，让云有「星云」而不是纯线框
+  // （泛光压低后雾也要更轻，否则又会糊成一片）
   for (const [x, y, z, s, op] of [
-    [-1.4, 0.6, -1.8, 7.2, 0.04],
-    [1.5, -0.9, -2.4, 8.6, 0.035],
+    [-1.4, 0.6, -1.8, 7.2, 0.022],
+    [1.5, -0.9, -2.4, 8.6, 0.018],
   ]) {
     const hazeMat = new THREE.SpriteMaterial({
       map: coreTex,
@@ -377,8 +379,8 @@ function initWebGL() {
   bloomPass = new UnrealBloomPass(
     new THREE.Vector2(Math.max(64, size.w * WEBGL_RENDER_SCALE * 0.45), Math.max(64, size.h * WEBGL_RENDER_SCALE * 0.45)),
     BLOOM_BASE,
-    0.72,
-    0.2
+    0.42,
+    0.3
   );
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
@@ -476,22 +478,22 @@ function renderFrame(ts) {
 
   const since = absorbStart >= 0 ? ts - absorbStart : Infinity;
   const absorbPulse = absorbStart >= 0 && since < 700 ? 1 - clamp(since / 700, 0, 1) : 0;
-  let bloomBoost = absorbPulse * 0.3;
+  let bloomBoost = absorbPulse * 0.18;
   if (absorbStart >= 0 && since < 220) {
-    bloomBoost = BLOOM_BASE * 2.1 * (1 - clamp(since / 220, 0, 1));
+    bloomBoost = BLOOM_BASE * 1.8 * (1 - clamp(since / 220, 0, 1));
   }
 
   if (coreSprite) {
-    const pulse = 1 + Math.sin(time * 1.9) * 0.05 + absorbPulse * 0.55;
-    coreSprite.scale.set(1.15 * pulse, 1.15 * pulse, 1);
-    coreMat.opacity = 0.8 + absorbPulse * 0.18;
+    const pulse = 1 + Math.sin(time * 1.9) * 0.05 + absorbPulse * 0.45;
+    coreSprite.scale.set(0.95 * pulse, 0.95 * pulse, 1);
+    coreMat.opacity = 0.45 + absorbPulse * 0.12;
   }
   if (outerSprite) {
-    outerSprite.scale.set(2.6 + absorbPulse * 1.8, 2.6 + absorbPulse * 1.8, 1);
-    outerMat.opacity = 0.22 + absorbPulse * 0.16;
+    outerSprite.scale.set(2.2 + absorbPulse * 1.4, 2.2 + absorbPulse * 1.4, 1);
+    outerMat.opacity = 0.1 + absorbPulse * 0.1;
   }
-  if (pointsMat) pointsMat.uniforms.uOpacity.value = 0.9 + absorbPulse * 0.1;
-  if (linkMat) linkMat.opacity = 0.1 + absorbPulse * 0.08;
+  if (pointsMat) pointsMat.uniforms.uOpacity.value = 0.82 + absorbPulse * 0.08;
+  if (linkMat) linkMat.opacity = 0.085 + absorbPulse * 0.06;
   if (bloomPass) bloomPass.strength = BLOOM_BASE + bloomBoost;
 
   if (flashRing && flashMat) {
@@ -499,7 +501,7 @@ function renderFrame(ts) {
       const p = easeOut(clamp(since / 700, 0, 1));
       const s = 0.5 + p * 4.6;
       flashRing.scale.set(s, s, 1);
-      flashMat.opacity = 0.42 * (1 - p);
+      flashMat.opacity = 0.28 * (1 - p);
     } else {
       flashMat.opacity = 0;
     }

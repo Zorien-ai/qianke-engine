@@ -401,6 +401,31 @@
   height: min(72vh, 660px);
   min-height: 440px;
 }
+/* 图例：每颗粒子代表一位用户，用一句极简说明点破，避免观众只当成星空 */
+.l-hero-legend {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.34);
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+.l-hero-legend-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #f3c078;
+  box-shadow: 0 0 8px 2px rgba(243, 192, 120, 0.45);
+}
+
 .l-hero-stage > .nebula {
   position: absolute;
   inset: 0;

@@ -474,6 +474,12 @@ onBeforeUnmount(() => {
               <p class="story-result-body">核心特征：25-35 岁，客单价均值 <b>1540</b> 元。</p>
               <span class="story-result-glow" aria-hidden="true" />
             </div>
+
+            <!-- 图例：让「一颗光点 = 一位用户」这件事一眼看懂 -->
+            <p class="l-hero-legend" aria-hidden="true">
+              <i class="l-hero-legend-dot" />
+              每个光点，都是一位用户
+            </p>
           </div>
         </div>
       </section>
