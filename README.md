@@ -9,6 +9,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
 [![Offline Eval](https://img.shields.io/badge/offline%20eval-97.0%25-brightgreen)](tests/eval_report.md)
+[![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/q93304989-bit/qianke-engine)
 
 > Qianke Engine is a lightweight, evaluation-driven RAG engine for e-commerce
 > user-profile analytics: hybrid retrieval, Text2SQL, anti-hallucination guard,
@@ -168,7 +169,7 @@ flowchart LR
 ### 1. 获取代码与配置
 
 ```bash
-git clone https://github.com/<your-org>/qianke-engine.git
+git clone https://github.com/q93304989-bit/qianke-engine.git
 cd qianke-engine
 
 cp .env.example .env
