@@ -19,6 +19,8 @@ const props = defineProps({
   // 0 散落 / 1 爆发 / 2 吐出
   phase: { type: Number, default: 0 },
   reducedMotion: { type: Boolean, default: false },
+  // 全幅背景模式：Canvas 铺满 Hero，作为文字后的背景层；模式内中心更暗、卡片贴角
+  fullBleed: { type: Boolean, default: false },
 });
 
 const wrapRef = ref(null);
@@ -100,10 +102,14 @@ function clamp(v, min, max) {
 /* ---------- 初始化 / 自适应 ---------- */
 function particleCount() {
   const area = width * height;
-  // 551px 见方约 84 个；大屏最多 130；小屏自动下调，保证移动端不发糊
-  let count = Math.round(area / 3500);
-  count = clamp(count, 70, 130);
-  if (width < 480) count = Math.min(count, 62);
+  let count;
+  if (props.fullBleed) {
+    // 全幅背景：像素多，粒子上限收到 110，移动端再降一档
+    count = clamp(Math.round(area / 12000), 70, 110);
+  } else {
+    count = clamp(Math.round(area / 3500), 70, 130);
+  }
+  if (width < 480) count = Math.min(count, props.fullBleed ? 52 : 62);
   return count;
 }
 
@@ -131,11 +137,14 @@ function resize() {
   const nextH = wrap.clientHeight;
   if (!nextW || !nextH) return;
   const nextDpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+  // 全幅背景铺满整屏时，按 0.78 渲染再拉伸（软一点但省一半以上像素，帧率更稳）
+  const renderScale = props.fullBleed ? 0.78 : 1;
+  const nextScale = nextDpr * renderScale;
   // ResizeObserver 首次回调会和 onMounted 的 resize 重复，尺寸没变就不重排/重画
-  if (ctx && nextW === width && nextH === height && nextDpr === dpr) return;
+  if (ctx && nextW === width && nextH === height && nextScale === dpr) return;
   width = nextW;
   height = nextH;
-  dpr = nextDpr;
+  dpr = nextScale;
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
   canvas.style.width = `${width}px`;
@@ -149,18 +158,20 @@ function resize() {
 
 /* ---------- 绘制工具 ---------- */
 function drawCore(t) {
+  const full = props.fullBleed;
   const pulse = 0.85 + 0.15 * Math.sin(t * 0.0021);
   const since = t - phaseStart;
   const burst = currentPhase === 1 ? 1 + 0.45 * Math.max(0, 1 - since / 650) : 1;
   const cx = width / 2;
   const cy = height * 0.5;
-  const coreR = Math.min(width, height) * 0.072 * pulse * burst;
+  const coreR =
+    Math.min(width, height) * (full ? 0.052 : 0.072) * pulse * (full ? 1 : burst);
 
-  // 外层暖光（半径封顶，避免爆发时把画布四边照成方块；画布另有 CSS 径向遮罩）
-  const outerR = Math.min(coreR * 5.2, Math.min(width, height) * 0.58);
+  // 外层暖光（全幅背景模式下中心压暗，保证文字可读）
+  const outerR = Math.min(coreR * (full ? 4.2 : 5.2), Math.min(width, height) * (full ? 0.42 : 0.58));
   let g = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR);
-  g.addColorStop(0, `rgba(255, 238, 205, ${0.42 * burst})`);
-  g.addColorStop(0.32, `rgba(${CORE_COLOR}, 0.18)`);
+  g.addColorStop(0, `rgba(255, 238, 205, ${(full ? 0.24 : 0.42) * (full ? 1 : burst)})`);
+  g.addColorStop(0.32, `rgba(${CORE_COLOR}, ${full ? 0.13 : 0.18})`);
   g.addColorStop(1, `rgba(${CORE_COLOR}, 0)`);
   ctx.fillStyle = g;
   ctx.beginPath();
@@ -171,7 +182,7 @@ function drawCore(t) {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(t * 0.00018);
-  ctx.strokeStyle = `rgba(${CORE_COLOR}, 0.22)`;
+  ctx.strokeStyle = `rgba(${CORE_COLOR}, ${full ? 0.16 : 0.22})`;
   ctx.lineWidth = 1;
   for (let k = 0; k < 3; k++) {
     ctx.beginPath();
@@ -193,53 +204,79 @@ function drawCore(t) {
 }
 
 function drawParticleNetwork(t) {
-  const threshold = Math.min(width, height) * 0.22;
+  const full = props.fullBleed;
+  const threshold = Math.min(width, height) * (full ? 0.17 : 0.22);
   const cx = width / 2;
   const cy = height * 0.5;
 
-  // 细线连接：越近越亮
+  // 细线连接：按亮度分 4 桶批量描边（逐条 stroke 在整屏画布上太贵）
+  const lineBuckets = [[], [], [], []];
   for (let i = 0; i < particles.length; i++) {
     const a = particles[i];
     for (let j = i + 1; j < particles.length; j++) {
       const b = particles[j];
       const dx = a.x - b.x;
       const dy = a.y - b.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > threshold) continue;
-      const alpha = (1 - dist / threshold) * (a.star || b.star ? 0.3 : 0.2);
-      ctx.strokeStyle = a.star || b.star
-        ? `rgba(255, 250, 240, ${alpha})`
-        : `rgba(${CORE_COLOR}, ${alpha})`;
-      ctx.lineWidth = 0.7;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
+      const d2 = dx * dx + dy * dy;
+      if (d2 > threshold * threshold) continue;
+      const k = 1 - Math.sqrt(d2) / threshold;
+      const bucket = Math.min(3, Math.floor(k * 4));
+      lineBuckets[bucket].push(a.x, a.y, b.x, b.y);
     }
   }
+  const lineAlpha = full ? [0.05, 0.1, 0.15, 0.2] : [0.06, 0.12, 0.18, 0.24];
+  ctx.lineWidth = 0.7;
+  lineBuckets.forEach((pts, idx) => {
+    if (!pts.length) return;
+    ctx.strokeStyle = `rgba(${CORE_COLOR}, ${lineAlpha[idx]})`;
+    ctx.beginPath();
+    for (let k = 0; k < pts.length; k += 4) {
+      ctx.moveTo(pts[k], pts[k + 1]);
+      ctx.lineTo(pts[k + 2], pts[k + 3]);
+    }
+    ctx.stroke();
+  });
 
-  // 粒子本体（星点带十字光）
+  // 粒子本体：按 twinkle 亮度分 4 桶批量 fill；星点单独带十字光
+  const dotBuckets = [[], [], [], []];
+  const stars = [];
   for (const p of particles) {
-    const twinkle = 0.55 + 0.45 * Math.sin(t * p.twinkleSpeed + p.twinkle);
     if (p.star) {
-      ctx.fillStyle = `rgba(255, 250, 240, ${0.55 + 0.45 * twinkle})`;
-      ctx.beginPath();
+      stars.push(p);
+      continue;
+    }
+    const twinkle = 0.55 + 0.45 * Math.sin(t * p.twinkleSpeed + p.twinkle);
+    const bucket = Math.min(3, Math.floor(twinkle * 4));
+    dotBuckets[bucket].push(p);
+  }
+  const dotAlpha = full ? [0.16, 0.24, 0.32, 0.4] : [0.18, 0.28, 0.38, 0.48];
+  dotBuckets.forEach((list, idx) => {
+    if (!list.length) return;
+    ctx.fillStyle = `rgba(${CORE_COLOR}, ${dotAlpha[idx]})`;
+    ctx.beginPath();
+    for (const p of list) {
+      ctx.moveTo(p.x + p.r, p.y);
       ctx.arc(p.x, p.y, p.r, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = `rgba(255, 250, 240, ${0.28 * twinkle})`;
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
+    }
+    ctx.fill();
+  });
+  if (stars.length) {
+    ctx.beginPath();
+    for (const p of stars) {
+      const tw = 0.55 + 0.45 * Math.sin(t * p.twinkleSpeed + p.twinkle);
+      const r = p.r * (1 + tw * 0.2);
+      ctx.moveTo(p.x + r, p.y);
+      ctx.arc(p.x, p.y, r, 0, TAU);
       ctx.moveTo(p.x - p.r * 3.4, p.y);
       ctx.lineTo(p.x + p.r * 3.4, p.y);
       ctx.moveTo(p.x, p.y - p.r * 3.4);
       ctx.lineTo(p.x, p.y + p.r * 3.4);
-      ctx.stroke();
-    } else {
-      ctx.fillStyle = `rgba(${CORE_COLOR}, ${0.24 + 0.4 * twinkle})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, TAU);
-      ctx.fill();
     }
+    ctx.fillStyle = "rgba(255, 250, 240, 0.72)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 250, 240, 0.2)";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
   }
 
   // 中心附近留白：把光核区域压暗一点点，让核心更突出
@@ -291,7 +328,7 @@ function drawShockwaves(dt) {
     w.age += dt;
     if (w.age < 0) continue;
     const p = clamp(w.age / w.duration, 0, 1);
-    const alpha = (1 - p) * 0.55;
+    const alpha = (1 - p) * (props.fullBleed ? 0.4 : 0.55);
     if (alpha <= 0.01) continue;
     ctx.strokeStyle = `rgba(${CORE_COLOR}, ${alpha})`;
     ctx.lineWidth = 2.4 * (1 - p) + 0.6;
@@ -316,7 +353,14 @@ function cubicPoint(p0, p1, p2, p3, t) {
 }
 
 function curveTargets() {
-  // 与 CSS 里 .nebula-card-N 的锚点保持一致（≤900 / ≤640 有各自的重排）
+  // 与 CSS 里 .nebula-card-N 的锚点保持一致（全幅 / ≤900 / ≤640 有各自的重排）
+  if (props.fullBleed) {
+    return [
+      { x: width * 0.12, y: height * 0.72 },
+      { x: width * 0.88, y: height * 0.68 },
+      { x: width * 0.84, y: height * 0.22 },
+    ];
+  }
   const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
   if (vw <= 640) {
     return [
@@ -341,6 +385,15 @@ function curveTargets() {
 
 function drawEmitCurves(t) {
   if (currentPhase !== 2 && !reduce) return;
+  // 全幅模式下小屏不显示画像卡，曲线也一起省略
+  if (
+    props.fullBleed &&
+    typeof window !== "undefined" &&
+    window.innerWidth < 1100 &&
+    !reduce
+  ) {
+    return;
+  }
   const since = t - phaseStart;
   const progress = reduce ? 1 : clamp(since / 700, 0, 1);
   const cx = width / 2;
@@ -352,7 +405,7 @@ function drawEmitCurves(t) {
     const p3 = target;
     const p1 = { x: cx + (p3.x - cx) * 0.42, y: cy + (p3.y - cy) * 0.02 };
     const p2 = { x: p3.x - (p3.x - cx) * 0.2, y: p3.y + (p3.y - cy) * 0.32 };
-    const alpha = 0.55 * progress;
+    const alpha = (props.fullBleed ? 0.68 : 0.55) * progress;
 
     ctx.save();
     ctx.strokeStyle = `rgba(${CORE_COLOR}, ${alpha * 0.35})`;
@@ -392,10 +445,10 @@ function drawFlash(t) {
   if (currentPhase !== 1 || reduce) return;
   const since = t - phaseStart;
   if (since > 700) return;
-  const alpha = Math.max(0, 1 - since / 700) * 0.42;
+  const alpha = Math.max(0, 1 - since / 700) * (props.fullBleed ? 0.3 : 0.42);
   const cx = width / 2;
   const cy = height * 0.5;
-  const flashR = Math.min(width, height) * 0.44;
+  const flashR = Math.min(width, height) * (props.fullBleed ? 0.36 : 0.44);
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, flashR);
   g.addColorStop(0, `rgba(255, 252, 244, ${alpha})`);
   g.addColorStop(0.45, `rgba(${CORE_COLOR}, ${alpha * 0.3})`);
@@ -404,6 +457,28 @@ function drawFlash(t) {
   ctx.beginPath();
   ctx.arc(cx, cy, flashR, 0, TAU);
   ctx.fill();
+}
+
+function drawFullScrim() {
+  if (!props.fullBleed) return;
+  // 中心压暗融进画布，省掉一层全屏 DOM 渐变合成（软件渲染下明显更省帧）
+  const cx = width / 2;
+  const cy = height * 0.46;
+  const r = Math.max(width * 0.62, height * 0.62);
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  g.addColorStop(0, "rgba(5, 6, 10, 0.58)");
+  g.addColorStop(0.55, "rgba(5, 6, 10, 0.22)");
+  g.addColorStop(1, "rgba(5, 6, 10, 0)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, TAU);
+  ctx.fill();
+  // 底部渐隐，衔接到下方暖白内容区
+  const lg = ctx.createLinearGradient(0, height * 0.8, 0, height);
+  lg.addColorStop(0, "rgba(5, 6, 10, 0)");
+  lg.addColorStop(1, "rgba(5, 6, 10, 0.9)");
+  ctx.fillStyle = lg;
+  ctx.fillRect(0, height * 0.8, width, height * 0.2);
 }
 
 function draw(t) {
@@ -415,6 +490,7 @@ function draw(t) {
   drawShockwaves(lastDt);
   drawFlash(t);
   drawEmitCurves(t);
+  drawFullScrim();
   frameCount++;
   if (window.__nebulaDebug) {
     window.__nebulaDebug.frames = frameCount;
@@ -512,6 +588,7 @@ function drawStatic() {
   drawParticleNetwork(0);
   drawCore(0);
   drawEmitCurves(0);
+  drawFullScrim();
   frameCount++;
   if (window.__nebulaDebug) {
     window.__nebulaDebug.frames = frameCount;
@@ -639,28 +716,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="wrapRef" class="nebula" :class="`is-phase-${phase}`">
+  <div ref="wrapRef" class="nebula" :class="[`is-phase-${phase}`, { 'is-full': fullBleed }]">
     <canvas ref="canvasRef" class="nebula-canvas" aria-hidden="true" />
 
     <div class="nebula-overlay" aria-hidden="true">
-      <!-- 阶段1：向心汇聚的 CSV 胶囊（四象限错峰入场） -->
-      <span
-        v-for="chip in CHIPS"
-        :key="chip.file"
-        class="nebula-chip"
-        :style="{
-          '--x': `${chip.x}cqw`,
-          '--y': `${chip.y}cqw`,
-          '--x-mid': `${(chip.x * 0.82).toFixed(1)}cqw`,
-          '--y-mid': `${(chip.y * 0.82).toFixed(1)}cqw`,
-          '--x-late': `${(chip.x * 0.38).toFixed(1)}cqw`,
-          '--y-late': `${(chip.y * 0.38).toFixed(1)}cqw`,
-          '--delay': `${chip.delay}ms`,
-        }"
-      >
-        <span class="nebula-chip-file">{{ chip.file }}</span>
-        <span class="nebula-chip-meta">{{ chip.meta }}</span>
-      </span>
+      <!-- 阶段1：向心汇聚的 CSV 胶囊（全幅背景模式只用 Canvas 氛围，不铺文字胶囊） -->
+      <template v-if="!fullBleed">
+        <span
+          v-for="chip in CHIPS"
+          :key="chip.file"
+          class="nebula-chip"
+          :style="{
+            '--x': `${chip.x}cqw`,
+            '--y': `${chip.y}cqw`,
+            '--x-mid': `${(chip.x * 0.82).toFixed(1)}cqw`,
+            '--y-mid': `${(chip.y * 0.82).toFixed(1)}cqw`,
+            '--x-late': `${(chip.x * 0.38).toFixed(1)}cqw`,
+            '--y-late': `${(chip.y * 0.38).toFixed(1)}cqw`,
+            '--delay': `${chip.delay}ms`,
+          }"
+        >
+          <span class="nebula-chip-file">{{ chip.file }}</span>
+          <span class="nebula-chip-meta">{{ chip.meta }}</span>
+        </span>
+      </template>
 
       <!-- 阶段2：一次白金光 flash -->
       <span v-if="phase === 1" class="nebula-flash" />
