@@ -373,7 +373,12 @@ async function startBuild() {
   btn.disabled = true;
   btn.textContent = "启动中…";
   try {
-    const res = await api("/api/wizard/build", { method: "POST", body: JSON.stringify(buildPayload()) });
+    // 老向导页（只在 8002 独立调试服务里还能打开）：第五轮起后端构建默认是
+    // 「追加更新」，这页仍是「一键全量构建」的语义，显式声明 mode=full。
+    const res = await api("/api/wizard/build", {
+      method: "POST",
+      body: JSON.stringify({ ...buildPayload(), mode: "full" }),
+    });
     state.taskId = res.task_id;
     // 记住这次到底写进了哪个库：提问要查的就是它（见 state.dataset 的注释）
     state.dataset = res.dataset || "user";

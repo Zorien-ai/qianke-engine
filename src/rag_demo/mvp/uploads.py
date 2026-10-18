@@ -31,6 +31,7 @@ M1 把文件读进浏览器，用 JS 解码、按行切、数出「约 N 行」�
 
 ⚠ 目录穿越：`upload_id` 与文件名都会拼进路径，两者都过 `_safe_*` 白名单校验。
 """
+import hashlib
 import io
 import json
 import logging
@@ -325,3 +326,224 @@ def remove(upload_id: str, name: str) -> None:
     csvs, mds = paths(upload_id)
     if not csvs and not mds:
         shutil.rmtree(dest, ignore_errors=True)
+
+
+# ==================== 增量更新：文件指纹 / 清单比对（纯逻辑，可单测） ====================
+# 这一节是「增量更新」的判定层，**不碰数据库、不加载模型**：
+#   · 文件指纹 sha256(文件字节)      —— 判断「这份文件是不是上次那份」
+#   · manifest 比对                  —— 判断文件是 new / ingested / changed
+#   · 旧库引导（mtime <= last_build.at）—— 没有 manifest 时也能判断哪些文件已入库
+#
+# 为什么判定必须做成纯函数：增量更新的核心风险不是「跑得慢」，而是
+# **判断错了**——把已入库的文件当新增再合并一次，用户的订单数/金额就会翻倍，
+# 而且不报错。这类错误只能靠单元测试逐条锁住，所以规则全部收在这里，
+# 由 tests/test_incremental.py 不连库直接验证。
+
+# manifest 的两个桶名（与 db/schema.py 的 ingested_csv / ingested_docs 一一对应）
+MANIFEST_CSV = "csv"
+MANIFEST_DOCS = "docs"
+
+# 文件状态
+STATE_NEW = "new"            # 清单里没有 = 新增
+STATE_INGESTED = "ingested"  # 清单里有且 sha256 相同 = 已入库
+STATE_CHANGED = "changed"    # 清单里有但 sha256 不同 = 内容变了
+FILE_STATES = (STATE_NEW, STATE_INGESTED, STATE_CHANGED)
+
+_BUILT_AT_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def sha256_file(path: str) -> str:
+    """
+    文件指纹：sha256(文件字节)
+
+    用**字节**而不是解析后的内容：上传接口已经统一转成 UTF-8 落盘，
+    同一份数据无论 pandas 怎么解读都是同一串字节；而按「解析结果」算指纹，
+    改一次读表参数（分隔符/编码）所有文件就都被判成 changed。
+    """
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def file_entry(path: str) -> dict:
+    """
+    一个落盘文件的清单条目：name / size / sha256 / mtime
+
+    mtime 只在「旧库引导」里用：没有 manifest 时，用
+    「文件 mtime <= last_build.at」判断它是不是上次构建时就已入库。
+    """
+    stat = os.stat(path)
+    return {
+        "name": os.path.basename(path),
+        "size": int(stat.st_size),
+        "sha256": sha256_file(path),
+        "mtime": float(stat.st_mtime),
+    }
+
+
+def _parse_built_at(value: str) -> float | None:
+    """last_build.at（"YYYY-MM-DD HH:MM:SS"，本地时间）→ 时间戳；解析不了返回 None"""
+    try:
+        from datetime import datetime
+
+        return datetime.strptime(str(value).strip(), _BUILT_AT_FMT).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def seed_manifest_from_mtime(
+    csv_entries: list[dict],
+    md_entries: list[dict],
+    built_at: str,
+) -> dict:
+    """
+    旧库引导：把「上次构建时就已经在盘上」的文件补进 manifest（**纯函数，不落盘**）
+
+    背景：M3 及更早的构建没有 manifest。如果直接要求用户再跑一次 1.6 小时的全量重建
+    才能用增量，这个功能就白做了。所以用 `meta.last_build`：
+        last_build 记了「上次构建用的是哪个上传目录（upload_id）」和「构建时间 at」；
+        该目录里 mtime <= at 的文件，一定是那次构建读过并入库的。
+
+    返回的条目 rows/chunks 为 None：旧构建没留下按文件统计，**不编造数字**；
+    真正做过一次增量后，处理过的文件会被真实计数覆盖，没处理过的保持 None
+    （计划页不展示它，只用于判定 ingested）。
+
+    built_at 解析失败 → 返回空 dict（调用方视为「引导失败」，不能增量）。
+    """
+    cutoff = _parse_built_at(built_at)
+    if cutoff is None:
+        return {MANIFEST_CSV: {}, MANIFEST_DOCS: {}}
+    csv_map: dict[str, dict] = {}
+    docs_map: dict[str, dict] = {}
+    for entry in csv_entries or []:
+        if entry["mtime"] <= cutoff:
+            csv_map[entry["name"]] = {
+                "sha256": entry["sha256"],
+                "rows": None,
+                "ingested_at": built_at,
+            }
+    for entry in md_entries or []:
+        if entry["mtime"] <= cutoff:
+            docs_map[entry["name"]] = {
+                "sha256": entry["sha256"],
+                "chunks": None,
+                "ingested_at": built_at,
+            }
+    return {MANIFEST_CSV: csv_map, MANIFEST_DOCS: docs_map}
+
+
+def manifest_state(entry: dict, bucket: dict | None) -> str | None:
+    """
+    单个文件在清单里的状态：new / ingested / changed / None（清单不可用）
+
+    None 的语义是「判断不了」，与 new 严格区分：
+    旧库（没有 manifest 也没有 last_build）时，说一个文件是「新增」等于
+    承诺「合并它不会重复累加」——而我们并不知道。
+    """
+    if bucket is None:
+        return None
+    previous = bucket.get(entry["name"])
+    if previous is None:
+        return STATE_NEW
+    if str(previous.get("sha256") or "") == entry["sha256"]:
+        return STATE_INGESTED
+    return STATE_CHANGED
+
+
+def classify_files(
+    csv_entries: list[dict],
+    md_entries: list[dict],
+    manifest: dict | None,
+) -> dict:
+    """
+    按 manifest 判定本次上传批次里每个文件的状态（纯函数）
+
+    manifest 传 None = 清单不可用：所有 state 为 None，不能做增量。
+    manifest 结构：{"csv": {name: {...}}, "docs": {name: {...}}}（见 db/schema.py）。
+
+    判定规则（契约 A）：
+        CSV：清单里没有 → new；同名但 sha256 变 → **changed 且跳过**
+             （CSV 是累加语义，同一份文件改内容后再合并会把旧数据重复累加，
+              所以要求改名或覆盖重建）；sha256 相同 → ingested
+        MD ：清单里没有 → new；同名 sha256 变 → **changed 且更新**（删旧 chunk 重切）；
+             sha256 相同 → ingested
+
+    返回：
+        csv_files / md_files   带 state 的条目（给第 1/2 步展示）
+        new_csv / new_md / changed_md   待处理条目
+        skipped_changed_csv    内容变了但不处理的 CSV 文件名
+    """
+    csv_bucket = (manifest or {}).get(MANIFEST_CSV) if manifest is not None else None
+    md_bucket = (manifest or {}).get(MANIFEST_DOCS) if manifest is not None else None
+
+    csv_files: list[dict] = []
+    new_csv: list[dict] = []
+    skipped_changed_csv: list[str] = []
+    for entry in csv_entries or []:
+        state = manifest_state(entry, csv_bucket)
+        item = {**entry, "state": state}
+        csv_files.append(item)
+        if state == STATE_NEW:
+            new_csv.append(item)
+        elif state == STATE_CHANGED:
+            skipped_changed_csv.append(entry["name"])
+
+    md_files: list[dict] = []
+    new_md: list[dict] = []
+    changed_md: list[dict] = []
+    for entry in md_entries or []:
+        state = manifest_state(entry, md_bucket)
+        item = {**entry, "state": state}
+        md_files.append(item)
+        if state == STATE_NEW:
+            new_md.append(item)
+        elif state == STATE_CHANGED:
+            changed_md.append(item)
+
+    return {
+        "csv_files": csv_files,
+        "md_files": md_files,
+        "new_csv": new_csv,
+        "new_md": new_md,
+        "changed_md": changed_md,
+        "skipped_changed_csv": skipped_changed_csv,
+        "manifest_available": manifest is not None,
+    }
+
+
+def plan_hint(
+    new_csv_count: int,
+    new_csv_rows: int,
+    new_md_count: int,
+    changed_md_count: int,
+    existing_profiles: int,
+    skipped_changed_csv: list[str] | None = None,
+) -> str:
+    """
+    第 3 步模式卡上那句人话（纯函数，便于断言文案）
+
+    契约示例：「本次将只处理 1 个新增 CSV（400 行）、0 篇文档；已有 99,457 个用户不受影响」
+    """
+    docs = int(new_md_count) + int(changed_md_count)
+    profiles = int(existing_profiles or 0)
+    csv_count = int(new_csv_count or 0)
+    rows = int(new_csv_rows or 0)
+    if csv_count == 0 and docs == 0:
+        hint = "本批次没有新增文件可追加；要重算全部数据请选「覆盖重建」"
+    else:
+        parts = []
+        if csv_count:
+            parts.append(f"{csv_count} 个新增 CSV（{rows:,} 行）")
+        if docs:
+            parts.append(f"{docs} 篇文档（新增 {int(new_md_count)} / 更新 {int(changed_md_count)}）")
+        hint = f"本次将只处理 {'、'.join(parts)}；已有 {profiles:,} 个用户不受影响"
+    skipped = list(skipped_changed_csv or [])
+    if skipped:
+        shown = "、".join(skipped[:3]) + ("…" if len(skipped) > 3 else "")
+        hint += (
+            f"。注意：{shown} 是已入库的同名 CSV 但内容有变化，为避免重复累加已跳过；"
+            "请改名后再上传，或选择「覆盖重建」"
+        )
+    return hint

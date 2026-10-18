@@ -132,10 +132,14 @@ def ingest_documents(
         total_chunks = 0
         imported = 0
         total = len(docs)
+        # 每篇文档切出多少块：全量构建结束后要写进增量清单（ingested_docs 的 chunks），
+        # 下次增量才能知道「这篇文档已经入库多少块」，而不是等到重复导入才发现。
+        per_doc: dict[str, int] = {}
         for i, (filename, text) in enumerate(docs, 1):
             documents = split(DOC_TYPE_WIKI, {"text": text, "doc_name": filename})
             if not documents:
                 logger.warning("[跳过] %s: 切分后没有内容", filename)
+                per_doc[filename] = 0
                 if progress:
                     progress(i, total, filename)
                 continue
@@ -165,13 +169,135 @@ def ingest_documents(
             conn.commit()
             total_chunks += len(documents)
             imported += 1
+            per_doc[filename] = len(documents)
             logger.info("[OK] %s: 导入 %d 个分块", filename, len(documents))
             if progress:
                 progress(i, total, filename)
     finally:
         cur.close()
 
-    return {"docs": imported, "chunks": total_chunks}
+    return {"docs": imported, "chunks": total_chunks, "docs_detail": per_doc}
+
+
+def ingest_documents_incremental(
+    docs: list[tuple[str, str]],
+    model: SentenceTransformer | None = None,
+    progress: ProgressFn | None = None,
+    docs_dir: str | None = None,
+) -> dict:
+    """
+    增量更新文档（M3 第五轮）：同名文档**删旧分块后重写**，不 TRUNCATE 全表
+
+    与 ingest_documents（全量覆盖）的区别只有「清空范围」：
+        全量：TRUNCATE wiki_vectors 再写整批
+        增量：只 DELETE WHERE doc_name = <本次处理的文档>，其它文档一行不动
+    这正是「追加一个文件不用重算全部」的关键——10 万行数据对应的知识库可能
+    有几十篇文档，全量重建时它们都要重新切分 + 向量化。
+
+    文档判定（新增/变更）由 uploads.classify_files 在 builder 里做，本函数只管写：
+        同名已存在 → 更新（先删后插），计入 docs_updated
+        不存在     → 新增，计入 docs_new
+
+    返回 {"docs_new", "docs_updated", "chunks", "docs_chunks": {文件名: 分块数}}
+    docs_chunks 用于增量清单的 per-file chunks（清单要求真实产出，不编数字）。
+
+    ⚠ 必须在 writes_to(...) 作用域内调用（写操作守卫与全量版一致）。
+    """
+    if not docs:
+        raise ValueError("没有可导入的 .md 文档")
+
+    dataset = require_write_scope("ingest_documents_incremental")
+
+    if model is None:
+        logger.info("正在加载 bge-m3 模型...")
+        model = SentenceTransformer(MODEL_PATH) if os.path.exists(MODEL_PATH) \
+            else SentenceTransformer("BAAI/bge-m3")
+
+    conn = get_conn(dataset)
+    cur = conn.cursor()
+    try:
+        ensure_base_tables(cur)
+        cur.execute("ALTER TABLE wiki_vectors ADD COLUMN IF NOT EXISTS metadata JSONB")
+        # 原文目录：Parent Document 全文化要靠它找文件；增量更新同样要维护
+        if docs_dir:
+            cur.execute(CREATE_META_SQL)
+            cur.execute(
+                f"INSERT INTO {META_TABLE} (key, value) VALUES ('doc_source_dir', %s) "
+                f"ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (os.path.abspath(docs_dir),),
+            )
+        conn.commit()
+
+        docs_new = 0
+        docs_updated = 0
+        total_chunks = 0
+        docs_chunks: dict[str, int] = {}
+        total = len(docs)
+        for i, (filename, text) in enumerate(docs, 1):
+            documents = split(DOC_TYPE_WIKI, {"text": text, "doc_name": filename})
+
+            # 先判断「原来有没有」再删：DELETE 之后 rowcount 无法区分新增/更新
+            cur.execute(
+                "SELECT 1 FROM wiki_vectors WHERE doc_name = %s LIMIT 1", (filename,)
+            )
+            existed = cur.fetchone() is not None
+            if existed:
+                cur.execute("DELETE FROM wiki_vectors WHERE doc_name = %s", (filename,))
+
+            chunk_count = 0
+            if documents:
+                vecs = model.encode(
+                    [d.page_content for d in documents],
+                    batch_size=16,
+                    show_progress_bar=False,
+                )
+                for doc, vec in zip(documents, vecs):
+                    meta = doc.metadata
+                    cur.execute(
+                        """INSERT INTO wiki_vectors
+                           (doc_name, chunk_text, embedding, dept, sensitivity, metadata)
+                           VALUES (%s, %s, %s, %s, %s, %s)""",
+                        (
+                            meta["source"],
+                            doc.page_content,
+                            vec,
+                            meta["dept"],
+                            meta["sensitivity"],
+                            json.dumps({
+                                "doc_type": meta["doc_type"],
+                                "headers": meta["headers"],
+                                "chunk_index": meta["chunk_index"],
+                            }, ensure_ascii=False),
+                        ),
+                    )
+                chunk_count = len(documents)
+            else:
+                logger.warning("[跳过] %s: 切分后没有内容（旧分块已删除）", filename)
+
+            conn.commit()
+            total_chunks += chunk_count
+            docs_chunks[filename] = chunk_count
+            if existed:
+                docs_updated += 1
+                logger.info("[更新] %s: 替换为 %d 个分块", filename, chunk_count)
+            else:
+                docs_new += 1
+                logger.info("[新增] %s: 导入 %d 个分块", filename, chunk_count)
+            if progress:
+                progress(i, total, filename)
+    finally:
+        cur.close()
+
+    logger.info(
+        "增量文档导入完成：新增 %d 篇 / 更新 %d 篇 / 共 %d 个分块（其余文档未改动）",
+        docs_new, docs_updated, total_chunks,
+    )
+    return {
+        "docs_new": docs_new,
+        "docs_updated": docs_updated,
+        "chunks": total_chunks,
+        "docs_chunks": docs_chunks,
+    }
 
 
 def main() -> None:

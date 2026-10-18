@@ -211,6 +211,142 @@ def build_index(
     }
 
 
+def update_index(
+    profile_user_ids: list[str],
+    doc_names: list[str],
+) -> dict:
+    """
+    增量更新检索索引（M3 第五轮）：只动**受影响用户/文档**的索引行
+
+    全量 build_index 会重算全部语料（10 万画像 = 2 小时的一部分）。增量构建只改了
+    新文件里出现的用户和新增/变更的文档，所以索引也只需重算这些：
+        画像：corpus_id = "user:<uid>"，按 uid 列表删除旧索引行后重算
+        文档：source = <doc_name>，按文档名删除（chunk 的库内 id 会变，按 source 删更稳）
+
+    指纹：增量合并后源表已经变了，这里用 `current_fingerprint()` 重算并写回
+    （与全量 build_index 同一事务写法）。不回写指纹的话，概况页会一直显示
+    「索引已过期」——而那是一次正常的增量更新。
+
+    返回 {"updated": 新写入的索引行数, "removed": 删掉的旧索引行数, "total": 索引总行数}
+
+    ⚠ 必须在 writes_to(...) 作用域内调用；其它用户的索引行不动。
+    """
+    require_write_scope("update_index")
+    ensure_schema()
+
+    user_ids = sorted({str(uid) for uid in (profile_user_ids or []) if str(uid).strip()})
+    docs = sorted({str(name) for name in (doc_names or []) if str(name).strip()})
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        # ---------- 1. 读取受影响行（只读这些 id，不扫全表） ----------
+        profile_rows: list[tuple] = []
+        for i in range(0, len(user_ids), BATCH):
+            chunk = user_ids[i:i + BATCH]
+            cur.execute(
+                "SELECT user_id, profile_text FROM user_profile_vectors WHERE user_id = ANY(%s)",
+                (chunk,),
+            )
+            profile_rows.extend(cur.fetchall())
+
+        doc_rows: list[tuple] = []
+        if docs:
+            cur.execute(
+                "SELECT id, doc_name, chunk_text FROM wiki_vectors WHERE doc_name = ANY(%s)",
+                (docs,),
+            )
+            doc_rows = list(cur.fetchall())
+
+        # ---------- 2. 取指纹（必须在任何未提交写之前） ----------
+        # ⚠ `current_fingerprint()` 内部会 get_conn() + rollback() 清理只读事务——
+        # 如果先删索引行再取指纹，那次 rollback 会把删除**一起回滚掉**，
+        # 随后 INSERT 就撞「corpus_id 已存在」的唯一约束（实测踩过）。
+        # 所以顺序固定：读受影响行（只读）→ 取指纹 → 删旧行 → 插新行。
+        fingerprint = current_fingerprint()
+
+        # ---------- 3. 删除受影响的旧索引行 ----------
+        removed = 0
+        if user_ids:
+            cur.execute(
+                f"DELETE FROM {SEARCH_INDEX_TABLE} WHERE corpus_id = ANY(%s)",
+                ([f"user:{uid}" for uid in user_ids],),
+            )
+            removed += cur.rowcount
+        if docs:
+            cur.execute(
+                f"DELETE FROM {SEARCH_INDEX_TABLE} WHERE source = ANY(%s)", (docs,)
+            )
+            removed += cur.rowcount
+
+        # ---------- 4. 重算受影响行的分词与稀疏权重 ----------
+        corpus: list[dict] = [
+            {"id": f"user:{uid}", "source": "user_profile", "text": text}
+            for uid, text in profile_rows
+        ] + [
+            {"id": f"wiki:{cid}", "source": doc_name, "text": text}
+            for cid, doc_name, text in doc_rows
+        ]
+        rows: list[tuple] = []
+        if corpus:
+            tokenized = [_tokenize(c["text"]) for c in corpus]
+            weights_list = encode_sparse([c["text"] for c in corpus])
+            rows = [
+                (
+                    c["id"],
+                    c["source"],
+                    c["text"],
+                    tokens,
+                    weights_to_sparsevec(weights, SPARSE_VEC_DIM),
+                )
+                for c, tokens, weights in zip(corpus, tokenized, weights_list)
+            ]
+
+        # ---------- 5. 落库 + 指纹（同一事务） ----------
+        for i in range(0, len(rows), BATCH):
+            execute_values(
+                cur,
+                f"""INSERT INTO {SEARCH_INDEX_TABLE}
+                    (corpus_id, source, text, bm25_tokens, sparse_weights)
+                    VALUES %s""",
+                rows[i:i + BATCH],
+                template="(%s, %s, %s, %s, %s::sparsevec)",
+            )
+        write_fingerprint(cur, fingerprint)
+        conn.commit()
+
+        # ---------- 5. 回读校验 ----------
+        cur.execute(f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE}")
+        total = int(cur.fetchone()[0])
+        cur.execute(
+            f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE} WHERE sparse_weights IS NULL"
+        )
+        missing_sparse = int(cur.fetchone()[0])
+        cur.execute(f"SELECT COUNT(*) FROM {SEARCH_INDEX_TABLE} WHERE bm25_tokens IS NULL")
+        missing_bm25 = int(cur.fetchone()[0])
+        conn.rollback()
+
+        fresh = index_freshness()
+        logger.info(
+            "索引增量更新完成：写入 %d 行 / 删除 %d 行 / 现共 %d 行（缺失 sparse=%d, bm25=%d）; 新鲜度 %s",
+            len(rows), removed, total, missing_sparse, missing_bm25, fresh["status"],
+        )
+        if fresh["status"] != FRESH:
+            # 不回写指纹/源表在索引写入后又变了都会落到这里。只告警不抛：
+            # 增量已提交，抛异常会让构建任务显示失败而数据其实已经更新。
+            logger.warning("索引增量更新后新鲜度不是 fresh：%s", fresh["reason"])
+        return {
+            "updated": len(rows),
+            "removed": removed,
+            "total": total,
+            "missing_sparse": missing_sparse,
+            "missing_bm25": missing_bm25,
+            "fresh": fresh,
+        }
+    finally:
+        cur.close()
+
+
 def main() -> None:
     """脚本入口：只负责「报告 + 退出码」，干活在 build_index"""
     stats = build_index()

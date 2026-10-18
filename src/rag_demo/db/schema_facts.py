@@ -320,9 +320,16 @@ def _render_column(cf: ColumnFact) -> str:
     elif cf.kind == "list" and cf.values:
         shown = " / ".join(f"{v}({n})" for v, n in cf.values)
         detail = f"{cf.doc}：{shown}"
+    elif cf.kind in ("enum", "list") and not cf.values:
+        # 列存在但没有任何取值 = 这份数据**没有提供**该字段（例：用户没映射会员等级列）。
+        # 必须显式告诉模型「未提供、不要推算」，否则它会拿金额/订单数去猜等级，
+        # 给出一个看起来合理、实际不属于客户业务的结论（第五轮客户底线）。
+        detail = f"{cf.doc}：未提供（该列没有任何取值；不要用其他字段推算）"
     elif cf.kind == "numeric":
         if cf.vmin is not None and cf.vmax is not None:
             detail = f"{cf.doc}（实测 {_num(cf.vmin)}-{_num(cf.vmax)}）"
+        else:
+            detail = f"{cf.doc}：未提供（该列没有可用数值；不要用其他字段推算）"
     elif cf.kind == "id":
         if cf.samples:
             detail = f"{cf.doc}（示例：{'、'.join(cf.samples)}）"
@@ -367,6 +374,15 @@ def collect(dataset: str | None = None) -> tuple[list[TableFact], list[str]]:
                 for fn in (_time_fact(cur, table, cols), _amount_quantiles(cur, table, cols)):
                     if fn:
                         facts.append(fn)
+                # 会员等级「未提供」时单独给一条数据口径：用户没映射该列时，
+                # 系统**不按金额/订单数推算**（第五轮客户底线）。列里本来就没值，
+                # 模型不该把这个当「数据里没有高等级用户」去解释。
+                level_fact = next((c for c in tf.columns if c.name == "member_level"), None)
+                if level_fact is not None and not level_fact.values:
+                    facts.append(
+                        "会员等级：数据未提供（该列没有任何取值，用户未映射等级列）；"
+                        "不要用金额、订单数或其他字段推算等级，被问到时直接说明该字段不可用"
+                    )
         conn.rollback()  # 只读，清理事务，避免连接停在 idle in transaction
         return tables, facts
     finally:

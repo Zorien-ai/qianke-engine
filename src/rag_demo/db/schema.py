@@ -509,15 +509,34 @@ def write_ui_config(values: dict[str, str | None]) -> None:
 # last_build 描述的是「这批数据从哪来」（清空后仍然有效），所以清空时保留它。
 LAST_BUILD_KEY = "last_build"
 
-# 清空数据空间时删除的「数据类」meta 键：语料指纹 + 构建时间。
+# 增量更新清单（M3 第五轮）：记录「哪些文件已经入库」。
+#   ingested_csv  {"<文件名>": {"sha256", "rows", "ingested_at"}}
+#   ingested_docs {"<文件名>": {"sha256", "chunks", "ingested_at"}}
+# 没有它就无法判断「这次上传的文件是新数据还是已经算过的数据」——判断错了
+# 要么漏数据，要么把同一份数据重复累加（用户订单数直接翻倍，且不报错）。
+INGESTED_CSV_KEY = "ingested_csv"
+INGESTED_DOCS_KEY = "ingested_docs"
+
+# 最近一次**全量**构建的耗时/规模：增量构建的 last_build 只记增量数据，
+# 而前端「覆盖重建」卡要显示「上次全量用时 5916s（99,457 行）」，所以全量单独记一份。
+LAST_FULL_BUILD_KEY = "last_full_build"
+
+# 清空数据空间时删除的「数据类」meta 键：语料指纹 + 构建时间 + 增量清单。
 # **保留** last_build（重建的源批次）、`ui_*` 配置（这个空间怎么用）与
 # doc_source_dir（文档原文目录）——清空数据不等于重置配置。
+#
+# 增量清单必须一起删：数据表都清空了，再声称「这些文件已入库」会让增量更新
+# 误以为没有新增、把用户挡在「本批次没有新增文件」上，只能靠全量重建恢复。
+# last_full_build 同理：它描述的是已经不存在的这批数据。
 DATA_META_KEYS = (
     "built_at",
     "profile_hash",
     "wiki_hash",
     "profile_count",
     "wiki_count",
+    INGESTED_CSV_KEY,
+    INGESTED_DOCS_KEY,
+    LAST_FULL_BUILD_KEY,
 )
 
 
@@ -555,6 +574,56 @@ def read_last_build() -> dict | None:
     那里能脱离数据库单测）。调用方负责切到正确的数据集（use_dataset）。
     """
     return parse_last_build(read_index_meta(LAST_BUILD_KEY))
+
+
+# ==================== 增量更新清单（manifest） ====================
+def _read_manifest_map(key: str) -> dict:
+    """读清单的一个桶；缺失 / JSON 坏 / 不是对象都降级成空 dict"""
+    raw = read_index_meta(key)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def read_ingest_manifest() -> dict:
+    """
+    读增量更新清单：{"csv": {文件名: {...}}, "docs": {文件名: {...}}}
+
+    只读、不抛异常（表不存在 / 键缺失 / JSON 坏都返回空桶）：
+    这两个键本来就可能不存在（M3 及更早构建的旧库），「没有清单」是正常状态。
+    """
+    return {
+        "csv": _read_manifest_map(INGESTED_CSV_KEY),
+        "docs": _read_manifest_map(INGESTED_DOCS_KEY),
+    }
+
+
+def write_ingest_manifest(csv_map: dict, docs_map: dict) -> None:
+    """
+    写增量更新清单（写操作，需在 writes_to 作用域内调用）
+
+    只写「这份数据空间当前有哪些文件已入库」这一件事，全量构建**整体替换**、
+    增量构建**合并本次处理过的文件**（合并逻辑在 builder，不在本层）。
+    中文不转义：meta 是 TEXT，排查时能直接读懂文件名与字段。
+    """
+    require_write_scope("write_ingest_manifest")
+    write_index_meta(INGESTED_CSV_KEY, json.dumps(csv_map or {}, ensure_ascii=False))
+    write_index_meta(INGESTED_DOCS_KEY, json.dumps(docs_map or {}, ensure_ascii=False))
+
+
+def write_last_full_build(payload: dict) -> None:
+    """记录最近一次**全量**构建的规模与耗时（写操作，需在 writes_to 作用域内调用）"""
+    require_write_scope("write_last_full_build")
+    write_index_meta(LAST_FULL_BUILD_KEY, json.dumps(payload or {}, ensure_ascii=False))
+
+
+def read_last_full_build() -> dict | None:
+    """读回最近一次全量构建记录；没有 / JSON 坏都返回 None"""
+    return parse_last_build(read_index_meta(LAST_FULL_BUILD_KEY))
 
 
 # ==================== 清空数据空间（M3 企业后台） ====================

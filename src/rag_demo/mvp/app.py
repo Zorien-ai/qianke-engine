@@ -337,15 +337,16 @@ def _analyze_fields(csv_files: list[dict]) -> tuple[list[dict], list[str]]:
     if missed:
         warnings.append("关键字段未识别到，建议手动指定：" + "、".join(missed))
 
-    # 金额列决定两件事：消费类结论、以及**没有等级列时**的等级推导。
-    # 有等级列就要说清「等级不受影响」，别让人以为还得再映射点什么。
+    # 金额列决定消费类结论；等级列决定等级是否可用。
+    # 第五轮起系统**不再从金额推导等级**（客户底线），所以两条警告各说各的：
     has_amount_col = any(f["key"] == "amount" and f["detected"] for f in fields)
     has_level_col = any(f["key"] == "member_level" and f["detected"] for f in fields)
     if all_columns and not has_amount_col:
+        warnings.append("没有识别到「订单金额」：客单价、消费类结论会缺失。")
+    if all_columns and not has_level_col:
         warnings.append(
-            "没有识别到「订单金额」：客单价、消费类结论会缺失"
-            + ("（会员等级用你自己的那一列，不受影响）。" if has_level_col
-               else "；本次也不会生成会员等级（没有等级列时，等级要靠金额分档）。")
+            "没有识别到「会员等级」：该字段将记为未知，系统不会按金额或其他字段推算"
+            "（需要等级请在字段确认页选择你数据里的等级列）。"
         )
 
     return fields, warnings
@@ -361,6 +362,11 @@ class BuildRequest(BaseModel):
     # 目标数据集：只接受 builder.BUILDABLE_DATASETS 里的名字（user / test）。
     # 默认 user —— 运营上传的数据进用户库；test 是首跑试验库。demo 不在白名单内。
     dataset: str = "user"
+    # 构建模式（第五轮）：
+    #   incremental 追加更新（默认）—— 只处理新上传的文件，只更新受影响的用户/文档
+    #   full        覆盖重建 —— 清空现有数据后全量重算（M2 的旧行为）
+    # 登录态下 dataset 仍由账号推导（红线）；mode 是「怎么算」不是「写哪个库」。
+    mode: str = "incremental"
     # 演示用：勾选后在「生成画像向量」这一步故意失败，
     # 用来验证「失败有可读中文提示 + 可重试」这条验收项。
     simulate_failure: bool = False
@@ -396,12 +402,51 @@ def health() -> dict:
 
 
 # ================= 1. 上传 =================
+def _file_state_map(upload_id: str) -> tuple[dict, dict]:
+    """
+    上传批次里每个文件的 sha256 与「是否已入库」状态（第 1/2 步展示用）
+
+    返回 ({csv 文件名: {"sha256","state"}}, {md 文件名: {...}})；
+    任何一步失败（库还没建 / 清单不可读 / 文件被删）都返回空映射**而不是报错**：
+    文件状态只是展示信息，不能让它把上传页打成 500。
+    """
+    empty: tuple[dict, dict] = ({}, {})
+    try:
+        from rag_demo.mvp import uploads
+        from rag_demo.mvp.builder import load_incremental_baseline
+
+        # 和构建同一个口径：登录态下数据集由账号推导（系统管理员→调试库，企业→本企业库）
+        dataset = _scope_dataset("user")
+        csv_paths, md_paths = uploads.paths(upload_id)
+        baseline = load_incremental_baseline(dataset)
+        manifest = baseline["manifest"] if baseline["available"] else None
+        csv_entries = [uploads.file_entry(p) for p in csv_paths]
+        md_entries = [uploads.file_entry(p) for p in md_paths]
+        classified = uploads.classify_files(csv_entries, md_entries, manifest)
+        return (
+            {
+                e["name"]: {"sha256": e["sha256"], "state": e["state"]}
+                for e in classified["csv_files"]
+            },
+            {
+                e["name"]: {"sha256": e["sha256"], "state": e["state"]}
+                for e in classified["md_files"]
+            },
+        )
+    except Exception as e:  # noqa: BLE001 状态不可用就降级，不阻断上传页
+        logger.info("上传批次文件状态不可用（%s）: %s", upload_id, e)
+        return empty
+
+
 def _state_payload(upload_id: str) -> dict:
     """
     该上传批次的完整状态：文件清单 + 字段识别 + 文档结构
 
     上传、删文件、示例填满、刷新页面恢复状态——四个场景返回**同一个结构**，
     前端因此只写一个渲染函数，不必区分「刚上传」和「恢复到一半」。
+
+    第五轮起每个文件补 `sha256` 与 `state`（new / ingested / changed，判断不了为 null）：
+    用户在第 1/2 步就能看到「这个文件已经入库了/是新文件」，而不是到第 3 步才发现。
     """
     csv_files = []
     md_paths = []
@@ -412,17 +457,34 @@ def _state_payload(upload_id: str) -> dict:
     except uploads.UploadError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
+    state_csv, state_md = _file_state_map(upload_id)
+    for item in csv_files:
+        extra = state_csv.get(item["name"]) or {}
+        item["sha256"] = extra.get("sha256")
+        item["state"] = extra.get("state")
+
     fields, field_warnings = _analyze_fields(csv_files)
     docs, doc_warnings = _analyze_docs(md_paths)
+
+    md_files = []
+    for d in docs:
+        extra = state_md.get(d["name"]) or {}
+        md_files.append(
+            {
+                "name": d["name"],
+                "size": d["size"],
+                "chars": d["chars"],
+                "sha256": extra.get("sha256"),
+                "state": extra.get("state"),
+            }
+        )
 
     return {
         "upload_id": upload_id,
         "csv_files": csv_files,
         # md 只回元信息（名字/大小/字符数），正文留在服务端——前端渲染文件列表用不到
         # 正文，而它可能有几万字，来回搬运只会让响应变大、还多一份可以不一致的副本
-        "md_files": [
-            {"name": d["name"], "size": d["size"], "chars": d["chars"]} for d in docs
-        ],
+        "md_files": md_files,
         "fields": fields,
         "docs": docs,
         "warnings": field_warnings + doc_warnings,
@@ -634,6 +696,8 @@ def _run_build(task_id: str, req: BuildRequest, csv_paths: list[str], md_paths: 
             # 把批次号带进构建线程：成功后落盘 meta.last_build，
             # 概况页拿它 + fields 就能一键重建（企业库清空后尤其重要）
             upload_id=req.upload_id,
+            # 第五轮：incremental=只处理新增文件；full=覆盖重建
+            mode=req.mode,
         )
         result = run_build(inputs, lambda ev: _apply_event(task, ev))
     except Exception as e:  # noqa: BLE001 构建失败必须变成任务状态，而不是打死线程
@@ -645,11 +709,19 @@ def _run_build(task_id: str, req: BuildRequest, csv_paths: list[str], md_paths: 
                 failed["status"] = "failed"
                 failed["note"] = str(e)
             task["error"] = str(e)
-            task["note"] = (
-                "构建失败。注意：画像/文档是**边写边提交**的，失败时库里可能是部分数据；"
-                "重试会先清空再重写，所以直接重试即可。检索索引是最后一步，本次没重建，"
-                "查询仍会看到上一版结果。"
-            )
+            if req.mode == "incremental":
+                # 增量是分批 commit 的：失败时可能已合并了一部分用户，
+                # 重试同一批会再累加一次（订单数翻倍，且不报错）——必须说清楚。
+                task["note"] = (
+                    "增量构建失败。注意：合并是边写边提交的，失败时**可能已有部分用户被合并**；"
+                    "重试同一批会把这些用户再累加一次。请改用「覆盖重建」恢复后再继续追加。"
+                )
+            else:
+                task["note"] = (
+                    "构建失败。注意：画像/文档是**边写边提交**的，失败时库里可能是部分数据；"
+                    "重试会先清空再重写，所以直接重试即可。检索索引是最后一步，本次没重建，"
+                    "查询仍会看到上一版结果。"
+                )
     else:
         with _BUILD_LOCK:
             for st in task["steps"]:
@@ -658,16 +730,20 @@ def _run_build(task_id: str, req: BuildRequest, csv_paths: list[str], md_paths: 
             task["status"] = "done"
             task["percent"] = 100
             task["step_index"] = len(BUILD_STEPS)
-            # 完成提示分开说：画像条数（多少个用户）与交易行数不是一回事，
-            # 早先写成「画像 700 行」——那其实是清洗后的交易行数，真实画像只有 616 个用户，
-            # 数字对不上会让人以为画像丢了。没上传 CSV 时更不能说「画像 0 行」：
-            # 那是「没重建」而不是「清空了」（见 builder 的 profiles=None）。
             idx = result.get("index_total", 0)
             tail = (
                 f"索引 {idx:,} 条，用时 {result.get('elapsed_s')}s，"
-                f"索引新鲜度 {result.get('freshness')}。可以开始提问了"
+                f"数据状态 {result.get('freshness')}。可以开始提问了"
             )
-            if result.get("profiles") is None:
+            if result.get("mode") == "incremental":
+                # 增量模式的「画像 X 个」是本次受影响用户数，不是总用户数——
+                # 说成「画像 X 个」会让用户以为数据只剩这么点（10 万变几百）
+                docs_changed = int(result.get("docs_new", 0)) + int(result.get("docs_updated", 0))
+                task["note"] = (
+                    f"增量构建完成：更新/新增 {result.get('profiles', 0):,} 个用户、"
+                    f"{docs_changed} 篇文档，其余数据未改动。{tail}"
+                )
+            elif result.get("profiles") is None:
                 task["note"] = f"构建完成：本次只更新了文档（未重建画像，上一批画像保持不变），{tail}"
             else:
                 task["note"] = (
@@ -677,12 +753,182 @@ def _run_build(task_id: str, req: BuildRequest, csv_paths: list[str], md_paths: 
             task["result"] = result
 
 
+# ================= 第 3 步：构建计划（增量判定，只读） =================
+def _dataset_plan_files(upload_id: str, dataset: str) -> tuple[dict, dict]:
+    """
+    当前批次的「文件清单 + 清单判定 + 增量基线」（plan 与 build 预检共用，只读）
+
+    返回 (classified, baseline)。异常原样上抛，由调用方翻译成 HTTP 语义：
+    上传内容不在 → 404；库/清单不可读不会抛（load_incremental_baseline 内部降级）。
+    """
+    from rag_demo.mvp import uploads
+    from rag_demo.mvp.builder import load_incremental_baseline
+
+    csv_paths, md_paths = uploads.paths(upload_id)
+    baseline = load_incremental_baseline(dataset)
+    manifest = baseline["manifest"] if baseline["available"] else None
+    csv_entries = [uploads.file_entry(p) for p in csv_paths]
+    md_entries = [uploads.file_entry(p) for p in md_paths]
+    classified = uploads.classify_files(csv_entries, md_entries, manifest)
+    return classified, baseline
+
+
+def _incremental_precheck(upload_id: str, dataset: str) -> dict:
+    """
+    增量构建前的只读预检：明确做到「不建任务就给出人话错误」
+
+    三道闸（与 builder._build_incremental 的判定同一套规则，这里只是提前拦）：
+        1. 没有基线（旧库/空库）→ 400，文案说明「先覆盖重建」
+        2. 没有新增/变更文件 → 400 契约原文
+    返回值是 classify_files 的结果（build 用它算进度初始总量）。
+    """
+    from rag_demo.mvp import uploads
+
+    try:
+        classified, baseline = _dataset_plan_files(upload_id, dataset)
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    existing = baseline["existing"]
+    if not baseline["available"]:
+        if existing["profiles"] or existing["chunks"]:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "该数据空间由旧版本构建，无法判断哪些文件已入库；"
+                    "请先做一次「覆盖重建」以启用增量更新"
+                ),
+            )
+        raise HTTPException(
+            status_code=400,
+            detail="当前数据空间还没有构建过（或数据已清空），无法增量更新；请选择「覆盖重建」",
+        )
+    if not classified["new_csv"] and not classified["new_md"] and not classified["changed_md"]:
+        detail = "本批次没有新增文件可追加；要重算全部数据请选「覆盖重建」"
+        skipped = classified["skipped_changed_csv"]
+        if skipped:
+            detail += (
+                "（同名 CSV 内容有变化已跳过："
+                + "、".join(skipped[:3])
+                + ("…" if len(skipped) > 3 else "")
+                + "；请改名后再上传）"
+            )
+        raise HTTPException(status_code=400, detail=detail)
+    return classified
+
+
+def _public_file_entries(entries: list[dict]) -> list[dict]:
+    """文件条目出网：去掉内部 mtime，只留 name/size/sha256/state"""
+    return [
+        {
+            "name": e["name"],
+            "size": e.get("size"),
+            "sha256": e.get("sha256"),
+            "state": e.get("state"),
+        }
+        for e in entries
+    ]
+
+
+@router.get("/plan")
+def build_plan(upload_id: str = "", dataset: str = "user") -> dict:
+    """
+    第 3 步的构建计划（**只读**）：告诉前端「增量能处理什么、已有数据多大」
+
+    响应（契约 B）：
+        dataset / mode_default / csv_files[{name,size,sha256,state}] /
+        md_files[...] / new_csv_count / new_md_count / changed_md_count /
+        skipped_changed_csv / existing{profiles,docs,chunks,built_at,last_mode,
+        last_elapsed_s,last_rows,last_full_elapsed_s} /
+        manifest{available,seeded_from} / can_incremental / incremental_block_reason / hint
+
+    `dataset` 只在 8002 独立调试服务（无登录态）下生效；8000 由账号推导。
+    """
+    from rag_demo.mvp import uploads
+    from rag_demo.mvp.builder import resolve_dataset
+
+    if not upload_id:
+        raise HTTPException(status_code=400, detail="缺少 upload_id：请先在第一步上传文件。")
+    _require_upload(upload_id)
+
+    try:
+        target = resolve_dataset(_scope_dataset(dataset), action="构建")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        scanned = uploads.scan(upload_id)
+        classified, baseline = _dataset_plan_files(upload_id, target)
+    except uploads.UploadError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    existing = baseline["existing"]
+    manifest_available = bool(baseline["available"])
+    if manifest_available:
+        can_incremental = True
+        block_reason = None
+    elif existing["profiles"] or existing["chunks"]:
+        can_incremental = False
+        block_reason = (
+            "该数据空间由旧版本构建，无法判断哪些文件已入库；"
+            "请先做一次「覆盖重建」以启用增量更新"
+        )
+    else:
+        can_incremental = False
+        block_reason = "当前数据空间还没有构建过（或数据已清空），第一次构建请选择「覆盖重建」"
+
+    rows_by_name = {f["name"]: int(f.get("row_count") or 0) for f in scanned["csv_files"]}
+    new_csv_rows = sum(rows_by_name.get(e["name"], 0) for e in classified["new_csv"])
+    new_md_count = len(classified["new_md"])
+    changed_md_count = len(classified["changed_md"])
+    hint = uploads.plan_hint(
+        len(classified["new_csv"]),
+        new_csv_rows,
+        new_md_count,
+        changed_md_count,
+        existing["profiles"],
+        classified["skipped_changed_csv"],
+    )
+
+    return {
+        "dataset": target,
+        "mode_default": "incremental" if can_incremental else "full",
+        "csv_files": _public_file_entries(classified["csv_files"]),
+        "md_files": _public_file_entries(classified["md_files"]),
+        "new_csv_count": len(classified["new_csv"]),
+        "new_md_count": new_md_count,
+        "changed_md_count": changed_md_count,
+        "skipped_changed_csv": classified["skipped_changed_csv"],
+        "existing": {
+            "profiles": existing["profiles"],
+            "docs": existing["docs"],
+            "chunks": existing["chunks"],
+            "built_at": existing["built_at"],
+            "last_mode": existing["last_mode"],
+            "last_elapsed_s": existing["last_elapsed_s"],
+            "last_rows": existing["last_rows"],
+            "last_full_elapsed_s": existing["last_full_elapsed_s"],
+        },
+        "manifest": {
+            "available": manifest_available,
+            "seeded_from": baseline["seeded_from"],
+        },
+        "can_incremental": can_incremental,
+        "incremental_block_reason": block_reason,
+        "hint": hint,
+    }
+
+
 @router.post("/build")
 def build(req: BuildRequest) -> dict:
     """
     启动**真实构建**任务，返回 task_id；前端随后轮询 /build/{id}
 
-    真实构建会写数据库（TRUNCATE + 全量重写），所以这里有两道前置检查：
+    第五轮起有**两种模式**（BuildRequest.mode）：
+        incremental（默认）追加更新：只处理新增文件、只更新受影响数据；
+                   进线程前先做只读预检（无基线/无新增文件直接 400，不建任务）
+        full        覆盖重建：清空后全量重算（旧行为）
+
+    共同的前置检查：
       1. 目标数据集必须在白名单内（demo 永远不在）——防「写错库」；
       2. 该数据集当前没有构建在跑——同一时刻两路写会被锁挡住，与其让用户
          看着进度条不动，不如立刻说清楚。
@@ -692,6 +938,13 @@ def build(req: BuildRequest) -> dict:
 
     _require_writer()
     _require_upload(req.upload_id)
+
+    # 构建模式校验（契约 B）：只认 incremental / full，其它一律 400
+    mode = (req.mode or "").strip().lower()
+    if mode not in ("incremental", "full"):
+        raise HTTPException(status_code=400, detail="构建模式只能是 incremental 或 full")
+    req.mode = mode
+
     # 登录态下数据集由账号推导（企业库 / 管理员调试库），前端传的 dataset 不采纳
     req.dataset = _scope_dataset(req.dataset)
     try:
@@ -722,15 +975,21 @@ def build(req: BuildRequest) -> dict:
     if not csv_paths and not md_paths:
         raise HTTPException(status_code=400, detail="没有可构建的数据，请回到第 1 步上传文件。")
 
+    # 增量模式先做只读预检：没有基线 / 没有新增文件在这里就 400，
+    # 不要把「注定失败」的任务丢进后台线程让用户等一轮轮询。
+    classified: dict | None = None
+    if mode == "incremental":
+        classified = _incremental_precheck(req.upload_id, dataset)
+
     # 必填但没映射的字段：**只警告不拦截**——MVP 明确要求「允许跳过不重要字段」，
     # 用户的判断优先于我们去替他决定。真正拦下来只会让人卡在这一步。
     # 唯一硬性的是 user_id：没有它就没有「一个用户」这个聚合单位（ingest 会自己报错）。
     #
-    # ⚠ 这道检查只在**有 CSV** 时才做。没有 CSV 就没有任何列可选，此时要求 user_id
-    #   是一道无解的关卡：用户照做也做不到（第 2 步的下拉框是空的），
-    #   而提示还让他「回到上一步选择」。只传文档的构建本来就成立——文档问答不需要画像。
-    #   （2026-10-17 走流程时实测：只传两篇文档 → 构建被 400 拦下。）
-    if csv_paths:
+    # ⚠ 这道检查只在**本次真的要合并新 CSV** 时才做。没有 CSV 就没有任何列可选，
+    #   此时要求 user_id 是一道无解的关卡（第 2 步的下拉框是空的）；
+    #   增量模式下只追加了文档时同理，画像合并不发生，不需要 user_id。
+    new_csv_exists = bool(csv_paths) if classified is None else bool(classified["new_csv"])
+    if new_csv_exists:
         missing = [
             spec["label"] for spec in FIELD_DEFS
             if spec["required"] and not req.fields.get(spec["key"])
@@ -741,9 +1000,7 @@ def build(req: BuildRequest) -> dict:
                 detail=f"「{missing[0]}」还没选对应的列。没有它就无法把订单聚合到人身上，请回到上一步选择。",
             )
     else:
-        # 只传文档、没有交易数据：仍允许构建（文档问答本来就不需要画像），
-        # 但必须说清楚「这次构建不出画像」，否则用户会以为查不到人群是自己的问题。
-        logger.info("构建任务不含 CSV，仅文档问答")
+        logger.info("构建任务不含需要合并的 CSV，仅文档更新")
 
     # 非阻塞试探：拿不到锁说明该数据集有别的活在干（构建，或有人正在提问——
     # 第 4 步起一次问答也整段持锁，它要真读库十几秒）。
@@ -765,7 +1022,14 @@ def build(req: BuildRequest) -> dict:
     # 清洗与聚合是一次性操作（一次读全部、一次聚合全部），没有可切分的进度，
     # 因此这两步只在完成时跳变，这是它们的真实粒度，不是显示问题。
     scanned = uploads.scan(req.upload_id)
-    rows = sum(f["row_count"] for f in scanned["csv_files"])
+    if mode == "incremental" and classified is not None:
+        # 增量：只把**本次要处理的新文件**算进进度总量，已入库文件不参与本轮
+        fresh_names = {e["name"] for e in classified["new_csv"]}
+        rows = sum(f["row_count"] for f in scanned["csv_files"] if f["name"] in fresh_names)
+        md_total = len(classified["new_md"]) + len(classified["changed_md"])
+    else:
+        rows = sum(f["row_count"] for f in scanned["csv_files"])
+        md_total = len(md_paths)
 
     task_id = uuid.uuid4().hex[:12]
     with _BUILD_LOCK:
@@ -773,6 +1037,7 @@ def build(req: BuildRequest) -> dict:
             "task_id": task_id,
             "upload_id": req.upload_id,
             "dataset": dataset,
+            "mode": mode,
             "status": "running",
             "percent": 0,
             "step_index": 0,
@@ -786,8 +1051,8 @@ def build(req: BuildRequest) -> dict:
         # 起始总量只用**已知的真值**：清洗几行（落盘时 pandas 读过）
         if rows:
             _BUILD_TASKS[task_id]["steps"][_STEP_INDEX["clean"]]["total"] = rows
-        if md_paths:
-            _BUILD_TASKS[task_id]["steps"][_STEP_INDEX["chunk"]]["total"] = len(md_paths)
+        if md_total:
+            _BUILD_TASKS[task_id]["steps"][_STEP_INDEX["chunk"]]["total"] = md_total
         # 只保留最近的任务，避免长时间开着进程内存无限涨
         for old in sorted(_BUILD_TASKS, key=lambda k: _BUILD_TASKS[k]["started_at"])[:-5]:
             _BUILD_TASKS.pop(old, None)
@@ -795,9 +1060,47 @@ def build(req: BuildRequest) -> dict:
             _CONFIRMED_FIELDS[req.upload_id] = dict(req.fields)
 
     threading.Thread(target=_run_build, args=(task_id, req, csv_paths, md_paths), daemon=True).start()
-    logger.info("构建任务已启动: %s（数据集 %s，批次 %s：CSV %d 个 / 文档 %d 篇，清洗 %d 行）",
-                task_id, dataset, req.upload_id, len(csv_paths), len(md_paths), rows)
-    return {"task_id": task_id, "dataset": dataset}
+    logger.info(
+        "构建任务已启动: %s（数据集 %s，模式 %s，批次 %s：CSV %d 个 / 文档 %d 篇，本轮清洗 %d 行）",
+        task_id, dataset, mode, req.upload_id, len(csv_paths), len(md_paths), rows,
+    )
+    return {"task_id": task_id, "dataset": dataset, "mode": mode}
+
+
+@router.get("/build/active")
+def build_active() -> dict:
+    """
+    当前数据空间下最近一个**还在跑**的构建任务（页面离开后回来恢复进度用）
+
+    没有则返回 {"task": null}。task 结构与 GET /build/{task_id} 完全一致，
+    前端因此复用同一套渲染/轮询逻辑。
+
+    ⚠ 必须定义在 `/build/{task_id}` **之前**：Starlette 按注册顺序匹配，
+    否则 "active" 会被当成一个 task_id 捕获。
+    """
+    account = _account()
+    try:
+        dataset = _scope_dataset("user")
+    except HTTPException:
+        raise
+
+    candidates: list[dict] = []
+    with _BUILD_LOCK:
+        for task in _BUILD_TASKS.values():
+            if task.get("status") != "running":
+                continue
+            if task.get("dataset") != dataset:
+                continue
+            candidates.append(task)
+    candidates.sort(key=lambda t: t.get("started_at") or 0, reverse=True)
+
+    for task in candidates:
+        # 任务可能属于同一企业的其他人：按 upload 归属再校验一次，
+        # 不能因为「同一个库」就能看到别人的构建进度
+        if account is None or auth.can_access_upload(account, task.get("upload_id", "")):
+            with _BUILD_LOCK:
+                return {"task": deepcopy(task)}
+    return {"task": None}
 
 
 @router.get("/build/{task_id}")
@@ -1068,21 +1371,18 @@ def put_ui_config(req: UiConfigRequest) -> dict:
             raise HTTPException(status_code=400, detail="示例问句太长了（超过 100 字）。")
         values["sample_question"] = question or None
     if req.member_level_names is not None:
-        from rag_demo.config import MEMBER_LEVEL_TIER_COUNT
-
-        # 中文逗号也认：用户从表格里复制过来多半是全角
+        # DEPRECATED（第五轮）：会员等级不再由系统推导，档位名**不再参与构建/检索**。
+        # 保留这个字段只为兼容旧前端与历史配置（读得出、写得进，旧页面不会 400）；
+        # 但不再校验档位数量，也不再有任何代码读它来分档。
         names = [
             n.strip()
             for n in req.member_level_names.replace("，", ",").split(",")
             if n.strip()
         ]
-        if names and len(names) != MEMBER_LEVEL_TIER_COUNT:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"等级档位名需要 {MEMBER_LEVEL_TIER_COUNT} 个（高档在前，"
-                    "最后一个是兜底档），用逗号分隔。"
-                ),
+        if req.member_level_names.strip():
+            logger.warning(
+                "member_level_names 已废弃（第五轮取消会员等级推导），"
+                "本次写入不影响构建结果"
             )
         values["member_level_names"] = ",".join(names) if names else None
 

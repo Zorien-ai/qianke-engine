@@ -40,16 +40,14 @@ from rag_demo.config import (
     MODEL_PATH,
     SEARCH_INDEX_TABLE,
 )
-from rag_demo.config import DEMO_MEMBER_LEVEL_NAMES
 from rag_demo.db.connection import (
     close_conn,
-    current_dataset,
     get_conn,
     require_write_scope,
     writes_to,
 )
 from rag_demo.db import schema_facts
-from rag_demo.db.schema import ensure_base_tables, read_ui_config
+from rag_demo.db.schema import ensure_base_tables
 from rag_demo.splitter import DOC_TYPE_PROFILE, split
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -58,31 +56,19 @@ logger = logging.getLogger(__name__)
 # ================= 配置区 =================
 BATCH = 50
 
-# 会员等级分档：**按本次构建的数据分布标定**，不再用写死的绝对金额。
+# 会员等级**不再由系统推导**（M3 第五轮，客户底线）。
 #
-# 这条演进线留着，免得又被「修」回去：
-#   1. 最初是绝对金额（钻石 2000 / 黄金 1000 / 白银 500）→ 区分度崩了（钻石占 59%）
-#   2. 改成按分位数标定，但把**当时那份数据的实测值**写成了常量
-#      （14555 / 6680 / 2495 = 演示数据的 p95 / p80 / p50）
-#   3. 常量搬到真实小店上就失效了：真实客单价中位 176 元，永远到不了 2495，
-#      195 个用户全是「普通」——字段在、规则也在，等级却等于没生效（见 bug/10.17）
-#   4. 现在每次构建按本批用户人均客单价的分位数分档：口径与第 2 步完全一致，
-#      数据换了规则跟着走。演示数据上算出来仍≈原来那三个数（p95/p80/p50 不变）
+# 历史演进别改回去：
+#   M2 早期没映射等级列时，系统按本批用户人均客单价的分位数推导「钻石/黄金/…」。
+#   对演示数据看着成立，但真实客户的数据口径不是「金额高=等级高」：
+#   企业自己的黑卡/金卡可能有合同、渠道、人工评定等依据。系统凭空按金额分档，
+#   等于替客户编了一套不存在的等级体系，还会污染检索与统计。
 #
-# 生效前提（缺一不可，缺了就把整列留空并说明原因，不产出「看起来精确」的假结论）：
-#   字段：金额列必须映射上（没有 avg_amount 就没有等级）
-#   规则：本批用户数 ≥ MEMBER_LEVEL_MIN_USERS（几个人算分位数没有意义）
-#
-# 注：本表不跟 data/docs/tag_definitions.md 的客单标签挂钩——
-#     该口径对演示数据同样偏松（约 70% 用户满足），属另一个待处理的数据问题。
-#
-# 这里只保留**分位点**（系统契约：怎么切）。档位**名称**不在这里——
-# 名字是业务语义，不同客户叫法不同（钻石 / 黑卡 / VIP3），从数据推不出来。
-# 写死会怎样：M2 用户上传机械设备数据、没映射等级列时，画像里会被拼出
-# 「钻石会员 / 黄金会员」，凭空长出一套不属于他业务的等级，还污染检索与统计。
-# 名称从当前数据集的 UI 配置 member_level_names 读（见 member_level_names()）。
-MEMBER_LEVEL_QUANTILES = (0.95, 0.80, 0.50)
-MEMBER_LEVEL_MIN_USERS = 20
+# 现在的规则（写死在 build_profiles 里）：
+#   · 用户在字段确认页映射了等级列 → 用他给的值（user）；
+#   · 没映射 → member_level 整列记为未知（None），level_source="none"，
+#     **绝不按金额或其他字段推算**。
+# 相关推算常量/函数（MEMBER_LEVEL_QUANTILES 等）已删除，不要再加回来。
 
 # 结构化字段 DDL（幂等，保留现有 8110 条数据，不 DROP 重建）
 ALTER_SQL = """
@@ -209,61 +195,6 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def member_level_names() -> list[str] | None:
-    """
-    档位名称：从当前数据集的 UI 配置读（member_level_names，逗号分隔，高档在前）
-
-    返回 None 表示「这份数据不该推导等级」——不猜、不套模板。
-    demo 是仓库自带的固定数据集，档位名属于它的数据说明，故有默认值；
-    用户自己的数据集必须显式配置，否则宁可不产出等级。
-    """
-    raw = ""
-    try:
-        raw = (read_ui_config().get("member_level_names") or "").strip()
-    except Exception as e:  # noqa: BLE001 读不到配置就当没配
-        logger.warning("读取等级档位名失败: %s", e)
-    names = [n.strip() for n in raw.split(",") if n.strip()]
-    if not names and current_dataset() == "demo":
-        names = list(DEMO_MEMBER_LEVEL_NAMES)
-    if len(names) != len(MEMBER_LEVEL_QUANTILES) + 1:
-        return None
-    return names
-
-
-def calibrate_member_levels(
-    avg_amounts: pd.Series, names: list[str] | None
-) -> list[tuple[str, float]] | None:
-    """
-    按本批用户的人均客单价分布算出分档阈值；前提不满足返回 None
-
-    None 的含义是「**本次等级不生效**」，调用方据此把整列留空并解释原因。
-    这和「算出来全是普通」是两件不同的事：前者诚实，后者是假装有结论。
-    """
-    if names is None:
-        return None
-    values = pd.to_numeric(avg_amounts, errors="coerce").dropna()
-    if len(values) < MEMBER_LEVEL_MIN_USERS:
-        return None
-    return [
-        (names[i], float(values.quantile(q)))
-        for i, q in enumerate(MEMBER_LEVEL_QUANTILES)
-    ]
-
-
-def build_member_level(
-    avg_amount: float | None,
-    thresholds: list[tuple[str, float]] | None,
-    fallback: str | None,
-) -> str | None:
-    """按标定好的阈值判档；没有金额数据、或规则本次没生效时返回 None"""
-    if thresholds is None or not _present(avg_amount) or not fallback:
-        return None
-    for name, threshold in thresholds:
-        if avg_amount >= threshold:
-            return name
-    return fallback
 
 
 def _clip_text(value: Any, *, field: str, limit: int) -> str | None:
@@ -520,10 +451,11 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
             logger.warning("下单时间列里没有可用时间值，将跳过「最近购买」相关聚合")
 
     if not has_amount:
-        # 有等级列时别说「没有会员等级」——那种情况等级照常有，缺的只是消费类结论
+        # 有等级列时别说「没有会员等级」——那种情况等级照常有，缺的只是消费类结论。
+        # 注意：**不要再提「推导的会员等级」**——第五轮起系统不再按金额推算等级。
         logger.warning(
             "未指定「订单金额」字段：画像里不会有消费金额%s",
-            "" if has_level else "与推导的会员等级",
+            "（会员等级用你自己的那一列，不受影响）" if has_level else "",
         )
     if not has_category:
         logger.warning("未指定「商品类目」字段：画像里不会有偏好品类")
@@ -580,9 +512,11 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
               .apply(agg_user, include_groups=False)
               .reset_index()
     )
-    # ---------- 会员等级：用户自己的口径优先，没有才推导 ----------
+    # ---------- 会员等级：用户自己的口径，**没有就是未知**（不再推导） ----------
     # 「把口径交给业务」：他店里的「黑卡」就是黑卡，系统不去猜一个相对位置。
-    # 只有**没给等级列**时才回退到按本批分位数推导（那是上一块的做法）。
+    # 没映射等级列时**绝不**回退到按金额分档（M2 曾经的 derived 分支已删除）：
+    # 金额高不代表等级高（合同/渠道/人工评定都可能影响），凭空造一套等级
+    # 会让检索与统计给出看起来精确、实际不属于客户业务的结论。
     if has_level:
         level_source = "user"
         given = profiles["member_level_raw"].map(_clean_level)
@@ -590,44 +524,20 @@ def build_profiles(df_all: pd.DataFrame) -> pd.DataFrame:
         filled = int(given.notna().sum())
         logger.info("会员等级：使用用户自己那一列（%d/%d 个用户有值）", filled, len(profiles))
         if filled < len(profiles):
-            # 缺值**不拿推导值去补**：一列里混两套等级名（黑卡 / 钻石）比留几个空更糟，
-            # 检索和统计都没法解释「为什么他身上有两个名字」。
             logger.warning(
-                "会员等级：%d 个用户在自己那列里没有值，这些用户不产出等级"
-                "（不与推导值混用）",
+                "会员等级：%d 个用户在自己那列里没有值，这些用户等级记为未知"
+                "（不推导、不补值）",
                 len(profiles) - filled,
             )
     else:
-        names = member_level_names()
-        thresholds = calibrate_member_levels(profiles["avg_amount"], names)
-        if thresholds is None:
-            # 说清「为什么这一列是空的」：可能没金额列、人太少，或没配档位名。
-            # 用户看到的画像里不会有等级片段，日志里必须有据可查。
-            level_source = "none"
-            if names is None:
-                logger.info(
-                    "会员等级本次不生效：未映射等级列，且未配置档位名"
-                    "（member_level_names，需 %d 个名字：高档 → 兜底档）",
-                    len(MEMBER_LEVEL_QUANTILES) + 1,
-                )
-            else:
-                logger.info(
-                    "会员等级本次不生效（没有等级列，需要金额列且至少 %d 个用户；本批 %d 个用户）",
-                    MEMBER_LEVEL_MIN_USERS, len(profiles),
-                )
-        else:
-            level_source = "derived"
-            logger.info(
-                "会员等级分档阈值（未映射等级列，按本批 %d 个用户的人均客单价标定）：%s",
-                len(profiles),
-                "；".join(f"{name} ≥ {value:.2f}" for name, value in thresholds),
-            )
-        fallback = names[-1] if names else None
-        profiles["member_level"] = profiles["avg_amount"].apply(
-            lambda v: build_member_level(v, thresholds, fallback)
+        level_source = "none"
+        profiles["member_level"] = None
+        logger.info(
+            "会员等级：未映射等级列，该列记为未知，不按金额推算（企业口径）"
         )
     # 用 attrs 带出「这一列是怎么来的」，不改函数签名（build_profiles 有别的调用方，
     # 返回元组会把它们全弄坏）。调用方按需取，取不到就当 unknown。
+    # 取值只有两种：user（用户映射的等级列）/ none（未提供，不推导）
     profiles.attrs["member_level_source"] = level_source
     profiles["profile_text"] = profiles.apply(build_profile_text, axis=1)
 
@@ -789,9 +699,302 @@ def ingest_transactions(
     return {
         "rows": len(df_all),
         "profiles": count,
-        # 这一列是怎么来的：user（用户自己的等级列）/ derived（按本批分位推导）/ none
+        # 这一列是怎么来的：user（用户映射的等级列）/ none（未提供，系统不推导）
         "member_level_source": profiles.attrs.get("member_level_source", "unknown"),
     }
+
+
+# ==================== 增量合并（M3 第五轮：追加更新） ====================
+# 背景：真实测试者 10 万行数据，追加一个文件要全量重跑约 2 小时。增量模式只处理
+# **新上传的 CSV/MD**，并且只更新这些文件里出现的用户；其余用户一行都不动。
+#
+# 这一节拆成两层，理由与「为什么判定层要纯函数」相同：
+#   merge_profile_row  纯函数——合并规则本身（一行用户 + 一批新订单），可脱库单测；
+#   merge_incremental  DB 编排——读旧行、向量化、写回、进度回调。
+# 合并规则一旦写错（例如把 total_amount 覆盖而不是相加），订单量不会报错，
+# 只会安静地少算或多算——所以逐条规则都写进注释，并由 tests/test_incremental.py 锁住。
+
+# 读旧画像行用到的列（与 user_profile_vectors 对齐，user_name 不在库里）
+_EXISTING_PROFILE_COLS = (
+    "user_id", "age", "gender", "city", "member_level", "order_count",
+    "total_amount", "avg_amount", "top_category", "days_since_last_buy",
+    "metadata", "profile_text",
+)
+_EXISTING_BATCH = 500
+
+_INSERT_PROFILE_SQL = """INSERT INTO user_profile_vectors
+    (user_id, profile_text, embedding, dept, sensitivity, metadata,
+     age, gender, city, member_level, order_count, total_amount,
+     avg_amount, top_category, days_since_last_buy, platforms)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+
+_UPDATE_PROFILE_SQL = """UPDATE user_profile_vectors
+    SET profile_text = %s, embedding = %s, dept = %s, sensitivity = %s, metadata = %s,
+        age = %s, gender = %s, city = %s, member_level = %s, order_count = %s,
+        total_amount = %s, avg_amount = %s, top_category = %s,
+        days_since_last_buy = %s, platforms = %s, update_time = NOW()
+    WHERE user_id = %s"""
+
+
+def _first_present(*values: Any) -> Any:
+    """取第一个「有内容」的值（没有则 None）——新值优先、旧值兜底，不猜不补"""
+    for value in values:
+        if _present(value):
+            return value
+    return None
+
+
+def _sum_present(*values: Any) -> float | None:
+    """把「有内容」的数值相加；全都缺失时返回 None（缺失≠0，不能当 0 累加）"""
+    numbers = [float(v) for v in values if _present(v)]
+    return sum(numbers) if numbers else None
+
+
+def _min_present(*values: Any) -> int | None:
+    """取「有内容」的整数最小值（天数类指标合并用）"""
+    numbers = [int(v) for v in values if _present(v)]
+    return min(numbers) if numbers else None
+
+
+def _merge_platforms(old: Any, new: Any) -> str | None:
+    """活跃平台取并集：旧画像里出现过的平台不会因为这次没出现就消失"""
+    parts: list[str] = []
+    for raw in (old, new):
+        for item in str(raw or "").split(","):
+            item = item.strip()
+            if item and item not in parts:
+                parts.append(item)
+    return ",".join(sorted(parts)) or None
+
+
+def merge_profile_row(old: dict | None, new: dict) -> dict:
+    """
+    纯函数：把一个用户的新聚合行合并进旧画像行（不碰数据库、不算向量）
+
+    old: 库里的旧行（dict；None = 库里还没有这个用户）
+    new: 本次新增 CSV 聚合出的一行（build_profiles 的输出记录）
+
+    合并规则（客户底线，测试逐条断言）：
+      order_count   = old + new          —— 订单数精确相加
+      total_amount  = old + new          —— 总消费精确相加
+      avg_amount    = total / order_count（count=0 → None，不产生 NaN）
+      age/gender/city/member_level：**新文件有值用新值，否则保留旧值**（不猜、不推导）
+      days_since_last_buy = min(old, new)——旧值基于更早的快照，取 min 是保守近似
+                                            （真实最近一次购买只会更近，不会更远）
+      top_category  ：新文件有值用新值（已在新文件内按金额加权）；否则保留旧值
+                      —— 旧品类的金额已无法拆分，拿旧金额做「假加权」只会算错
+      platforms     ：新旧取并集（老客户换平台消费，旧平台不应消失）
+      user_name     ：同属性规则（新有值用新，否则保留；库里不存该列时通常为 None）
+    """
+    old = old or {}
+    old_count = _to_int(old.get("order_count")) or 0
+    new_count = _to_int(new.get("order_count")) or 0
+    order_count = old_count + new_count
+
+    total_amount = _sum_present(old.get("total_amount"), new.get("total_amount"))
+    avg_amount = (
+        round(total_amount / order_count, 2)
+        if (total_amount is not None and order_count > 0)
+        else None
+    )
+
+    return {
+        "user_id": _first_present(new.get("user_id"), old.get("user_id")),
+        "user_name": _first_present(new.get("user_name"), old.get("user_name")),
+        "age": _first_present(new.get("age"), old.get("age")),
+        "gender": _first_present(new.get("gender"), old.get("gender")),
+        "city": _first_present(new.get("city"), old.get("city")),
+        "member_level": _first_present(new.get("member_level"), old.get("member_level")),
+        "order_count": order_count,
+        "total_amount": total_amount,
+        "avg_amount": avg_amount,
+        "top_category": _first_present(new.get("top_category"), old.get("top_category")),
+        "days_since_last_buy": _min_present(
+            old.get("days_since_last_buy"), new.get("days_since_last_buy")
+        ),
+        "platforms": _merge_platforms(old.get("platforms"), new.get("platforms")),
+    }
+
+
+def _load_existing_profiles(cur: Any, user_ids: list[str]) -> dict[str, dict]:
+    """
+    按 user_id 分批读取旧画像行（只读本次受影响的用户）
+
+    只读受影响用户而不是全表：增量更新的价值就在「10 万用户里只有几百个要动」，
+    一次全表 SELECT 会把省下的时间又还回去。
+    """
+    existing: dict[str, dict] = {}
+    ids = [str(uid) for uid in user_ids]
+    for i in range(0, len(ids), _EXISTING_BATCH):
+        chunk = ids[i:i + _EXISTING_BATCH]
+        cur.execute(
+            f"SELECT {', '.join(_EXISTING_PROFILE_COLS)} FROM user_profile_vectors "
+            f"WHERE user_id = ANY(%s)",
+            (chunk,),
+        )
+        for row in cur.fetchall():
+            record = dict(zip(_EXISTING_PROFILE_COLS, row))
+            meta = record.get("metadata")
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except (TypeError, ValueError):
+                    meta = {}
+            record["platforms"] = (meta or {}).get("platforms") if isinstance(meta, dict) else None
+            existing[str(record["user_id"])] = record
+    return existing
+
+
+def merge_incremental(
+    csv_paths: list[str],
+    column_map: dict[str, str] | None,
+    model: SentenceTransformer,
+    progress: ProgressFn | None = None,
+    on_phase: PhaseFn | None = None,
+) -> dict:
+    """
+    增量合并：只把**新增 CSV** 的订单合并进已有画像，未出现的用户一行都不动
+
+    参数与 ingest_transactions 对齐（progress/on_phase 语义相同）：
+        progress(已完成, 总数, 说明) 每写一批 commit 后回调
+        on_phase("load_done"/"profile_done", 真实数量)
+
+    返回：
+        rows_incremental  本次新增 CSV 的交易行数
+        profiles_new      新增用户数（库里原本没有）
+        profiles_updated  更新用户数（合并旧画像）
+        profiles          = profiles_new + profiles_updated（本次受影响用户数）
+        user_ids          受影响用户 ID 列表（检索索引按它做增量更新）
+        member_level_source  user / none（等级只来自用户映射列，不推导）
+
+    ⚠ 必须在 writes_to(...) 作用域内调用；写入是**分批 commit** 的，
+    中途失败会留下部分已合并数据（重试同一批会重复累加，见 builder 的失败提示）。
+    """
+    dataset = require_write_scope("merge_incremental")
+    if not csv_paths:
+        raise ValueError("没有新增的 CSV 文件，无法增量更新（要重算全部数据请选「覆盖重建」）")
+    if model is None:
+        raise ValueError("增量合并需要传入向量模型（服务路径必须复用检索侧单例）")
+
+    df_new = load_transactions(csv_paths, column_map)
+    if df_new is None or len(df_new) == 0:
+        # 空文件不能静默通过：否则会得到「构建成功但一个用户都没更新」的假象
+        raise ValueError("新增的 CSV 没有解析出任何交易记录，无法增量更新")
+    if on_phase:
+        on_phase("load_done", {"rows": len(df_new)})
+
+    new_profiles = build_profiles(df_new)
+    if len(new_profiles) == 0:
+        raise ValueError("新增的 CSV 没有聚合出任何用户，无法增量更新")
+    if on_phase:
+        on_phase("profile_done", {"profiles": len(new_profiles)})
+
+    # 合并后的「最近购买」只能近似重建：库里只存了相对天数，没有绝对日期。
+    # 用新数据的快照日 - 合并后的天数，得到与 days_since_last_buy 同一口径的日期；
+    # 当旧天数更小时这个日期会偏新（保守近似），但不影响检索语义（画像文本只到天）。
+    snapshot_date = None
+    if "purchase_time" in df_new.columns:
+        candidate = df_new["purchase_time"].max()
+        snapshot_date = candidate if _present(candidate) else None
+
+    conn = get_conn(dataset)
+    cur = conn.cursor()
+    try:
+        ensure_base_tables(cur)
+        ensure_schema(cur)
+        conn.commit()
+
+        records = new_profiles.to_dict("records")
+        user_ids = [str(row["user_id"]) for row in records]
+        existing = _load_existing_profiles(cur, user_ids)
+
+        merged_rows: list[dict] = []
+        for row in records:
+            uid = str(row["user_id"])
+            old = existing.get(uid)
+            merged = merge_profile_row(old, row)
+            if snapshot_date is not None and _present(merged.get("days_since_last_buy")):
+                merged["last_buy"] = snapshot_date - pd.Timedelta(
+                    days=int(merged["days_since_last_buy"])
+                )
+            else:
+                merged["last_buy"] = None
+            merged["profile_text"] = build_profile_text(pd.Series(merged))
+            merged["_is_new"] = old is None
+            merged_rows.append(merged)
+
+        profiles_new = 0
+        profiles_updated = 0
+        total = len(merged_rows)
+        logger.info("增量合并：受影响用户 %d（新增 %d / 更新 %d）",
+                    total,
+                    sum(1 for m in merged_rows if m["_is_new"]),
+                    sum(1 for m in merged_rows if not m["_is_new"]))
+        try:
+            for i in range(0, total, BATCH):
+                batch = merged_rows[i:i + BATCH]
+                vecs = model.encode(
+                    [m["profile_text"] for m in batch],
+                    batch_size=16,
+                    show_progress_bar=False,
+                )
+                for m, vec in zip(batch, vecs):
+                    meta = json.dumps(
+                        {
+                            "platforms": m["platforms"],
+                            "top_category": m["top_category"],
+                        },
+                        ensure_ascii=False,
+                    )
+                    values = (
+                        m["profile_text"],
+                        vec,
+                        "sales",
+                        1,
+                        meta,
+                        _to_int(m["age"]),
+                        m["gender"],
+                        m["city"],
+                        m["member_level"],
+                        _to_int(m["order_count"]),
+                        _to_float(m["total_amount"]),
+                        _to_float(m["avg_amount"]),
+                        m["top_category"],
+                        _to_int(m["days_since_last_buy"]),
+                        m["platforms"],
+                    )
+                    if m["_is_new"]:
+                        cur.execute(_INSERT_PROFILE_SQL, (str(m["user_id"]),) + values)
+                        profiles_new += 1
+                    else:
+                        cur.execute(_UPDATE_PROFILE_SQL, values + (str(m["user_id"]),))
+                        profiles_updated += 1
+                conn.commit()
+                done = min(i + BATCH, total)
+                if progress:
+                    progress(done, total, "合并画像")
+        except psycopg2.errors.StringDataRightTruncation as e:
+            conn.rollback()
+            raise ValueError(
+                "增量合并失败：某个文本字段的值超过数据库列长度限制"
+                "（相关列宽会自动扩容，可直接重试构建）。原始错误：" + str(e)
+            ) from e
+
+        schema_facts.invalidate()
+        logger.info(
+            "增量合并完成：新增用户 %d / 更新用户 %d（其余用户未改动）",
+            profiles_new, profiles_updated,
+        )
+        return {
+            "rows_incremental": int(len(df_new)),
+            "profiles_new": profiles_new,
+            "profiles_updated": profiles_updated,
+            "profiles": profiles_new + profiles_updated,
+            "user_ids": user_ids,
+            "member_level_source": new_profiles.attrs.get("member_level_source", "unknown"),
+        }
+    finally:
+        cur.close()
 
 
 def verify(cur: Any) -> None:

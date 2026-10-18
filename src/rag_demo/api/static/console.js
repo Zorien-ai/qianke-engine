@@ -1145,6 +1145,9 @@
       var data = await postJson("/api/wizard/build", {
         upload_id: state.src.upload_id,
         fields: state.src.fields || {},
+        // 旧版知识库页的「重建」= 覆盖重建；第五轮起后端默认是增量模式，
+        // 不显式传 mode=full 会被「没有新增文件可追加」的预检拦下。
+        mode: "full",
       });
       if (!data.task_id) throw new Error("接口没有返回 task_id，无法跟踪构建进度");
       build.taskId = data.task_id;

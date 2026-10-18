@@ -42,7 +42,7 @@ FIELD_DEFS: list[dict] = [
         "key": "amount",
         "label": "订单金额",
         "required": False,
-        "hint": "客单价类问句的依据；会员等级按它的人均分布自动分档（没映射等级列、也没配档位名时就没有等级）",
+        "hint": "客单价类问句的依据；未映射时消费类结论会缺失。系统不会用金额推算会员等级",
         "synonyms": [
             "amount", "order_amount", "pay_amount", "total_amount", "price", "gmv",
             "订单金额", "实付金额", "支付金额", "成交金额", "金额", "客单价", "交易金额",
@@ -86,7 +86,7 @@ FIELD_DEFS: list[dict] = [
         "key": "member_level",
         "label": "会员等级",
         "required": False,
-        "hint": "你自己的等级口径（黑卡 / 金卡 / VIP3…）：映射了就直接用你的，不映射才按消费金额推导",
+        "hint": "你自己的等级口径（黑卡 / 金卡 / VIP3…）：映射了就直接用你的；未映射则记为未知，系统不会按金额推算",
         "synonyms": [
             "member_level", "member_grade", "level", "vip_level", "grade", "tier",
             "会员等级", "客户等级", "会员级别", "会员星级", "VIP等级", "等级",

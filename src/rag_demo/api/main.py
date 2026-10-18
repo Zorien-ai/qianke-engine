@@ -952,8 +952,8 @@ def _stats_snapshot() -> dict:
             "SELECT member_level, COUNT(*) FROM user_profile_vectors "
             "GROUP BY member_level ORDER BY COUNT(*) DESC"
         )
-        # 丢掉 NULL 档：member_level 可能整列为空（未映射等级列且未配置档位名），
-        # 那不该显示成「null 占比 xx%」
+        # 丢掉 NULL 档：member_level 可能整列为空（用户未映射等级列；第五轮起取消
+        # 「按金额推导等级」，未映射就是未知），那不该显示成「null 占比 xx%」
         levels = {k: v for k, v in cur.fetchall() if k is not None}
 
         cur.execute(

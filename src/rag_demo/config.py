@@ -111,16 +111,9 @@ def register_dataset(name: str, dbname: str) -> dict:
 # 这正是保住既有评测基线的前提。向导的路由会显式切到 user。
 DEFAULT_DATASET = "demo"
 
-# demo 数据集的会员等级档位名（**只给 demo 用**）。
-# 档位名是业务语义，从数据推不出来：不同客户叫钻石 / 黑卡 / VIP3。
-# 演示数据是仓库自带的固定数据集，它的档位名属于数据说明，故放这里；
-# 用户自己的数据集必须通过 UI 配置 member_level_names 显式给出，
-# 未配置时**不推导等级**——宁可没有这一列，也不给用户凭空造一套等级体系。
-DEMO_MEMBER_LEVEL_NAMES = ("钻石", "黄金", "白银", "普通")
-
-# 等级档位数 = 分位档数 + 1 个兜底档。ingest_data.MEMBER_LEVEL_QUANTILES 的长度
-# 必须等于它 - 1；配置接口按这个数校验用户填的档位名。
-MEMBER_LEVEL_TIER_COUNT = len(DEMO_MEMBER_LEVEL_NAMES)
+# 注（第五轮）：会员等级不再「按金额分档推导」——用户没映射等级列时该维度就是未知，
+# 因此原先的 DEMO_MEMBER_LEVEL_NAMES / MEMBER_LEVEL_TIER_COUNT 已无使用方并删除；
+# `ui-config` 里的 member_level_names 字段保留可读（旧配置兼容）但已 deprecated。
 
 # ---------- 检索参数 ----------
 TOP_K_VECTOR = 20   # 向量单路召回数量
