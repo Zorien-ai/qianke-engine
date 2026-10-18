@@ -409,8 +409,12 @@
   z-index: 2;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0;
+  width: max-content;
+  max-width: 92%;
   color: rgba(255, 255, 255, 0.34);
   font-size: 11.5px;
   letter-spacing: 0.12em;
@@ -418,12 +422,83 @@
   pointer-events: none;
   transform: translateX(-50%);
 }
+.l-hero-legend-hint {
+  color: rgba(255, 255, 255, 0.22);
+  letter-spacing: 0.04em;
+}
 .l-hero-legend-dot {
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: #f3c078;
   box-shadow: 0 0 8px 2px rgba(243, 192, 120, 0.45);
+}
+
+/* hover / pinned 用户画像 tooltip（DOM 玻璃卡，只读；teleport 到舞台层，压在结果卡之上） */
+.nebula-tooltip {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+  min-width: 196px;
+  max-width: 260px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(32, 27, 20, 0.78), rgba(12, 11, 10, 0.66));
+  border: 1px solid rgba(255, 220, 170, 0.16);
+  box-shadow:
+    0 18px 44px -18px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  color: #fff;
+  font-family: var(--l-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  pointer-events: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.nebula-tooltip.is-pinned {
+  border-color: rgba(255, 204, 130, 0.46);
+  box-shadow:
+    0 0 0 1px rgba(255, 204, 130, 0.2),
+    0 18px 44px -18px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+.nebula-tooltip-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.nebula-tooltip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #f3c078;
+  box-shadow: 0 0 8px 2px rgba(243, 192, 120, 0.45);
+}
+.nebula-tooltip-head b {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.nebula-tooltip-meta {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+}
+.nebula-tooltip-line {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.nebula-tooltip-pin {
+  display: inline-block;
+  margin-top: 8px;
+  color: rgba(255, 205, 140, 0.8);
+  font-size: 10px;
+  letter-spacing: 0.06em;
 }
 
 .l-hero-stage > .nebula {

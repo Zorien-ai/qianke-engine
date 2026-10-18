@@ -11,7 +11,7 @@
  *   absorb：Bloom ×~3 爆闪 0.15~0.25s + 一次性闪光环 + 粒子轻微向内收。
  * 生命周期：页面隐藏/离屏暂停；卸载 dispose geometry/material/texture/renderer 与 rAF；reduced-motion 只渲染单帧。
  */
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -21,9 +21,14 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 const props = defineProps({
   stage: { type: String, default: "search" },
   reducedMotion: { type: Boolean, default: false },
+  users: { type: Array, default: () => [] },
+  matchedUsers: { type: Array, default: () => [] },
+  // 舞台 DOM（Landing.vue 传入），用于把 tooltip Teleport 到结果卡之上
+  tooltipTarget: { type: Object, default: null },
 });
 
 const wrapRef = ref(null);
+const tooltip = ref(null);
 
 const TAU = Math.PI * 2;
 const MAX_DT = 48;
@@ -74,6 +79,22 @@ let ctx2d = null;
 let fallbackParticles = [];
 let fallbackPairs = [];
 let spriteTex2d = null;
+
+/* 交互：每颗粒子 = 一位 demo 用户（users[i % users.length]） */
+let stageEl = null;
+let pointerIn = false;
+let pointerX = 0;
+let pointerY = 0;
+let pointerDirty = false;
+let hoveredIndex = -1;
+let pinnedIndex = -1;
+let lastRenderTs = 0;
+let basePhases = null;
+
+const _hitVec = new THREE.Vector3();
+let pointerMoveHandler = null;
+let pointerLeaveHandler = null;
+let pointerDownHandler = null;
 
 let resizeObserver = null;
 let intersectionObserver = null;
@@ -272,6 +293,7 @@ function initWebGL() {
 
   const data = buildCloudData();
   basePositions = data.positions;
+  basePhases = data.phases;
   pointsGeom = new THREE.BufferGeometry();
   pointsGeom.setAttribute("position", new THREE.BufferAttribute(data.positions, 3));
   pointsGeom.setAttribute("aColor", new THREE.BufferAttribute(data.colors, 3));
@@ -509,7 +531,236 @@ function renderFrame(ts) {
 
   if (composer) composer.render();
   frameCount++;
+  lastRenderTs = ts;
+  updateInteraction(ts / 1000);
   updateDebug();
+}
+
+/* ---------------- 星云节点 ↔ demo 用户交互 ---------------- */
+const userAt = (index) => {
+  const list = props.users;
+  if (!list || !list.length) return null;
+  return list[index % list.length] || null;
+};
+
+function moneyText(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "–";
+  return Math.round(n).toLocaleString("zh-CN");
+}
+
+function projectParticle(index, timeSec) {
+  if (!cloud || !camera || !basePositions) return null;
+  const i3 = index * 3;
+  const phase = basePhases ? basePhases[index] : index * 0.37;
+  const t = timeSec;
+  const x = basePositions[i3] + Math.sin(t * 0.55 + phase) * 0.24;
+  const y = basePositions[i3 + 1] + Math.cos(t * 0.47 + phase * 1.7) * 0.2;
+  const z = basePositions[i3 + 2] + Math.sin(t * 0.4 + phase * 0.7) * 0.18;
+  _hitVec.set(x, y, z);
+  cloud.updateMatrixWorld(true);
+  _hitVec.applyMatrix4(cloud.matrixWorld);
+  _hitVec.project(camera);
+  if (_hitVec.z > 1 || _hitVec.z < -1) return null;
+  const w = wrap ? wrap.clientWidth : 0;
+  const h = wrap ? wrap.clientHeight : 0;
+  return {
+    x: (_hitVec.x * 0.5 + 0.5) * w,
+    y: (-_hitVec.y * 0.5 + 0.5) * h,
+    z: _hitVec.z,
+  };
+}
+
+// 命中测试：14px 内最近的粒子；WebGL 做 3D 投影，Canvas2D 用动态屏幕坐标
+function hitTest(px, py, timeSec) {
+  if (!props.users.length) return -1;
+  const r2 = 14 * 14;
+  let best = -1;
+  let bestD = r2;
+  if (mode === "webgl") {
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const p = projectParticle(i, timeSec);
+      if (!p) continue;
+      const dx = p.x - px;
+      const dy = p.y - py;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+  } else {
+    const cw = canvas ? canvas.width : 1;
+    const ch = canvas ? canvas.height : 1;
+    const w = wrap ? wrap.clientWidth : 1;
+    const h = wrap ? wrap.clientHeight : 1;
+    for (let i = 0; i < fallbackParticles.length; i++) {
+      const q = fallbackParticles[i];
+      const sx = ((q.x + Math.sin(timeSec * 0.55 + q.phase) * 8) / cw) * w;
+      const sy = ((q.y + Math.cos(timeSec * 0.47 + q.phase * 1.7) * 7) / ch) * h;
+      const dx = sx - px;
+      const dy = sy - py;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+  }
+  return best;
+}
+
+function tooltipLines(user) {
+  const lines = [];
+  const row1 = [];
+  if (Number.isFinite(Number(user.avg_amount))) row1.push(`客单价 ¥${moneyText(user.avg_amount)}`);
+  if (user.order_count != null) row1.push(`${user.order_count} 单`);
+  if (user.top_category) row1.push(`偏好${user.top_category}`);
+  if (row1.length) lines.push(row1.join(" · "));
+  const row2 = [];
+  if (user.city) row2.push(user.city);
+  if (user.days_since_last_buy != null) row2.push(`最近购买 ${user.days_since_last_buy} 天前`);
+  if (row2.length) lines.push(row2.join(" · "));
+  return lines;
+}
+
+function setTooltip(index, pinned, timeSec) {
+  const user = userAt(index);
+  if (!user) {
+    tooltip.value = null;
+    return;
+  }
+  const pos = mode === "webgl" ? projectParticle(index, timeSec) : null;
+  let sx = 0;
+  let sy = 0;
+  if (pos) {
+    sx = pos.x;
+    sy = pos.y;
+  } else if (mode === "canvas2d" && canvas && wrap) {
+    const q = fallbackParticles[index];
+    if (q) {
+      sx = ((q.x + Math.sin(timeSec * 0.55 + q.phase) * 8) / canvas.width) * wrap.clientWidth;
+      sy = ((q.y + Math.cos(timeSec * 0.47 + q.phase * 1.7) * 7) / canvas.height) * wrap.clientHeight;
+    }
+  }
+  tooltip.value = {
+    user,
+    pinned,
+    index,
+    x: sx,
+    y: sy,
+    meta: [user.gender, Number.isFinite(Number(user.age)) ? `${user.age} 岁` : "", user.member_level]
+      .filter(Boolean)
+      .join(" · "),
+    lines: tooltipLines(user),
+  };
+}
+
+function updateInteraction(timeSec) {
+  if (!wrap) return;
+  if (!props.users.length) {
+    if (tooltip.value) tooltip.value = null;
+    return;
+  }
+  if (pinnedIndex >= 0) {
+    setTooltip(pinnedIndex, true, timeSec);
+    return;
+  }
+  if (!pointerIn) {
+    if (tooltip.value) tooltip.value = null;
+    wrap.style.cursor = "default";
+    return;
+  }
+  if (pointerDirty) {
+    pointerDirty = false;
+    const idx = hitTest(pointerX, pointerY, timeSec);
+    hoveredIndex = idx;
+    if (idx >= 0) {
+      setTooltip(idx, false, timeSec);
+      wrap.style.cursor = "pointer";
+    } else {
+      tooltip.value = null;
+      wrap.style.cursor = "default";
+    }
+  } else if (hoveredIndex >= 0) {
+    setTooltip(hoveredIndex, false, timeSec);
+  }
+}
+
+function syncInteractionStatic() {
+  if (!props.users.length) return;
+  const timeSec = 0;
+  if (pinnedIndex >= 0) {
+    setTooltip(pinnedIndex, true, timeSec);
+    return;
+  }
+  if (!pointerIn) {
+    tooltip.value = null;
+    if (wrap) wrap.style.cursor = "default";
+    return;
+  }
+  const idx = hitTest(pointerX, pointerY, timeSec);
+  hoveredIndex = idx;
+  if (idx >= 0) {
+    setTooltip(idx, false, timeSec);
+    if (wrap) wrap.style.cursor = "pointer";
+  } else {
+    tooltip.value = null;
+    if (wrap) wrap.style.cursor = "default";
+  }
+}
+
+const tooltipStyle = computed(() => {
+  const t = tooltip.value;
+  if (!t) return {};
+  const w = wrap ? wrap.clientWidth : 0;
+  const h = wrap ? wrap.clientHeight : 0;
+  const estW = 252;
+  const estH = 104;
+  let left = t.x + 16;
+  let top = t.y - 22;
+  if (left + estW > w - 8) left = Math.max(8, t.x - 16 - estW);
+  if (top < 8) top = t.y + 18;
+  if (top + estH > h - 8) top = Math.max(8, h - estH - 8);
+  return { left: `${Math.round(left)}px`, top: `${Math.round(top)}px` };
+});
+
+function onPointerMove(e) {
+  const rect = stageEl ? stageEl.getBoundingClientRect() : wrap.getBoundingClientRect();
+  pointerX = e.clientX - rect.left;
+  pointerY = e.clientY - rect.top;
+  pointerIn = true;
+  pointerDirty = true;
+  if (!running) syncInteractionStatic();
+}
+
+function onPointerLeave() {
+  pointerIn = false;
+  pointerDirty = false;
+  hoveredIndex = -1;
+  if (pinnedIndex < 0) tooltip.value = null;
+  if (wrap) wrap.style.cursor = "default";
+}
+
+function onPointerDown(e) {
+  if (!props.users.length) return;
+  const rect = stageEl ? stageEl.getBoundingClientRect() : wrap.getBoundingClientRect();
+  const px = e.clientX - rect.left;
+  const py = e.clientY - rect.top;
+  const timeSec = running ? lastRenderTs / 1000 : 0;
+  // 优先使用当前 hover 命中的粒子：截图/逐帧之间云会缓慢自转，避免 click 时重新投影落空
+  let idx = hoveredIndex >= 0 ? hoveredIndex : hitTest(px, py, timeSec);
+  if (idx >= 0) {
+    pinnedIndex = pinnedIndex === idx ? -1 : idx;
+    hoveredIndex = idx;
+    pointerIn = true;
+    if (pinnedIndex >= 0) setTooltip(pinnedIndex, true, timeSec);
+    else setTooltip(idx, false, timeSec);
+  } else {
+    pinnedIndex = -1;
+    tooltip.value = null;
+  }
+  if (!running) syncInteractionStatic();
 }
 
 /* ---------------- Canvas2D 降级 ---------------- */
@@ -625,6 +876,8 @@ function renderFallback(ts) {
   }
   ctx2d.globalAlpha = 1;
   frameCount++;
+  lastRenderTs = ts;
+  updateInteraction(ts / 1000);
   updateDebug();
 }
 
@@ -638,6 +891,8 @@ function updateDebug() {
     links: mode === "webgl" ? (linkPairs ? linkPairs.length : 0) : fallbackPairs.length,
     bloom: bloomPass ? Number(bloomPass.strength.toFixed(2)) : null,
     dpr: renderer ? renderer.getPixelRatio() : 1,
+    hovered: hoveredIndex >= 0 ? userAt(hoveredIndex)?.uid || null : null,
+    pinned: pinnedIndex >= 0 ? userAt(pinnedIndex)?.uid || null : null,
     quality: {
       renderScale: WebGLQuality.scale,
       bloomScale: WebGLQuality.bloomScale,
@@ -833,6 +1088,16 @@ onMounted(() => {
   visHandler = onVisibility;
   document.addEventListener("visibilitychange", visHandler);
 
+  // 交互：悬停 / 点击 pin（只读；卸载时移除）
+  stageEl = wrap.parentElement || wrap;
+  pointerMoveHandler = onPointerMove;
+  pointerLeaveHandler = onPointerLeave;
+  pointerDownHandler = onPointerDown;
+  stageEl.addEventListener("pointermove", pointerMoveHandler, { passive: true });
+  stageEl.addEventListener("pointerleave", pointerLeaveHandler, { passive: true });
+  stageEl.addEventListener("pointerdown", pointerDownHandler);
+  stageEl.addEventListener("pointercancel", pointerLeaveHandler, { passive: true });
+
   // QA 冻结钩子：截图验收时暂停 rAF，保留最后一帧
   window.__nebulaPause = () => {
     stop();
@@ -884,6 +1149,21 @@ onBeforeUnmount(() => {
   }
   if (mode === "webgl") disposeWebGL();
   else disposeFallback();
+  if (stageEl) {
+    if (pointerMoveHandler) stageEl.removeEventListener("pointermove", pointerMoveHandler);
+    if (pointerLeaveHandler) {
+      stageEl.removeEventListener("pointerleave", pointerLeaveHandler);
+      stageEl.removeEventListener("pointercancel", pointerLeaveHandler);
+    }
+    if (pointerDownHandler) stageEl.removeEventListener("pointerdown", pointerDownHandler);
+  }
+  stageEl = null;
+  pointerMoveHandler = null;
+  pointerLeaveHandler = null;
+  pointerDownHandler = null;
+  tooltip.value = null;
+  hoveredIndex = -1;
+  pinnedIndex = -1;
   window.__nebulaDebug = null;
   delete window.__nebulaPause;
   delete window.__nebulaResume;
@@ -891,5 +1171,29 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="wrapRef" class="nebula" :data-stage="stage"></div>
+  <div ref="wrapRef" class="nebula" :data-stage="stage">
+    <!--
+      tooltip 必须挂到舞台（.l-hero-stage）这一层：
+      它原本在 .nebula 内，而 .nebula 的 stacking context 是 z-index:0，
+      z-index:8 也压不过 z-index:4 的结果卡，悬停时画像会被卡片盖住。
+      Landing.vue 把舞台元素作为 tooltipTarget 传进来。
+    -->
+    <Teleport v-if="tooltip && tooltipTarget" :to="tooltipTarget">
+      <div
+        class="nebula-tooltip"
+        :class="{ 'is-pinned': tooltip.pinned }"
+        :style="tooltipStyle"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="nebula-tooltip-head">
+          <i class="nebula-tooltip-dot" />
+          <b>Demo 用户 {{ tooltip.user.uid }}</b>
+          <span class="nebula-tooltip-meta">{{ tooltip.meta }}</span>
+        </div>
+        <p v-for="(line, i) in tooltip.lines" :key="i" class="nebula-tooltip-line">{{ line }}</p>
+        <span v-if="tooltip.pinned" class="nebula-tooltip-pin">已固定 · 点击空白取消</span>
+      </div>
+    </Teleport>
+  </div>
 </template>

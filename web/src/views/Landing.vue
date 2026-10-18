@@ -44,6 +44,60 @@ const stage = ref("search");
 const typed = ref("");
 const copyVisible = ref(false);
 
+/* ==================== demo 用户数据（匿名只读接口，失败静默降级） ==================== */
+const DEFAULT_LABELS = ["女 / 28 岁", "客单价 1200", "偏好美妆"];
+const DEFAULT_QUERY = { matched: 2341, avg_amount: 1540, age_min: 25, age_max: 35 };
+const demoData = ref(null);
+
+const demoUsers = computed(() => (Array.isArray(demoData.value?.users) ? demoData.value.users : []));
+const demoMatchedUsers = computed(() =>
+  Array.isArray(demoData.value?.matched_users) ? demoData.value.matched_users : []
+);
+const demoLabels = computed(() => {
+  const labels = demoData.value?.labels;
+  return Array.isArray(labels) && labels.length ? labels.slice(0, 3) : DEFAULT_LABELS;
+});
+const demoQuery = computed(() => demoData.value?.query || DEFAULT_QUERY);
+const totalProfiles = computed(() =>
+  Number.isFinite(demoData.value?.total_profiles) ? demoData.value.total_profiles : null
+);
+
+function formatInt(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return Math.round(n).toLocaleString("zh-CN");
+}
+
+const matchedDisplay = computed(() => formatInt(demoQuery.value.matched));
+const avgAmountDisplay = computed(() => formatInt(Math.floor(Number(demoQuery.value.avg_amount))));
+const ageRangeDisplay = computed(
+  () => `${demoQuery.value.age_min ?? 25}-${demoQuery.value.age_max ?? 35}`
+);
+const totalProfilesDisplay = computed(() =>
+  totalProfiles.value == null ? "" : formatInt(totalProfiles.value)
+);
+const legendText = computed(() =>
+  totalProfiles.value == null
+    ? "每个光点，都是一位 demo 用户"
+    : `每个光点，都是一位 demo 用户 · 共 ${totalProfilesDisplay.value} 位`
+);
+
+async function fetchDemoUsers() {
+  try {
+    const res = await fetch("/api/public/demo/users?limit=400", {
+      headers: { accept: "application/json" },
+      credentials: "same-origin",
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && Array.isArray(data.users) && data.users.length) {
+      demoData.value = data;
+    }
+  } catch (err) {
+    /* 静默降级：接口不可用时保持现有硬编码文案 */
+  }
+}
+
 let storyStart = 0;
 let pausedTotal = 0;
 let pausedAt = 0;
@@ -215,6 +269,9 @@ function startStory() {
 const navScrolled = ref(false);
 const navDark = ref(true);
 const heroRef = ref(null);
+// 舞台 DOM 传给 HeroNebula：悬停画像 tooltip 要 Teleport 到这一层，
+// 否则 .nebula 的 z-index:0 stacking context 会让它被结果卡（z-index:4）盖住
+const heroStageEl = ref(null);
 
 function navHeight() {
   return window.innerWidth <= 900 ? 62 : 68;
@@ -338,6 +395,7 @@ onMounted(() => {
     if (motionQuery.addEventListener) motionQuery.addEventListener("change", onMotionChange);
     else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
   }
+  fetchDemoUsers();
   // 等 WebGL 星云初始化完成再启动 7s 时间轴，避免 shader 编译阻塞把打字/分镜时间点挤在一起
   const beginStory = () => {
     if (storyStarted) return;
@@ -442,8 +500,14 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 右：叙事舞台（Canvas 星云只在这个 50% 列内播放 + DOM 玻璃拟态） -->
-          <div class="l-hero-stage">
-            <HeroNebula :stage="stage" :reduced-motion="reducedMotion" />
+          <div ref="heroStageEl" class="l-hero-stage">
+            <HeroNebula
+              :stage="stage"
+              :reduced-motion="reducedMotion"
+              :users="demoUsers"
+              :matched-users="demoMatchedUsers"
+              :tooltip-target="heroStageEl"
+            />
             <!-- Phase 1：毛玻璃搜索框 + 打字机 -->
             <div class="story-search" :class="`is-stage-${stage}`" aria-hidden="true">
               <span class="story-search-icon" aria-hidden="true">
@@ -455,14 +519,17 @@ onBeforeUnmount(() => {
               <span class="story-search-text">{{ typed }}<i class="story-caret" /></span>
             </div>
 
-            <!-- Phase 2：从粒子处飘散的数据标签 -->
+            <!-- Phase 2：从粒子处飘散的数据标签（来自 demo 数据实时统计） -->
             <div v-if="stage === 'absorb'" class="story-labels" aria-hidden="true">
-              <span class="story-label story-label-1">女 / 28 岁</span>
-              <span class="story-label story-label-2">客单价 1200</span>
-              <span class="story-label story-label-3">偏好美妆</span>
+              <span
+                v-for="(label, i) in demoLabels"
+                :key="label + i"
+                class="story-label"
+                :class="`story-label-${i + 1}`"
+              >{{ label }}</span>
             </div>
 
-            <!-- Phase 3：晶莹玻璃结果卡（演示内容） -->
+            <!-- Phase 3：晶莹玻璃结果卡（演示数据 = demo 库实时统计） -->
             <div
               v-if="stage === 'result' || stage === 'final'"
               class="story-result"
@@ -470,15 +537,18 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             >
               <span class="story-result-badge">演示</span>
-              <p class="story-result-title">已匹配 <b>2,341</b> 位用户</p>
-              <p class="story-result-body">核心特征：25-35 岁，客单价均值 <b>1540</b> 元。</p>
+              <p class="story-result-title">已匹配 <b>{{ matchedDisplay }}</b> 位用户</p>
+              <p class="story-result-body">
+                核心特征：{{ ageRangeDisplay }} 岁，客单价均值 <b>{{ avgAmountDisplay }}</b> 元。
+              </p>
               <span class="story-result-glow" aria-hidden="true" />
             </div>
 
-            <!-- 图例：让「一颗光点 = 一位用户」这件事一眼看懂 -->
-            <p class="l-hero-legend" aria-hidden="true">
+            <!-- 图例：让「一颗光点 = 一位 demo 用户」这件事一眼看懂 -->
+            <p class="l-hero-legend">
               <i class="l-hero-legend-dot" />
-              每个光点，都是一位用户
+              {{ legendText }}
+              <span class="l-hero-legend-hint">悬停 / 点击查看画像</span>
             </p>
           </div>
         </div>
