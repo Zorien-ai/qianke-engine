@@ -41,6 +41,8 @@ const navItems = computed(() => {
 });
 
 const pageTitle = computed(() => (route.meta && route.meta.title) || "工作台");
+// 公开营销页（/home）不套应用外壳：它自带极简导航与暖白底色
+const isPublicRoute = computed(() => !!(route.meta && route.meta.public));
 const accountName = computed(() => {
   const a = store.account;
   if (!a) return "未登录";
@@ -87,24 +89,30 @@ function closeDrawer() {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'is-collapsed': collapsed, 'is-drawer-open': drawerOpen }">
-    <!-- 未登录/初始化失败：路由守卫已拦截，这里只负责给出可读状态 -->
-    <div v-if="!store.booted" class="boot-screen">
-      <div v-if="!store.bootError" class="boot-box">
-        <span class="spinner" />
-        <p>正在确认登录状态…</p>
-      </div>
-      <div v-else class="boot-box boot-error">
-        <h2>无法完成初始化</h2>
-        <p>{{ store.bootError }}</p>
-        <div class="row-actions">
-          <button class="btn btn-primary" @click="$router.go(0)">重试</button>
-          <a class="btn btn-ghost" href="/login">去登录页</a>
-        </div>
+  <!-- 初始化中 / 初始化失败：两种外壳共用同一块提示 -->
+  <div v-if="!store.booted" class="boot-screen">
+    <div v-if="!store.bootError" class="boot-box">
+      <span class="spinner" />
+      <p>正在确认登录状态…</p>
+    </div>
+    <div v-else class="boot-box boot-error">
+      <h2>无法完成初始化</h2>
+      <p>{{ store.bootError }}</p>
+      <div class="row-actions">
+        <button class="btn btn-primary" @click="$router.go(0)">重试</button>
+        <a class="btn btn-ghost" href="/login">去登录页</a>
       </div>
     </div>
+  </div>
 
-    <template v-else>
+  <!-- 公开落地页：不渲染侧边栏 / topbar / 抽屉，页面自带营销页顶栏 -->
+  <template v-else-if="isPublicRoute">
+    <RouterView />
+    <ToastHost />
+  </template>
+
+  <!-- 应用外壳（登录后的工作台） -->
+  <div v-else class="app-shell" :class="{ 'is-collapsed': collapsed, 'is-drawer-open': drawerOpen }">
       <div class="nav-backdrop" :class="{ show: drawerOpen }" @click="closeDrawer" />
 
       <aside class="sidebar">
@@ -187,7 +195,6 @@ function closeDrawer() {
           </RouterView>
         </main>
       </div>
-    </template>
 
     <ToastHost />
   </div>

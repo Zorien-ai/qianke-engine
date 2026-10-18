@@ -41,9 +41,10 @@ npm run dev        # http://127.0.0.1:5173；vite.config.js 已把
 ## 构建产物（示例）
 
 ```
-dist/index.html                  1.13 kB │ gzip:  0.74 kB
-dist/assets/index-*.css         65.39 kB │ gzip: 12.14 kB
-dist/assets/index-*.js         240.45 kB │ gzip: 85.54 kB
+dist/index.html                  1.13 kB │ gzip:  0.75 kB
+dist/assets/index-*.css         82.48 kB │ gzip: 15.79 kB
+dist/assets/index-*.js         254.08 kB │ gzip: 90.68 kB
+dist/assets/{setup,chat,kb}-*.png  共约 627 kB（官网场景截图）
 ```
 
 `web/dist/` 与 `web/node_modules/` 都在仓库根 `.gitignore` 里，不会提交。
@@ -74,8 +75,11 @@ web/
     │       ├── StepFields.vue    # 字段映射 / 文档结构 / 提示
     │       ├── StepBuild.vue     # 构建计划 + 模式卡 + 确认弹窗 + scaleX 进度 + 离开恢复
     │       └── StepAsk.vue       # 示例问句 / 提问 / 来源 / 历史
-    ├── styles/main.css     # 设计变量 + 全部样式（深色 = data-theme="dark"）
+    ├── styles/main.css     # 应用外壳样式（深色 = data-theme="dark"）
+    ├── styles/landing.css  # 官网 Landing Page 样式（暖白营销页，独立于应用主题）
+    ├── assets/shots/       # 官网场景截图（setup.png / chat.png / kb.png）
     └── views/
+        ├── Landing.vue     # 官网首页（/home，公开可匿名访问）
         ├── Dashboard.vue   # 工作台
         ├── Chat.vue        # 对话（SSE 流式）
         ├── Kb.vue          # 知识库
@@ -88,6 +92,7 @@ web/
 
 | 路由（`/v2/#...`） | 页面 | 关键接口 |
 |---|---|---|
+| `/home` | **公开官网 Landing Page**（匿名可看）：暖白营销页、Hero 三阶段叙事动画、真实场景截图 + CSS 高亮、产品能力卡、私有化部署 CTA、极简 Footer。未登录访问其它页面会先回这里 | 只读 `GET /whoami`（判断登录态，用于切换「免费体验 Demo / 进入工作台」） |
 | `/` | 工作台：账号 / 企业 / 等级 / 能力清单；`/stats` 概况卡（仅 `can.stats`）；数据空间卡；快捷入口 | `GET /whoami`、`GET /stats`、`GET /api/kb/overview` |
 | `/chat` | 对话：SSE 流式问答、思维链、来源列表、SQL 原文 / 查询结果、检索过程、缓存与错误态 | `POST /qa/stream` |
 | `/kb` | 知识库：文档数 / 切片数 / 画像数 / 构建时间 / 数据状态条 / 文档矩阵；企业管理员可重建（轮询进度）与清空；只读账号显示 `readonly_reason` | `GET /api/kb/overview`、`POST /api/wizard/build`、`GET /api/wizard/build/{task_id}`、`POST /api/kb/clear` |
@@ -96,6 +101,16 @@ web/
 | `/setup` | 四步导入向导（仅管理员）：上传 → 确认字段 → 选择「追加更新 / 覆盖重建」构建（3s 轮询、可离开页面）→ 提问验证。侧边栏「数据导入」入口即此页；旧的 `/wizard` 页面由后端 **302 重定向**到 `/v2/#/setup` | `GET /api/wizard/plan`、`POST /api/wizard/upload`、`POST /api/wizard/upload/remove`、`GET /api/wizard/upload/{id}`、`GET /api/wizard/sample`、`POST /api/wizard/build`、`GET /api/wizard/build/{task_id}`、`GET /api/wizard/build/active`、`GET /api/wizard/examples`、`POST /api/wizard/query` |
 
 侧边栏「数据导入」指向 `#/setup`（仅管理员可见）；旧 `/wizard` 已不提供服务端页面，由后端 302 到本页。
+
+## 公开官网 Landing Page（`/home`）
+
+- **匿名访问策略**：`/home` 的 `meta.public=true`，未登录可直接看；未登录访问其它页面 → 回 `/home`（不再粗暴跳 `/login`）；已登录访问 `/home` 正常展示，主按钮变「进入工作台」→ `/`。`store.doBoot()` 不再负责跳转，只记录 `authenticated`，跳转交给路由守卫。
+- **应用外壳**：`route.meta.public` 的页面不渲染侧边栏 / topbar / 移动抽屉，只有 RouterView + ToastHost；未登录时 `store.account` 为空也不会报错。
+- **视觉基调**：暖白 `#F9F9F8`、深炭黑标题、灰蓝正文、衬线标题栈（`Noto Serif SC / Songti SC / Source Han Serif SC / STSong / Georgia`，无远程字体）；`styles/landing.css` 独立于应用主题，所以即使工作台处于深色模式，官网仍是暖白营销页。
+- **Hero 三阶段循环叙事**（纯 Vue + CSS，无第三方）：散落 CSV/文档数据点 → 被吸入发光 AI 大脑 → 吐出带彩色标签的用户画像卡片；JS 定时切 phase，动效全走 CSS transition/keyframes，卸载清定时器；`prefers-reduced-motion` 下静态停在阶段 3。
+- **真实场景截图**：`web/src/assets/shots/setup.png`、`chat.png`、`kb.png`，用 `import.meta.glob` 引用（截图未就位时构建不失败，显示占位框；图到位后重新 build 自动替换）。Mac 浏览器外框 + 绝对定位百分比高亮框标注「拖拽上传 / 引用来源 / 数据状态与增量更新」，坐标可按真图微调。
+- **滚动动画**：`v-reveal` 自定义指令 + IntersectionObserver 淡入上浮；reduced-motion 下直接显示。卡片 hover 阴影加深、轻微上浮；900px 以下全站单列，Hero 动画等比缩小，无横向滚动。
+- 本页不调用任何写接口、不写死业务数据；只有截图是设计素材。
 
 ## 四步导入向导（`/setup`）
 
@@ -144,6 +159,8 @@ cd web && npm install && npm run build
 
 ## 已知缺口 / 限制
 
+- **官网截图素材随构建打包**：`web/src/assets/shots/{setup,chat,kb}.png` 会被打进 dist（三张约 0.6MB）。换图后需要重新 `npm run build`；高亮框用绝对定位百分比，坐标按当前 **1440×900** 截图校准，换图或改截图窗口尺寸后需同步微调 `Landing.vue` 里的 `highlightStyle`。
+- **官网固定暖白**：`/home` 是营销页，不跟随应用内深色主题（有意如此，保证品牌观感一致）。
 - **依赖第五轮新后端接口**：`GET /api/wizard/plan` 与 `GET /api/wizard/build/active` 由后端任务实现。未就绪时本页自动降级：读不到 plan → 只允许「覆盖重建」并给出提示；`active` 不可用 → 用 localStorage 的 task_id 兜底恢复；两者都不可用时回到第 1 步（上传批次仍会恢复）。
 - **分块大小 / 重叠没有配置项**：后端暂未提供对应接口，本页不做假配置（切分参数仍在服务端默认值里）。真要可配置，应先加读写接口，再在向导第 2 步补一块表单。
 - **权限页的人员授权**：只读展示 `config.user_levels`，编辑（grant / revoke）留给下一迭代；矩阵、角色默认等级、一键全开、恢复默认已实现。

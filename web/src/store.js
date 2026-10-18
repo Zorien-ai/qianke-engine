@@ -27,18 +27,29 @@ export const store = reactive({
 
 let bootPromise = null;
 
-/** 读取 /whoami 并写入 store；未登录 → 跳 /login 并返回 false。 */
+/**
+ * 读取 /whoami 并写入 store。
+ *
+ * 这里只负责"我是谁/登录了没有"，**不负责跳转**：
+ * 未登录要不要送去登录页、还是先看官网，由路由守卫按 meta.public 决定。
+ * 之前在这里直接 window.location.href="/login"，导致官网 Landing Page 无法匿名访问。
+ */
 async function doBoot() {
   store.bootError = "";
   try {
     const mine = await getJson("/whoami");
     store.whoami = mine;
     store.authenticated = !!mine.authenticated;
-    if (!mine.authenticated) {
-      window.location.href = "/login";
-      return false;
+    if (mine.authenticated) applyWhoami(mine);
+    else {
+      // 匿名：清掉可能残留的旧账号信息，模板里按"未登录"渲染
+      store.account = null;
+      store.can = {};
+      store.level = "";
+      store.levelLabel = "";
+      store.role = "";
+      store.roleLabel = "";
     }
-    applyWhoami(mine);
     store.booted = true;
     return true;
   } catch (e) {
@@ -58,6 +69,10 @@ export async function refreshWhoami() {
   store.whoami = mine;
   store.authenticated = !!mine.authenticated;
   if (mine.authenticated) applyWhoami(mine);
+  else {
+    store.account = null;
+    store.can = {};
+  }
   return mine;
 }
 
