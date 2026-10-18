@@ -42,8 +42,8 @@ npm run dev        # http://127.0.0.1:5173；vite.config.js 已把
 
 ```
 dist/index.html                  1.13 kB │ gzip:  0.75 kB
-dist/assets/index-*.css         82.48 kB │ gzip: 15.79 kB
-dist/assets/index-*.js         254.08 kB │ gzip: 90.68 kB
+dist/assets/index-*.css         84.92 kB │ gzip: 16.29 kB
+dist/assets/index-*.js         262.58 kB │ gzip: 94.05 kB
 dist/assets/{setup,chat,kb}-*.png  共约 627 kB（官网场景截图）
 ```
 
@@ -69,14 +69,16 @@ web/
     ├── components/
     │   ├── ToastHost.vue
     │   ├── ConfirmButton.vue   # 二次确认按钮（点两次才执行）
-    │   └── setup/              # 四步向导拆件
-    │       ├── SetupStepper.vue  # 滑动 pill + 连线进度
-    │       ├── StepUpload.vue    # 双拖拽区 / 文件列表 / 示例数据
-    │       ├── StepFields.vue    # 字段映射 / 文档结构 / 提示
-    │       ├── StepBuild.vue     # 构建计划 + 模式卡 + 确认弹窗 + scaleX 进度 + 离开恢复
-    │       └── StepAsk.vue       # 示例问句 / 提问 / 来源 / 历史
+    │   ├── setup/              # 四步向导拆件
+    │   │   ├── SetupStepper.vue  # 滑动 pill + 连线进度
+    │   │   ├── StepUpload.vue    # 双拖拽区 / 文件列表 / 示例数据
+    │   │   ├── StepFields.vue    # 字段映射 / 文档结构 / 提示
+    │   │   ├── StepBuild.vue     # 构建计划 + 模式卡 + 确认弹窗 + scaleX 进度 + 离开恢复
+    │   │   └── StepAsk.vue       # 示例问句 / 提问 / 来源 / 历史
+    │   └── landing/
+    │       └── HeroNebula.vue    # 官网 Hero：原生 Canvas 粒子星云 + 三阶段叙事
     ├── styles/main.css     # 应用外壳样式（深色 = data-theme="dark"）
-    ├── styles/landing.css  # 官网 Landing Page 样式（暖白营销页，独立于应用主题）
+    ├── styles/landing.css  # 官网样式：暗色沉浸 Hero + 暖白营销区（独立于应用主题）
     ├── assets/shots/       # 官网场景截图（setup.png / chat.png / kb.png）
     └── views/
         ├── Landing.vue     # 官网首页（/home，公开可匿名访问）
@@ -92,7 +94,7 @@ web/
 
 | 路由（`/v2/#...`） | 页面 | 关键接口 |
 |---|---|---|
-| `/home` | **公开官网 Landing Page**（匿名可看）：暖白营销页、Hero 三阶段叙事动画、真实场景截图 + CSS 高亮、产品能力卡、私有化部署 CTA、极简 Footer。未登录访问其它页面会先回这里 | 只读 `GET /whoami`（判断登录态，用于切换「免费体验 Demo / 进入工作台」） |
+| `/home` | **公开官网 Landing Page**（匿名可看）：全幅暗色沉浸 Hero（Canvas 粒子星云 + 三阶段叙事）、暖白营销区（真实场景截图 + CSS 高亮、产品能力卡、私有化部署 CTA）、极简 Footer。未登录访问其它页面会先回这里 | 只读 `GET /whoami`（判断登录态，用于切换「免费体验 Demo / 进入工作台」） |
 | `/` | 工作台：账号 / 企业 / 等级 / 能力清单；`/stats` 概况卡（仅 `can.stats`）；数据空间卡；快捷入口 | `GET /whoami`、`GET /stats`、`GET /api/kb/overview` |
 | `/chat` | 对话：SSE 流式问答、思维链、来源列表、SQL 原文 / 查询结果、检索过程、缓存与错误态 | `POST /qa/stream` |
 | `/kb` | 知识库：文档数 / 切片数 / 画像数 / 构建时间 / 数据状态条 / 文档矩阵；企业管理员可重建（轮询进度）与清空；只读账号显示 `readonly_reason` | `GET /api/kb/overview`、`POST /api/wizard/build`、`GET /api/wizard/build/{task_id}`、`POST /api/kb/clear` |
@@ -106,8 +108,10 @@ web/
 
 - **匿名访问策略**：`/home` 的 `meta.public=true`，未登录可直接看；未登录访问其它页面 → 回 `/home`（不再粗暴跳 `/login`）；已登录访问 `/home` 正常展示，主按钮变「进入工作台」→ `/`。`store.doBoot()` 不再负责跳转，只记录 `authenticated`，跳转交给路由守卫。
 - **应用外壳**：`route.meta.public` 的页面不渲染侧边栏 / topbar / 移动抽屉，只有 RouterView + ToastHost；未登录时 `store.account` 为空也不会报错。
-- **视觉基调**：暖白 `#F9F9F8`、深炭黑标题、灰蓝正文、衬线标题栈（`Noto Serif SC / Songti SC / Source Han Serif SC / STSong / Georgia`，无远程字体）；`styles/landing.css` 独立于应用主题，所以即使工作台处于深色模式，官网仍是暖白营销页。
-- **Hero 三阶段循环叙事**（纯 Vue + CSS，无第三方）：散落 CSV/文档数据点 → 被吸入发光 AI 大脑 → 吐出带彩色标签的用户画像卡片；JS 定时切 phase，动效全走 CSS transition/keyframes，卸载清定时器；`prefers-reduced-motion` 下静态停在阶段 3。
+- **视觉基调**：Hero 为全幅暗色沉浸区（`#05060A ~ #0B0D14` + 暖金/琥珀光晕 + 暗角），营销区为暖白 `#F9F9F8` + 深炭黑标题 + 灰蓝正文 + 衬线标题栈（`Noto Serif SC / Songti SC / Source Han Serif SC / STSong / Georgia`，无远程字体）；`styles/landing.css` 独立于应用主题，所以即使工作台处于深色模式，官网营销区仍是暖白。
+- **顶部导航**：Hero 上透明亮色（`is-dark`），滚出 Hero 后自动切回浅色吸顶（白底/深字/阴影，`is-scrolled`）；页内锚点滚动会补偿导航高度，落点不被吸顶遮住。
+- **Hero 三阶段叙事**（`HeroNebula.vue`，原生 Canvas，无第三方依赖）：散落 CSV 玻璃胶囊向中心汇聚 → 光核爆发 + 冲击波环 + flash → 3 条发光贝塞尔曲线射向 3 张玻璃拟态画像卡（沿线流动光点）。阶段由 Landing 每 2.6s 切换并传入组件；Canvas 画粒子星座/细线/中心呼吸光核/向心流星/冲击波/曲线，DOM 覆盖层画 CSV 胶囊、玻璃卡、flash 和阶段图例。
+- **Canvas 性能与生命周期**：单 rAF 循环、dt 钳制 48ms、DPR 上限 1.75、`ResizeObserver` 自适应（粒子数 70~130，宽度 <480px 自动下调到 62）；`IntersectionObserver` + `visibilitychange` 离屏/后台暂停、回来恢复；`prefers-reduced-motion` 只画一帧静态（星云 + 曲线 + 卡片）；卸载 `cancelAnimationFrame` + 断开两个 observer + 移除监听 + 清引用。调试用 `window.__nebulaDebug`（frames/phase/particles/running/dpr）。
 - **真实场景截图**：`web/src/assets/shots/setup.png`、`chat.png`、`kb.png`，用 `import.meta.glob` 引用（截图未就位时构建不失败，显示占位框；图到位后重新 build 自动替换）。Mac 浏览器外框 + 绝对定位百分比高亮框标注「拖拽上传 / 引用来源 / 数据状态与增量更新」，坐标可按真图微调。
 - **滚动动画**：`v-reveal` 自定义指令 + IntersectionObserver 淡入上浮；reduced-motion 下直接显示。卡片 hover 阴影加深、轻微上浮；900px 以下全站单列，Hero 动画等比缩小，无横向滚动。
 - 本页不调用任何写接口、不写死业务数据；只有截图是设计素材。

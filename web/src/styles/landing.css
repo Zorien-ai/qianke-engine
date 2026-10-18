@@ -1,7 +1,7 @@
 /* =========================================================
-   官网 Landing Page（/v2/#/home）—— 温暖叙事风
-   暖白 #F9F9F8 · 深炭黑标题 · 灰蓝正文 · 衬线标题栈
-   只作用于 .landing 内部，不影响登录后的工作台主题
+   官网 Landing Page（/v2/#/home）—— 暖白营销页 + 暗色沉浸 Hero
+   暖白区：#F9F9F8 / 深炭黑标题 / 灰蓝正文 / 衬线标题栈
+   暗色 Hero：#05060A ~ #0B0D14 + 暖金 Canvas 粒子星云
    ========================================================= */
 
 .landing {
@@ -73,6 +73,38 @@
   border-bottom-color: var(--l-line);
   box-shadow: 0 10px 30px -24px rgba(31, 26, 20, 0.4);
   background: rgba(249, 249, 248, 0.92);
+}
+/* Hero 暗色之上：透明、亮色文字；滚出 Hero 后自动去掉 is-dark 回到上面的浅色吸顶 */
+.l-nav.is-dark {
+  background: transparent;
+  border-bottom-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.l-nav.is-dark .l-brand-text b {
+  color: #f7f3ea;
+}
+.l-nav.is-dark .l-brand-text small {
+  color: rgba(244, 240, 232, 0.5);
+}
+.l-nav.is-dark .l-logo {
+  background: linear-gradient(135deg, #f5b35a, #c2410c 62%, #1c1917);
+  color: #1a1208;
+}
+.l-nav.is-dark .l-nav-link {
+  color: rgba(244, 240, 232, 0.72);
+}
+.l-nav.is-dark .l-nav-link:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.l-nav.is-dark .l-nav-login {
+  color: #f7f3ea;
+  border-color: rgba(244, 240, 232, 0.26);
+}
+.l-nav.is-dark .l-nav-login:hover {
+  border-color: rgba(244, 240, 232, 0.6);
+  background: rgba(255, 255, 255, 0.06);
 }
 .l-nav-inner {
   display: flex;
@@ -217,8 +249,7 @@
   padding: 8px 16px;
   font-size: 13.5px;
 }
-/* 链接按钮：.landing a { color: inherit } 会盖掉 .l-btn-primary 的颜色，
-   这里用更高优先级把按钮/登录入口的颜色捞回来 */
+/* 链接按钮：.landing a { color: inherit } 会盖掉 .l-btn-primary 的颜色，这里用更高优先级捞回来 */
 .landing a.l-btn-primary {
   color: #faf8f4;
 }
@@ -273,9 +304,32 @@
   display: inline;
 }
 
-/* ---------- Hero ---------- */
+/* ---------- Hero：全幅暗色沉浸区 ---------- */
 .l-hero {
-  padding: clamp(48px, 7vw, 96px) 0 clamp(28px, 4vw, 56px);
+  position: relative;
+  margin-top: -68px; /* 让 Hero 延伸到吸顶导航背后，导航因此能平铺在暗色之上 */
+  padding: calc(68px + clamp(56px, 8vw, 104px)) 0 clamp(56px, 7vw, 92px);
+  overflow: hidden;
+  isolation: isolate;
+}
+.l-hero--dark {
+  background:
+    radial-gradient(900px 560px at 76% 32%, rgba(245, 179, 90, 0.16), transparent 62%),
+    radial-gradient(760px 460px at 10% 4%, rgba(92, 106, 138, 0.13), transparent 60%),
+    radial-gradient(560px 340px at 50% 110%, rgba(245, 179, 90, 0.08), transparent 70%),
+    linear-gradient(180deg, #05060a 0%, #0b0d14 56%, #090a10 100%);
+  color: #f7f3ea;
+}
+.l-hero-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(125% 85% at 50% 42%, transparent 40%, rgba(0, 0, 0, 0.52) 100%);
+}
+.l-hero .l-shell {
+  position: relative;
+  z-index: 1;
 }
 .l-hero-grid {
   display: grid;
@@ -284,6 +338,7 @@
   gap: clamp(24px, 4vw, 56px);
 }
 .l-hero-copy {
+  min-width: 0;
   animation: l-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .l-title {
@@ -296,10 +351,10 @@
   letter-spacing: -0.025em;
 }
 .l-title em {
-  font-style: normal;
-  color: var(--l-accent);
   position: relative;
   display: inline-block;
+  font-style: normal;
+  color: var(--l-accent);
 }
 .l-title em::after {
   content: "";
@@ -349,206 +404,242 @@
   opacity: 0.55;
 }
 
-/* ---------- Hero 叙事动画阶段 ---------- */
+/* 暗色 Hero 上的亮色文案 / CTA */
+.l-hero--dark .l-eyebrow {
+  color: #f5b35a;
+}
+.l-hero--dark .l-eyebrow i {
+  background: #f5b35a;
+  opacity: 0.7;
+}
+.l-hero--dark .l-title {
+  color: #f7f3ea;
+}
+.l-hero--dark .l-title em {
+  color: #f5b35a;
+}
+.l-hero--dark .l-title em::after {
+  background: linear-gradient(90deg, rgba(245, 179, 90, 0.26), rgba(245, 179, 90, 0.02));
+}
+.l-hero--dark .l-lead {
+  color: rgba(244, 240, 232, 0.7);
+}
+.l-hero--dark .l-hero-facts {
+  color: rgba(244, 240, 232, 0.5);
+}
+.l-hero--dark .l-hero-facts li::before {
+  background: #f5b35a;
+  opacity: 0.75;
+}
+.l-hero--dark .l-btn-primary {
+  background: #f5b35a;
+  color: #241505;
+  box-shadow: 0 18px 40px -22px rgba(245, 179, 90, 0.85);
+}
+.l-hero--dark .l-btn-primary:hover {
+  background: #ffc978;
+  color: #241505;
+}
+.l-hero--dark .l-btn-ghost {
+  color: #f7f3ea;
+  border-color: rgba(244, 240, 232, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+}
+.l-hero--dark .l-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(244, 240, 232, 0.52);
+}
+/* 链接按钮在锚点上的颜色优先级：.landing a 规则更“重”，这里再抬一层 */
+.landing .l-hero--dark a.l-btn-primary {
+  color: #241505;
+}
+.landing .l-hero--dark a.l-btn-ghost {
+  color: #f7f3ea;
+}
+.landing .l-nav.is-dark a.l-nav-login {
+  color: #f7f3ea;
+}
+
+/* ---------- Hero 右侧：Canvas 粒子星云 ---------- */
 .l-hero-visual {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 16px;
   min-width: 0;
 }
-.l-stage {
+.nebula {
   position: relative;
-  width: min(100%, 560px);
+  width: 100%;
+  max-width: 600px;
   aspect-ratio: 1 / 1;
-  overflow: hidden;
+  container-type: inline-size;
 }
-.l-stage::before {
-  content: "";
-  position: absolute;
-  inset: 8%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(180, 83, 9, 0.1), rgba(249, 249, 248, 0) 66%);
-}
-.l-stage-scene {
+.nebula-canvas {
   position: absolute;
   inset: 0;
-  transform: scale(var(--l-stage-scale, 1));
-  transform-origin: 50% 50%;
-}
-
-.l-brain {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  display: grid;
-  place-items: center;
-  width: 168px;
-  height: 168px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle at 36% 30%,
-    #fff6e5 0%,
-    #f6c57a 22%,
-    #c2410c 52%,
-    #7c2d12 76%,
-    #3f1d0f 100%
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 径向遮罩让粒子/光晕在画布边缘自然溶解，避免爆发阶段露出方形边界 */
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    #000 0 50%,
+    rgba(0, 0, 0, 0.85) 58%,
+    rgba(0, 0, 0, 0.25) 67%,
+    transparent 74%
   );
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.55),
-    0 30px 70px -26px rgba(124, 45, 18, 0.6),
-    0 0 80px -18px rgba(194, 65, 12, 0.5);
-  transform: translate(-50%, -50%);
-  transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.9s ease;
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    #000 0 50%,
+    rgba(0, 0, 0, 0.85) 58%,
+    rgba(0, 0, 0, 0.25) 67%,
+    transparent 74%
+  );
 }
-.l-brain-core {
-  color: #fff7ed;
-  font-family: var(--l-serif);
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-shadow: 0 2px 18px rgba(120, 53, 15, 0.65);
-}
-.l-brain-ring {
+.nebula-overlay {
   position: absolute;
-  inset: -18px;
-  border: 1px solid rgba(194, 65, 12, 0.3);
-  border-radius: 50%;
-  animation: l-orbit 11s linear infinite;
-}
-.l-ring-2 {
-  inset: -38px;
-  border-style: dashed;
-  border-color: rgba(180, 83, 9, 0.22);
-  animation-duration: 19s;
-  animation-direction: reverse;
-}
-.l-stage[data-phase="absorb"] .l-brain {
-  transform: translate(-50%, -50%) scale(1.14);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    0 34px 90px -26px rgba(124, 45, 18, 0.7),
-    0 0 130px -10px rgba(194, 65, 12, 0.62);
-}
-.l-stage[data-phase="emit"] .l-brain {
-  transform: translate(-50%, -50%) scale(1.04);
+  inset: 0;
+  pointer-events: none;
 }
 
-/* 散落的数据点（CSV / 文档） */
-.l-datachip {
+/* 阶段1：从四周向中心汇聚的 CSV 胶囊 */
+.nebula-chip {
   position: absolute;
   left: 50%;
   top: 50%;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   padding: 8px 11px;
   border-radius: 12px;
-  background: #fffdf9;
-  border: 1px solid var(--l-line);
-  box-shadow: 0 16px 30px -22px rgba(31, 26, 20, 0.45);
-  transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y)));
+  background: rgba(15, 17, 25, 0.72);
+  border: 1px solid rgba(245, 179, 90, 0.28);
+  box-shadow:
+    0 18px 36px -22px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
   opacity: 0;
-  transition: transform 1.05s cubic-bezier(0.5, 0, 0.2, 1), opacity 0.55s ease;
-  transition-delay: var(--delay, 0ms);
-  will-change: transform, opacity;
+  transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y))) scale(0.94);
 }
-.l-stage[data-phase="scatter"] .l-datachip {
-  opacity: 1;
-  animation: l-float 4.6s ease-in-out infinite;
+.nebula.is-phase-0 .nebula-chip {
+  animation: nebula-chip-in 2.35s cubic-bezier(0.42, 0, 0.2, 1) both;
   animation-delay: var(--delay, 0ms);
 }
-.l-stage[data-phase="absorb"] .l-datachip {
-  transform: translate(-50%, -50%) scale(0.12) rotate(-6deg);
-  opacity: 0;
-}
-.l-stage[data-phase="emit"] .l-datachip {
-  transform: translate(-50%, -50%) scale(0.12);
-  opacity: 0;
-  transition-delay: 0ms;
-}
-.l-datachip-file {
-  color: #7c2d12;
+.nebula-chip-file {
+  color: #ffe2b8;
   font-family: var(--l-mono);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
 }
-.l-datachip-fields {
-  color: var(--l-muted);
+.nebula-chip-meta {
+  color: rgba(244, 240, 232, 0.52);
   font-size: 10.5px;
   white-space: nowrap;
 }
 
-/* 吐出的画像卡片 */
-.l-profile-card {
+/* 阶段2：一次白金光 flash */
+.nebula-flash {
   position: absolute;
-  left: 50%;
-  top: 50%;
+  inset: -12%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(255, 246, 228, 0.5),
+    rgba(245, 179, 90, 0.16) 34%,
+    transparent 64%
+  );
+  animation: nebula-flash 0.8s ease-out both;
+}
+
+/* 阶段3：半透明玻璃拟态画像卡 */
+.nebula-card {
+  position: absolute;
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 208px;
-  padding: 11px 12px;
+  width: 190px;
+  padding: 10px 12px;
   border-radius: 16px;
-  background: #fffdf9;
-  border: 1px solid var(--l-line);
-  box-shadow: 0 26px 50px -30px rgba(31, 26, 20, 0.5);
+  background: rgba(18, 20, 28, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(14px) saturate(140%);
+  box-shadow:
+    0 26px 60px -28px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   opacity: 0;
-  transform: translate(-50%, -50%) scale(0.55);
-  transition: transform 0.85s cubic-bezier(0.2, 1.2, 0.3, 1), opacity 0.5s ease;
+  transform: translate(calc(-50% + var(--tw)), calc(-50% + var(--th))) scale(0.82);
+  transition: opacity 0.55s ease, transform 0.85s cubic-bezier(0.2, 1.15, 0.3, 1);
   transition-delay: var(--delay, 0ms);
-  will-change: transform, opacity;
 }
-.l-stage[data-phase="emit"] .l-profile-card {
+.nebula.is-phase-2 .nebula-card {
   opacity: 1;
-  transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(1);
+  transform: translate(calc(-50% + var(--tw)), calc(-50% + var(--th))) scale(1);
 }
-.l-profile-avatar {
+/* 三张卡的锚点：与 HeroNebula 里 curveTargets() 的百分比保持一致 */
+.nebula-card-1 {
+  left: 17%;
+  top: 27%;
+}
+.nebula-card-2 {
+  left: 83%;
+  top: 24%;
+}
+.nebula-card-3 {
+  left: 51%;
+  top: 79%;
+}
+.nebula-card-avatar {
   display: grid;
   place-items: center;
   flex: 0 0 auto;
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--accent) 14%, #fff);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--accent);
   font-family: var(--l-serif);
   font-size: 15px;
   font-weight: 700;
 }
-.l-profile-body {
+.nebula-card-body {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
-.l-profile-name {
-  color: var(--l-ink);
+.nebula-card-name {
+  color: #f7f3ea;
   font-size: 12.5px;
   font-weight: 650;
+  white-space: nowrap;
 }
-.l-profile-tags {
+.nebula-card-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
-.l-profile-tags span {
+.nebula-card-tags span {
   padding: 1px 7px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--accent) 11%, #fff);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, #ffffff);
   font-size: 10px;
   white-space: nowrap;
 }
 
+/* 阶段图例（暗底可读） */
 .l-phase-legend {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 7px 18px;
-  color: var(--l-muted);
   font-size: 12px;
+}
+.l-phase-legend--dark {
+  color: rgba(244, 240, 232, 0.46);
 }
 .l-phase-item {
   display: inline-flex;
@@ -560,30 +651,51 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--l-line-strong);
+  background: rgba(244, 240, 232, 0.24);
   transition: background 0.25s ease, box-shadow 0.25s ease;
 }
-.l-phase-item.is-active {
-  color: var(--l-accent);
+.l-phase-legend--dark .l-phase-item.is-active {
+  color: #f5b35a;
   font-weight: 600;
 }
-.l-phase-item.is-active i {
-  background: var(--l-accent);
-  box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.14);
+.l-phase-legend--dark .l-phase-item.is-active i {
+  background: #f5b35a;
+  box-shadow: 0 0 0 4px rgba(245, 179, 90, 0.16);
 }
 
-@keyframes l-float {
+@keyframes nebula-chip-in {
   0%,
-  100% {
-    translate: 0 -4px;
+  8% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y))) scale(0.9);
   }
-  50% {
-    translate: 0 4px;
+  14% {
+    opacity: 1;
+  }
+  52% {
+    opacity: 0.95;
+    transform: translate(calc(-50% + var(--x-mid)), calc(-50% + var(--y-mid))) scale(0.94);
+  }
+  80% {
+    opacity: 0.85;
+    transform: translate(calc(-50% + var(--x-late)), calc(-50% + var(--y-late))) scale(0.86);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
   }
 }
-@keyframes l-orbit {
-  to {
-    transform: rotate(360deg);
+@keyframes nebula-flash {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
   }
 }
 @keyframes l-rise {
@@ -931,8 +1043,8 @@
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 1100px) {
-  .l-stage {
-    --l-stage-scale: 0.9;
+  .nebula {
+    max-width: 520px;
   }
 }
 
@@ -954,7 +1066,8 @@
     display: none;
   }
   .l-hero {
-    padding-top: 40px;
+    margin-top: -62px;
+    padding-top: calc(62px + 40px);
   }
   .l-hero-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -963,10 +1076,25 @@
   .l-hero-visual {
     order: 2;
   }
-  .l-stage {
-    --l-stage-scale: 0.82;
-    width: min(100%, 460px);
+  .nebula {
+    max-width: min(100%, 460px);
     margin: 0 auto;
+  }
+  /* 平板窄栏：卡片收窄重排，避免 460px 视觉框里左右被裁 */
+  .nebula-card {
+    width: 170px;
+  }
+  .nebula-card-1 {
+    left: 20%;
+    top: 28%;
+  }
+  .nebula-card-2 {
+    left: 80%;
+    top: 24%;
+  }
+  .nebula-card-3 {
+    left: 50%;
+    top: 80%;
   }
   .l-scene,
   .l-scene.is-reverse {
@@ -1012,13 +1140,54 @@
     flex-direction: column;
     align-items: stretch;
   }
-  .l-stage {
-    --l-stage-scale: 0.64;
-    width: min(100%, 360px);
+  .nebula {
+    max-width: 100%;
   }
-  .l-brain {
+  .nebula-chip {
+    padding: 6px 9px;
+  }
+  .nebula-chip-file {
+    font-size: 10px;
+  }
+  .nebula-chip-meta {
+    font-size: 9.5px;
+  }
+  /* 手机：卡片整体缩到 0.78 左右、内边距/字号收紧，三张卡完全落在 362px 视觉框内 */
+  .nebula-card {
     width: 148px;
-    height: 148px;
+    padding: 7px 9px;
+    gap: 7px;
+    border-radius: 14px;
+  }
+  .nebula-card-1 {
+    left: 27%;
+    top: 30%;
+  }
+  .nebula-card-2 {
+    left: 72%;
+    top: 22%;
+  }
+  .nebula-card-3 {
+    left: 50%;
+    top: 80%;
+  }
+  .nebula-card-avatar {
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+  }
+  .nebula-card-body {
+    gap: 3px;
+  }
+  .nebula-card-name {
+    font-size: 11px;
+  }
+  .nebula-card-tags {
+    gap: 3px;
+  }
+  .nebula-card-tags span {
+    padding: 0 5px;
+    font-size: 8.5px;
   }
   .l-nav-login {
     padding: 6px 12px;
@@ -1055,13 +1224,12 @@
   .landing .l-hero-copy {
     animation: none;
   }
-  .landing .l-stage-scene *,
+  .landing .nebula-chip,
+  .landing .nebula-card,
+  .landing .nebula-flash,
   .landing .l-highlight {
     animation: none !important;
     transition: none !important;
-  }
-  .landing .l-brain-ring {
-    animation: none;
   }
   .landing .reveal {
     opacity: 1;

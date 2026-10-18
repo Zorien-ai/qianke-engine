@@ -1,75 +1,44 @@
 <script setup>
 /**
- * 官网 Landing Page（`/v2/#/home`，公开、可匿名访问）。
+ * 官网 Landing Page（`/v2/#/home`，公开可匿名访问）。
  *
  * 纯 Vue 3 + 手写 CSS，不引第三方动画库、不用远程字体：
- *   - 暖白营销页配色（#F9F9F8 / 深炭黑标题 / 灰蓝正文）+ 衬线标题栈；
- *   - Hero 右侧三阶段循环叙事：散落 CSV → 吸入发光 AI 大脑 → 吐出带彩色标签的画像卡片；
- *     阶段由 JS 定时切换，动效全交给 CSS transition/keyframes；卸载清定时器；
- *     prefers-reduced-motion 下静态停在阶段 3（生成画像）。
- *   - 滚动触达淡入上浮用 IntersectionObserver 自定义指令 v-reveal（reduced-motion 直接显示）。
- *   - 真实场景截图使用 import.meta.glob 引用：截图未就位时不炸构建，页面显示占位框；
- *     图片就位后重新 build 即可自动替换。
+ *   - 暖白营销页 + 暗色沉浸 Hero（深空黑 / 暖金光晕 / Canvas 粒子星云）；
+ *   - Hero 右侧 HeroNebula（原生 Canvas 粒子网络 + DOM 覆盖层）承担三阶段叙事：
+ *     散落 CSV 向心汇聚 → 中心爆发冲击波 → 三条发光曲线射向玻璃画像卡；
+ *   - 顶部导航在 Hero 上透明亮色，滚出 Hero 后切换成浅色吸顶；
+ *   - 滚动触达淡入上浮用 IntersectionObserver 自定义指令 v-reveal；
+ *   - 真实场景截图用 import.meta.glob 引用（截图未就位时构建不失败）。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { store } from "../store";
+import HeroNebula from "../components/landing/HeroNebula.vue";
 import "../styles/landing.css";
 
-/* 真实截图：Lead 产图前不存在也不会让构建失败（glob 为空时回退占位框） */
+/* 真实截图：import.meta.glob 保证缺图时不炸构建 */
 const shotModules = import.meta.glob("../assets/shots/*.png", { eager: true, import: "default" });
 const shot = (name) => shotModules[`../assets/shots/${name}.png`] || "";
 
 const isAuthed = computed(() => !!store.authenticated);
 
-/* ---------- Hero 三阶段循环动画 ---------- */
-const PHASE_KEYS = ["scatter", "absorb", "emit"];
+/* ---------- Hero 三阶段循环 ---------- */
 const PHASE_LEGEND = ["上传交易表", "AI 理解业务", "生成可问画像"];
 const PHASE_MS = 2600;
 
-const phase = ref(0);
-const phaseKey = computed(() => PHASE_KEYS[phase.value]);
+function prefersReducedMotion() {
+  return !!(
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+// 初次挂载就带上正确状态，避免 reduced-motion 用户先看到一帧动画再停
+const reducedMotion = ref(prefersReducedMotion());
+const phase = ref(reducedMotion.value ? 2 : 0);
 
 let phaseTimer = null;
 let motionQuery = null;
-
-const dataPoints = [
-  { file: "orders.csv", fields: "user_id · amount · city", x: -172, y: -118, delay: 0 },
-  { file: "用户表.csv", fields: "member_level · gender", x: 152, y: -142, delay: 90 },
-  { file: "rules.md", fields: "高价值客户 · 流失预警", x: -188, y: 78, delay: 170 },
-  { file: "trade_2024.csv", fields: "order_id · pay_time", x: 158, y: 112, delay: 250 },
-  { file: "会员规则.md", fields: "# 标签定义", x: -86, y: -186, delay: 130 },
-  { file: "goods.csv", fields: "category · price", x: 54, y: 176, delay: 210 },
-];
-
-const profileCards = [
-  {
-    avatar: "高",
-    name: "高价值客户",
-    tags: ["高客单", "美妆偏好"],
-    tx: -148,
-    ty: -84,
-    delay: 0,
-    accent: "#B45309",
-  },
-  {
-    avatar: "复",
-    name: "复购用户",
-    tags: ["近 30 天活跃", "母婴"],
-    tx: 142,
-    ty: -62,
-    delay: 110,
-    accent: "#2F6F5E",
-  },
-  {
-    avatar: "预",
-    name: "流失预警",
-    tags: ["待召回", "沉睡用户"],
-    tx: -28,
-    ty: 128,
-    delay: 210,
-    accent: "#6D5AA8",
-  },
-];
 
 function clearPhaseTimer() {
   if (phaseTimer) {
@@ -80,18 +49,16 @@ function clearPhaseTimer() {
 
 function startPhaseLoop() {
   clearPhaseTimer();
-  const reduce =
-    typeof window !== "undefined" &&
-    window.matchMedia &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduce = prefersReducedMotion();
+  reducedMotion.value = !!reduce;
   if (reduce) {
-    // 降低动效：静态展示阶段 3（生成画像）
+    // 降低动效：静态停在阶段 3（生成画像）
     phase.value = 2;
     return;
   }
   phase.value = 0;
   phaseTimer = setInterval(() => {
-    phase.value = (phase.value + 1) % PHASE_KEYS.length;
+    phase.value = (phase.value + 1) % PHASE_LEGEND.length;
   }, PHASE_MS);
 }
 
@@ -99,18 +66,32 @@ function onMotionChange() {
   startPhaseLoop();
 }
 
-/* ---------- 页内锚点（hash 路由下不能用 href="#id"） ---------- */
-function scrollTo(selector) {
-  const node = document.querySelector(selector);
-  if (node && node.scrollIntoView) {
-    node.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+/* ---------- 顶部导航：Hero 内透明亮色 / 滚出后浅色吸顶 ---------- */
+const navScrolled = ref(false);
+const navDark = ref(true);
+const heroRef = ref(null);
+
+function navHeight() {
+  return window.innerWidth <= 900 ? 62 : 68;
 }
 
-/* ---------- 顶部导航：滚动后加一层阴影 ---------- */
-const navScrolled = ref(false);
-function onWindowScroll() {
-  navScrolled.value = window.scrollY > 10;
+function updateNavState() {
+  const y = window.scrollY || 0;
+  navScrolled.value = y > 10;
+  const hero = heroRef.value;
+  if (!hero) {
+    navDark.value = false;
+    return;
+  }
+  navDark.value = hero.getBoundingClientRect().bottom > navHeight() + 10;
+}
+
+/* ---------- 页内锚点（hash 路由下不能用 href="#id"），补偿吸顶导航高度 ---------- */
+function scrollTo(selector) {
+  const node = document.querySelector(selector);
+  if (!node) return;
+  const top = node.getBoundingClientRect().top + window.scrollY - navHeight() - 14;
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
 }
 
 /* ---------- 滚动触达淡入上浮 ---------- */
@@ -223,8 +204,9 @@ onMounted(() => {
     else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
   }
   startPhaseLoop();
-  window.addEventListener("scroll", onWindowScroll, { passive: true });
-  onWindowScroll();
+  window.addEventListener("scroll", updateNavState, { passive: true });
+  window.addEventListener("resize", updateNavState);
+  updateNavState();
   document.title = "用户画像 RAG · 让你的电商数据，听懂中国话";
 });
 
@@ -234,14 +216,15 @@ onBeforeUnmount(() => {
     if (motionQuery.removeEventListener) motionQuery.removeEventListener("change", onMotionChange);
     else if (motionQuery.removeListener) motionQuery.removeListener(onMotionChange);
   }
-  window.removeEventListener("scroll", onWindowScroll);
+  window.removeEventListener("scroll", updateNavState);
+  window.removeEventListener("resize", updateNavState);
 });
 </script>
 
 <template>
   <div class="landing">
-    <!-- ============ 顶部极简导航（吸顶） ============ -->
-    <header class="l-nav" :class="{ 'is-scrolled': navScrolled }">
+    <!-- ============ 顶部极简导航（Hero 上透明亮色，滚出后浅色吸顶） ============ -->
+    <header class="l-nav" :class="{ 'is-dark': navDark, 'is-scrolled': navScrolled }">
       <div class="l-shell l-nav-inner">
         <RouterLink to="/home" class="l-brand" aria-label="用户画像 RAG 官网首页">
           <span class="l-logo">R</span>
@@ -272,8 +255,9 @@ onBeforeUnmount(() => {
     </header>
 
     <main>
-      <!-- ============ Hero ============ -->
-      <section class="l-hero">
+      <!-- ============ Hero：全幅暗色沉浸区 ============ -->
+      <section ref="heroRef" class="l-hero l-hero--dark">
+        <div class="l-hero-vignette" aria-hidden="true" />
         <div class="l-shell l-hero-grid">
           <div class="l-hero-copy">
             <span class="l-eyebrow"><i aria-hidden="true" />电商运营的 AI 数据助理</span>
@@ -302,48 +286,9 @@ onBeforeUnmount(() => {
             </ul>
           </div>
 
-          <!-- 三阶段循环叙事动画（纯 CSS/Vue） -->
           <div class="l-hero-visual" aria-hidden="true">
-            <div class="l-stage" :data-phase="phaseKey">
-              <div class="l-stage-scene">
-                <div class="l-brain">
-                  <span class="l-brain-ring l-ring-1" />
-                  <span class="l-brain-ring l-ring-2" />
-                  <span class="l-brain-core">AI</span>
-                </div>
-
-                <span
-                  v-for="p in dataPoints"
-                  :key="p.file"
-                  class="l-datachip"
-                  :style="{ '--x': `${p.x}px`, '--y': `${p.y}px`, '--delay': `${p.delay}ms` }"
-                >
-                  <span class="l-datachip-file">{{ p.file }}</span>
-                  <span class="l-datachip-fields">{{ p.fields }}</span>
-                </span>
-
-                <article
-                  v-for="c in profileCards"
-                  :key="c.name"
-                  class="l-profile-card"
-                  :style="{
-                    '--tx': `${c.tx}px`,
-                    '--ty': `${c.ty}px`,
-                    '--delay': `${c.delay}ms`,
-                    '--accent': c.accent,
-                  }"
-                >
-                  <span class="l-profile-avatar">{{ c.avatar }}</span>
-                  <span class="l-profile-body">
-                    <span class="l-profile-name">{{ c.name }}</span>
-                    <span class="l-profile-tags">
-                      <span v-for="tag in c.tags" :key="tag">{{ tag }}</span>
-                    </span>
-                  </span>
-                </article>
-              </div>
-            </div>
-            <div class="l-phase-legend">
+            <HeroNebula :phase="phase" :reduced-motion="reducedMotion" />
+            <div class="l-phase-legend l-phase-legend--dark">
               <span
                 v-for="(label, i) in PHASE_LEGEND"
                 :key="label"
