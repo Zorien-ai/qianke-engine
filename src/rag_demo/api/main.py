@@ -46,6 +46,14 @@ from openai import APIError
 from pydantic import BaseModel
 
 from rag_demo import answer_guard, auth, config, permissions
+from rag_demo.api.demo_showcase import (
+    DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
+    DEMO_QUERY_TITLE,
+    DEMO_QUERY_WHERE,
+    build_labels as build_demo_labels,
+    clamp_limit as clamp_demo_limit,
+    serialize_user as serialize_demo_user,
+)
 from rag_demo.api.kb import register_kb
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache
@@ -1229,6 +1237,74 @@ def clear_cache(
 def health() -> StatusResponse:
     """存活探针：不鉴权。监控系统需要它，且它不泄露任何业务信息"""
     return {"status": "ok"}
+
+
+# ================= 官网公开 demo 展示（匿名只读） =================
+# 首屏星云把「每个光点 = 一位 demo 用户」关联起来，并提供悬停/点选画像、
+# 以及真实统计的结果卡数字。安全边界见 api/demo_showcase.py 顶部说明：
+# 固定读仓库自带的合成 demo 数据集，接口不接受 dataset/tenant 参数，
+# 不返回 profile_text / embedding / 联系方式；企业库不会经过这里。
+@app.get("/api/public/demo/users")
+def public_demo_users(limit: int = DEMO_SHOWCASE_LIMIT) -> dict:
+    """公开只读：官网首屏星云的 demo 用户样本 + demo 场景的真实统计"""
+    limit = clamp_demo_limit(limit)
+    conn = get_conn(config.DEFAULT_DATASET)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM user_profile_vectors")
+        total_profiles = cur.fetchone()[0]
+
+        # demo 场景命中用户（用于首屏高亮与三条数据标签）
+        cur.execute(
+            f"""SELECT user_id, age, gender, city, member_level, order_count,
+                       avg_amount::float8, top_category, days_since_last_buy
+                FROM user_profile_vectors
+                WHERE {DEMO_QUERY_WHERE}
+                ORDER BY avg_amount DESC NULLS LAST"""
+        )
+        matched_rows = cur.fetchall()
+
+        # 结果卡数字：全部由 SQL 实时统计，不在前端写死
+        cur.execute(
+            f"""SELECT COUNT(*), AVG(avg_amount)::float8, MIN(age), MAX(age)
+                FROM user_profile_vectors WHERE {DEMO_QUERY_WHERE}"""
+        )
+        matched, avg_amount, age_min, age_max = cur.fetchone()
+
+        # 采样：md5 排序做确定性伪随机，覆盖全量用户而不是永远取前 N 条
+        cur.execute(
+            """SELECT user_id, age, gender, city, member_level, order_count,
+                      avg_amount::float8, top_category, days_since_last_buy
+               FROM user_profile_vectors
+               ORDER BY md5(user_id || 'demo-showcase')
+               LIMIT %s""",
+            (limit,),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.rollback()  # 只读查询，清事务，避免连接停在 idle in transaction
+        cur.close()
+
+    users = [serialize_demo_user(row) for row in rows]
+    matched_users = [serialize_demo_user(row) for row in matched_rows]
+    # 保证命中用户都在样本里：首屏高亮节点 / 标签要用到他们
+    known = {user["uid"] for user in users}
+    users += [user for user in matched_users if user["uid"] not in known]
+
+    return {
+        "dataset": config.DEFAULT_DATASET,
+        "total_profiles": total_profiles,
+        "query": {
+            "title": DEMO_QUERY_TITLE,
+            "matched": matched,
+            "avg_amount": round(float(avg_amount), 2) if avg_amount is not None else None,
+            "age_min": age_min,
+            "age_max": age_max,
+        },
+        "users": users,
+        "matched_users": matched_users,
+        "labels": build_demo_labels(matched_users),
+    }
 
 
 @app.post("/admin/reload")
