@@ -29,7 +29,9 @@
 因此**不能**在顶层 import `rag_demo.api.main` 里的助手函数（那时 main 还没定义完）。
 统一用 `_main()` 延迟导入——导入发生在请求内，`sys.modules` 查表，没有额外成本。
 """
+import hashlib
 import logging
+import re
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -264,6 +266,211 @@ def kb_overview() -> dict:
         "freshness": freshness,
         "last_source": last_source,
         "notes": notes,
+    }
+
+
+# ==================== A2. 画像卡牌 / 文档切片预览 ====================
+_NAME_RE = re.compile(r"用户[^（(]*[（(]([^）)]{1,24})[）)]")
+_PROFILE_PAGE_SIZE = 20
+_DOC_CHUNK_LIMIT = 500
+
+
+def mask_profile_name(profile_text: str) -> str | None:
+    """从 profile_text 提取姓名并脱敏：张三 → 张**；不返回完整姓名。"""
+    match = _NAME_RE.search(profile_text or "")
+    if not match:
+        return None
+    name = match.group(1).strip()
+    if not name:
+        return None
+    return name[:1] + "**" if len(name) > 1 else name + "**"
+
+
+def doc_id_for(name: str) -> str:
+    """文档名 → 稳定、URL 安全的短 ID；不把原始文件名直接暴露在路径里。"""
+    return hashlib.sha1((name or "").encode("utf-8")).hexdigest()[:16]
+
+
+def normalize_page(page: int, size: int) -> tuple[int, int]:
+    return max(1, int(page or 1)), min(50, max(1, int(size or _PROFILE_PAGE_SIZE)))
+
+
+def _profile_row(row) -> dict:
+    user_id, profile_text, age, gender, city, member_level, order_count, avg_amount, top_category, days_since_last_buy = row
+    return {
+        "user_id": user_id,
+        "name": mask_profile_name(profile_text),
+        "age": age,
+        "gender": gender,
+        "city": city,
+        "member_level": member_level,
+        "order_count": int(order_count or 0),
+        "avg_amount": round(float(avg_amount), 2) if avg_amount is not None else None,
+        "top_category": top_category,
+        "days_since_last_buy": days_since_last_buy,
+    }
+
+
+@router.get("/api/kb/profiles")
+def kb_profiles(page: int = 1, size: int = _PROFILE_PAGE_SIZE) -> dict:
+    """当前账号数据空间的画像卡牌（只读、分页；不返回 profile_text/embedding）。"""
+    api = _main()
+    api._require_login()
+    dataset = api._tenant_dataset()
+    page, size = normalize_page(page, size)
+    result = {
+        "dataset": dataset,
+        "ready": False,
+        "page": page,
+        "size": size,
+        "total": 0,
+        "total_pages": 0,
+        "items": [],
+    }
+    if not api._tenant_ready(dataset):
+        return result
+
+    from rag_demo.db.connection import get_conn, reset_dataset, use_dataset
+
+    token = use_dataset(dataset)
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM user_profile_vectors")
+            total = int(cur.fetchone()[0] or 0)
+            cur.execute(
+                """SELECT user_id, profile_text, age, gender, city, member_level,
+                          order_count, avg_amount::float8, top_category, days_since_last_buy
+                   FROM user_profile_vectors
+                   ORDER BY user_id ASC
+                   LIMIT %s OFFSET %s""",
+                (size, (page - 1) * size),
+            )
+            items = [_profile_row(row) for row in cur.fetchall()]
+        finally:
+            conn.rollback()
+            cur.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("画像卡牌读取失败 dataset=%s", dataset)
+        raise HTTPException(status_code=500, detail=f"画像数据读取失败：{exc}") from exc
+    finally:
+        reset_dataset(token)
+
+    return {
+        **result,
+        "ready": True,
+        "total": total,
+        "total_pages": (total + size - 1) // size if total else 0,
+        "items": items,
+    }
+
+
+@router.get("/api/kb/documents")
+def kb_documents() -> dict:
+    """当前账号数据空间的文档列表（不返回 chunk_text 全文）。"""
+    api = _main()
+    api._require_login()
+    dataset = api._tenant_dataset()
+    result = {"dataset": dataset, "ready": False, "items": []}
+    if not api._tenant_ready(dataset):
+        return result
+
+    from rag_demo.db.connection import get_conn, reset_dataset, use_dataset
+
+    token = use_dataset(dataset)
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """SELECT doc_name, COUNT(*), SUM(length(chunk_text)), MAX(update_time)
+                   FROM wiki_vectors
+                   GROUP BY doc_name
+                   ORDER BY COUNT(*) DESC, doc_name ASC"""
+            )
+            items = [
+                {
+                    "doc_id": doc_id_for(row[0]),
+                    "name": row[0],
+                    "chunks": int(row[1] or 0),
+                    "chars": int(row[2] or 0),
+                    "updated_at": row[3].strftime("%Y-%m-%d %H:%M:%S") if row[3] else None,
+                }
+                for row in cur.fetchall()
+            ]
+        finally:
+            conn.rollback()
+            cur.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("文档列表读取失败 dataset=%s", dataset)
+        raise HTTPException(status_code=500, detail=f"文档列表读取失败：{exc}") from exc
+    finally:
+        reset_dataset(token)
+
+    return {**result, "ready": True, "items": items}
+
+
+@router.get("/api/kb/documents/{doc_id}/chunks")
+def kb_document_chunks(doc_id: str) -> dict:
+    """按 doc_id 取当前数据空间的切片；doc_id 只是文档名的哈希，不是任意查询入口。"""
+    api = _main()
+    api._require_login()
+    dataset = api._tenant_dataset()
+    if not api._tenant_ready(dataset):
+        return {"dataset": dataset, "ready": False, "document": None, "items": [], "total": 0, "truncated": False}
+
+    from rag_demo.db.connection import get_conn, reset_dataset, use_dataset
+
+    token = use_dataset(dataset)
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT DISTINCT doc_name FROM wiki_vectors")
+            names = [row[0] for row in cur.fetchall() if row[0]]
+            matched = next((name for name in names if doc_id_for(name) == doc_id), None)
+            if matched is None:
+                raise HTTPException(status_code=404, detail="文档不存在或不属于当前数据空间")
+            cur.execute("SELECT COUNT(*), COALESCE(SUM(length(chunk_text)), 0) FROM wiki_vectors WHERE doc_name = %s", (matched,))
+            total, chars = cur.fetchone()
+            total = int(total or 0)
+            cur.execute(
+                """SELECT id, chunk_text, length(chunk_text), parent_key
+                   FROM wiki_vectors
+                   WHERE doc_name = %s
+                   ORDER BY id ASC
+                   LIMIT %s""",
+                (matched, _DOC_CHUNK_LIMIT),
+            )
+            items = [
+                {
+                    "chunk_index": index,
+                    "id": row[0],
+                    "text": row[1],
+                    "chars": int(row[2] or len(row[1] or "")),
+                    "parent_key": row[3],
+                }
+                for index, row in enumerate(cur.fetchall(), 1)
+            ]
+        finally:
+            conn.rollback()
+            cur.close()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("文档切片读取失败 dataset=%s doc_id=%s", dataset, doc_id)
+        raise HTTPException(status_code=500, detail=f"文档切片读取失败：{exc}") from exc
+    finally:
+        reset_dataset(token)
+
+    return {
+        "dataset": dataset,
+        "ready": True,
+        "document": {"doc_id": doc_id, "name": matched, "chunks": total, "chars": int(chars or 0)},
+        "items": items,
+        "total": total,
+        "truncated": total > len(items),
     }
 
 

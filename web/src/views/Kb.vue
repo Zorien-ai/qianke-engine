@@ -11,6 +11,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { getJson, postJson } from "../api";
 import { toast, toastError } from "../store";
 import { freshnessReason, freshnessText } from "../lib/wizardCache";
+import ProfileWall from "../components/kb/ProfileWall.vue";
+import DocumentReader from "../components/kb/DocumentReader.vue";
 
 const overview = ref(null);
 const loading = ref(true);
@@ -299,6 +301,10 @@ function stepIcon(status) {
             <div class="progress-fill" :style="{ width: `${freshness.pct}%` }"></div>
           </div>
         </div>
+
+        <!-- 画像卡牌墙 + 文档切片阅读器 -->
+        <ProfileWall :dataset="overview.dataset" />
+        <DocumentReader :dataset="overview.dataset" />
 
         <!-- 文档矩阵 -->
         <section class="card">
