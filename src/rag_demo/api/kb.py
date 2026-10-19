@@ -474,6 +474,170 @@ def kb_document_chunks(doc_id: str) -> dict:
     }
 
 
+# ==================== A3. 原文阅读 + 构建历史 ====================
+@router.get("/api/kb/docs/{doc_id}/raw")
+def kb_document_raw(doc_id: str) -> dict:
+    """返回当前数据空间某篇文档的原始 Markdown；找不到源文件时用切片拼回并标记。"""
+    api = _main()
+    api._require_login()
+    dataset = api._tenant_dataset()
+    if not api._tenant_ready(dataset):
+        return {"dataset": dataset, "ready": False, "document": None}
+
+    from pathlib import Path
+
+    from rag_demo.db.connection import get_conn, reset_dataset, use_dataset
+    from rag_demo.db.schema import read_last_build
+    from rag_demo.mvp import uploads
+
+    token = use_dataset(dataset)
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT DISTINCT doc_name FROM wiki_vectors")
+            names = [row[0] for row in cur.fetchall() if row[0]]
+            matched = next((name for name in names if doc_id_for(name) == doc_id), None)
+            if matched is None:
+                raise HTTPException(status_code=404, detail="文档不存在或不属于当前数据空间")
+
+            content = None
+            source = None
+            # 1) 上传批次的原始 Markdown（企业用户的真实来源）
+            try:
+                last_build = read_last_build() or {}
+                upload_id = last_build.get("upload_id")
+                if upload_id:
+                    _, md_paths = uploads.paths(upload_id)
+                    for path in md_paths:
+                        if Path(path).name == matched:
+                            content = Path(path).read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+                            source = "upload"
+                            break
+            except Exception as exc:  # noqa: BLE001 源文件不可用不应阻断阅读
+                logger.info("原文读取：上传源不可用（%s）：%s", dataset, exc)
+
+            # 2) demo / 仓库自带文档目录
+            if content is None:
+                from rag_demo.config import BASE_DIR
+
+                candidate = Path(BASE_DIR) / "data" / "docs" / matched
+                if candidate.is_file():
+                    content = candidate.read_text(encoding="utf-8", errors="replace").lstrip("\ufeff")
+                    source = "repo_docs"
+
+            # 3) 最后兜底：用已入库切片按顺序拼回（明确标记非原始文件）
+            if content is None:
+                cur.execute("SELECT chunk_text FROM wiki_vectors WHERE doc_name = %s ORDER BY id ASC", (matched,))
+                content = "\n\n".join(row[0] or "" for row in cur.fetchall())
+                source = "chunks_reconstructed"
+        finally:
+            conn.rollback()
+            cur.close()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("原文读取失败 dataset=%s doc_id=%s", dataset, doc_id)
+        raise HTTPException(status_code=500, detail=f"原文读取失败：{exc}") from exc
+    finally:
+        reset_dataset(token)
+
+    return {
+        "dataset": dataset,
+        "ready": True,
+        "document": {
+            "doc_id": doc_id,
+            "name": matched,
+            "content": content or "",
+            "source": source,
+        },
+    }
+
+
+@router.get("/api/kb/history")
+def kb_history() -> dict:
+    """当前数据空间的构建流水；旧库无历史表时从 last_build 降级成一条。"""
+    api = _main()
+    api._require_login()
+    dataset = api._tenant_dataset()
+    result = {"dataset": dataset, "ready": False, "items": []}
+    if not api._tenant_ready(dataset):
+        return result
+
+    from rag_demo.db.connection import get_conn, reset_dataset, use_dataset
+    from rag_demo.db.schema import ensure_build_history, read_fingerprint, read_last_build
+
+    token = use_dataset(dataset)
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        try:
+            ensure_build_history(cur)
+            conn.commit()
+            cur.execute(
+                """SELECT built_at, mode, elapsed_s, rows, profiles, status, error
+                   FROM build_history
+                   ORDER BY built_at DESC, id DESC
+                   LIMIT 50"""
+            )
+            items = [
+                {
+                    "built_at": row[0].strftime("%Y-%m-%d %H:%M:%S") if row[0] else None,
+                    "mode": row[1],
+                    "elapsed_s": float(row[2]) if row[2] is not None else None,
+                    "rows": row[3],
+                    "profiles": row[4],
+                    "status": row[5] or "success",
+                    "error": row[6],
+                }
+                for row in cur.fetchall()
+            ]
+            if not items:
+                # 旧数据空间没有历史表：用 last_build 给出一条“最近构建”，并标记来源
+                try:
+                    last = read_last_build()
+                except Exception:  # noqa: BLE001
+                    last = None
+                if last:
+                    items = [{
+                        "built_at": last.get("at"),
+                        "mode": last.get("mode") or "full",
+                        "elapsed_s": last.get("elapsed_s"),
+                        "rows": last.get("rows"),
+                        "profiles": last.get("profiles"),
+                        "status": "success",
+                        "error": None,
+                        "note": "历史表为空，显示最近一次构建",
+                    }]
+                if not items:
+                    # 连 last_build 都没有（例如仓库自带 demo 基线）：用索引指纹的 built_at 回填
+                    try:
+                        fp = read_fingerprint() or {}
+                    except Exception:  # noqa: BLE001
+                        fp = {}
+                    if fp.get("built_at"):
+                        items = [{
+                            "built_at": fp.get("built_at"),
+                            "mode": "full",
+                            "elapsed_s": None,
+                            "rows": fp.get("profile_count"),
+                            "profiles": fp.get("profile_count"),
+                            "status": "success",
+                            "error": None,
+                            "note": "历史表为空，按当前索引构建时间回填",
+                        }]
+        finally:
+            conn.rollback()
+            cur.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("构建历史读取失败 dataset=%s", dataset)
+        raise HTTPException(status_code=500, detail=f"构建历史读取失败：{exc}") from exc
+    finally:
+        reset_dataset(token)
+
+    return {**result, "ready": True, "items": items}
+
+
 # ==================== B. 清空数据空间 ====================
 _CLEAR_EMPTY = "当前租户数据为空，无需清空"
 _CLEAR_BUSY = (

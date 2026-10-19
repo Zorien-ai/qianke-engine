@@ -77,6 +77,20 @@ CREATE TABLE IF NOT EXISTS wiki_vectors (
 )
 """
 
+# 构建流水（每个数据集自己的库内各一张）；历史页读取。旧数据空间在第一次读取时会懒建表。
+BUILD_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS build_history (
+    id          BIGSERIAL PRIMARY KEY,
+    built_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    mode        TEXT        NOT NULL,
+    elapsed_s   DOUBLE PRECISION,
+    rows        INTEGER,
+    profiles    INTEGER,
+    status      TEXT        NOT NULL DEFAULT 'success',
+    error       TEXT
+)
+"""
+
 # 老库补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表是 no-op，新列不会自动出现。
 # 与 metadata 列同一套约定（在 ingest 里幂等 ALTER），这里集中定义避免两处写漏。
 WIKI_ALTER_SQL = [
@@ -102,6 +116,7 @@ WIKI_EMBED_INDEX = (
 BASE_TABLE_SQL = [
     USER_PROFILE_DDL,
     WIKI_DDL,
+    BUILD_HISTORY_DDL,
     USER_PROFILE_EMBED_INDEX,
     WIKI_EMBED_INDEX,
 ]
@@ -130,6 +145,44 @@ def ensure_base_tables(cur=None) -> None:
             cur.execute(sql)
         conn.commit()
         logger.info("源数据表 user_profile_vectors / wiki_vectors 已就绪")
+    finally:
+        cur.close()
+
+
+def ensure_build_history(cur=None) -> None:
+    """懒建构建流水表；旧数据空间不需要重跑 ingest 也能打开历史页。"""
+    if cur is not None:
+        cur.execute(BUILD_HISTORY_DDL)
+        return
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(BUILD_HISTORY_DDL)
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def write_build_history(
+    *,
+    mode: str,
+    elapsed_s: float | None,
+    rows: int | None,
+    profiles: int | None,
+    status: str = "success",
+    error: str | None = None,
+) -> None:
+    """在最后写一条构建流水（失败时也写 status=failed）。"""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        ensure_build_history(cur)
+        cur.execute(
+            """INSERT INTO build_history (mode, elapsed_s, rows, profiles, status, error)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (mode, elapsed_s, rows, profiles, status, error),
+        )
+        conn.commit()
     finally:
         cur.close()
 

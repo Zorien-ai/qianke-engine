@@ -143,7 +143,7 @@ function closeDrawer() {
             class="nav-item"
             active-class=""
             exact-active-class=""
-            :class="{ 'is-active': route.path === item.to }"
+            :class="{ 'is-active': route.path === item.to || (item.to === '/kb' && route.path.startsWith('/kb/')) }"
             :title="item.label"
             @click="closeDrawer"
           >

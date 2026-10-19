@@ -392,6 +392,23 @@ def run_build(inputs: BuildInputs, on_event: EventFn) -> dict:
             _persist_build_records(inputs, mode, result)
             logger.info("[构建] 完成：%s", result)
             return result
+    except Exception as exc:
+        # 失败也留一条流水；历史页要能区分成功/失败，而不是只剩成功记录。
+        try:
+            from rag_demo.db.schema import write_build_history
+
+            with writes_to(dataset):
+                write_build_history(
+                    mode=mode,
+                    elapsed_s=round(time.time() - started, 1),
+                    rows=None,
+                    profiles=None,
+                    status="failed",
+                    error=str(exc)[:2000],
+                )
+        except Exception:  # noqa: BLE001 记录失败不能覆盖原始构建异常
+            logger.exception("[构建] 写入失败流水失败（不影响原始异常）")
+        raise
     finally:
         lock.release()
         logger.info("[构建] 释放数据集锁: %s（用时 %.1fs）", dataset, time.time() - started)
@@ -404,7 +421,7 @@ def _persist_build_records(inputs: BuildInputs, mode: str, result: dict) -> None
     last_build 的扩展字段（第五轮契约 C）：
         mode / rows / profiles / elapsed_s —— 概况页与 plan 据此显示「上次构建是什么模式、多大、多久」
     """
-    from rag_demo.db.schema import write_last_build, write_last_full_build
+    from rag_demo.db.schema import write_build_history, write_last_build, write_last_full_build
     from rag_demo.kb_stats import serialize_last_build
 
     at = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -431,6 +448,16 @@ def _persist_build_records(inputs: BuildInputs, mode: str, result: dict) -> None
         }
     )
     write_last_build(payload)
+    try:
+        write_build_history(
+            mode=mode,
+            elapsed_s=result.get("elapsed_s"),
+            rows=result.get("rows"),
+            profiles=result.get("profiles"),
+            status="success",
+        )
+    except Exception:  # noqa: BLE001 历史记录失败不能反噬一次已成功的构建
+        logger.exception("[构建] 写入 build_history 失败（不影响构建结果）")
 
     if mode == MODE_FULL:
         # 「覆盖重建」卡要显示「上次全量用时 / 行数」，即使最近一次是增量构建也要有值

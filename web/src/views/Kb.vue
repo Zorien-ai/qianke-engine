@@ -1,85 +1,42 @@
 <script setup>
 /**
- * 知识库页：GET /api/kb/overview 概况 + 文档矩阵 + 数据状态；
- * 企业管理员（overview.can_write）可重建 / 清空。
- *
- * 重建复用既有向导接口：POST /api/wizard/build（upload_id + fields + mode）→ 轮询
- * GET /api/wizard/build/{task_id} 显示步骤进度。**绝不传 dataset**：读哪个库
- * 由登录账号推导（红线）。清空要手输 dataset 字面值做二次确认。
+ * 知识库总览：只保留 4 个可点击指标卡 + 数据状态。
+ * 文档/切片 → /kb/docs，画像 → /kb/profiles，构建时间 → /kb/history。
+ * 数据集仍由登录账号推导，前端不传 dataset。
  */
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { getJson, postJson } from "../api";
-import { toast, toastError } from "../store";
+import { computed, onMounted, ref } from "vue";
+import { getJson } from "../api";
 import { freshnessReason, freshnessText } from "../lib/wizardCache";
-import ProfileWall from "../components/kb/ProfileWall.vue";
-import DocumentReader from "../components/kb/DocumentReader.vue";
 
 const overview = ref(null);
 const loading = ref(true);
 const loadError = ref("");
 
-const clearInput = ref("");
-const clearing = ref(false);
-
-const build = reactive({
-  busy: false,
-  taskId: "",
-  dataset: "",
-  status: "",
-  percent: 0,
-  steps: [],
-  note: "",
-  error: "",
-  pollTimer: null,
-});
-
-const lastSource = computed(() => (overview.value && overview.value.last_source) || null);
-const canWrite = computed(() => !!(overview.value && overview.value.can_write));
-const rebuildDisabledReason = computed(() => {
-  if (!canWrite.value) return "只有企业管理员可以重建数据";
-  if (!lastSource.value) return "还没有可复用的构建源，请先去数据导入向导构建一次";
-  if (!lastSource.value.available) return "源文件已不在上传目录，请重新导入后再重建";
-  return "";
-});
-const canRebuild = computed(() => !rebuildDisabledReason.value);
+const totals = computed(() => (overview.value && overview.value.totals) || { docs: 0, chunks: 0, profiles: 0 });
+const builtAt = computed(() => (overview.value && overview.value.built_at) || "—");
+const modeLabel = computed(() => (overview.value && overview.value.mode === "demo" ? "演示数据集" : "企业数据空间"));
 
 const freshness = computed(() => {
   const f = (overview.value && overview.value.freshness) || null;
-  if (!f) {
-    return {
-      status: "unknown",
-      label: freshnessText("unknown"),
-      reason: freshnessReason("unknown"),
-      pct: 0,
-      cls: "is-muted",
-    };
-  }
-  // 文案降维：技术值只放 title（见模板），正文给人话
   const map = {
     fresh: { pct: 100, cls: "is-success" },
     stale: { pct: 55, cls: "is-warn" },
     unknown: { pct: 14, cls: "is-muted" },
   };
-  const m = map[f.status] || map.unknown;
+  const status = (f && f.status) || "unknown";
+  const m = map[status] || map.unknown;
   return {
-    status: f.status,
-    label: freshnessText(f.status),
+    status,
+    label: freshnessText(status),
+    reason: freshnessReason(status, f && f.reason),
     pct: m.pct,
     cls: m.cls,
-    // 后端 reason 是技术口径（如「索引与源表一致」），展示时降维成人话
-    reason: freshnessReason(f.status, f.reason),
   };
 });
 
-const maxChunks = computed(() => {
-  const docs = (overview.value && overview.value.docs) || [];
-  return docs.reduce((n, d) => Math.max(n, Number(d.chunks) || 0), 0) || 1;
-});
-
-const srcFields = computed(() => {
-  const fields = (lastSource.value && lastSource.value.fields) || {};
-  return Object.entries(fields).filter(([, v]) => v);
-});
+function countText(value) {
+  return Number(value || 0).toLocaleString();
+}
 
 async function load() {
   loading.value = true;
@@ -93,119 +50,14 @@ async function load() {
   }
 }
 
-/* ---------- 重建 ---------- */
-function stopPolling() {
-  if (build.pollTimer) {
-    clearInterval(build.pollTimer);
-    build.pollTimer = null;
-  }
-}
-
-async function pollBuild() {
-  if (!build.taskId) return;
-  try {
-    const t = await getJson(`/api/wizard/build/${build.taskId}`);
-    build.status = t.status || "";
-    build.percent = Number(t.percent) || 0;
-    build.steps = t.steps || [];
-    build.note = t.note || "";
-    build.error = t.error || "";
-    if (t.status === "done" || t.status === "failed") {
-      stopPolling();
-      build.busy = false;
-      if (t.status === "done") {
-        toast("重建完成，知识库概况已刷新", "success", 4200);
-        await load();
-      } else {
-        toast(`重建失败：${t.error || t.note || "未知错误"}`, "error", 7000);
-      }
-    }
-  } catch (e) {
-    stopPolling();
-    build.busy = false;
-    toastError(e);
-  }
-}
-
-async function rebuild() {
-  const src = lastSource.value;
-  if (!src || !src.upload_id || build.busy) return;
-  if (!src.available) {
-    toast("源文件已不在上传目录，无法自动重建，请重新导入数据", "error");
-    return;
-  }
-  build.busy = true;
-  build.percent = 0;
-  build.steps = [];
-  build.note = "正在提交构建任务…";
-  build.error = "";
-  try {
-    // 只传 upload_id + fields + mode；dataset 由后端按账号推导（红线）。
-    // 知识库页的「重建」语义就是清空重写（覆盖重建）；第五轮起构建默认是
-    // 「追加更新」，不显式传 mode=full 会被增量预检拦下（没有新增文件可追加）。
-    const res = await postJson("/api/wizard/build", {
-      upload_id: src.upload_id,
-      fields: src.fields || {},
-      mode: "full",
-    });
-    build.taskId = res.task_id || "";
-    build.dataset = res.dataset || "";
-    build.status = "running";
-    build.note = "构建任务已启动，正在清理并重写数据…";
-    stopPolling();
-    // 第五轮统一：构建进度轮询 3000ms（与向导一致，低频更新即可）
-    build.pollTimer = setInterval(pollBuild, 3000);
-    await pollBuild();
-  } catch (e) {
-    build.busy = false;
-    build.note = "";
-    toastError(e);
-  }
-}
-
-/* ---------- 清空 ---------- */
-async function clearAll() {
-  const ds = ((overview.value && overview.value.dataset) || "").trim();
-  if (!ds) return;
-  if (clearInput.value.trim() !== ds) {
-    toast(`请输入数据集名「${ds}」以确认清空`, "warn");
-    return;
-  }
-  clearing.value = true;
-  try {
-    const res = await postJson("/api/kb/clear", { confirm: clearInput.value.trim() });
-    const cleared = res.cleared || {};
-    toast(
-      `已清空：画像 ${cleared.profiles ?? 0} · 切片 ${cleared.chunks ?? 0} · 文档 ${cleared.docs ?? 0} · 索引 ${cleared.index ?? 0}`,
-      "success",
-      5200
-    );
-    clearInput.value = "";
-    await load();
-  } catch (e) {
-    toastError(e);
-  } finally {
-    clearing.value = false;
-  }
-}
-
 onMounted(load);
-onBeforeUnmount(stopPolling);
-
-function stepIcon(status) {
-  if (status === "done") return "✓";
-  if (status === "running") return "•";
-  if (status === "failed") return "✕";
-  if (status === "skipped") return "–";
-  return "·";
-}
 </script>
 
 <template>
-  <div class="page">
+  <div class="page kb-overview">
     <div v-if="loading" class="card">
       <div class="skeleton" style="height: 26px; width: 30%"></div>
-      <div class="skeleton" style="height: 90px; margin-top: 16px"></div>
+      <div class="skeleton" style="height: 100px; margin-top: 16px"></div>
     </div>
 
     <div v-else-if="loadError" class="card">
@@ -218,231 +70,115 @@ function stepIcon(status) {
     </div>
 
     <template v-else-if="overview">
-      <!-- 标题行 -->
       <div class="kb-hero">
         <div>
           <div class="kb-title-line">
-            <h2 style="font-size: 20px">知识库概况</h2>
+            <h2 style="font-size: 22px">知识库概况</h2>
             <span class="kb-dataset">{{ overview.dataset }}</span>
             <span class="badge" :class="overview.mode === 'demo' ? 'is-warn' : 'is-primary'">
-              {{ overview.mode === "demo" ? "演示数据集" : "企业数据空间" }}
+              {{ modeLabel }}
             </span>
-            <span class="badge" v-if="overview.ready" :class="overview.empty ? 'is-warn' : 'is-success'">
-              {{ overview.empty ? "已构建 · 空" : "已构建" }}
+            <span class="badge" :class="overview.ready ? 'is-success' : 'is-muted'">
+              {{ overview.ready ? "已构建" : "未构建" }}
             </span>
-            <span class="badge" v-else>未构建</span>
           </div>
-          <p class="card-sub" style="margin-top: 6px">
-            数据来源由登录账号推导；这里只展示当前数据空间的真实概况，重建/清空也只会作用在它上面。
+          <p class="card-sub" style="margin-top: 7px">
+            所有指标都来自当前账号的数据空间。点击卡片进入对应的数据视图。
           </p>
         </div>
         <div class="row-actions">
-          <RouterLink class="btn btn-ghost" to="/setup">去数据导入</RouterLink>
+          <RouterLink class="btn btn-ghost" to="/kb/history">构建历史</RouterLink>
           <button type="button" class="btn btn-ghost" @click="load">刷新</button>
         </div>
       </div>
 
-      <!-- 只读说明 -->
-      <div v-if="!canWrite && overview.readonly_reason" class="alert is-info" style="margin-bottom: 16px">
-        {{ overview.readonly_reason }}
+      <div class="stat-grid kb-nav-grid">
+        <RouterLink to="/kb/docs" class="stat-card kb-nav-card">
+          <div class="kb-nav-head">
+            <span class="stat-label">文档</span>
+            <span class="kb-nav-arrow">→</span>
+          </div>
+          <div class="stat-value">{{ countText(totals.docs) }}</div>
+          <div class="stat-extra">参与检索的文档篇数 · 查看文档池</div>
+        </RouterLink>
+
+        <RouterLink to="/kb/docs" class="stat-card kb-nav-card">
+          <div class="kb-nav-head">
+            <span class="stat-label">切片</span>
+            <span class="kb-nav-arrow">→</span>
+          </div>
+          <div class="stat-value">{{ countText(totals.chunks) }}</div>
+          <div class="stat-extra">写入 wiki_vectors 的 RAG 文本块</div>
+        </RouterLink>
+
+        <RouterLink to="/kb/profiles" class="stat-card kb-nav-card">
+          <div class="kb-nav-head">
+            <span class="stat-label">用户画像</span>
+            <span class="kb-nav-arrow">→</span>
+          </div>
+          <div class="stat-value">{{ countText(totals.profiles) }}</div>
+          <div class="stat-extra">结构化画像条数 · 浏览画像卡牌</div>
+        </RouterLink>
+
+        <RouterLink to="/kb/history" class="stat-card kb-nav-card">
+          <div class="kb-nav-head">
+            <span class="stat-label">最近构建时间</span>
+            <span class="kb-nav-arrow">→</span>
+          </div>
+          <div class="stat-value kb-time-value">{{ builtAt }}</div>
+          <div class="stat-extra">查看构建流水与耗时</div>
+        </RouterLink>
       </div>
 
-      <!-- 未构建 -->
-      <div v-if="!overview.ready" class="card">
-        <div class="empty-state">
-          <div class="empty-emoji">🌱</div>
-          <div class="empty-title">这个数据空间还没有构建</div>
-          <div class="empty-desc">
-            上传 CSV / Markdown 并完成一次构建后，这里会显示文档数、切片数、画像数、数据状态与文档矩阵。
-          </div>
-          <RouterLink class="btn btn-primary" to="/setup">去数据导入向导</RouterLink>
+      <div class="freshness-card" :title="`技术值：${freshness.status}`">
+        <span class="status-dot" :class="`is-${freshness.status}`"></span>
+        <div>
+          <div class="freshness-kicker">数据状态</div>
+          <div class="freshness-text">{{ freshness.label }}</div>
+          <div class="freshness-reason">{{ freshness.reason || "暂无数据状态信息" }}</div>
+        </div>
+        <div class="freshness-bar progress progress-lg" :class="freshness.cls">
+          <div class="progress-fill" :style="{ width: `${freshness.pct}%` }"></div>
         </div>
       </div>
 
-      <template v-else>
-        <!-- 概况卡 -->
-        <div class="stat-grid">
-          <div class="stat-card">
-            <div class="stat-value">{{ Number(overview.totals?.docs ?? 0).toLocaleString() }}</div>
-            <div class="stat-label">文档</div>
-            <div class="stat-extra">参与检索的文档篇数</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value">{{ Number(overview.totals?.chunks ?? 0).toLocaleString() }}</div>
-            <div class="stat-label">切片</div>
-            <div class="stat-extra">写入 wiki_vectors 的分块数</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value">{{ Number(overview.totals?.profiles ?? 0).toLocaleString() }}</div>
-            <div class="stat-label">用户画像</div>
-            <div class="stat-extra">结构化画像条数</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" style="font-size: 19px; line-height: 1.4">
-              {{ overview.built_at || "—" }}
-            </div>
-            <div class="stat-label">最近构建时间</div>
-            <div class="stat-extra">{{ freshness.reason || "暂无数据状态信息" }}</div>
-          </div>
-        </div>
-
-        <!-- 数据状态 -->
-        <div
-          class="freshness-card"
-          :title="`技术值：${overview.freshness?.status || 'unknown'}`"
-        >
-          <span class="status-dot" :class="`is-${overview.freshness?.status || 'unknown'}`"></span>
-          <div>
-            <div class="freshness-kicker">数据状态</div>
-            <div class="freshness-text">{{ freshness.label }}</div>
-            <div class="freshness-reason">{{ freshness.reason || "暂无数据状态信息" }}</div>
-          </div>
-          <div class="freshness-bar progress progress-lg" :class="freshness.cls">
-            <div class="progress-fill" :style="{ width: `${freshness.pct}%` }"></div>
-          </div>
-        </div>
-
-        <!-- 画像卡牌墙 + 文档切片阅读器 -->
-        <ProfileWall :dataset="overview.dataset" />
-        <DocumentReader :dataset="overview.dataset" />
-
-        <!-- 文档矩阵 -->
-        <section class="card">
-          <div class="card-title">
-            <span class="dot"></span>文档矩阵
-            <span class="badge">{{ overview.docs?.length || 0 }} 篇</span>
-            <span class="spacer"></span>
-            <span class="card-sub">按切片数排序 · 占比条以最大文档为基准</span>
-          </div>
-          <div v-if="overview.docs && overview.docs.length" class="doc-matrix">
-            <div v-for="doc in overview.docs" :key="doc.doc_name" class="doc-row">
-              <span class="doc-name" :title="doc.doc_name">{{ doc.doc_name }}</span>
-              <span class="doc-num">{{ doc.chunks }} 切片</span>
-              <span class="doc-num">{{ Number(doc.chars || 0).toLocaleString() }} 字符</span>
-              <div class="doc-bar progress">
-                <div class="progress-fill" :style="{ width: `${Math.max(3, (Number(doc.chunks) / maxChunks) * 100)}%` }"></div>
-              </div>
-            </div>
-          </div>
-          <div v-else class="empty-state" style="padding: 28px 10px">
-            <div class="empty-desc">
-              已构建但还没有文档。可以去
-              <RouterLink to="/setup">数据导入向导</RouterLink>
-              上传 Markdown 文档后重建。
-            </div>
-          </div>
-        </section>
-
-        <!-- 操作区 -->
-        <section class="kb-op-card">
-          <div class="card-title"><span class="dot"></span>数据维护</div>
-
-          <template v-if="canWrite">
-            <div class="meta-list" style="margin-bottom: 14px">
-              <div class="meta-row">
-                <dt>最近构建源</dt>
-                <dd>
-                  <template v-if="lastSource">
-                    <code>{{ lastSource.upload_id }}</code>
-                    <span class="field-hint" style="margin-left: 8px">
-                      CSV {{ lastSource.csv ?? 0 }} 个 · 文档 {{ lastSource.md ?? 0 }} 篇 ·
-                      {{ lastSource.built_at || "—" }}
-                    </span>
-                  </template>
-                  <template v-else>无（还没通过向导构建过）</template>
-                </dd>
-              </div>
-              <div class="meta-row" v-if="srcFields.length">
-                <dt>字段映射</dt>
-                <dd>
-                  <span v-for="[k, v] in srcFields" :key="k" class="tag" style="margin-right: 6px">{{ k }} → {{ v }}</span>
-                </dd>
-              </div>
-              <div class="meta-row" v-if="lastSource">
-                <dt>源文件</dt>
-                <dd>
-                  <span class="badge" :class="lastSource.available ? 'is-success' : 'is-danger'">
-                    {{ lastSource.available ? "仍在磁盘" : "已删除（需重新导入）" }}
-                  </span>
-                </dd>
-              </div>
-            </div>
-
-            <div class="row-actions">
-              <button type="button" class="btn btn-primary" :disabled="!canRebuild || build.busy" :title="rebuildDisabledReason" @click="rebuild">
-                <span v-if="build.busy" class="spinner spinner-sm" />
-                {{ build.busy ? "重建中…" : "重建索引" }}
-              </button>
-              <span class="field-hint">{{ rebuildDisabledReason || "复用最近一次构建源，会清空并重写当前数据空间" }}</span>
-            </div>
-
-            <!-- 构建进度 -->
-            <div v-if="build.busy || build.status === 'failed'" style="margin-top: 16px">
-              <div class="answer-head" style="margin-bottom: 8px">
-                <span class="status-dot" :class="{ 'is-running': build.busy, 'is-error': build.status === 'failed' }"></span>
-                <span class="freshness-text">{{ build.busy ? "构建进行中" : "构建失败" }} · {{ build.percent }}%</span>
-                <span class="card-sub" v-if="build.dataset">目标数据集 {{ build.dataset }}</span>
-              </div>
-              <div class="progress progress-lg" :class="{ 'is-danger': build.status === 'failed' }">
-                <div class="progress-fill is-gpu" :style="{ transform: `scaleX(${build.percent / 100})` }"></div>
-              </div>
-              <p class="build-note" v-if="build.note">{{ build.note }}</p>
-              <div class="build-steps">
-                <div v-for="st in build.steps" :key="st.key" class="build-step">
-                  <span class="step-dot" :class="`is-${st.status}`">{{ stepIcon(st.status) }}</span>
-                  <span class="build-step-label">{{ st.label }}</span>
-                  <div class="progress" :class="{ 'is-success': st.status === 'done', 'is-muted': st.status === 'skipped' }">
-                    <div class="progress-fill is-gpu" :style="{ transform: `scaleX(${(st.percent || 0) / 100})` }"></div>
-                  </div>
-                  <span class="build-step-pct">{{ st.percent || 0 }}%</span>
-                </div>
-              </div>
-              <p v-if="build.error" class="alert is-error" style="margin-top: 10px">{{ build.error }}</p>
-            </div>
-
-            <!-- 危险区：清空 -->
-            <div class="danger-zone">
-              <div style="font-size: 13px; font-weight: 650; color: var(--danger)">
-                清空当前数据空间（不可恢复）
-              </div>
-              <p class="field-hint" style="margin-top: 4px">
-                会清空画像 / 切片 / 检索索引，保留界面配置与源文件。请输入数据集名
-                <code>{{ overview.dataset }}</code> 后确认：
-              </p>
-              <div class="clear-form">
-                <input v-model="clearInput" class="input" :placeholder="`输入 ${overview.dataset}`" :disabled="clearing" />
-                <button
-                  type="button"
-                  class="btn btn-danger"
-                  :disabled="clearing || clearInput.trim() !== overview.dataset"
-                  @click="clearAll"
-                >
-                  <span v-if="clearing" class="spinner spinner-sm" />
-                  {{ clearing ? "清空中…" : "确认清空" }}
-                </button>
-              </div>
-            </div>
-          </template>
-
-          <template v-else>
-            <div class="empty-state" style="padding: 22px 8px">
-              <div class="empty-emoji">🔒</div>
-              <div class="empty-title">只读账号</div>
-              <div class="empty-desc">
-                {{ overview.readonly_reason || "只有企业管理员可以重建或清空数据。" }}
-                你可以查看概况与文档矩阵；如需导入数据，请联系本企业管理员。
-              </div>
-            </div>
-          </template>
-        </section>
-
-        <!-- 备注 -->
-        <div v-if="overview.notes && overview.notes.length" class="alert is-info" style="margin-top: 16px">
-          <div>
-            <div v-for="(n, i) in overview.notes" :key="i">{{ n }}</div>
-          </div>
-        </div>
-      </template>
+      <div v-if="overview.notes && overview.notes.length" class="alert is-info" style="margin-top: 16px">
+        <div v-for="(n, i) in overview.notes" :key="i">{{ n }}</div>
+      </div>
     </template>
   </div>
 </template>
+
+<style scoped>
+.kb-overview { max-width: 1200px; }
+.kb-nav-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kb-nav-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.kb-nav-card:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
+}
+.kb-nav-card:active { transform: translateY(-1px); }
+.kb-nav-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kb-nav-arrow {
+  font-size: 17px;
+  color: var(--primary);
+  opacity: 0.55;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.kb-nav-card:hover .kb-nav-arrow { transform: translateX(3px); opacity: 1; }
+.kb-time-value { font-size: 18px !important; line-height: 1.35 !important; word-break: break-all; }
+@media (max-width: 900px) {
+  .kb-nav-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .kb-nav-grid { grid-template-columns: 1fr; }
+}
+</style>

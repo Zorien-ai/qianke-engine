@@ -5,6 +5,9 @@ import Landing from "./views/Landing.vue";
 import Dashboard from "./views/Dashboard.vue";
 import Chat from "./views/Chat.vue";
 import Kb from "./views/Kb.vue";
+import KbProfiles from "./views/KbProfiles.vue";
+import KbDocs from "./views/KbDocs.vue";
+import KbHistory from "./views/KbHistory.vue";
 import Staff from "./views/Staff.vue";
 import Settings from "./views/Settings.vue";
 import Setup from "./views/Setup.vue";
@@ -29,6 +32,9 @@ const routes = [
   { path: "/", name: "dashboard", component: Dashboard, meta: { title: "工作台" } },
   { path: "/chat", name: "chat", component: Chat, meta: { title: "对话" } },
   { path: "/kb", name: "kb", component: Kb, meta: { title: "知识库" } },
+  { path: "/kb/profiles", name: "kb-profiles", component: KbProfiles, meta: { title: "用户画像" } },
+  { path: "/kb/docs", name: "kb-docs", component: KbDocs, meta: { title: "文档管理" } },
+  { path: "/kb/history", name: "kb-history", component: KbHistory, meta: { title: "构建历史" } },
   { path: "/staff", name: "staff", component: Staff, meta: { title: "员工管理" } },
   { path: "/settings", name: "settings", component: Settings, meta: { title: "权限配置" } },
   // 四步导入向导（替代老 /wizard 页面；老路径由后端 302 到 /v2/#/setup）
