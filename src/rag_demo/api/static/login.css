@@ -266,32 +266,47 @@ body {
   border-color: var(--primary);
 }
 
-.lang-toggle {
+.lang-switch {
   position: fixed;
   top: 16px;
   right: 64px;
   z-index: 3;
-  width: 40px;
-  height: 40px;
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--bg-elevated);
-  color: var(--fg-muted);
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
 }
 
-[data-theme="dark"] .lang-toggle {
+[data-theme="dark"] .lang-switch {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.lang-toggle:hover {
+.lang-option {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.lang-option:hover {
   color: var(--fg);
-  border-color: var(--primary);
+}
+
+.lang-option.is-active {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg));
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 .theme-toggle svg {

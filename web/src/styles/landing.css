@@ -159,15 +159,18 @@
   font-size: 13.5px;
   color: var(--l-body);
 }
-.l-nav.is-dark .lang-toggle {
+.l-nav.is-dark .lang-switch {
   color: rgba(255, 255, 255, 0.82);
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.08);
 }
-.l-nav.is-dark .lang-toggle:hover {
+.l-nav.is-dark .lang-option {
+  color: rgba(255, 255, 255, 0.7);
+}
+.l-nav.is-dark .lang-option.is-active {
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.16);
 }
 .l-nav-login {
   font-size: 13.5px;

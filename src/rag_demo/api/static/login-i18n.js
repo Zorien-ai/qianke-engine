@@ -117,22 +117,28 @@
       subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ATTRS,
     });
   }
-  function updateButton(button) {
-    if (!button) return;
-    button.textContent = locale === "zh" ? "EN" : "中文";
-    button.title = locale === "zh" ? "Switch to English" : "切换为中文";
-    button.setAttribute("aria-label", button.title);
+  function updateSwitch(root) {
+    if (!root) return;
+    root.querySelectorAll("[data-lang]").forEach(function (button) {
+      var active = button.getAttribute("data-lang") === locale;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
   }
   function setLocale(next) {
     locale = next === "en" ? "en" : "zh";
     try { localStorage.setItem(KEY, locale); } catch (e) { /* ignore */ }
-    updateButton(document.getElementById("lang-toggle"));
+    updateSwitch(document.getElementById("lang-switch"));
     apply();
   }
-  function init(button) {
-    if (button) {
-      updateButton(button);
-      button.addEventListener("click", function () { setLocale(locale === "zh" ? "en" : "zh"); });
+  function init(root) {
+    if (root) {
+      updateSwitch(root);
+      root.querySelectorAll("[data-lang]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          setLocale(button.getAttribute("data-lang"));
+        });
+      });
     }
     if (locale === "en") {
       fetch("/static/login-en.json", { cache: "no-store" })
@@ -142,8 +148,8 @@
     }
   }
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () { init(document.getElementById("lang-toggle")); });
+    document.addEventListener("DOMContentLoaded", function () { init(document.getElementById("lang-switch")); });
   } else {
-    init(document.getElementById("lang-toggle"));
+    init(document.getElementById("lang-switch"));
   }
 })();
