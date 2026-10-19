@@ -9,6 +9,8 @@
     locale = "zh";
   }
   var dict = {};
+  var dictReady = false;
+  var dictPromise = null;
   var textOriginal = new WeakMap();
   var attrOriginal = new WeakMap();
   var textNodes = new Set();
@@ -117,6 +119,23 @@
       subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ATTRS,
     });
   }
+  function ensureDict() {
+    if (dictReady) return Promise.resolve(dict);
+    if (!dictPromise) {
+      dictPromise = fetch("/static/login-en.json", { cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (data) {
+          dict = data || {};
+          dictReady = true;
+          return dict;
+        })
+        .catch(function () {
+          dictPromise = null;
+          return {};
+        });
+    }
+    return dictPromise;
+  }
   function updateSwitch(root) {
     if (!root) return;
     root.querySelectorAll("[data-lang]").forEach(function (button) {
@@ -129,7 +148,14 @@
     locale = next === "en" ? "en" : "zh";
     try { localStorage.setItem(KEY, locale); } catch (e) { /* ignore */ }
     updateSwitch(document.getElementById("lang-switch"));
-    apply();
+    if (locale === "en") {
+      // 默认中文进入时字典还没请求；首次切英文必须按需加载，否则只会高亮按钮、正文仍是中文。
+      ensureDict().then(function () {
+        if (locale === "en") apply();
+      });
+    } else {
+      apply();
+    }
   }
   function init(root) {
     if (root) {
@@ -141,10 +167,9 @@
       });
     }
     if (locale === "en") {
-      fetch("/static/login-en.json", { cache: "no-store" })
-        .then(function (r) { return r.ok ? r.json() : {}; })
-        .then(function (data) { dict = data || {}; apply(); })
-        .catch(function () { /* 字典加载失败就保持中文 */ });
+      ensureDict().then(function () {
+        if (locale === "en") apply();
+      });
     }
   }
   if (document.readyState === "loading") {
