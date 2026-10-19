@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "accelerate>=1.15.0",
+    "alibabacloud-oss-v2>=1.4.0",
     "argon2-cffi>=25.1.0",
     "datasets>=5.1.0",
     "fastapi>=0.142.4",
@@ -28,8 +29,11 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "scikit-learn>=1.9.1",
     "sentence-transformers>=3.0.0",
-    # 跨平台可复现：从 PyPI 解析；CUDA 用户可按 README 用官方 PyTorch 索引覆盖安装
-    "torch>=2.4,<3",
+    # ⚠ 必须锁定本地 cu126 wheel（见下方 [tool.uv.sources]），不能写成 ">=2.4,<3"：
+    # PyPI 在 Windows 上提供的是 CPU 版 torch，任何一次 uv lock/sync/run 都会把
+    # .venv 里的 cu126 换成 +cpu，服务静默退化为 device=cpu。
+    # 背景与排查记录：bug/10.10/2026-10-10_环境与评测问题.md §2
+    "torch==2.14.1+cu126",
     "transformers>=5.19.0",
     "uvicorn>=0.54.0",
 ]
@@ -41,6 +45,12 @@ build-backend = "uv_build"
 # 项目/仓库名改为 qianke-engine，但 Python 包名仍保持 rag_demo（避免 import 大迁移）。
 [tool.uv.build-backend]
 module-name = "rag_demo"
+
+# 本地 wheel 源（wheels/ 已在 .gitignore 里，不入库）。
+# 作用：让解析器永远不去 PyPI 取 torch——它是「保持 CUDA」的唯一保证，
+# 删掉这段不会报错，但下一次 uv run 会悄悄把 torch 换成 CPU 版。
+[tool.uv.sources]
+torch = { path = "wheels/torch-2.14.1+cu126-cp312-cp312-win_amd64.whl" }
 
 [dependency-groups]
 dev = [
