@@ -24,6 +24,7 @@ from rag_demo.config import (
     TOP_K_VECTOR,
 )
 from rag_demo.db.connection import current_dataset, get_conn
+from rag_demo.retrieval.enrich import attach_wiki_meta
 
 # 稀疏检索依赖 FlagEmbedding；未安装时降级为仅 BM25，不影响主流程
 try:
@@ -311,4 +312,6 @@ def hybrid_search(query, top_k=TOP_K_RRF, dept=None, keyword_mode=None):
     vec_results = vector_search(query, top_k=TOP_K_VECTOR, dept=dept)
     kw_results = keyword_search(query, top_k=TOP_K_BM25, mode=keyword_mode)
     fused = rrf_fusion([vec_results, kw_results], top_n=top_k)
-    return fused
+    # 父块与图片只有 wiki_vectors / search_index 里各存一半，融合后统一回表补一次：
+    # 放在精排之前，reranker 才能直接拿 parent_text 做章节级回填。
+    return attach_wiki_meta(fused)

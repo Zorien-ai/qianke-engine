@@ -58,6 +58,12 @@ _CHUNK_SIZE = 400
 _CHUNK_OVERLAP = 40
 _SEPARATORS = ["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
 
+# 章节级父块的长度上限（字符）。
+# 父块 = MarkdownHeaderTextSplitter 切出的**一个标题章节**，命中任一子块时整段回填，
+# 用于回答「这个标题下到底讲了什么」这类跨 chunk 的问题。上限存在的理由与
+# WIKI_MAX_CHARS（整篇全文扩展）一致：父块无限大时，一次命中就能挤爆上下文。
+_PARENT_MAX_CHARS = 1600
+
 # 切分器无状态，模块级建一次即可
 _MD_SPLITTER = MarkdownHeaderTextSplitter(headers_to_split_on=_MD_HEADERS)
 _CHAR_SPLITTER = RecursiveCharacterTextSplitter(
@@ -78,11 +84,18 @@ def split_wiki_documents(text: str, doc_name: str) -> list[Document]:
 
     标题会**同时**出现在正文和 metadata 里，这不是冗余：
         正文里的标题 -> 参与向量化与 BM25 打分（检索「会员等级」这类词要能匹配上）
-        metadata 里的 -> 供展示、过滤、Parent Document 合并使用
+        metadata 里的 -> 供展示、过滤、父块合并使用
+
+    父块（M4 新增）
+    ---------------
+    `MarkdownHeaderTextSplitter` 的一轮输出天然就是「一个标题章节」，直接把它作为
+    父块：同一章节内的所有子块共享 `parent_key` / `parent_text`。
+    这样「命中一个 400 字的 chunk」与「回答这个标题下讲了什么」不再矛盾——
+    前者保精度，后者靠回填整节保完整，且不会像整篇全文扩展那样越过章节边界。
     """
     documents: list[Document] = []
 
-    for md_chunk in _MD_SPLITTER.split_text(text):
+    for section_index, md_chunk in enumerate(_MD_SPLITTER.split_text(text)):
         headers = {k: v for k, v in md_chunk.metadata.items() if v}
 
         # 标题拼回正文开头：MarkdownHeaderTextSplitter 只把标题放进 metadata，
@@ -93,6 +106,13 @@ def split_wiki_documents(text: str, doc_name: str) -> list[Document]:
             if header_str
             else md_chunk.page_content
         )
+
+        # 父块按章节序号命名：标题文本可能重复/为空，序号在同一文档内唯一且稳定
+        # （同一份 md 重导入时 key 不变，增量更新不会留下孤儿父块）。
+        parent_key = f"{doc_name}#{section_index}"
+        parent_text = body.strip()
+        if len(parent_text) > _PARENT_MAX_CHARS:
+            parent_text = parent_text[:_PARENT_MAX_CHARS] + "……"
 
         for piece in _CHAR_SPLITTER.split_text(body):
             documents.append(
@@ -105,6 +125,9 @@ def split_wiki_documents(text: str, doc_name: str) -> list[Document]:
                         "sensitivity": SENSITIVITY_DEFAULT,
                         "headers": headers,
                         "chunk_index": len(documents),
+                        "parent_key": parent_key,
+                        "parent_index": section_index,
+                        "parent_text": parent_text,
                     },
                 )
             )

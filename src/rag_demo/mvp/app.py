@@ -63,6 +63,10 @@ from pydantic import BaseModel, Field
 
 from rag_demo import auth
 
+# 图片入库只依赖 oss_store（纯环境变量 + SDK 懒加载），同样不碰 torch
+from rag_demo import media
+from rag_demo.storage import oss_store
+
 # 复用现有切分逻辑（无 torch / 无数据库副作用），保证「预估分块数」与真实入库口径一致
 from rag_demo.splitter import split_wiki_documents
 
@@ -485,12 +489,15 @@ def _state_payload(upload_id: str) -> dict:
         # md 只回元信息（名字/大小/字符数），正文留在服务端——前端渲染文件列表用不到
         # 正文，而它可能有几万字，来回搬运只会让响应变大、还多一份可以不一致的副本
         "md_files": md_files,
+        # 配图也进状态：用户要能确认「md 里引用的图到底传上来了没有」
+        "image_files": scanned.get("image_files", []),
         "fields": fields,
         "docs": docs,
         "warnings": field_warnings + doc_warnings,
         "summary": {
             "csv_count": len(csv_files),
             "md_count": len(md_paths),
+            "image_count": len(scanned.get("image_files", [])),
             # 这里是**服务端真读出来的行数**（M1 是前端按换行数估的，只能写「约」）
             "total_rows": sum(f["row_count"] for f in csv_files),
             "total_chunks": sum(d["est_chunks"] for d in docs),
@@ -503,9 +510,9 @@ def _state_payload(upload_id: str) -> dict:
 def _empty_state(upload_id: str) -> dict:
     """批次里一个文件都不剩时的状态（删完最后一个文件后前端仍要能渲染）"""
     return {
-        "upload_id": upload_id, "csv_files": [], "md_files": [],
+        "upload_id": upload_id, "csv_files": [], "md_files": [], "image_files": [],
         "fields": [], "docs": [], "warnings": [],
-        "summary": {"csv_count": 0, "md_count": 0, "total_rows": 0,
+        "summary": {"csv_count": 0, "md_count": 0, "image_count": 0, "total_rows": 0,
                     "total_chunks": 0, "detected_fields": 0, "total_fields": 0},
     }
 
@@ -544,12 +551,49 @@ async def upload(
 
     state = _state_payload(uid)
     state["rejected"] = rejected
-    if rejected and not (state["csv_files"] or state["md_files"]):
+    if rejected and not (state["csv_files"] or state["md_files"] or state.get("image_files")):
         # 一个都没成功：这不该表现为「上传好了但列表是空的」
+        # （只传配图也算成功——md 还没传但图已经落盘了，不能报「全都失败」）
         raise HTTPException(status_code=400, detail="；".join(rejected))
     logger.info("[上传] 批次 %s：CSV %d 个 / 文档 %d 篇（拒绝 %d 个）",
                 uid, state["summary"]["csv_count"], state["summary"]["md_count"], len(rejected))
     return state
+
+
+@router.post("/upload-image")
+async def upload_image(files: list[UploadFile] = File(default=[])) -> dict:
+    """
+    独立图片上传：图片直接进 OSS，返回 key + 可直接粘进 md 的引用
+
+    与 `/upload` 的分工：
+        `/upload`       md / csv 进批次目录，md 里的相对路径图片由入库时自动上传
+        `/upload-image` 单张图片立刻进 OSS，适合「先传图、再在 md 里引用」的流程
+
+    为什么返回 oss:// 而不是签名 URL：签名只有 30 分钟，写进 md 里明天就成了死链；
+    key 是永久的，检索时再换签名 URL。
+    """
+    _require_writer()
+    if not files:
+        raise HTTPException(status_code=400, detail="还没有选择图片。")
+
+    images: list[dict] = []
+    rejected: list[str] = []
+    for f in files:
+        name = f.filename or "image"
+        try:
+            images.append(media.store_inline_image(name, await f.read()))
+        except (ValueError, oss_store.OssError) as e:
+            rejected.append(f"{name}（{e}）")
+
+    if not images:
+        raise HTTPException(status_code=400, detail="；".join(rejected) or "图片上传失败。")
+
+    logger.info("[上传] 独立图片 %d 张（拒绝 %d 张）", len(images), len(rejected))
+    return {
+        "images": images,
+        "rejected": rejected,
+        "note": "把 markdown 字段里的 oss:// 引用粘进文档正文即可，检索时会换成临时地址",
+    }
 
 
 @router.post("/upload/remove")
@@ -1203,11 +1247,18 @@ def query(req: QueryRequest) -> dict:
         reset_dataset(token)
         lock.release()
 
+    # 向导这条路不过 permissions.render（见上方说明），图片签名要在这里补：
+    # 生成层给的只有 key，直接给前端 <img src> 是渲染不出来的。
+    sources = [
+        {**src, "images": media.sign_images(src.get("images"))}
+        for src in result.get("sources", [])
+    ]
+
     return {
         "answer": result.get("answer", ""),
         # sources 直接用生成层的产出（编号 + 来源名 + 片段），
         # 正文里的 [来源N] 与它的下标一一对应，前端据此做「点引用跳出处」
-        "sources": result.get("sources", []),
+        "sources": sources,
         "route": result.get("route"),
         "busy": False,
         "cached": bool(result.get("cached")),

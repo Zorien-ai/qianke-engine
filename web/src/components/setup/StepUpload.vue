@@ -249,11 +249,21 @@ const ICON_MD =
     </div>
 
     <input ref="csvInput" type="file" accept=".csv,.txt" multiple hidden @change="onPick('csv', $event)" />
-    <input ref="mdInput" type="file" accept=".md,.markdown" multiple hidden @change="onPick('md', $event)" />
+    <input
+      ref="mdInput"
+      type="file"
+      accept=".md,.markdown,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg"
+      multiple
+      hidden
+      @change="onPick('md', $event)"
+    />
 
     <div v-if="summary && hasFiles" class="summary-row">
       <span class="summary-chip"><b>{{ summary.csv_count }}</b> 个数据文件</span>
       <span class="summary-chip"><b>{{ summary.md_count }}</b> 篇规则文档</span>
+      <span v-if="summary.image_count" class="summary-chip">
+        <b>{{ summary.image_count }}</b> 张配图（入库时传 OSS）
+      </span>
       <span class="summary-chip"><b>{{ Number(summary.total_rows || 0).toLocaleString() }}</b> 行交易记录</span>
       <span class="summary-chip"><b>{{ summary.total_chunks }}</b> 个预计分块</span>
       <span class="summary-chip">

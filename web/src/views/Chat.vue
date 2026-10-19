@@ -516,7 +516,9 @@ onBeforeUnmount(() => {
                   <span class="source-index">[来源{{ s.index }}]</span>
                   <span class="source-name">{{ s.source || "未知来源" }}</span>
                   <span class="tag" :class="`is-${sourceType(s).key}`">{{ sourceType(s).label }}</span>
-                  <span v-if="s.expanded" class="tag">全文扩展</span>
+                  <span v-if="s.expanded" class="tag">
+                    {{ s.expand_scope === "section" ? "章节回填" : "全文扩展" }}
+                  </span>
                   <span v-for="st in s.strategies || []" :key="st" class="tag">{{ st }}</span>
                   <span class="source-score" v-if="typeof s.rerank_score === 'number'">
                     精排 {{ s.rerank_score.toFixed(4) }}
@@ -524,6 +526,17 @@ onBeforeUnmount(() => {
                 </div>
                 <div v-if="s.from_query" class="source-from">命中检索式：{{ s.from_query }}</div>
                 <div v-if="s.text" class="source-text">{{ s.text }}</div>
+                <div v-if="(s.images || []).length" class="source-images">
+                  <a
+                    v-for="(img, i) in s.images.filter((x) => x && x.url)"
+                    :key="img.key || i"
+                    :href="img.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <img :src="img.url" :alt="img.alt || '资料配图'" loading="lazy" />
+                  </a>
+                </div>
               </div>
             </div>
             <div v-else-if="!sourcesVisible.length && canSources" class="tp-empty field-hint">

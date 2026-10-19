@@ -256,6 +256,17 @@ onMounted(loadExamples);
             <span class="source-name">{{ s.source || "未知来源" }}</span>
           </div>
           <div v-if="s.text" class="source-text">{{ s.text }}</div>
+          <div v-if="(s.images || []).length" class="source-images">
+            <a
+              v-for="(img, k) in s.images.filter((x) => x && x.url)"
+              :key="img.key || k"
+              :href="img.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img :src="img.url" :alt="img.alt || '资料配图'" loading="lazy" />
+            </a>
+          </div>
         </div>
       </div>
     </div>

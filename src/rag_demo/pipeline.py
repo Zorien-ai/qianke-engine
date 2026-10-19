@@ -334,9 +334,15 @@ def prepare(
                 "origin_query": c.get("origin_query", ""),
                 "from_query": c.get("from_query", ""),
                 "strategies": c.get("strategies", []),
-                # 精排分数与是否做过全文扩展——它们决定了这条资料凭什么占住名额
+                # 精排分数与回填范围——它们决定了这条资料凭什么占住名额
                 "rerank_score": round(float(c.get("rerank_score", 0)), 4),
                 "expanded": bool(c.get("expanded", False)),
+                "expand_scope": c.get("expand_scope", ""),
+                "parent_key": c.get("parent_key", ""),
+                # 图片只带 key / 外链，**不带签名 URL**：sources 会进 answer_cache，
+                # 签名地址存进去（TTL 1 小时）命中缓存就是死链。签名在
+                # permissions._render_source 每次响应时现做。
+                "images": c.get("images", []),
             }
             for i, c in enumerate(candidates, 1)
         ],

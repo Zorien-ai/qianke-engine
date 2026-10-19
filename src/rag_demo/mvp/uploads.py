@@ -57,8 +57,12 @@ UPLOAD_ROOT = os.path.join(BASE_DIR, "data", "uploads")
 # （accept=".csv,.txt"）——有的平台导出就是 .txt 里放逗号分隔。
 CSV_SUFFIXES = (".csv", ".txt")
 MD_SUFFIXES = (".md", ".markdown")
+# 图片与 md 一起上传：文档正文里的 `![](images/a.png)` 要有原图可传 OSS。
+# 图片**按字节原样落盘**（不解码），编码字段记 "binary"。
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")
 
 MAX_FILE_BYTES = 200 * 1024 * 1024   # 单文件 200MB：挡住「拖错了一个数据库备份」
+MAX_IMAGE_BYTES = 20 * 1024 * 1024   # 图片单张 20MB（与 media.MAX_IMAGE_BYTES 同一口径）
 
 # 批次目录里的旁挂元数据：记录每个文件的**原始编码**。
 # 为什么不直接看落盘文件：落盘时已经统一转成 UTF-8 了，原始编码这个信息丢了。
@@ -98,12 +102,14 @@ def new_upload_id() -> str:
 
 
 def kind_of(name: str) -> str | None:
-    """按后缀判类型：'csv' / 'md' / None（不支持）"""
+    """按后缀判类型：'csv' / 'md' / 'image' / None（不支持）"""
     lower = (name or "").lower()
     if lower.endswith(CSV_SUFFIXES):
         return "csv"
     if lower.endswith(MD_SUFFIXES):
         return "md"
+    if lower.endswith(IMAGE_SUFFIXES):
+        return "image"
     return None
 
 
@@ -205,7 +211,7 @@ def save(upload_id: str | None, files: list[tuple[str, bytes]]) -> tuple[str, li
     for name, raw in files:
         kind = kind_of(name)
         if kind is None:
-            rejected.append(f"{name}（只支持 .csv/.txt 与 .md/.markdown）")
+            rejected.append(f"{name}（只支持 .csv/.txt、.md/.markdown 与图片）")
             continue
         try:
             safe = _safe_name(name)
@@ -214,6 +220,25 @@ def save(upload_id: str | None, files: list[tuple[str, bytes]]) -> tuple[str, li
             continue
         if os.path.exists(os.path.join(dest, safe)):
             rejected.append(f"{safe}（已存在，跳过）")
+            continue
+
+        # 图片是二进制：不解码、不做表格解析，原样落盘。
+        # 文档正文里的相对路径引用要靠它在磁盘上找到原图（见 media.prepare_doc_images）。
+        if kind == "image":
+            if not raw:
+                rejected.append(f"{safe} 是空文件")
+                continue
+            if len(raw) > MAX_IMAGE_BYTES:
+                rejected.append(
+                    f"{safe} 超过 {MAX_IMAGE_BYTES // 1024 // 1024}MB，请压缩后再上传"
+                )
+                continue
+            with open(os.path.join(dest, safe), "wb") as f:
+                f.write(raw)
+            meta[safe] = {"encoding": "binary", "original_name": name,
+                          "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+            saved_any = True
+            logger.info("[上传] %s: 图片 %d KB", safe, len(raw) // 1024)
             continue
 
         # 解码与解析都必须**按文件**兜住异常：一次拖进来 6 个文件，其中一个是空的
@@ -264,6 +289,23 @@ def paths(upload_id: str) -> tuple[list[str], list[str]]:
     return csvs, mds
 
 
+def image_paths(upload_id: str) -> list[str]:
+    """
+    该批次里的图片路径（按文件名排序）
+
+    单独一个函数而不是改 `paths()` 的返回元组：`paths()` 有 6 处调用方都在解
+    `(csv, md)`，为了图片改签名会把无关逻辑一起搅动。图片只在入库侧需要。
+    """
+    dest = upload_dir(upload_id)
+    if not os.path.isdir(dest):
+        raise UploadError("上传内容不存在或已被清理，请回到第 1 步重新上传。")
+    return [
+        os.path.join(dest, name)
+        for name in sorted(os.listdir(dest))
+        if kind_of(name) == "image"
+    ]
+
+
 def read_text(path: str) -> str:
     with open(path, "r", encoding="utf-8-sig") as f:
         return f.read()
@@ -305,7 +347,16 @@ def scan(upload_id: str) -> dict:
             # 这里只回传文本长度，避免把正文搬来搬去
             "chars": len(text),
         })
-    return {"upload_id": upload_id, "csv_files": csv_files, "md_files": md_files}
+    image_files = [
+        {"name": os.path.basename(p), "size": os.path.getsize(p), "encoding": "binary"}
+        for p in image_paths(upload_id)
+    ]
+    return {
+        "upload_id": upload_id,
+        "csv_files": csv_files,
+        "md_files": md_files,
+        "image_files": image_files,
+    }
 
 
 def remove(upload_id: str, name: str) -> None:
@@ -322,9 +373,10 @@ def remove(upload_id: str, name: str) -> None:
         _save_meta(dest, meta)
 
     # 判空要**忽略元数据文件**：只看目录里还有没有东西的话，
-    # 删完最后一个数据文件后目录会带着一个 _meta.json 永远留下
+    # 删完最后一个数据文件后目录会带着一个 _meta.json 永远留下。
+    # 图片也算内容：只传了一堆配图、删到只剩最后一张时，目录不能提前被清掉。
     csvs, mds = paths(upload_id)
-    if not csvs and not mds:
+    if not csvs and not mds and not image_paths(upload_id):
         shutil.rmtree(dest, ignore_errors=True)
 
 

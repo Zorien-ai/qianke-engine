@@ -36,6 +36,7 @@ from rag_demo.config import (
     TOP_K_PROFILE,
     TOP_K_RRF,
     TOP_K_WIKI,
+    is_doc_source,
 )
 from rag_demo.db.schema_facts import get_time_capability
 from rag_demo.generation.generator import chat_completion
@@ -271,27 +272,27 @@ def _offer_to_pool(pool: list[dict], index: dict[str, dict], item: dict) -> bool
 
 def _dedupe_wikis_by_doc(items: list[dict]) -> list[dict]:
     """
-    文档池按**文档名**再收敛一次：同一篇只留分数最高的那条（strategies 取并集）
+    文档池再收敛一次：同一个**回填单元**只留分数最高的那条（strategies 取并集）
 
     为什么 id 级去重不够
     -------------------
     wiki 的 id 是 **chunk 级**的，而两条改写式命中的常常是同一篇文档的**不同分块**。
-    父块扩展（`_expand_to_full_doc`）会把它们各自展开成同一份全文——此时两条
-    **正文一字不差、来源名也相同**，却因 id 不同而各占一个名额，白占额度、白烧 token，
-    前端还会出现两个内容完全一样的 `[来源N]`。
-    （EDGE-02 实测：`analysis_report_template.md` 重复出现两条。）
+    父块回填会把它们各自展开成同一份正文——此时两条**正文一字不差、来源名也相同**，
+    却因 id 不同而各占一个名额，白占额度、白烧 token，前端还会出现两个内容完全
+    一样的 `[来源N]`。（EDGE-02 实测：`analysis_report_template.md` 重复出现两条。）
 
-    `_expand_to_full_doc` 的注释写着「同一文档的多个 chunk 合并为一条，避免重复占名额」
-    ——那就是这个意图，只是它只在**单路内**生效；跨路要在这里补上。
+    去重键 = `parent_key`（章节级回填）或 `source`（整篇回填/未回填）：
+    章节级下同一篇文档的**不同章节**是两份不同的资料，不能按 source 合并。
 
     只对文档池调用，**不能用于画像池**：所有画像的 source 都是 `user_profile`，
     按 source 收敛会把 3 个用户并成 1 个。
     """
-    by_doc: dict[str, dict] = {}
+    by_unit: dict[str, dict] = {}
     for c in items:
-        prev = by_doc.get(c["source"])
+        key = c.get("parent_key") or c["source"]
+        prev = by_unit.get(key)
         if prev is None:
-            by_doc[c["source"]] = c
+            by_unit[key] = c
             continue
         # 分数高的那条留在原位（正文 / id / from_query 都用它），低的只贡献 strategies
         winner, loser = (
@@ -300,8 +301,8 @@ def _dedupe_wikis_by_doc(items: list[dict]) -> list[dict]:
         for s in loser.get("strategies") or []:
             if s not in winner.setdefault("strategies", []):
                 winner["strategies"].append(s)
-        by_doc[c["source"]] = winner
-    return list(by_doc.values())
+        by_unit[key] = winner
+    return list(by_unit.values())
 
 
 def search_variants(
@@ -428,14 +429,14 @@ def search_variants(
         # 同一条被多路命中只占一个池内名额（strategies 合并，留下共识依据）
         profiles_in_route = 0
         for c in hits:
-            if not c["source"].endswith(".md"):
+            if not is_doc_source(c["source"]):
                 if _offer_to_pool(profile_pool, pool_index, c):
                     profiles_in_route += 1
 
         # 文档：**保持每路分池精排**（相关度阈值过滤 + 父块全文扩展都在这里做）。
         # 精排失败不按「跳过该路」处理——精排是整个链路的基础能力，
         # 它挂了应该整体暴露，而不是静默退化成一个只有部分资料的回答
-        wikis_in_route = [c for c in hits if c["source"].endswith(".md")]
+        wikis_in_route = [c for c in hits if is_doc_source(c["source"])]
         kept = (
             rerank_by_source(text, wikis_in_route, top_k_wiki=TOP_K_WIKI)
             if wikis_in_route else []
@@ -534,7 +535,7 @@ def multi_query_search(
         # 留个数是为了排查时能看出「到底丢了几条」，而不是只能怀疑
         "wiki_doc_dedup": (
             sum(v.get("kept_count", 0) for v in per_variant)
-            - sum(1 for c in plan.candidates if c["source"].endswith(".md"))
+            - sum(1 for c in plan.candidates if is_doc_source(c["source"]))
         ),
     }
     return plan

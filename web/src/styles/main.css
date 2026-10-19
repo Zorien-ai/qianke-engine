@@ -1084,6 +1084,11 @@ html[data-theme="dark"] .tag.is-profile { color: #c4b5fd; }
   white-space: pre-wrap;
 }
 .source-from { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+/* 来源配图：签名 URL 有时效，点开看原图仍然走同一个地址（后台已按需重签） */
+.source-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.source-images a { display: block; line-height: 0; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+.source-images img { display: block; max-width: 180px; max-height: 120px; object-fit: cover; transition: transform 0.16s ease; }
+.source-images a:hover img { transform: scale(1.03); }
 
 .sql-block {
   margin: 0;

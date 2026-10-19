@@ -71,9 +71,19 @@ CREATE TABLE IF NOT EXISTS wiki_vectors (
     dept         VARCHAR(50),
     sensitivity  INT       DEFAULT 1,
     update_time  TIMESTAMP DEFAULT NOW(),
-    metadata     JSONB
+    metadata     JSONB,
+    parent_key   TEXT,
+    parent_text  TEXT
 )
 """
+
+# 老库补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表是 no-op，新列不会自动出现。
+# 与 metadata 列同一套约定（在 ingest 里幂等 ALTER），这里集中定义避免两处写漏。
+WIKI_ALTER_SQL = [
+    "ALTER TABLE wiki_vectors ADD COLUMN IF NOT EXISTS metadata JSONB",
+    "ALTER TABLE wiki_vectors ADD COLUMN IF NOT EXISTS parent_key TEXT",
+    "ALTER TABLE wiki_vectors ADD COLUMN IF NOT EXISTS parent_text TEXT",
+]
 
 # 稠密向量的 HNSW 近邻索引。
 # 为什么这里给 wiki 也建、而活库的 wiki_vectors 没有：活库里 wiki 只有 36 条，
@@ -120,6 +130,32 @@ def ensure_base_tables(cur=None) -> None:
             cur.execute(sql)
         conn.commit()
         logger.info("源数据表 user_profile_vectors / wiki_vectors 已就绪")
+    finally:
+        cur.close()
+
+
+def ensure_wiki_columns(cur=None) -> None:
+    """
+    老库补 wiki_vectors 的新列（幂等）：metadata / parent_key / parent_text
+
+    为什么单独一个函数、还要在**启动时**调一次：
+    demo 库是仓库自带的、早就建好了，用户不会为它重跑 ingest。如果只在 ingest
+    里补列，演示库的父块查询会一直报「column does not exist」。检索侧虽然兜住了
+    （enrich 捕获异常、降级为无父块），但每次查询打一条 warning 同样不可接受。
+
+    cur 传了就复用调用方事务、不提交（与 ensure_base_tables 一致）。
+    """
+    if cur is not None:
+        for sql in WIKI_ALTER_SQL:
+            cur.execute(sql)
+        return
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        for sql in WIKI_ALTER_SQL:
+            cur.execute(sql)
+        conn.commit()
     finally:
         cur.close()
 

@@ -18,6 +18,8 @@ from rag_demo.config import (
     WIKI_EXPAND_FULLTEXT,
     WIKI_MAX_CHARS,
     WIKI_MIN_SCORE,
+    WIKI_PARENT_MODE,
+    is_doc_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,54 +84,70 @@ def rerank(query, candidates, top_k=5):
 #             可调小 WIKI_MAX_CHARS、或只扩展被多次命中的文档。
 #             注意：此机制解决了「chunk 粒度错配」问题（DA-01 靠它才能列出全部标签），
 #             属正向改进而非缺陷，只是有成本，不可简单移除。详见 bug/性能隐患台账.md
-def _expand_to_full_doc(items, max_chars=WIKI_MAX_CHARS):
+def _expand_to_parent(items, mode=WIKI_PARENT_MODE, max_chars=WIKI_MAX_CHARS):
     """
-    Parent Document 召回：把命中的 wiki chunk 扩展为所在文档的全文。
+    父块回填：把命中的 wiki chunk 换成它所属的**章节**（或整篇）正文。
 
     动机：chunk 级 rerank 分数无法支撑文档级取舍——例如 DA-01「哪些标签跟美妆相关」
     需要 tag_definitions.md 里的**全部**标签定义，而其中任一 chunk 单独看都答不了
     这个问题（rerank 只给 0.001，见 bug/10.11 问题 5）。
 
-    同一文档的多个 chunk 合并为一条，避免重复占名额；保留原 chunk 的 rerank_score
-    用于排序，附加 expanded 标记便于排查。
+    两种粒度：
+        section 用入库时写好的 parent_text（一个标题章节，切分器已截到 1600 字）
+        doc     旧行为：读磁盘原文全文，截到 WIKI_MAX_CHARS
+    去重键也跟着变：章节级按 parent_key 收敛，整篇级按 source 收敛——
+    否则同一篇文档的两个章节会被当成重复条目丢掉一个。
+    保留原 chunk 的 rerank_score 用于排序，附加 expand_scope 便于排查。
     """
+    if mode == "off":
+        return items
+
     expanded = []
     seen = set()
     for c in items:
-        doc = c["source"]
-        if doc in seen:
+        use_section = mode == "section" and bool(c.get("parent_text"))
+        dedupe_key = (c.get("parent_key") or c["source"]) if use_section else c["source"]
+        if dedupe_key in seen:
             continue
-        seen.add(doc)
+        seen.add(dedupe_key)
 
-        path = os.path.join(_doc_base_dir(), doc)
-        if not os.path.exists(path):
-            logger.warning(f"Parent Document 扩展失败，找不到源文件: {path}")
-            expanded.append(c)
-            continue
+        if use_section:
+            text = c["parent_text"]
+            scope = "section"
+            if len(text) > max_chars:
+                # 章节一般不超过 max_chars；超长时仍按同一上限截断，避免上下文失控
+                text = text[:max_chars] + "……"
+        else:
+            path = os.path.join(_doc_base_dir(), c["source"])
+            if not os.path.exists(path):
+                logger.warning(f"Parent Document 扩展失败，找不到源文件: {path}")
+                expanded.append(c)
+                continue
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+            scope = "doc"
+            if len(text) > max_chars:
+                text = text[:max_chars] + "……"
 
-        with open(path, "r", encoding="utf-8") as f:
-            full = f.read().strip()
-        if len(full) > max_chars:
-            full = full[:max_chars] + "……"
-
-        expanded.append({**c, "text": full, "expanded": True})
+        expanded.append({**c, "text": text, "expanded": True, "expand_scope": scope})
     return expanded
 
 
 def rerank_by_source(query, candidates, top_k_profile=3, top_k_wiki=2,
-                     min_wiki_score=WIKI_MIN_SCORE, expand_fulltext=WIKI_EXPAND_FULLTEXT):
+                     min_wiki_score=WIKI_MIN_SCORE, expand_fulltext=WIKI_EXPAND_FULLTEXT,
+                     parent_mode: str | None = None):
     """
     分来源精排：
     - 画像类（user_profile）：取 Top-N
-    - 文档类（*.md）：取 Top-M，可选扩展为整篇文档（Parent Document 召回）
+    - 文档类（*.md）：取 Top-M，可选回填父块（章节 / 整篇，见 config.WIKI_PARENT_MODE）
     - 合并后按 rerank_score 重排
 
     注意：wiki 名额是「上限」而非「强制填满」。检索池里的 wiki 可能全都不相关，
     硬塞会浪费 token 并干扰生成（详见 bug/10.11 问题 5）。
     实测分数参考（sigmoid 后）：强相关 ≈ 0.8，明确无关 ≈ 0.005。
     """
-    profiles = [c for c in candidates if not c["source"].endswith(".md")]
-    wikis = [c for c in candidates if c["source"].endswith(".md")]
+    profiles = [c for c in candidates if not is_doc_source(c["source"])]
+    wikis = [c for c in candidates if is_doc_source(c["source"])]
 
     reranked_profiles = rerank(query, profiles, top_k=top_k_profile) if profiles else []
 
@@ -140,8 +158,11 @@ def rerank_by_source(query, candidates, top_k_profile=3, top_k_wiki=2,
             for c in rerank(query, wikis, top_k=top_k_wiki)
             if c.get("rerank_score", 0) >= min_wiki_score
         ]
-        if expand_fulltext and reranked_wikis:
-            reranked_wikis = _expand_to_full_doc(reranked_wikis)
+        if reranked_wikis:
+            mode = parent_mode or WIKI_PARENT_MODE
+            reranked_wikis = _expand_to_parent(
+                reranked_wikis, mode=mode if expand_fulltext else "off"
+            )
 
     combined = reranked_profiles + reranked_wikis
     combined.sort(key=lambda x: -x.get("rerank_score", 0))

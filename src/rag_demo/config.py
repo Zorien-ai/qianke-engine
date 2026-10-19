@@ -206,6 +206,24 @@ WIKI_MIN_SCORE = 0.0
 WIKI_EXPAND_FULLTEXT = True
 WIKI_MAX_CHARS = 1200   # 单篇文档扩展后的最大字符数（TODO(perf): [P2] 调小可降耗时，见 bug/性能隐患台账.md）
 
+# 回填粒度（M4）：
+#   section  按标题章节回填父块（优先用 parent_text，无父块才退回整篇）
+#   doc      旧行为：整篇文档全文
+#   off      不回填，只用命中的 chunk
+# 为什么默认 section：整篇全文扩展会把不相干的章节一起塞进上下文（实测
+# 11.0s → 15.1s，+16%），而多数问题只需要「命中位置所在的那一节」。
+WIKI_PARENT_MODE = os.environ.get("RAG_WIKI_PARENT_MODE", "section").strip().lower()
+if WIKI_PARENT_MODE not in ("section", "doc", "off"):
+    WIKI_PARENT_MODE = "section"
+
+# 文档类来源的后缀。上传口同时接受 .md 与 .markdown，而检索侧原先只判 ".md"，
+# 导致 .markdown 文档被当成「画像」进画像池（既不精排也不回填父块）。
+DOC_SOURCE_SUFFIXES = (".md", ".markdown")
+
+
+def is_doc_source(source: str) -> bool:
+    return str(source or "").lower().endswith(DOC_SOURCE_SUFFIXES)
+
 # ---------- LLM 调用 ----------
 # 思考模式（reasoning）：开启时模型会先输出一大段推理过程，再给最终答案。
 # 那段推理不返回给用户、也进不了答案，但**照样消耗时间和 token**。

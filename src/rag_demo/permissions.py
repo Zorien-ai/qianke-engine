@@ -63,6 +63,8 @@ import threading
 import time
 from typing import Any, Callable
 
+from rag_demo import media
+
 logger = logging.getLogger(__name__)
 
 # ==================== 角色 ====================
@@ -580,7 +582,7 @@ def answer_for(text: str, role: str, user: str | None = None) -> str:
 
 
 def _render_source(src: dict, caps: frozenset[str]) -> dict:
-    """层级：L2 只给编号与来源名；L3 才给原文片段、分数与命中路径"""
+    """层级：L2 只给编号与来源名；L3 才给原文片段、分数、命中路径与图片"""
     out = {"index": src.get("index"), "source": src.get("source")}
     if CAP_INTERNALS in caps:
         out.update({
@@ -590,6 +592,12 @@ def _render_source(src: dict, caps: frozenset[str]) -> dict:
             "strategies": src.get("strategies", []),
             "rerank_score": src.get("rerank_score"),
             "expanded": src.get("expanded", False),
+            "expand_scope": src.get("expand_scope", ""),
+            "parent_key": src.get("parent_key", ""),
+            # 图片与原文片段同级：能看到正文才看得到配图。
+            # 签名必须在**响应时**做（缓存里只存 key），所以放在这个唯一出口，
+            # 而不是 pipeline 组装 sources 的地方——见 media.sign_images 的说明。
+            "images": media.sign_images(src.get("images")),
         })
     return out
 

@@ -150,6 +150,11 @@ def _build_sources(candidates):
             "origin_query": c.get("origin_query", ""),
             "from_query": c.get("from_query", ""),
             "strategies": c.get("strategies", []),
+            # 与 pipeline.prepare 保持同构：非流式/流式两条路的 sources 字段必须一致，
+            # 否则同一条资料在两种接口下展示的东西不同，排查时非常误导
+            "expand_scope": c.get("expand_scope", ""),
+            "parent_key": c.get("parent_key", ""),
+            "images": c.get("images", []),
         }
         for i, c in enumerate(candidates, 1)
     ]

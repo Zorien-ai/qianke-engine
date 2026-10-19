@@ -73,7 +73,7 @@ from rag_demo.db.connection import (
     reset_dataset,
     use_dataset,
 )
-from rag_demo.db.schema import index_freshness
+from rag_demo.db.schema import ensure_wiki_columns, index_freshness
 from rag_demo.generation.generator import (
     EVENT_ANSWER,
     EVENT_REASONING,
@@ -328,6 +328,15 @@ async def lifespan(app: FastAPI):
         "登录态：账号库 %s，企业 %d 家（AUTH_ENABLED=%s）",
         auth.describe_backend(), len(enterprises), auth.AUTH_ENABLED,
     )
+
+    # 老库补列（幂等）：父块 / 图片元数据。demo 库是仓库自带的、不会为重跑 ingest，
+    # 不在这里补的话每次检索都会因缺列而降级并刷 warning。
+    # 失败只降级不阻断启动：父块与图片是增强能力，缺了仍能答文本问题。
+    try:
+        ensure_wiki_columns()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("wiki_vectors 补列失败（父块/图片功能降级）: %s: %s",
+                       type(e).__name__, e)
 
     logger.info("预加载模型和 BM25 语料...")
     get_model()

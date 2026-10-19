@@ -31,6 +31,7 @@ from typing import Callable
 
 from sentence_transformers import SentenceTransformer
 
+from rag_demo import media
 from rag_demo.config import DEFAULT_DATASET, DOCS_DIR, MODEL_PATH, SEARCH_INDEX_TABLE
 from rag_demo.db.connection import (
     close_conn,
@@ -38,13 +39,59 @@ from rag_demo.db.connection import (
     require_write_scope,
     writes_to,
 )
-from rag_demo.db.schema import CREATE_META_SQL, META_TABLE, ensure_base_tables
+from rag_demo.db.schema import (
+    CREATE_META_SQL,
+    META_TABLE,
+    ensure_base_tables,
+    ensure_wiki_columns,
+)
 from rag_demo.splitter import DOC_TYPE_WIKI, split
 
 logger = logging.getLogger(__name__)
 
 # 进度回调：(已完成文档数, 文档总数, 当前文件名)
 ProgressFn = Callable[[int, int, str], None]
+
+
+def _insert_chunks(cur, filename: str, text: str, documents, vecs,
+                   docs_dir: str | None, dataset: str) -> None:
+    """
+    一篇文档的所有分块写库（全量 / 增量两条路共用）
+
+    图片处理放在这里而不是切分阶段：切分器不认识 OSS，也不该为了「正文里有没有
+    图片」去碰网络。入库时一次性把这篇文章引用的图片传上去，再按 chunk 反查——
+    同一张图被正文引用多次也只传一次。
+    上传失败只会让这个 chunk 少几张图（media 内部已兜底），不会中断入库。
+    """
+    image_map = media.prepare_doc_images(text, filename, docs_dir or DOCS_DIR, dataset)
+    for doc, vec in zip(documents, vecs):
+        meta = doc.metadata
+        payload = {
+            "doc_type": meta["doc_type"],
+            "headers": meta["headers"],
+            "chunk_index": meta["chunk_index"],
+        }
+        images = media.images_for_chunk(doc.page_content, image_map)
+        if images:
+            # 只存 key / 外链 URL，**不存签名地址**：签名有时效，
+            # 存进库（以及 answer_cache）后很快就会变成死链。
+            payload["images"] = images
+        cur.execute(
+            """INSERT INTO wiki_vectors
+               (doc_name, chunk_text, embedding, dept, sensitivity,
+                metadata, parent_key, parent_text)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                meta["source"],
+                doc.page_content,
+                vec,
+                meta["dept"],
+                meta["sensitivity"],
+                json.dumps(payload, ensure_ascii=False),
+                meta.get("parent_key"),
+                meta.get("parent_text"),
+            ),
+        )
 
 
 def load_doc_texts(docs_dir: str = DOCS_DIR) -> list[tuple[str, str]]:
@@ -111,9 +158,9 @@ def ingest_documents(
         # 否则下面的 ALTER 会报「relation does not exist」
         ensure_base_tables(cur)
 
-        # 补 metadata 列以对齐 user_profile_vectors，用于存放切分阶段的结构信息
-        # （标题路径 / 块序位 / 来源类型）。原先这些信息在切分后被丢掉了。
-        cur.execute("ALTER TABLE wiki_vectors ADD COLUMN IF NOT EXISTS metadata JSONB")
+        # 老库补列（metadata / parent_key / parent_text）：CREATE TABLE IF NOT EXISTS
+        # 对已有表是 no-op，新列只能幂等补，见 schema.ensure_wiki_columns
+        ensure_wiki_columns(cur)
 
         # 清空旧数据，避免重复导入
         cur.execute("TRUNCATE wiki_vectors RESTART IDENTITY;")
@@ -147,25 +194,7 @@ def ingest_documents(
             vecs = model.encode(
                 [d.page_content for d in documents], batch_size=16, show_progress_bar=False
             )
-            for doc, vec in zip(documents, vecs):
-                meta = doc.metadata
-                cur.execute(
-                    """INSERT INTO wiki_vectors
-                       (doc_name, chunk_text, embedding, dept, sensitivity, metadata)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
-                    (
-                        meta["source"],
-                        doc.page_content,
-                        vec,
-                        meta["dept"],
-                        meta["sensitivity"],
-                        json.dumps({
-                            "doc_type": meta["doc_type"],
-                            "headers": meta["headers"],
-                            "chunk_index": meta["chunk_index"],
-                        }, ensure_ascii=False),
-                    )
-                )
+            _insert_chunks(cur, filename, text, documents, vecs, docs_dir, dataset)
             conn.commit()
             total_chunks += len(documents)
             imported += 1
@@ -217,7 +246,7 @@ def ingest_documents_incremental(
     cur = conn.cursor()
     try:
         ensure_base_tables(cur)
-        cur.execute("ALTER TABLE wiki_vectors ADD COLUMN IF NOT EXISTS metadata JSONB")
+        ensure_wiki_columns(cur)
         # 原文目录：Parent Document 全文化要靠它找文件；增量更新同样要维护
         if docs_dir:
             cur.execute(CREATE_META_SQL)
@@ -251,25 +280,7 @@ def ingest_documents_incremental(
                     batch_size=16,
                     show_progress_bar=False,
                 )
-                for doc, vec in zip(documents, vecs):
-                    meta = doc.metadata
-                    cur.execute(
-                        """INSERT INTO wiki_vectors
-                           (doc_name, chunk_text, embedding, dept, sensitivity, metadata)
-                           VALUES (%s, %s, %s, %s, %s, %s)""",
-                        (
-                            meta["source"],
-                            doc.page_content,
-                            vec,
-                            meta["dept"],
-                            meta["sensitivity"],
-                            json.dumps({
-                                "doc_type": meta["doc_type"],
-                                "headers": meta["headers"],
-                                "chunk_index": meta["chunk_index"],
-                            }, ensure_ascii=False),
-                        ),
-                    )
+                _insert_chunks(cur, filename, text, documents, vecs, docs_dir, dataset)
                 chunk_count = len(documents)
             else:
                 logger.warning("[跳过] %s: 切分后没有内容（旧分块已删除）", filename)
