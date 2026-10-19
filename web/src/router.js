@@ -8,6 +8,7 @@ import Kb from "./views/Kb.vue";
 import Staff from "./views/Staff.vue";
 import Settings from "./views/Settings.vue";
 import Setup from "./views/Setup.vue";
+import Eval from "./views/Eval.vue";
 
 /**
  * 用 hash 路由：后端把 web/dist 静态挂到 /v2/，没有服务端 fallback，
@@ -32,6 +33,7 @@ const routes = [
   { path: "/settings", name: "settings", component: Settings, meta: { title: "权限配置" } },
   // 四步导入向导（替代老 /wizard 页面；老路径由后端 302 到 /v2/#/setup）
   { path: "/setup", name: "setup", component: Setup, meta: { title: "数据导入" } },
+  { path: "/eval", name: "eval", component: Eval, meta: { title: "离线评测" } },
   // 未知路径 → 工作台；未登录时守卫会再把人送回 /home
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
@@ -68,6 +70,11 @@ router.beforeEach(async (to) => {
   // 导入向导会构建数据（写库），仅管理员可进；后端还会再拦截一次
   if (to.name === "setup" && !isManager()) {
     toast("只有企业管理员可以导入或重建数据", "error");
+    return { name: "dashboard" };
+  }
+  // 离线评测只对管理员开放；后端还会按账号推导 dataset 再拦截一次
+  if (to.name === "eval" && !isManager()) {
+    toast("只有管理员可以访问离线评测", "error");
     return { name: "dashboard" };
   }
   return true;

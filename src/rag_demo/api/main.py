@@ -45,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import answer_guard, auth, config, permissions
+from rag_demo import answer_guard, auth, config, permissions, tenant_eval
 from rag_demo.api.demo_showcase import (
     DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
     DEMO_QUERY_TITLE,
@@ -448,6 +448,15 @@ class SearchRequest(BaseModel):
     question: str
     top_k: int = 10
     retriever: str | None = None
+
+
+class EvalQuestionSetIn(BaseModel):
+    name: str | None = None
+    questions: list[dict]
+
+
+class EvalRunIn(BaseModel):
+    set_id: str
 
 
 def _brief(hits: list[dict], text_len: int = 90) -> list[dict]:
@@ -1314,6 +1323,173 @@ def public_demo_users(limit: int = DEMO_SHOWCASE_LIMIT) -> dict:
         "matched_users": matched_users,
         "labels": build_demo_labels(matched_users),
     }
+
+
+# ================= 企业侧离线评测（题库上传 + 后台运行 + 结果查看） =================
+# 评测数据按 dataset 分目录：data/eval/<dataset>/...
+# dataset 一律由账号推导；企业管理员只能操作自己的空间，系统管理员走 demo 基线。
+_EVAL_ACTIVE_BY_DATASET: dict[str, str] = {}
+_EVAL_LOCK = threading.Lock()
+
+
+def _eval_scope() -> tuple[dict, str]:
+    """返回 (account, dataset)；只允许管理员，且目标数据空间已构建。"""
+    account = _require_manager()
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    # 表存在但可能还是空库：先明确告诉用户，而不是让它跑 50 道全空题
+    conn = get_conn(dataset)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT (SELECT COUNT(*) FROM user_profile_vectors), (SELECT COUNT(*) FROM wiki_vectors)")
+        profiles, chunks = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        conn.rollback()
+        cur.close()
+        raise HTTPException(status_code=403, detail=f"数据空间不可用：{exc}") from exc
+    finally:
+        try:
+            conn.rollback()
+            cur.close()
+        except Exception:  # noqa: BLE001
+            pass
+    if not profiles and not chunks:
+        raise HTTPException(status_code=400, detail="当前数据空间还没有可评测的数据，请先完成数据构建")
+    return account, dataset
+
+
+def _eval_scope_name(account: dict) -> str:
+    return "platform" if account.get("is_system_admin") else "enterprise"
+
+
+def _run_eval_task(dataset: str, run_id: str, qset: dict) -> None:
+    """后台线程：显式 use_dataset 由 tenant_eval.run_questions 负责。"""
+    tenant_eval.mark_active(run_id)
+    try:
+        def progress(patch: dict) -> None:
+            tenant_eval.update_run_progress(dataset, run_id, {
+                "status": "running",
+                "phase": patch.get("phase") or "评测中",
+                "current": patch.get("current", 0),
+                "total": patch.get("total", len(qset.get("questions") or [])),
+                "progress": patch.get("progress", 0),
+            })
+
+        payload = tenant_eval.run_questions(dataset, qset, progress)
+        tenant_eval.persist_run_result(dataset, run_id, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("企业离线评测失败 run_id=%s dataset=%s", run_id, dataset)
+        try:
+            tenant_eval.mark_run_failed(dataset, run_id, f"{type(exc).__name__}: {exc}")
+        except Exception:  # noqa: BLE001
+            logger.exception("写入评测失败状态失败 run_id=%s", run_id)
+    finally:
+        tenant_eval.mark_inactive(run_id)
+        with _EVAL_LOCK:
+            if _EVAL_ACTIVE_BY_DATASET.get(dataset) == run_id:
+                _EVAL_ACTIVE_BY_DATASET.pop(dataset, None)
+
+
+@app.get("/api/eval/question-sets")
+def eval_question_sets() -> dict:
+    account = _require_manager()
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    return {
+        "dataset": dataset,
+        "scope": _eval_scope_name(account),
+        "sets": tenant_eval.list_question_sets(dataset),
+        "judge_model": tenant_eval.JUDGE_MODEL,
+    }
+
+
+@app.post("/api/eval/question-sets")
+def eval_question_set_create(payload: EvalQuestionSetIn) -> dict:
+    account = _require_manager()
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    try:
+        questions = tenant_eval.validate_questions(payload.questions)
+        saved = tenant_eval.save_question_set(dataset, payload.name, questions)
+    except tenant_eval.EvalInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("离线评测题库已保存 dataset=%s set=%s 题数=%s", dataset, saved["id"], saved["count"])
+    return {"dataset": dataset, "scope": _eval_scope_name(account), "set": saved}
+
+
+@app.get("/api/eval/runs")
+def eval_runs(limit: int = 10) -> dict:
+    account = _require_manager()
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    return {
+        "dataset": dataset,
+        "scope": _eval_scope_name(account),
+        "runs": tenant_eval.list_runs(dataset, limit=limit),
+    }
+
+
+@app.get("/api/eval/runs/latest")
+def eval_latest_run() -> dict:
+    account = _require_manager()
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    latest = tenant_eval.latest_run(dataset)
+    if latest is None:
+        return {"dataset": dataset, "scope": _eval_scope_name(account), "run": None, "summary": None, "modules": [], "failures": []}
+    data = tenant_eval.read_run(dataset, latest["id"])
+    return {"dataset": dataset, "scope": _eval_scope_name(account), **data}
+
+
+@app.get("/api/eval/runs/{run_id}")
+def eval_run_detail(run_id: str) -> dict:
+    account = _require_manager()
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    try:
+        data = tenant_eval.read_run(dataset, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except tenant_eval.EvalInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"dataset": dataset, "scope": _eval_scope_name(account), **data}
+
+
+@app.post("/api/eval/runs")
+def eval_run_start(payload: EvalRunIn) -> dict:
+    account = _require_manager()
+    dataset = _tenant_dataset()
+    if not _tenant_ready(dataset):
+        raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
+    try:
+        qset = tenant_eval.load_question_set(dataset, payload.set_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except tenant_eval.EvalInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with _EVAL_LOCK:
+        active = _EVAL_ACTIVE_BY_DATASET.get(dataset)
+        if active:
+            raise HTTPException(status_code=409, detail=f"当前数据空间已有评测在运行：{active}")
+        meta = tenant_eval.create_run(dataset, qset)
+        _EVAL_ACTIVE_BY_DATASET[dataset] = meta["id"]
+    tenant_eval.mark_active(meta["id"])
+    tenant_eval.update_run_progress(dataset, meta["id"], {"status": "running", "phase": "启动中"})
+    thread = threading.Thread(
+        target=_run_eval_task,
+        args=(dataset, meta["id"], qset),
+        name=f"tenant-eval-{meta['id']}",
+        daemon=True,
+    )
+    thread.start()
+    logger.info("企业离线评测已启动 dataset=%s run=%s 题数=%s", dataset, meta["id"], meta["total"])
+    return {"dataset": dataset, "scope": _eval_scope_name(account), "run": {**meta, "status": "running", "phase": "启动中"}}
 
 
 @app.post("/admin/reload")

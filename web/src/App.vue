@@ -14,6 +14,8 @@ const ICONS = {
     '<rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/>',
   chat: '<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01"/>',
   kb: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  eval:
+    '<path d="M9 3h6v4H9z"/><path d="M9 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3"/><path d="M8 13l2.2 2.2L16 9.5"/>',
   staff:
     '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   settings:
@@ -35,6 +37,7 @@ const navItems = computed(() => {
     { to: "/kb", key: "kb", label: "知识库", icon: ICONS.kb },
   ];
   if (isManager()) items.push({ to: "/staff", key: "staff", label: "员工管理", icon: ICONS.staff });
+  if (isManager()) items.push({ to: "/eval", key: "eval", label: "离线评测", icon: ICONS.eval });
   if (hasCap("ops"))
     items.push({ to: "/settings", key: "settings", label: "权限配置", icon: ICONS.settings });
   return items;
