@@ -99,7 +99,12 @@ function schedulePoll() {
 }
 
 function pickFile() {
-  if (fileInput.value) fileInput.value.click();
+  const input = fileInput.value;
+  if (!input) {
+    toast("文件选择器未就绪，请刷新页面后重试", "error");
+    return;
+  }
+  input.click();
 }
 
 async function onFile(event) {
@@ -204,10 +209,19 @@ onBeforeUnmount(() => {
           <button type="button" class="btn btn-ghost" :disabled="uploading" @click="downloadTemplate">
             下载题库模板
           </button>
-          <button type="button" class="btn btn-primary" :disabled="uploading" @click="pickFile">
+          <label
+            for="eval-file"
+            class="btn btn-primary eval-upload-label"
+            :class="{ 'is-disabled': uploading }"
+            :aria-disabled="uploading ? 'true' : 'false'"
+            role="button"
+            tabindex="0"
+            @keydown.enter.prevent="pickFile"
+            @keydown.space.prevent="pickFile"
+          >
             <span v-if="uploading" class="spinner spinner-sm" />
             {{ uploading ? "上传中…" : "上传 QA 题库" }}
-          </button>
+          </label>
           <button type="button" class="btn btn-ghost" @click="loadAll">刷新</button>
         </div>
       </div>
@@ -239,7 +253,18 @@ onBeforeUnmount(() => {
             上传一个 QA JSON 开始。每个企业 / 数据空间单独维护题库和结果，不使用 demo 的 33 题。
           </div>
           <div class="row-actions" style="justify-content: center">
-            <button type="button" class="btn btn-primary" @click="pickFile">上传 QA 题库</button>
+            <label
+              for="eval-file"
+              class="btn btn-primary eval-upload-label"
+              :class="{ 'is-disabled': uploading }"
+              :aria-disabled="uploading ? 'true' : 'false'"
+              role="button"
+              tabindex="0"
+              @keydown.enter.prevent="pickFile"
+              @keydown.space.prevent="pickFile"
+            >
+              {{ uploading ? "上传中…" : "上传 QA 题库" }}
+            </label>
             <button type="button" class="btn btn-ghost" @click="downloadTemplate">下载模板</button>
           </div>
           <pre class="eval-template">[
@@ -432,6 +457,9 @@ onBeforeUnmount(() => {
 .eval-progress-text { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--primary); }
 .eval-accent { color: var(--primary); }
 .eval-empty { padding: 30px 10px; }
+/* 用原生 label[for] 触发文件选择：比脚本 .click() 更稳定，也不会被浏览器当成非用户手势拦截 */
+.eval-upload-label { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none; }
+.eval-upload-label.is-disabled { pointer-events: none; opacity: 0.62; }
 .eval-template { max-width: 680px; margin: 16px auto 0; padding: 14px 16px; text-align: left; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; line-height: 1.6; overflow: auto; color: var(--text-2); }
 .eval-failures { display: flex; flex-direction: column; gap: 12px; }
 .eval-failure { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
