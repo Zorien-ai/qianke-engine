@@ -4,6 +4,7 @@ import { useRoute, RouterLink, RouterView } from "vue-router";
 import { hasCap, isManager, logout, store } from "./store";
 import { toggleTheme } from "./theme";
 import ToastHost from "./components/ToastHost.vue";
+import LanguageToggle from "./components/LanguageToggle.vue";
 
 const route = useRoute();
 const drawerOpen = ref(false);
@@ -185,6 +186,7 @@ function closeDrawer() {
             <button class="icon-btn theme-btn" type="button" @click="toggleTheme" :title="store.theme === 'dark' ? '切换到浅色' : '切换到深色'">
               <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'>${store.theme === 'dark' ? ICONS.sun : ICONS.moon}</svg>`" />
             </button>
+            <LanguageToggle />
             <div class="account-chip" :title="`${enterpriseName} · ${roleLine}`">
               <span class="avatar">{{ avatarChar }}</span>
               <span class="account-meta">

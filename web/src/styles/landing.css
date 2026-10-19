@@ -159,6 +159,16 @@
   font-size: 13.5px;
   color: var(--l-body);
 }
+.l-nav.is-dark .lang-toggle {
+  color: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+}
+.l-nav.is-dark .lang-toggle:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.14);
+}
 .l-nav-login {
   font-size: 13.5px;
   color: var(--l-ink);
