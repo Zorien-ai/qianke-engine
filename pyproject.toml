@@ -49,6 +49,8 @@ module-name = "rag_demo"
 # 本地 wheel 源（wheels/ 已在 .gitignore 里，不入库）。
 # 作用：让解析器永远不去 PyPI 取 torch——它是「保持 CUDA」的唯一保证，
 # 删掉这段不会报错，但下一次 uv run 会悄悄把 torch 换成 CPU 版。
+# ⚠ 换机器/清空 wheels/ 后需把同版本 wheel 放回该路径，否则 uv lock/sync 会
+#   直接报「路径不存在」——这是特意的：宁可明确失败，也不要静默退回 CPU。
 [tool.uv.sources]
 torch = { path = "wheels/torch-2.14.1+cu126-cp312-cp312-win_amd64.whl" }
 
