@@ -10,7 +10,7 @@
  * - 前端不传 dataset / tenant：读哪个库由登录账号推导。
  */
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from "vue";
-import { ApiError, apiFetch, detailMessage, readBody } from "../api";
+import { ApiError, apiFetch, detailMessage, postJson, readBody } from "../api";
 import { hasCap, store, toast } from "../store";
 import { renderMarkdown } from "../lib/markdown";
 
@@ -39,6 +39,26 @@ const topk = ref("");
 const thinking = ref(false);
 const showDetail = ref(true);
 const answerCard = ref(null);
+
+/* ---------- 营销文案生成 ---------- */
+const marketingOpen = ref(false);
+const marketingLoading = ref(false);
+const marketingError = ref("");
+const marketingData = ref(null);
+const copiedStyle = ref("");
+
+const marketingUserIds = computed(() => {
+  // SQL 查询结果行是结构化事实，优先从这里取目标人群；
+  // 答案正文里可能还会提到其他对比用户，不能把他们也当成触达对象。
+  const sqlText = (meta.sqlRows || [])
+    .map((row) => (Array.isArray(row) ? row.join(" ") : String(row || "")))
+    .join(" ");
+  const found = String(sqlText || answer.value || "").match(/\bU\d{3,12}\b/g) || [];
+  return [...new Set(found)].slice(0, 10);
+});
+const canGenerateMarketing = computed(
+  () => phase.value === "done" && canAsk.value && marketingUserIds.value.length > 0 && !sending.value
+);
 
 const meta = reactive({
   route: "",
@@ -223,6 +243,8 @@ async function submit() {
   if (sending.value) return;
 
   // 重置上一轮
+  closeMarketing();
+  marketingData.value = null;
   answer.value = "";
   pendingAnswer = "";
   reasoning.value = "";
@@ -316,6 +338,8 @@ function stop() {
 
 function resetAll() {
   if (sending.value) stop();
+  closeMarketing();
+  marketingData.value = null;
   question.value = "";
   answer.value = "";
   pendingAnswer = "";
@@ -348,6 +372,55 @@ function onKeydown(e) {
     e.preventDefault();
     submit();
   }
+  if (e.key === "Escape" && marketingOpen.value) marketingOpen.value = false;
+}
+
+async function openMarketing() {
+  if (!marketingUserIds.value.length) {
+    toast("当前回答里没有可用的用户 ID", "warn");
+    return;
+  }
+  marketingOpen.value = true;
+  marketingLoading.value = true;
+  marketingError.value = "";
+  marketingData.value = null;
+  copiedStyle.value = "";
+  try {
+    marketingData.value = await postJson("/api/marketing/copy", {
+      question: question.value,
+      user_ids: marketingUserIds.value,
+    });
+  } catch (e) {
+    marketingError.value = e && (e.detail || e.message) ? e.detail || e.message : "营销文案生成失败";
+  } finally {
+    marketingLoading.value = false;
+  }
+}
+
+async function copyMarketing(item) {
+  const text = item && item.sms ? item.sms : "";
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  copiedStyle.value = item.style || item.label || "";
+  toast("已复制文案", "success");
+  setTimeout(() => {
+    if (copiedStyle.value === (item.style || item.label || "")) copiedStyle.value = "";
+  }, 1800);
+}
+
+function closeMarketing() {
+  marketingOpen.value = false;
 }
 
 onBeforeUnmount(() => {
@@ -490,7 +563,77 @@ onBeforeUnmount(() => {
           模型正在深度推理（首字可能要等 20~45 秒），推理完成后正文会开始流式输出。
         </div>
         <div v-if="guardNotice" class="cache-note" style="margin-top: 8px">{{ guardNotice }}</div>
+
+        <div v-if="canGenerateMarketing" class="marketing-cta">
+          <button type="button" class="btn btn-primary marketing-cta-btn" @click="openMarketing">
+            ✨ 一键生成专属营销话术
+          </button>
+          <span class="field-hint">
+            基于当前名单与 SOP/活动规则生成 3 种风格；不会编造文档外的金额
+          </span>
+        </div>
       </section>
+
+      <!-- 营销文案抽屉 -->
+      <Teleport to="body">
+        <div v-if="marketingOpen" class="marketing-overlay" @click.self="closeMarketing">
+          <aside class="marketing-drawer" role="dialog" aria-modal="true" aria-label="专属营销话术">
+            <header class="marketing-head">
+              <div>
+                <div class="marketing-kicker">PERSONALIZED MARKETING</div>
+                <h3>专属营销话术</h3>
+                <p class="field-hint">目标名单 {{ marketingUserIds.length }} 人 · 3 种风格 · 可一键复制</p>
+              </div>
+              <button type="button" class="icon-btn" aria-label="关闭" @click="closeMarketing">×</button>
+            </header>
+
+            <div v-if="marketingLoading" class="marketing-state">
+              <span class="spinner" />
+              <p>正在结合画像与 SOP 生成文案…</p>
+              <p class="field-hint">硬性优惠金额会先由后端按文档校验</p>
+            </div>
+
+            <div v-else-if="marketingError" class="marketing-state">
+              <div class="alert is-error">{{ marketingError }}</div>
+              <button type="button" class="btn btn-ghost" @click="openMarketing">重试</button>
+            </div>
+
+            <template v-else-if="marketingData">
+              <div v-if="marketingData.guard && marketingData.guard.degraded" class="alert is-warn marketing-guard">
+                检测到文档外硬指标，已拦截并降级为无金额安全文案。
+                <span v-if="marketingData.guard.rejected_count">共拦截 {{ marketingData.guard.rejected_count }} 条。</span>
+              </div>
+              <div v-if="(marketingData.profiles || []).length" class="marketing-profiles">
+                <span v-for="p in marketingData.profiles" :key="p.user_id" class="tag">
+                  {{ p.user_id }} · {{ p.city || "—" }} · {{ p.member_level || "—" }}
+                </span>
+              </div>
+
+              <div class="marketing-cards">
+                <article v-for="item in marketingData.variants" :key="item.style || item.label" class="marketing-card">
+                  <div class="marketing-card-head">
+                    <span class="badge is-primary">{{ item.label }}</span>
+                    <button type="button" class="btn btn-sm btn-ghost" @click="copyMarketing(item)">
+                      {{ copiedStyle === (item.style || item.label) ? "已复制 ✓" : "复制" }}
+                    </button>
+                  </div>
+                  <p class="marketing-sms">{{ item.sms }}</p>
+                  <p v-if="item.basis" class="marketing-basis">依据：{{ item.basis }}</p>
+                </article>
+              </div>
+
+              <details class="marketing-basis-box" v-if="(marketingData.facts || []).length">
+                <summary>查看文档权益依据（{{ marketingData.facts.length }} 条）</summary>
+                <ul>
+                  <li v-for="f in marketingData.facts" :key="f.source + f.token">
+                    <code>{{ f.token }}</code> · {{ f.source }} · {{ f.snippet }}
+                  </li>
+                </ul>
+              </details>
+            </template>
+          </aside>
+        </div>
+      </Teleport>
 
       <!-- 溯源与过程 -->
       <section v-if="showDetailPanel && !errorText" class="detail-panel">
@@ -626,3 +769,102 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.marketing-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+.marketing-cta-btn {
+  box-shadow: 0 8px 24px var(--primary-soft);
+}
+.marketing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(8, 8, 12, 0.42);
+  backdrop-filter: blur(3px);
+}
+.marketing-drawer {
+  width: min(560px, 94vw);
+  height: 100%;
+  overflow: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -24px 0 70px rgba(0, 0, 0, 0.22);
+  padding: 24px 24px 36px;
+}
+.marketing-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.marketing-kicker {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--primary);
+  font-weight: 700;
+}
+.marketing-head h3 { margin: 5px 0 4px; font-size: 21px; }
+.marketing-head .icon-btn { font-size: 22px; line-height: 1; }
+.marketing-state {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.marketing-guard { margin-top: 16px; }
+.marketing-profiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.marketing-cards { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.marketing-card {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.marketing-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.marketing-sms {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.marketing-basis { margin: 10px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+.marketing-basis-box {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--muted);
+}
+.marketing-basis-box summary { cursor: pointer; color: var(--primary); font-weight: 650; }
+.marketing-basis-box ul { margin: 10px 0 0; padding-left: 18px; }
+.marketing-basis-box li { margin: 5px 0; line-height: 1.55; }
+.marketing-basis-box code { font-family: var(--font-mono, monospace); color: var(--text-2); }
+@media (max-width: 640px) {
+  .marketing-drawer { width: 100vw; padding: 18px 16px 28px; }
+}
+</style>

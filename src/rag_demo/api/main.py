@@ -45,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import answer_guard, auth, config, permissions, tenant_eval
+from rag_demo import answer_guard, auth, config, marketing, permissions, tenant_eval
 from rag_demo.api.demo_showcase import (
     DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
     DEMO_QUERY_TITLE,
@@ -457,6 +457,11 @@ class EvalQuestionSetIn(BaseModel):
 
 class EvalRunIn(BaseModel):
     set_id: str
+
+
+class MarketingCopyIn(BaseModel):
+    question: str
+    user_ids: list[str] = []
 
 
 def _brief(hits: list[dict], text_len: int = 90) -> list[dict]:
@@ -880,6 +885,30 @@ def qa(
             deep_thinking=req.deep_thinking,
         )
     return permissions.render(result, role, user)
+
+
+@app.post("/api/marketing/copy")
+def marketing_copy(
+    req: MarketingCopyIn,
+    x_role: str | None = Header(default=None, alias=ROLE_HEADER),
+    x_user: str | None = Header(default=None, alias=USER_HEADER),
+) -> dict:
+    """按当前数据空间生成 3 种营销短信；文档硬指标由后端二次校验。"""
+    _require_login()
+    role, user = _role(x_role), _user(x_user)
+    _require(role, permissions.CAP_ANSWER, user)
+    question = (req.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="缺少原始问题，无法定位营销场景")
+    with _tenant_scope() as dataset:
+        try:
+            data = marketing.generate_copy(question, req.user_ids)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("营销文案生成失败 dataset=%s", dataset)
+            raise HTTPException(status_code=502, detail=f"营销文案生成失败：{exc}") from exc
+    return {"dataset": dataset, **data}
 
 
 @app.post("/search")
