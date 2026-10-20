@@ -55,6 +55,7 @@ const deployOpen = ref(false);
 const copied = ref(false);
 let copyTimer = null;
 let bodyOverflow = "";
+let bodyLocked = false;
 
 function closeModals() {
   docsOpen.value = false;
@@ -80,12 +81,16 @@ async function copyTerminalCommand() {
 
 watch([docsOpen, deployOpen], ([docs, deploy]) => {
   const open = docs || deploy;
-  if (open && !bodyOverflow) {
+  // 不能把「原 overflow 是否为空」当作锁状态：Landing 原本通常就是 ""，
+  // 一旦用它判断，关闭时条件永远不成立，页面会永久停在 overflow:hidden。
+  if (open && !bodyLocked) {
     bodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-  } else if (!open && bodyOverflow) {
+    bodyLocked = true;
+  } else if (!open && bodyLocked) {
     document.body.style.overflow = bodyOverflow;
     bodyOverflow = "";
+    bodyLocked = false;
   }
 });
 
@@ -659,9 +664,10 @@ onBeforeUnmount(() => {
     clearTimeout(copyTimer);
     copyTimer = null;
   }
-  if (bodyOverflow) {
+  if (bodyLocked) {
     document.body.style.overflow = bodyOverflow;
     bodyOverflow = "";
+    bodyLocked = false;
   }
   delete window.__heroFreeze;
   delete window.__heroResume;
