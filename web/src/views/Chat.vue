@@ -9,10 +9,13 @@
  * - 显隐全部看 /whoami.can：topk / SQL 原文 / trace / 来源 / 思考模式；
  * - 前端不传 dataset / tenant：读哪个库由登录账号推导。
  */
-import { computed, nextTick, onBeforeUnmount, reactive, ref } from "vue";
-import { ApiError, apiFetch, detailMessage, postJson, readBody } from "../api";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { ApiError, apiFetch, del, detailMessage, getJson, postJson, putJson, readBody } from "../api";
 import { hasCap, store, toast } from "../store";
 import { renderMarkdown } from "../lib/markdown";
+import ChatHistoryPanel from "../components/chat/ChatHistoryPanel.vue";
+import ChatHistoryMessage from "../components/chat/ChatHistoryMessage.vue";
 
 /* 示例问句只给"问法"，不写具体取值（城市名 / 等级名 / 品类名）。
  * 具体取值由当前数据决定，换一份数据后这些问法依然成立。 */
@@ -41,6 +44,19 @@ const topk = ref("3");
 const thinking = ref(false);
 const showDetail = ref(true);
 const answerCard = ref(null);
+
+/* ---------- 历史会话 ---------- */
+const route = useRoute();
+const router = useRouter();
+const sessions = ref([]);
+const sessionsLoading = ref(false);
+const historyLoading = ref(false);
+const activeSessionId = ref("");
+const historyMessages = ref([]);
+const currentQuestion = ref("");
+const currentRewritten = ref("");
+const historyOpen = ref(false);
+const SESSION_KEY = "rag-v2-active-chat";
 
 /* ---------- 营销文案生成 ---------- */
 const marketingOpen = ref(false);
@@ -243,6 +259,11 @@ function handleChunk(part) {
     meta.trace = data.trace || null;
     meta.cached = !!data.cached;
     meta.deepThinking = !!data.deep_thinking;
+    if (data.session_id && !activeSessionId.value) {
+      activeSessionId.value = data.session_id;
+      rememberSession(data.session_id);
+    }
+    if (data.rewritten_question) currentRewritten.value = data.rewritten_question;
     if (data.cached) toast("命中缓存：以下来源与过程是上一次的检索结果", "info");
   } else if (event === "reasoning") {
     phase.value = "reasoning";
@@ -288,29 +309,20 @@ async function submit() {
   }
   if (sending.value) return;
 
-  // 重置上一轮
-  closeMarketing();
-  marketingData.value = null;
-  answer.value = "";
-  pendingAnswer = "";
-  reasoning.value = "";
-  reasoningOpen.value = true;
-  errorText.value = "";
-  guardNotice.value = "";
-  elapsed.value = 0;
-  firstCharSec.value = null;
-  firstDeltaAt = null;
-  Object.assign(meta, {
-    route: "",
-    sources: [],
-    sql: "",
-    rowsCount: null,
-    sqlRows: [],
-    sqlError: null,
-    trace: null,
-    cached: false,
-    deepThinking: false,
-  });
+  // 当前轮先归档到本地历史，再开始新一轮；服务端在 done 时已落库。
+  archiveLiveTurn();
+  resetLiveTurn();
+  currentQuestion.value = text;
+  currentRewritten.value = "";
+  question.value = "";
+
+  if (!demoMode.value && !activeSessionId.value) {
+    try {
+      await createSession();
+    } catch (e) {
+      toast((e && (e.detail || e.message)) || "历史会话创建失败，本次按临时对话继续", "warn");
+    }
+  }
 
   phase.value = "retrieving";
   sending.value = true;
@@ -319,6 +331,7 @@ async function submit() {
 
   try {
     const payload = { question: text };
+    if (activeSessionId.value) payload.session_id = activeSessionId.value;
     if (canTopk.value) {
       // 输入框允许中途为空，但提交时统一夹到 1~30 的整数，空值回落到下限。
       const n = Math.floor(Number(topk.value));
@@ -378,6 +391,7 @@ async function submit() {
   } finally {
     sending.value = false;
     controller = null;
+    if (!demoMode.value) refreshSessions();
   }
 }
 
@@ -385,20 +399,19 @@ function stop() {
   if (controller) controller.abort();
 }
 
-function resetAll() {
-  if (sending.value) stop();
+function resetLiveTurn() {
   closeMarketing();
   marketingData.value = null;
-  question.value = "";
   answer.value = "";
   pendingAnswer = "";
   reasoning.value = "";
+  reasoningOpen.value = true;
   errorText.value = "";
   guardNotice.value = "";
   phase.value = "idle";
   elapsed.value = 0;
   firstCharSec.value = null;
-  reasoningOpen.value = true;
+  firstDeltaAt = null;
   Object.assign(meta, {
     route: "",
     sources: [],
@@ -411,6 +424,149 @@ function resetAll() {
     deepThinking: false,
   });
 }
+
+function resetAll() {
+  if (sending.value) stop();
+  resetLiveTurn();
+  question.value = "";
+  currentQuestion.value = "";
+  currentRewritten.value = "";
+}
+
+/* ---------- 历史会话：加载 / 新建 / 切换 / 重命名 / 删除 ---------- */
+function rememberSession(id) {
+  try {
+    if (id) localStorage.setItem(SESSION_KEY, id);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* localStorage 不可用时仅当前页面有效 */
+  }
+}
+
+async function refreshSessions() {
+  if (demoMode.value) return;
+  try {
+    const data = await getJson("/api/chat/sessions?limit=50");
+    sessions.value = data.items || [];
+  } catch {
+    /* 历史列表失败不阻断当前对话 */
+  }
+}
+
+async function loadSession(sessionId, syncRoute = true) {
+  if (!sessionId || demoMode.value || historyLoading.value) return;
+  historyLoading.value = true;
+  try {
+    const data = await getJson(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
+    activeSessionId.value = data.session.id;
+    historyMessages.value = data.messages || [];
+    currentQuestion.value = "";
+    currentRewritten.value = "";
+    resetLiveTurn();
+    question.value = "";
+    rememberSession(activeSessionId.value);
+    if (syncRoute) {
+      router.replace({ path: "/chat", query: { ...route.query, session: activeSessionId.value } });
+    }
+    await nextTick();
+    scrollToBottom();
+  } catch (e) {
+    toast((e && (e.detail || e.message)) || "会话加载失败", "error");
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function createSession() {
+  if (demoMode.value) return "";
+  const data = await postJson("/api/chat/sessions", {});
+  const session = data.session;
+  sessions.value = [session, ...sessions.value.filter((s) => s.id !== session.id)];
+  activeSessionId.value = session.id;
+  rememberSession(session.id);
+  router.replace({ path: "/chat", query: { ...route.query, session: session.id } });
+  return session.id;
+}
+
+function newChat() {
+  if (sending.value) stop();
+  activeSessionId.value = "";
+  historyMessages.value = [];
+  resetAll();
+  rememberSession("");
+  router.replace({ path: "/chat" });
+}
+
+async function renameSession({ id, title }) {
+  try {
+    const data = await putJson(`/api/chat/sessions/${encodeURIComponent(id)}`, { title });
+    const idx = sessions.value.findIndex((s) => s.id === id);
+    if (idx >= 0) sessions.value[idx] = data.session;
+  } catch (e) {
+    toast((e && (e.detail || e.message)) || "重命名失败", "error");
+  }
+}
+
+async function deleteSession(id) {
+  if (!window.confirm("删除这个历史会话？删除后不可恢复。")) return;
+  try {
+    await del(`/api/chat/sessions/${encodeURIComponent(id)}`);
+    sessions.value = sessions.value.filter((s) => s.id !== id);
+    if (activeSessionId.value === id) newChat();
+  } catch (e) {
+    toast((e && (e.detail || e.message)) || "删除会话失败", "error");
+  }
+}
+
+function archiveLiveTurn() {
+  if (!currentQuestion.value || !answer.value) return;
+  historyMessages.value.push(
+    { id: `local-u-${Date.now()}`, role: "user", content: currentQuestion.value, sources: [] },
+    {
+      id: `local-a-${Date.now()}`,
+      role: "assistant",
+      content: answer.value,
+      sources: meta.sources || [],
+      route: meta.route,
+      rewritten_question: currentRewritten.value,
+      status: "success",
+    }
+  );
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    const el = answerCard.value;
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "end" });
+    else window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  });
+}
+
+async function initHistory() {
+  if (demoMode.value) return;
+  sessionsLoading.value = true;
+  await refreshSessions();
+  sessionsLoading.value = false;
+  let wanted = "";
+  try {
+    wanted = String(route.query.session || localStorage.getItem(SESSION_KEY) || "");
+  } catch {
+    wanted = String(route.query.session || "");
+  }
+  if (wanted && sessions.value.some((s) => s.id === wanted)) {
+    await loadSession(wanted, false);
+  }
+}
+
+onMounted(initHistory);
+
+watch(
+  () => route.query.session,
+  (id) => {
+    const sid = String(id || "");
+    if (sid && sid !== activeSessionId.value) loadSession(sid, false);
+  }
+);
 
 function useExample(q) {
   question.value = q;
@@ -479,7 +635,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page chat-page">
+    <ChatHistoryPanel
+      v-if="!demoMode"
+      :sessions="sessions"
+      :active-id="activeSessionId"
+      :loading="sessionsLoading"
+      :open="historyOpen"
+      @new="newChat"
+      @select="loadSession($event)"
+      @rename="renameSession"
+      @delete="deleteSession"
+      @close="historyOpen = false"
+    />
+
+    <div class="chat-main">
+      <div v-if="!demoMode" class="chat-mobile-bar">
+        <button type="button" class="btn btn-ghost btn-sm" @click="historyOpen = true">☰ 历史会话</button>
+        <button type="button" class="btn btn-ghost btn-sm" @click="newChat">＋ 新对话</button>
+      </div>
+
     <!-- 提问框 -->
     <section class="composer">
       <textarea
@@ -568,8 +743,28 @@ onBeforeUnmount(() => {
       </p>
     </section>
 
+    <!-- 历史消息 + 当前轮用户问题 -->
+    <div v-if="historyMessages.length || currentQuestion" class="chat-transcript">
+      <div v-if="historyLoading" class="history-loading">
+        <span class="spinner spinner-sm" /> 正在加载历史会话…
+      </div>
+      <ChatHistoryMessage
+        v-for="message in historyMessages"
+        :key="message.id"
+        :message="message"
+        :can-sources="canSources"
+      />
+      <div v-if="currentQuestion" class="current-turn">
+        <div class="current-question-bubble">{{ currentQuestion }}</div>
+        <div v-if="currentRewritten" class="current-rewrite">
+          <span>结合上下文理解为</span>
+          <b>{{ currentRewritten }}</b>
+        </div>
+      </div>
+    </div>
+
     <!-- 首屏空态 -->
-    <section v-if="phase === 'idle' && !answer && !errorText" class="card" style="margin-top: 16px">
+    <section v-if="phase === 'idle' && !answer && !errorText && !historyMessages.length && !currentQuestion" class="card" style="margin-top: 16px">
       <div class="empty-state">
         <div class="empty-emoji">✨</div>
         <div class="empty-title">向你的企业知识库提问</div>
@@ -610,7 +805,7 @@ onBeforeUnmount(() => {
           <span v-if="meta.cached" class="badge is-warn">缓存命中</span>
           <span v-if="guardNotice" class="badge is-warn">已按安全策略替换</span>
           <span class="spacer"></span>
-          <button v-if="!sending && answer" type="button" class="btn btn-sm btn-ghost" @click="resetAll">新对话</button>
+          <button v-if="!sending && answer" type="button" class="btn btn-sm btn-ghost" @click="newChat">新对话</button>
         </div>
 
         <div v-if="reasoning" class="reasoning-box">
@@ -844,6 +1039,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </div>
+    </div>
   </div>
 </template>
 
@@ -989,5 +1185,55 @@ onBeforeUnmount(() => {
 .marketing-basis-box code { font-family: var(--font-mono, monospace); color: var(--text-2); }
 @media (max-width: 640px) {
   .marketing-drawer { width: 100vw; padding: 18px 16px 28px; }
+}
+/* ---------- 历史会话布局 ---------- */
+.chat-page {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  max-width: 1320px;
+}
+.chat-main { flex: 1; min-width: 0; }
+.chat-mobile-bar { display: none; align-items: center; gap: 8px; margin-bottom: 12px; }
+.chat-transcript { margin-top: 18px; }
+.history-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.current-turn { display: flex; flex-direction: column; align-items: flex-end; margin-top: 18px; }
+.current-question-bubble {
+  max-width: min(78%, 760px);
+  padding: 11px 15px;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--primary-soft);
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.current-rewrite {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+  max-width: min(78%, 760px);
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px dashed color-mix(in srgb, var(--primary) 24%, var(--border));
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.current-rewrite b { color: var(--text-2); font-weight: 600; }
+
+@media (max-width: 900px) {
+  .chat-page { display: block; max-width: none; }
+  .chat-mobile-bar { display: flex; }
+  .current-question-bubble, .current-rewrite { max-width: 88%; }
 }
 </style>

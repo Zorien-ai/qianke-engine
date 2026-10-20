@@ -37,6 +37,7 @@ import random
 import secrets
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -45,7 +46,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import ai_monitor, answer_guard, auth, config, marketing, permissions, tenant_eval
+from rag_demo import ai_monitor, answer_guard, auth, chat_history, config, conversation, marketing, permissions, tenant_eval
 from rag_demo.api.demo_showcase import (
     DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
     DEMO_QUERY_TITLE,
@@ -220,6 +221,56 @@ def _check_demo_question(question: str) -> None:
             status_code=400,
             detail=f"演示模式单次提问最多 {_DEMO_MAX_QUESTION} 字，请精简后再试。",
         )
+
+
+def _require_chat_history() -> tuple[dict, str]:
+    """历史会话读写：登录且非共享演示账号（避免访客之间串会话）。"""
+    account = _require_login()
+    if account is None:
+        raise HTTPException(status_code=403, detail="历史会话需要登录态")
+    if account.get("is_demo"):
+        raise HTTPException(status_code=403, detail="演示模式不保存历史会话")
+    return account, _tenant_dataset()
+
+
+def _load_chat_session(req, account: dict, dataset: str) -> tuple[dict | None, list[dict]]:
+    """按请求里的 session_id 加载会话与最近历史；不属于当前租户/账号一律 404。"""
+    session_id = (req.session_id or "").strip()
+    if not session_id:
+        return None, []
+    if account.get("is_demo"):
+        raise HTTPException(status_code=403, detail="演示模式不保存历史会话")
+    session = chat_history.get_session(dataset, int(account["id"]), session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在或不属于当前账号")
+    return session, chat_history.load_recent(dataset, int(account["id"]), session_id, limit=6)
+
+
+def _history_sources(sources: list) -> list:
+    """历史回放时按当前权限重新裁剪，不能让旧高权会话在降级后泄露过程数据。"""
+    role, user = _role(None), _user(None)
+    if not permissions.has(role, permissions.CAP_SOURCES, user):
+        return []
+    if not permissions.has(role, permissions.CAP_INTERNALS, user):
+        keep = {"index", "source", "images"}
+        return [
+            {k: v for k, v in (src or {}).items() if k in keep}
+            for src in (sources or [])
+            if isinstance(src, dict)
+        ]
+    return sources or []
+
+
+def _history_messages(messages: list[dict]) -> list[dict]:
+    out = []
+    for item in messages:
+        row = dict(item)
+        if row.get("role") == "assistant":
+            row["sources"] = _history_sources(row.get("sources") or [])
+            # 不把内部 trace / 调试字段回放到前端；答案正文本身保留。
+            row.pop("trace", None)
+        out.append(row)
+    return out
 
 
 def _tenant_dataset() -> str:
@@ -444,6 +495,9 @@ async def _attach_account(request: Request, call_next):
                 "/qa",
                 "/qa/stream",
                 "/api/marketing/copy",
+                "/auth/login",
+                "/auth/register",
+                "/api/auth/demo-login",
                 "/auth/logout",
             }
             if not allowed:
@@ -474,6 +528,16 @@ class QueryRequest(BaseModel):
     # 忠实度 95.7%→100%，见 tools/ab_deep_thinking.py），不做权限收窄。
     # None/False = 关（也是全局默认），True = 开。
     deep_thinking: bool | None = None
+    # 历史会话：不传则保持旧的无状态单轮行为（兼容旧客户端/脚本）。
+    session_id: str | None = None
+
+
+class ChatSessionIn(BaseModel):
+    title: str | None = None
+
+
+class ChatSessionPatchIn(BaseModel):
+    title: str
 
 
 class SearchRequest(BaseModel):
@@ -972,13 +1036,56 @@ def qa(
     # 「由登录身份推导部门」，届时这个参数应整体从请求模型里删掉。
     dept = req.dept if permissions.has(role, permissions.CAP_OPS, user) else None
 
+    account = auth.current_account()
+    dataset = _tenant_dataset()
+    session, history = _load_chat_session(req, account, dataset)
+    turn_id = uuid.uuid4().hex
+    search_question = req.question
+    rewrite = {"question": req.question, "rewritten": False}
+
     # 读哪个库由账号决定（_tenant_scope 内部校验并切换），前端无权指定
     with _tenant_scope():
-        result = answer_question(
-            req.question, dept, keyword_mode=req.retriever, profile_limit=limit,
-            deep_thinking=req.deep_thinking,
-        )
-    return permissions.render(result, role, user)
+        if session is not None:
+            rewrite = conversation.rewrite_followup(req.question, history)
+            search_question = rewrite["question"]
+            try:
+                chat_history.append_message(
+                    dataset, int(account["id"]), session["id"], turn_id, "user", req.question,
+                    rewritten_question=search_question,
+                )
+            except Exception:  # noqa: BLE001 历史落库失败不能阻断问答
+                logger.exception("用户消息落库失败 session=%s", session["id"])
+        try:
+            result = answer_question(
+                search_question, dept, keyword_mode=req.retriever, profile_limit=limit,
+                deep_thinking=req.deep_thinking,
+            )
+        except Exception:
+            if session is not None:
+                try:
+                    chat_history.append_message(
+                        dataset, int(account["id"]), session["id"], turn_id, "assistant",
+                        "回答生成失败，请稍后重试。", rewritten_question=search_question,
+                        status="error",
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("失败消息落库失败 session=%s", session["id"])
+            raise
+        if session is not None:
+            try:
+                chat_history.append_message(
+                    dataset, int(account["id"]), session["id"], turn_id, "assistant",
+                    result.get("answer", ""), rewritten_question=search_question,
+                    route=result.get("route"), sources=result.get("sources") or [],
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("助手消息落库失败 session=%s", session["id"])
+
+    payload = permissions.render(result, role, user)
+    if session is not None:
+        payload["session_id"] = session["id"]
+        payload["rewritten_question"] = rewrite.get("question") if rewrite.get("rewritten") else None
+    return payload
 
 
 @app.post("/api/marketing/copy")
@@ -1223,12 +1330,72 @@ def qa_stream(
     # 读哪个库由账号推导，且在**请求线程**里先算好：生成器每次恢复都在新的
     # Context 副本里（见 _dataset_pinned_stream），不能指望它自己切库。
     dataset = _tenant_dataset()
-    trace_id = ai_monitor.begin_trace("chat.stream", auth.current_account())
+    account = auth.current_account()
+    session, history = _load_chat_session(req, account, dataset)
+
+    # 先钉住数据集，改写调用（非流式）产生的 token 也要记到正确租户下。
+    pin_dataset(dataset)
+    trace_id = ai_monitor.begin_trace("chat.stream", account)
     trace_started = time.perf_counter()
+
+    turn_id = uuid.uuid4().hex
+    search_question = req.question
+    rewrite = {"question": req.question, "rewritten": False}
+    if session is not None:
+        try:
+            rewrite = conversation.rewrite_followup(req.question, history)
+            search_question = rewrite["question"]
+        except Exception:  # noqa: BLE001 改写失败必须回退原问题
+            logger.exception("会话 %s 追问改写异常，按原问题继续", session["id"])
+            search_question = req.question
+            rewrite = {"question": req.question, "rewritten": False}
+        try:
+            chat_history.append_message(
+                dataset, int(account["id"]), session["id"], turn_id, "user", req.question,
+                rewritten_question=search_question if rewrite.get("rewritten") else None,
+            )
+        except Exception:  # noqa: BLE001 历史落库失败不能阻断问答
+            logger.exception("用户消息落库失败 session=%s", session["id"])
+
+    history_key = ""
+    if session is not None:
+        history_key = f"{session['id']}:{history[-1]['id'] if history else 'first'}"
+    chat_extra = {}
+    if session is not None:
+        chat_extra["session_id"] = session["id"]
+        if rewrite.get("rewritten"):
+            chat_extra["rewritten_question"] = search_question
 
     def meta(payload: dict, **extra) -> str:
         """构造 meta 事件：先裁剪再序列化，避免各处漏裁剪"""
-        return _sse("meta", permissions.render(payload, role, user) | extra)
+        return _sse("meta", permissions.render(payload, role, user) | extra | chat_extra)
+
+    # 助手消息先收集在 state 里，统一在 finally 落库，避免四个 return 分支各写一次。
+    assistant_state = {
+        "answer": "",
+        "route": "",
+        "sources": [],
+        "status": "success",
+    }
+
+    def persist_assistant():
+        if session is None:
+            return
+        try:
+            chat_history.append_message(
+                dataset,
+                int(account["id"]),
+                session["id"],
+                turn_id,
+                "assistant",
+                assistant_state["answer"],
+                rewritten_question=search_question if rewrite.get("rewritten") else None,
+                route=assistant_state["route"] or None,
+                sources=assistant_state["sources"] or [],
+                status=assistant_state["status"],
+            )
+        except Exception:  # noqa: BLE001 历史落库失败不能反向影响已经生成的回答
+            logger.exception("助手消息落库失败 session=%s", session["id"])
 
     def event_stream():
         # 读哪个库由账号决定（与 /qa 同一口径）：dataset 已在请求线程里算好，
@@ -1238,20 +1405,32 @@ def qa_stream(
         trace_cache_hit = False
         trace_guard_hit = False
         trace_first_token_ms = None
-        if not _tenant_ready(dataset):
-            trace_status = "error"
-            yield _sse("error", {"message": _TENANT_EMPTY})
-            return
+        chunks = []
         try:
+            if not _tenant_ready(dataset):
+                trace_status = "error"
+                assistant_state["status"] = "error"
+                assistant_state["answer"] = _TENANT_EMPTY
+                yield _sse("error", {"message": _TENANT_EMPTY})
+                return
+
             # 命中缓存时直接吐完，不用走生成。
             # 键里带 deep_thinking：开与不开是两份不同的答案，不能互相命中。
+            # 有历史时还带 history_key，避免同一句「那女性呢」在不同会话串答案。
             # 缓存里**不存思维链**——它只是展示物、不进答案，存下来让缓存翻倍不划算；
             # 代价是命中缓存时前端拿不到思维链（此时下面也不会发 reasoning 事件）。
-            key = answer_cache.make_key(req.question, dept, req.retriever, limit,
-                                        req.deep_thinking, dataset=dataset)
+            key = answer_cache.make_key(
+                search_question, dept, req.retriever, limit,
+                req.deep_thinking, dataset=dataset, history_key=history_key,
+            )
             hit = answer_cache.get(key)
             if hit is not None:
                 trace_cache_hit = True
+                assistant_state.update({
+                    "answer": hit.get("answer", ""),
+                    "route": hit.get("route") or "",
+                    "sources": hit.get("sources") or [],
+                })
                 yield meta({
                     "route": hit.get("route"),
                     "sources": hit.get("sources", []),
@@ -1269,7 +1448,7 @@ def qa_stream(
 
             yield _sse("stage", {"stage": "retrieving"})
             prepare_started = time.perf_counter()
-            ctx = prepare(req.question, dept, req.retriever, profile_limit=limit)
+            ctx = prepare(search_question, dept, req.retriever, profile_limit=limit)
             ai_monitor.record_span(
                 kind="retrieval",
                 name="prepare",
@@ -1282,6 +1461,11 @@ def qa_stream(
             # 兜底文案对**所有角色**透出——把"服务坏了"裁成"资料里没有"是最坏的结果
             if route_name == "error":
                 trace_status = "error"
+                assistant_state.update({
+                    "answer": ctx["answer"],
+                    "route": route_name,
+                    "status": "error",
+                })
                 yield meta({"route": route_name, "sources": []})
                 yield _sse("delta", {"delta": ctx["answer"]})
                 yield _sse("done", {})
@@ -1289,6 +1473,7 @@ def qa_stream(
 
             # 闲聊：不调模型，直接给固定回复
             if route_name == "chitchat":
+                assistant_state.update({"answer": ctx["answer"], "route": route_name})
                 yield meta({"route": route_name, "sources": []})
                 yield _sse("delta", {"delta": ctx["answer"]})
                 yield _sse("done", {})
@@ -1305,6 +1490,8 @@ def qa_stream(
                 "sql_error": (sql_result or {}).get("error"),
                 "trace": ctx.get("trace", {}),
             }
+            assistant_state["route"] = route_name
+            assistant_state["sources"] = ctx.get("sources") or []
             # deep_thinking 走 **extra 而不是放进 payload：
             # payload 要过 permissions.render()（只复制白名单字段，这是防越权的关键），
             # 而本字段是**请求方自己发过来的**、不含知识库内容，属「非裁剪项」——
@@ -1317,10 +1504,9 @@ def qa_stream(
 
             # 推理段与答案段走两个事件：思维链要单独展示，不能混进回答正文
             # （混进去会污染 [来源N] 与「事实/推断」的呈现）
-            chunks = []
             generation_started = time.perf_counter()
             for kind, text in generate_events(
-                req.question, ctx["candidates"], sql_result,
+                search_question, ctx["candidates"], sql_result,
                 deep_thinking=req.deep_thinking,
             ):
                 if trace_first_token_ms is None:
@@ -1356,6 +1542,7 @@ def qa_stream(
                 answer = PREDICTION_BLOCKED_REPLY
                 yield _sse("replace", {"answer": answer, "guard": guard})
 
+            assistant_state["answer"] = answer
             yield _sse("done", {})
             # 写缓存的是**完整结果**（不裁剪）：否则低权角色先问一次，
             # 高权角色再问就只剩被裁过的版本
@@ -1371,17 +1558,21 @@ def qa_stream(
             # LLM 接口故障：与检索不可用分开处理，文案与 route 都不同
             # （排查方向相反：一个查 LLM 接口，一个查数据库）
             trace_status = "error"
+            assistant_state["status"] = "error"
             logger.exception("LLM 服务不可用")
             if not chunks:
                 # 还没吐过任何字，用固定文案兜底——用户看到的是人话，
                 # 而不是「请求失败：APITimeoutError」
                 yield _sse("delta", {"delta": LLM_UNAVAILABLE_REPLY})
+                assistant_state["answer"] = LLM_UNAVAILABLE_REPLY
             yield _sse("error", {"message": str(e), "kind": "llm_unavailable"})
         except Exception as e:  # 流式过程中出错也要让前端知道
             trace_status = "error"
+            assistant_state["status"] = "error"
             logger.exception("流式问答失败")
             yield _sse("error", {"message": str(e)})
         finally:
+            persist_assistant()
             ai_monitor.finish_trace(
                 status=trace_status,
                 cache_hit=trace_cache_hit,
@@ -1424,6 +1615,55 @@ def clear_cache(
 def health() -> StatusResponse:
     """存活探针：不鉴权。监控系统需要它，且它不泄露任何业务信息"""
     return {"status": "ok"}
+
+
+# ================= 历史会话 =================
+# 会话归属：tenant_id + account_id 双过滤；前端只能传 session_id，不能传 tenant。
+# 演示账号不提供持久历史（共享账号，避免串访客）。
+@app.get("/api/chat/sessions")
+def chat_sessions(limit: int = 30) -> dict:
+    account, dataset = _require_chat_history()
+    return {
+        "items": chat_history.list_sessions(dataset, int(account["id"]), limit=limit),
+    }
+
+
+@app.post("/api/chat/sessions")
+def chat_session_create(payload: ChatSessionIn) -> dict:
+    account, dataset = _require_chat_history()
+    session = chat_history.create_session(dataset, int(account["id"]), payload.title)
+    return {"session": session}
+
+
+@app.get("/api/chat/sessions/{session_id}")
+def chat_session_detail(session_id: str) -> dict:
+    account, dataset = _require_chat_history()
+    session = chat_history.get_session(dataset, int(account["id"]), session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在或不属于当前账号")
+    messages = chat_history.get_messages(dataset, int(account["id"]), session_id, limit=200)
+    return {"session": session, "messages": _history_messages(messages)}
+
+
+@app.patch("/api/chat/sessions/{session_id}")
+def chat_session_rename(session_id: str, payload: ChatSessionPatchIn) -> dict:
+    account, dataset = _require_chat_history()
+    try:
+        session = chat_history.rename_session(dataset, int(account["id"]), session_id, payload.title)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在或不属于当前账号")
+    return {"session": session}
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+def chat_session_delete(session_id: str) -> dict:
+    account, dataset = _require_chat_history()
+    deleted = chat_history.delete_session(dataset, int(account["id"]), session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="会话不存在或不属于当前账号")
+    return {"status": "deleted"}
 
 
 # ================= 官网公开 demo 展示（匿名只读） =================
