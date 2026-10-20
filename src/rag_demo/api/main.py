@@ -1450,6 +1450,7 @@ def qa_stream(
                 yield meta({
                     "route": hit.get("route"),
                     "sources": hit.get("sources", []),
+                    "user_cards": hit.get("user_cards", []),
                     "sql": hit.get("sql", ""),
                     "rows_count": hit.get("rows_count"),
                     "sql_rows": hit.get("sql_rows", []),
@@ -1513,7 +1514,12 @@ def qa_stream(
             # 而本字段是**请求方自己发过来的**、不含知识库内容，属「非裁剪项」——
             # 与 cached 同类。（实测：放进 payload 会被 render 静默丢掉。）
             yield meta(
-                {"route": route_name, "sources": ctx["sources"], **sql_payload},
+                {
+                    "route": route_name,
+                    "sources": ctx["sources"],
+                    "user_cards": ctx.get("user_cards", []),
+                    **sql_payload,
+                },
                 deep_thinking=bool(req.deep_thinking),
             )
             yield _sse("stage", {"stage": "generating"})
@@ -1567,6 +1573,7 @@ def qa_stream(
             answer_cache.set(key, {
                 "answer": answer,
                 "sources": ctx["sources"],
+                "user_cards": ctx.get("user_cards", []),
                 "route": route_name,
                 **sql_payload,
             })

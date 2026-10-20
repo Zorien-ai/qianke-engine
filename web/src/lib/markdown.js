@@ -127,6 +127,77 @@ function parseList(lines, start, opts) {
   return [`<${tag}>${body}</${tag}>`, i];
 }
 
+function parseMermaid(code) {
+  const lines = String(code || "").replace(/\r\n?/g, "\n").split("\n");
+  const labels = {};
+  const children = {};
+  const targets = new Set();
+  const edges = [];
+  const defRe = /\b([A-Za-z][\w-]*)\s*(?:\[([^\]]*)\]|\(([^)]*)\)|\{([^}]*)\})/g;
+  const edgeRe = /\b([A-Za-z][\w-]*)\s*(?:-->|---|-.->|==>)\s*(?:\|[^|]*\|\s*)?([A-Za-z][\w-]*)/g;
+
+  for (const line of lines) {
+    const source = line.replace(/%%/g, "");
+    let m;
+    while ((m = defRe.exec(source))) {
+      const id = m[1];
+      const label = (m[2] ?? m[3] ?? m[4] ?? id).trim();
+      if (!labels[id]) labels[id] = label || id;
+    }
+    while ((m = edgeRe.exec(source))) {
+      const from = m[1];
+      const to = m[2];
+      if (!labels[from]) labels[from] = from;
+      if (!labels[to]) labels[to] = to;
+      edges.push({ from, to });
+      targets.add(to);
+      (children[from] ||= []).push(to);
+    }
+  }
+
+  const ids = Object.keys(labels);
+  if (!ids.length) return "";
+  const roots = ids.filter((id) => !targets.has(id));
+  const hasCycle = (() => {
+    const visiting = new Set();
+    const visited = new Set();
+    const walk = (id) => {
+      if (visiting.has(id)) return true;
+      if (visited.has(id)) return false;
+      visiting.add(id);
+      for (const child of children[id] || []) if (walk(child)) return true;
+      visiting.delete(id);
+      visited.add(id);
+      return false;
+    };
+    return ids.some(walk);
+  })();
+
+  const node = (id) => `<span class="mm-node">${esc(labels[id] || id)}</span>`;
+  if (roots.length === 1 && edges.length && !hasCycle) {
+    const seen = new Set();
+    const tree = (id) => {
+      if (seen.has(id)) return `<span class="mm-node-wrap">${node(id)}</span>`;
+      seen.add(id);
+      const kids = (children[id] || []).filter(Boolean);
+      if (!kids.length) return `<span class="mm-node-wrap">${node(id)}</span>`;
+      const branches = kids
+        .map((kid) => `<div class="mm-edge"><span class="mm-arrow">↳</span>${tree(kid)}</div>`)
+        .join("");
+      return `<span class="mm-node-wrap">${node(id)}<span class="mm-children">${branches}</span></span>`;
+    };
+    return `<div class="md-mermaid"><div class="mm-caption">流程图</div><div class="mm-tree">${tree(roots[0])}</div></div>`;
+  }
+
+  const flat = edges
+    .map(
+      (edge) =>
+        `<div class="mm-edge">${node(edge.from)}<span class="mm-arrow">→</span>${node(edge.to)}</div>`
+    )
+    .join("");
+  return `<div class="md-mermaid"><div class="mm-caption">流程图</div><div class="mm-flat">${flat}</div></div>`;
+}
+
 function blocks(text, opts) {
   const lines = String(text == null ? "" : text).replace(/\r\n?/g, "\n").split("\n");
   const html = [];
@@ -146,6 +217,13 @@ function blocks(text, opts) {
       }
       if (i < lines.length) i++; // 跳过结束围栏
       const code = buf.join("\n");
+      if (lang === "mermaid") {
+        const mermaid = parseMermaid(code);
+        if (mermaid) {
+          html.push(mermaid);
+          continue;
+        }
+      }
       const cls = lang ? ` class="language-${esc(lang)}"` : "";
       html.push(`<pre class="code-block"><code${cls}>${esc(code)}</code></pre>`);
       continue;

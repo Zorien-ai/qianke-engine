@@ -42,7 +42,7 @@ const elapsed = ref(0);
 const firstCharSec = ref(null);
 const topk = ref("3");
 const thinking = ref(false);
-const showDetail = ref(true);
+const showDetail = ref(false);
 const answerCard = ref(null);
 const messagesEl = ref(null);
 
@@ -73,7 +73,8 @@ const marketingUserIds = computed(() => {
     .map((row) => (Array.isArray(row) ? row.join(" ") : String(row || "")))
     .join(" ");
   const found = String(sqlText || answer.value || "").match(/\bU\d{3,12}\b/g) || [];
-  return [...new Set(found)].slice(0, 10);
+  const fromCards = (meta.userCards || []).map((card) => card.user_id).filter(Boolean);
+  return [...new Set([...found, ...fromCards])].slice(0, 10);
 });
 const canGenerateMarketing = computed(
   () => phase.value === "done" && canAsk.value && marketingUserIds.value.length > 0 && !sending.value
@@ -82,6 +83,7 @@ const canGenerateMarketing = computed(
 const meta = reactive({
   route: "",
   sources: [],
+  userCards: [],
   sql: "",
   rowsCount: null,
   sqlRows: [],
@@ -90,6 +92,61 @@ const meta = reactive({
   cached: false,
   deepThinking: false,
 });
+
+/* ---------- AI 回答操作 ---------- */
+const feedback = ref(""); // "" | "up" | "down"
+const copiedAnswer = ref(false);
+let copiedTimer = null;
+
+const userCards = computed(() => (canSources.value ? meta.userCards || [] : []));
+
+function formatCardAmount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return Math.round(n).toLocaleString("zh-CN");
+}
+
+function cardAvatar(card) {
+  if (card.gender === "女") return "♀";
+  if (card.gender === "男") return "♂";
+  return "·";
+}
+
+async function copyAnswer() {
+  const text = answer.value || "";
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  copiedAnswer.value = true;
+  toast("已复制回答", "success");
+  if (copiedTimer) clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => {
+    copiedAnswer.value = false;
+  }, 1800);
+}
+
+function regenerateAnswer() {
+  if (sending.value || !currentQuestion.value || !canAsk.value) return;
+  question.value = currentQuestion.value;
+  submit();
+}
+
+function setFeedback(type) {
+  if (!answer.value) return;
+  feedback.value = feedback.value === type ? "" : type;
+  if (feedback.value === "up") toast("感谢反馈，已标记为有帮助", "success");
+  else if (feedback.value === "down") toast("已记录反馈，我们会继续改进", "info");
+}
 
 const canAsk = computed(() => hasCap("ask"));
 const canTopk = computed(() => hasCap("topk"));
@@ -257,6 +314,7 @@ function handleChunk(part) {
   } else if (event === "meta") {
     meta.route = data.route || meta.route;
     meta.sources = data.sources || [];
+    meta.userCards = data.user_cards || [];
     meta.sql = data.sql || "";
     meta.rowsCount = data.rows_count ?? null;
     meta.sqlRows = data.sql_rows || [];
@@ -419,6 +477,7 @@ function resetLiveTurn() {
   Object.assign(meta, {
     route: "",
     sources: [],
+    userCards: [],
     sql: "",
     rowsCount: null,
     sqlRows: [],
@@ -427,6 +486,8 @@ function resetLiveTurn() {
     cached: false,
     deepThinking: false,
   });
+  feedback.value = "";
+  copiedAnswer.value = false;
 }
 
 function resetAll() {
@@ -452,6 +513,9 @@ async function refreshSessions() {
   try {
     const data = await getJson("/api/chat/sessions?limit=50");
     sessions.value = data.items || [];
+    const active = sessions.value.find((s) => s.id === activeSessionId.value);
+    if (active) store.chatTitle = active.title || "新对话";
+    else if (!activeSessionId.value) store.chatTitle = "新对话";
   } catch {
     /* 历史列表失败不阻断当前对话 */
   }
@@ -464,6 +528,7 @@ async function loadSession(sessionId, syncRoute = true) {
     const data = await getJson(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
     activeSessionId.value = data.session.id;
     historyMessages.value = data.messages || [];
+    store.chatTitle = data.session.title || "新对话";
     currentQuestion.value = "";
     currentRewritten.value = "";
     resetLiveTurn();
@@ -487,6 +552,7 @@ async function createSession() {
   const session = data.session;
   sessions.value = [session, ...sessions.value.filter((s) => s.id !== session.id)];
   activeSessionId.value = session.id;
+  store.chatTitle = session.title || "新对话";
   rememberSession(session.id);
   router.replace({ path: "/chat", query: { ...route.query, session: session.id } });
   return session.id;
@@ -496,6 +562,7 @@ function newChat() {
   if (sending.value) stop();
   activeSessionId.value = "";
   historyMessages.value = [];
+  store.chatTitle = "新对话";
   resetAll();
   rememberSession("");
   router.replace({ path: "/chat" });
@@ -506,6 +573,7 @@ async function renameSession({ id, title }) {
     const data = await putJson(`/api/chat/sessions/${encodeURIComponent(id)}`, { title });
     const idx = sessions.value.findIndex((s) => s.id === id);
     if (idx >= 0) sessions.value[idx] = data.session;
+    if (activeSessionId.value === id) store.chatTitle = data.session.title || "新对话";
   } catch (e) {
     toast((e && (e.detail || e.message)) || "重命名失败", "error");
   }
@@ -599,7 +667,7 @@ async function openMarketing() {
   copiedStyle.value = "";
   try {
     marketingData.value = await postJson("/api/marketing/copy", {
-      question: question.value,
+      question: currentQuestion.value || question.value,
       user_ids: marketingUserIds.value,
     });
   } catch (e) {
@@ -845,6 +913,84 @@ onBeforeUnmount(() => {
           模型正在深度推理（首字可能要等 20~45 秒），推理完成后正文会开始流式输出。
         </div>
         <div v-if="guardNotice" class="cache-note" style="margin-top: 8px">{{ guardNotice }}</div>
+
+        <!-- 本轮检索命中的用户池 -->
+        <div v-if="answer && userCards.length" class="user-pool">
+          <div class="user-pool-head">
+            <span>检索到的用户池</span>
+            <b>{{ userCards.length }}</b>
+            <span class="field-hint">来自本轮画像召回</span>
+          </div>
+          <div class="user-pool-grid">
+            <article v-for="card in userCards" :key="card.user_id" class="user-pool-card">
+              <div class="user-pool-top">
+                <span class="user-pool-avatar">{{ cardAvatar(card) }}</span>
+                <div class="user-pool-identity">
+                  <b>{{ card.user_id }}</b>
+                  <span>{{ card.age }} 岁 · {{ card.gender }}</span>
+                </div>
+              </div>
+              <div class="user-pool-meta">
+                <span>{{ card.city || "—" }}</span>
+                <span>{{ card.member_level || "—" }}</span>
+              </div>
+              <div class="user-pool-stats">
+                <span>平均客单价 <b>¥{{ formatCardAmount(card.avg_amount) }}</b></span>
+                <span>{{ card.order_count }} 笔订单</span>
+              </div>
+              <div class="user-pool-tags">
+                <span v-if="card.top_category">偏好 {{ card.top_category }}</span>
+                <span v-if="card.platforms">{{ card.platforms }}</span>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <!-- 回答操作 -->
+        <div v-if="answer && phase === 'done'" class="answer-actions">
+          <button type="button" class="answer-action" title="复制回答" @click="copyAnswer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            <span>{{ copiedAnswer ? "已复制" : "复制" }}</span>
+          </button>
+          <button type="button" class="answer-action" title="重新生成回答" :disabled="sending" @click="regenerateAnswer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+              <path d="M20 4v7h-7" />
+            </svg>
+            <span>重新生成</span>
+          </button>
+          <span class="answer-action-divider" aria-hidden="true"></span>
+          <button
+            type="button"
+            class="answer-action is-icon"
+            :class="{ 'is-active': feedback === 'up' }"
+            title="有帮助"
+            aria-label="有帮助"
+            @click="setFeedback('up')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7 10v11H4a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1h3Z" />
+              <path d="M7 10l4-7a2 2 0 0 1 3.8 1.3L14 9h5.2a2 2 0 0 1 2 2.3l-1 7a2 2 0 0 1-2 1.7H7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="answer-action is-icon"
+            :class="{ 'is-active': feedback === 'down' }"
+            title="需要改进"
+            aria-label="需要改进"
+            @click="setFeedback('down')"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3Z" />
+              <path d="M17 14l-4 7a2 2 0 0 1-3.8-1.3L10 15H4.8a2 2 0 0 1-2-2.3l1-7A2 2 0 0 1 5.8 4H17" />
+            </svg>
+          </button>
+          <span v-if="feedback" class="answer-action-note">{{ feedback === "up" ? "已标记有帮助" : "已记录改进意见" }}</span>
+        </div>
 
         <div v-if="canGenerateMarketing" class="marketing-cta">
           <button type="button" class="btn btn-primary marketing-cta-btn" @click="openMarketing">
@@ -1380,6 +1526,113 @@ onBeforeUnmount(() => {
 .chat-welcome .empty-title { margin-top: 6px; font-size: 15px; }
 .chat-welcome .empty-desc { max-width: 620px; margin: 5px auto 0; font-size: 12px; line-height: 1.6; }
 .chat-welcome .row-actions { margin-top: 10px; gap: 5px; }
+
+/* ---------- 检索用户池卡片 ---------- */
+.user-pool {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.user-pool-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.user-pool-head b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+}
+.user-pool-head .field-hint { margin-left: auto; }
+.user-pool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+.user-pool-card {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.user-pool-top { display: flex; align-items: center; gap: 8px; }
+.user-pool-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 14px;
+}
+.user-pool-identity { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.user-pool-identity b { font-size: 12.5px; color: var(--text); }
+.user-pool-identity span { color: var(--muted); font-size: 10.5px; }
+.user-pool-meta { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+.user-pool-meta span,
+.user-pool-tags span {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 10.5px;
+}
+.user-pool-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.user-pool-stats b { color: var(--text-2); font-weight: 650; }
+.user-pool-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
+.user-pool-tags span { color: var(--muted); background: transparent; padding: 0; }
+
+/* ---------- 回答操作 ---------- */
+.answer-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.answer-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.answer-action svg { width: 15px; height: 15px; }
+.answer-action:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+.answer-action:disabled { opacity: .45; cursor: not-allowed; }
+.answer-action.is-icon { width: 32px; padding: 0; justify-content: center; }
+.answer-action.is-active { color: var(--primary); background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 20%, transparent); }
+.answer-action-divider { width: 1px; height: 16px; margin: 0 3px; background: var(--border); }
+.answer-action-note { margin-left: 3px; color: var(--muted); font-size: 10.5px; }
 
 @media (max-width: 900px) {
   .chat-page { max-width: none; gap: 0; }

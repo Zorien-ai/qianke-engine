@@ -13,6 +13,7 @@ export const store = reactive({
   bootError: "",
   authenticated: false,
   demoMode: false,
+  chatTitle: "新对话",
   whoami: null,
   account: null,
   can: {},

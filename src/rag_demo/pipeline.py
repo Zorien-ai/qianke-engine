@@ -171,6 +171,62 @@ def brief_rows(rows: list[tuple], limit: int = 20) -> list[list[str]]:
     return [[str(v)[:60] for v in r] for r in rows[:limit]]
 
 
+def load_user_cards(candidates: list[dict], limit: int = 30) -> list[dict]:
+    """把本轮被检索到的画像候选补齐成结构化用户卡片。
+
+    画像候选的 id 形如 `user:U1234`，但 profile_text 只是给模型看的拼接文本；
+    前端要卡片需要结构化字段，因此按候选顺序回库补一次（只查被命中的少量 ID）。
+    """
+    user_ids = []
+    for c in candidates or []:
+        cid = str(c.get("id") or "")
+        if c.get("source") != "user_profile" or not cid.startswith("user:"):
+            continue
+        uid = cid.split(":", 1)[1].strip()
+        if uid and uid not in user_ids:
+            user_ids.append(uid)
+        if len(user_ids) >= limit:
+            break
+    if not user_ids:
+        return []
+
+    from rag_demo.db.connection import get_conn
+
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """SELECT user_id, age, gender, city, member_level, order_count,
+                      total_amount, avg_amount, top_category, days_since_last_buy, platforms
+               FROM user_profile_vectors WHERE user_id = ANY(%s)""",
+            (user_ids,),
+        )
+        rows = {row[0]: row for row in cur.fetchall()}
+    finally:
+        conn.rollback()  # 只读查询，及时结束事务释放锁
+        cur.close()
+
+    cards = []
+    for uid in user_ids:
+        row = rows.get(uid)
+        if not row:
+            continue
+        cards.append({
+            "user_id": row[0],
+            "age": row[1],
+            "gender": row[2],
+            "city": row[3],
+            "member_level": row[4],
+            "order_count": int(row[5] or 0),
+            "total_amount": float(row[6] or 0),
+            "avg_amount": float(row[7] or 0),
+            "top_category": row[8],
+            "days_since_last_buy": row[9],
+            "platforms": row[10],
+        })
+    return cards
+
+
 def _plan_and_retrieve(
     question: str,
     dept: str | None = None,
@@ -254,6 +310,7 @@ def _answer_uncached(
     result = generate(question, candidates, sql_result=sql_result, deep_thinking=deep_thinking,
                       memory_context=memory_context)
     result["route"] = ROUTE_RAG
+    result["user_cards"] = load_user_cards(candidates)
 
     # 生成后审查：提示词只是约束，模型仍可能替数据说话（「明年 GMV 将达到 1.2 亿」）。
     # 命中就把整段答案换成固定文案——为什么是「后置审查」而不是前置拦截，
@@ -329,6 +386,7 @@ def prepare(
         "candidates": candidates,
         "sql_result": sql_result,
         "trace": plan.trace,
+        "user_cards": load_user_cards(candidates),
         "sources": [
             {
                 "index": i,
