@@ -664,20 +664,18 @@ onBeforeUnmount(() => {
 
     <!-- 提问框 -->
     <section class="composer">
-      <textarea
-        v-model="question"
-        :disabled="sending || !canAsk"
-        :maxlength="demoMode ? DEMO_MAX_QUESTION : undefined"
-        :placeholder="
-          canAsk
-            ? '问点什么，比如业务规则、用户分布、客单价……（Ctrl / Cmd + Enter 发送）'
-            : '当前账号没有提问能力'
-        "
-        @keydown="onKeydown"
-      ></textarea>
+      <div class="composer-input-wrap">
+        <textarea
+          v-model="question"
+          :disabled="sending || !canAsk"
+          :maxlength="demoMode ? DEMO_MAX_QUESTION : undefined"
+          :placeholder="canAsk ? '输入你的问题…' : '当前账号没有提问能力'"
+          @keydown="onKeydown"
+        ></textarea>
+        <span class="composer-shortcut">Ctrl / ⌘ + Enter 发送</span>
+      </div>
 
       <div class="composer-foot">
-        <span class="composer-hint"><kbd class="kbd">Ctrl</kbd> / <kbd class="kbd">Cmd</kbd> + <kbd class="kbd">Enter</kbd> 发送</span>
         <span v-if="demoMode" class="composer-hint demo-composer-hint">
           演示模式 · 单次最多 {{ DEMO_MAX_QUESTION }} 字
         </span>
@@ -715,8 +713,10 @@ onBeforeUnmount(() => {
               @click="stepTopk(1)"
             >+</button>
           </div>
-          <span class="field-hint">{{ topkMin }}~{{ topkMax }}</span>
+          <span class="topk-range">{{ topkMin }}~{{ topkMax }}</span>
         </div>
+
+        <span v-if="canTopk" class="toolbar-divider" aria-hidden="true"></span>
 
         <label class="toggle">
           <input v-model="thinking" type="checkbox" :disabled="sending" />
@@ -726,8 +726,14 @@ onBeforeUnmount(() => {
 
         <span class="spacer"></span>
 
-        <button v-if="sending" type="button" class="btn btn-ghost" @click="stop">停止</button>
-        <button v-else type="button" class="btn btn-primary" :disabled="!canAsk || !question.trim()" @click="submit">
+        <button v-if="sending" type="button" class="btn btn-ghost composer-stop-btn" @click="stop">停止</button>
+        <button
+          v-else
+          type="button"
+          class="btn btn-primary composer-send-btn"
+          :disabled="!canAsk || !question.trim()"
+          @click="submit"
+        >
           提问
         </button>
       </div>
@@ -772,7 +778,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 首屏空态 -->
-    <section v-if="phase === 'idle' && !answer && !errorText && !historyMessages.length && !currentQuestion" class="card" style="margin-top: 16px">
+    <section v-if="phase === 'idle' && !answer && !errorText && !historyMessages.length && !currentQuestion" class="card chat-welcome" style="margin-top: 8px">
       <div class="empty-state">
         <div class="empty-emoji">✨</div>
         <div class="empty-title">向你的企业知识库提问</div>
@@ -1298,9 +1304,85 @@ onBeforeUnmount(() => {
 }
 .current-rewrite b { color: var(--text-2); font-weight: 600; }
 
+/* ---------- 输入区细节：对齐 / 对比度 / 触达面积 ---------- */
+.composer-input-wrap { order: 2; position: relative; }
+.chat-main > .composer .composer-input-wrap textarea {
+  order: 0;
+  min-height: 68px;
+  max-height: 150px;
+  padding: 11px 14px 30px;
+  resize: none;
+}
+.composer-shortcut {
+  position: absolute;
+  right: 14px;
+  bottom: 9px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+.chat-main > .composer .composer-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  margin: 0 0 8px;
+}
+.toolbar-divider {
+  width: 1px;
+  height: 18px;
+  flex: 0 0 1px;
+  background: var(--border);
+}
+.topk-control { gap: 8px; }
+.topk-control > label { color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.topk-range { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.topk-stepper {
+  height: 30px;
+  border-radius: 8px;
+  border-color: var(--border);
+  background: var(--surface);
+}
+.topk-step-btn { width: 30px; height: 28px; font-size: 15px; line-height: 1; }
+.topk-stepper input[type="number"] {
+  width: 42px;
+  height: 28px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.composer-send-btn {
+  height: 32px;
+  min-width: 84px;
+  padding: 0 22px;
+  border-radius: 9px;
+  background: var(--primary);
+  background-image: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px -6px color-mix(in srgb, var(--primary) 50%, transparent);
+}
+.composer-send-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, #000);
+  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--primary) 55%, transparent);
+  opacity: 1;
+}
+.composer-stop-btn { height: 32px; padding: 0 18px; border-radius: 9px; }
+.chat-welcome { margin-top: 8px; }
+.chat-welcome .empty-state { padding: 18px 10px; }
+.chat-welcome .empty-emoji { font-size: 22px; }
+.chat-welcome .empty-title { margin-top: 6px; font-size: 15px; }
+.chat-welcome .empty-desc { max-width: 620px; margin: 5px auto 0; font-size: 12px; line-height: 1.6; }
+.chat-welcome .row-actions { margin-top: 10px; gap: 5px; }
+
 @media (max-width: 900px) {
   .chat-page { max-width: none; gap: 0; }
   .chat-mobile-bar { display: flex; }
   .current-question-bubble, .current-rewrite { max-width: 88%; }
+  .chat-main > .composer .composer-foot { gap: 8px; }
+  .chat-main > .composer .examples { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .chat-main > .composer .examples .chip { flex: 0 0 auto; }
 }
 </style>

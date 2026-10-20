@@ -202,7 +202,7 @@ function closeDrawer() {
           <button class="icon-btn menu-btn" type="button" @click="drawerOpen = true" aria-label="打开菜单">
             <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'>${ICONS.menu}</svg>`" />
           </button>
-          <h1 class="page-title">{{ pageTitle }}</h1>
+          <h1 v-if="route.name !== 'chat'" class="page-title">{{ pageTitle }}</h1>
 
           <div class="topbar-right">
             <span v-if="store.level" class="level-badge" :title="`当前账号的有效等级：${store.levelLabel}`">

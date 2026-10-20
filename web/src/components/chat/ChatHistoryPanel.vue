@@ -61,10 +61,7 @@ const hasSessions = computed(() => props.sessions.length > 0);
 <template>
   <aside class="chat-history-panel" :class="{ 'is-open': open }" aria-label="历史会话">
     <header class="history-head">
-      <div>
-        <div class="history-kicker">CONVERSATIONS</div>
-        <strong>历史会话</strong>
-      </div>
+      <strong>历史会话</strong>
       <button type="button" class="icon-btn history-close" aria-label="关闭历史会话" @click="$emit('close')">
         ×
       </button>
@@ -143,19 +140,12 @@ const hasSessions = computed(() => props.sessions.length > 0);
 }
 .history-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 6px 6px 12px;
 }
-.history-kicker {
-  color: var(--muted);
-  font-family: var(--font-mono, monospace);
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-.history-head strong { display: block; margin-top: 2px; font-size: 14px; }
+.history-head strong { font-size: 15px; letter-spacing: -0.01em; }
 .history-close { display: none; font-size: 20px; line-height: 1; }
 .new-chat-btn {
   display: flex;
@@ -189,7 +179,7 @@ const hasSessions = computed(() => props.sessions.length > 0);
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 42px;
+  min-height: 46px;
   border-radius: 8px;
 }
 .history-item:hover { background: var(--surface-2); }
@@ -211,28 +201,48 @@ const hasSessions = computed(() => props.sessions.length > 0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
 }
-.history-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+.history-meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-2);
+  opacity: 0.72;
+  font-size: 11.5px;
+}
 .history-actions {
+  position: absolute;
+  right: 2px;
+  top: 50%;
   display: flex;
-  gap: 1px;
-  padding-right: 3px;
+  gap: 2px;
+  padding-left: 10px;
+  border-radius: 0 8px 8px 0;
+  background: linear-gradient(90deg, transparent, var(--surface-2) 28%);
   opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
   transition: opacity .15s;
 }
-.history-item:hover .history-actions, .history-item.is-active .history-actions { opacity: 1; }
+.history-item.is-active .history-actions {
+  background: linear-gradient(90deg, transparent, var(--primary-soft) 28%);
+}
+.history-item:hover .history-actions,
+.history-item:focus-within .history-actions { opacity: 1; pointer-events: auto; }
 .history-action {
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: 7px;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-2);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
+  line-height: 1;
   cursor: pointer;
 }
 .history-action:hover { background: var(--surface-3); color: var(--text); }
@@ -292,5 +302,8 @@ const hasSessions = computed(() => props.sessions.length > 0);
     background: rgba(8, 10, 14, .34);
     backdrop-filter: blur(2px);
   }
+}
+@media (hover: none) {
+  .history-item.is-active .history-actions { opacity: 1; }
 }
 </style>

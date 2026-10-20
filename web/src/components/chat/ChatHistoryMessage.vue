@@ -59,7 +59,7 @@ const routeLabel = computed(() => {
 </template>
 
 <style scoped>
-.history-message { margin: 18px 0 0; }
+.history-message { margin: 14px 0 0; }
 .history-message.is-user { display: flex; justify-content: flex-end; }
 .history-user-bubble {
   max-width: min(78%, 720px);
@@ -73,9 +73,9 @@ const routeLabel = computed(() => {
   word-break: break-word;
 }
 .history-answer-card {
-  padding: 16px 18px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
@@ -100,14 +100,17 @@ const routeLabel = computed(() => {
 }
 .history-rewrite b { color: var(--text-2); font-weight: 600; }
 .history-answer-body {
-  margin-top: 10px;
+  margin-top: 8px;
   color: var(--text);
   font-size: 13.5px;
-  line-height: 1.8;
+  line-height: 1.72;
   word-break: break-word;
 }
-.history-answer-body :deep(p) { margin: 0 0 10px; }
+.history-answer-body :deep(p) { margin: 0 0 8px; }
 .history-answer-body :deep(p:last-child) { margin-bottom: 0; }
+.history-answer-body :deep(ul),
+.history-answer-body :deep(ol) { margin: 6px 0 8px; padding-left: 20px; }
+.history-answer-body :deep(li) { margin: 2px 0; }
 .history-answer-body :deep(.cite) {
   margin-left: 2px;
   padding: 0 3px;
