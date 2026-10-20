@@ -569,6 +569,12 @@ def login_page() -> FileResponse:
     return FileResponse(os.path.join(STATIC_DIR, "login.html"))
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """浏览器直接请求根 favicon 时也能拿到千客引擎图标。"""
+    return FileResponse(os.path.join(STATIC_DIR, "favicon.ico"), media_type="image/x-icon")
+
+
 @app.get("/whoami")
 def whoami(
     x_role: str | None = Header(default=None, alias=ROLE_HEADER),
