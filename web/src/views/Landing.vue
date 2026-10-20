@@ -16,6 +16,7 @@ import { store } from "../store";
 import HeroNebula from "../components/landing/HeroNebula.vue";
 import LanguageToggle from "../components/LanguageToggle.vue";
 import ThemeToggle from "../components/ThemeToggle.vue";
+import Logo from "../components/Logo.vue";
 import "../styles/landing.css";
 
 const shotModules = import.meta.glob("../assets/shots/*.png", { eager: true, import: "default" });
@@ -597,7 +598,7 @@ onBeforeUnmount(() => {
     <header class="l-nav" :class="{ 'is-dark': navDark, 'is-scrolled': navScrolled }">
       <div class="l-shell l-nav-inner">
         <RouterLink to="/home" class="l-brand" aria-label="千客引擎（Qianke Engine）官网首页">
-          <span class="l-logo">Q</span>
+          <Logo :size="30" :show-text="false" class="l-logo-slot" />
           <span class="l-brand-text"><b>千客引擎</b></span>
         </RouterLink>
 

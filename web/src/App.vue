@@ -5,6 +5,7 @@ import { hasCap, isManager, logout, store } from "./store";
 import ToastHost from "./components/ToastHost.vue";
 import LanguageToggle from "./components/LanguageToggle.vue";
 import ThemeToggle from "./components/ThemeToggle.vue";
+import Logo from "./components/Logo.vue";
 
 const route = useRoute();
 const drawerOpen = ref(false);
@@ -137,7 +138,7 @@ function closeDrawer() {
 
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-logo">Q</div>
+          <Logo :size="32" :show-text="false" class="brand-logo-slot" />
           <div class="brand-text">
             <strong>千客引擎</strong>
             <span>新版工作台</span>
