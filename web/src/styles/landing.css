@@ -2202,3 +2202,151 @@ button.l-btn {
   .l-modal-enter-active .l-modal-panel,
   .l-modal-leave-active .l-modal-panel { transition: none; }
 }
+
+/* =========================================================
+   官网深浅色：Landing 有自己的 --l-* 变量体系，不能只依赖
+   工作台 main.css 的全局变量，否则切换主题时首页仍然是暖白。
+   Hero 保持电影感深色；内容区 / 导航 / 卡片随主题切换。
+   ========================================================= */
+[data-theme="dark"] .landing {
+  --l-bg: #0b0b0e;
+  --l-bg-soft: #15151a;
+  --l-card: #141419;
+  --l-ink: #f5f2ea;
+  --l-ink-soft: #e8e3d8;
+  --l-body: #aaa8b1;
+  --l-muted: #7d7b85;
+  --l-line: #29292f;
+  --l-line-strong: #3a3a43;
+  --l-accent: #f59e0b;
+  --l-gold: #f5b35a;
+}
+
+/* Hero：暗色模式更冷、更纯黑；光晕稍收，和浅色模式的暖黑区分 */
+[data-theme="dark"] .l-hero {
+  background:
+    radial-gradient(46% 40% at 74% 46%, rgba(245, 179, 90, 0.045), transparent 70%),
+    radial-gradient(30% 26% at 18% 20%, rgba(96, 125, 170, 0.04), transparent 70%),
+    radial-gradient(120% 90% at 50% 50%, transparent 44%, rgba(0, 0, 0, 0.72) 100%),
+    #020204;
+}
+[data-theme="dark"] .l-hero::after {
+  background: linear-gradient(180deg, rgba(2, 2, 4, 0) 0%, rgba(2, 2, 4, 0.55) 68%, #020204 100%);
+}
+
+/* 导航：滚出 Hero 后是深色磨砂，而不是原来的暖白 */
+[data-theme="dark"] .l-nav {
+  background: rgba(10, 10, 14, 0.82);
+  border-bottom-color: transparent;
+}
+[data-theme="dark"] .l-nav.is-scrolled {
+  border-bottom-color: var(--l-line);
+  background: rgba(10, 10, 14, 0.92);
+  box-shadow: 0 10px 30px -24px rgba(0, 0, 0, 0.9);
+}
+[data-theme="dark"] .l-nav.is-dark {
+  background: transparent;
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+[data-theme="dark"] .l-nav.is-dark.is-scrolled {
+  background: linear-gradient(180deg, rgba(2, 2, 4, 0.78), rgba(2, 2, 4, 0));
+}
+[data-theme="dark"] .l-nav-link:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .l-nav-login {
+  color: var(--l-ink);
+  border-color: var(--l-line-strong);
+}
+[data-theme="dark"] .l-nav-login:hover {
+  background: #1b1b21;
+  border-color: var(--l-ink);
+}
+[data-theme="dark"] .l-logo-slot {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+/* 按钮 */
+[data-theme="dark"] .l-btn-ghost:hover {
+  background: #1b1b21;
+  border-color: var(--l-ink);
+}
+[data-theme="dark"] .l-private .l-btn-primary {
+  background: #f4f1e9;
+  color: #09090b;
+}
+[data-theme="dark"] .l-private .l-btn-primary:hover {
+  background: #ffffff;
+}
+
+/* 产品截图的 Mac 窗口：避免深色页面里出现一块暖白 */
+[data-theme="dark"] .l-mac {
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.06) inset,
+    0 70px 140px -52px rgba(0, 0, 0, 0.75),
+    0 26px 64px -34px rgba(0, 0, 0, 0.5);
+}
+[data-theme="dark"] .l-mac:hover {
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.08) inset,
+    0 84px 160px -52px rgba(0, 0, 0, 0.8),
+    0 30px 70px -34px rgba(0, 0, 0, 0.56);
+}
+[data-theme="dark"] .l-mac-bar {
+  background: #17171d;
+  border-bottom-color: var(--l-line);
+}
+[data-theme="dark"] .l-mac-url {
+  background: #0f0f14;
+  border-color: var(--l-line);
+  color: var(--l-muted);
+}
+[data-theme="dark"] .l-mac-body {
+  background: #0d0d12;
+}
+[data-theme="dark"] .l-shot-placeholder {
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 14px, rgba(255, 255, 255, 0.005) 14px 28px),
+    #0d0d12;
+  color: var(--l-muted);
+}
+
+/* 下方内容区 / Slogan / 页脚 */
+[data-theme="dark"] .l-private {
+  background: linear-gradient(180deg, rgba(21, 21, 26, 0), rgba(21, 21, 26, 0.72));
+}
+[data-theme="dark"] .l-footer {
+  background: rgba(15, 15, 20, 0.62);
+}
+[data-theme="dark"] .l-highlight {
+  border-color: rgba(245, 158, 11, 0.9);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+/* 主题切换时不要瞬间跳色 */
+.landing,
+.landing .l-nav,
+.landing .l-showcase,
+.landing .l-private,
+.landing .l-footer,
+.landing .l-mac,
+.landing .l-mac-bar,
+.landing .l-mac-url,
+.landing .l-mac-body {
+  transition: background-color 0.24s ease, border-color 0.24s ease, color 0.24s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing,
+  .landing .l-nav,
+  .landing .l-showcase,
+  .landing .l-private,
+  .landing .l-footer,
+  .landing .l-mac,
+  .landing .l-mac-bar,
+  .landing .l-mac-url,
+  .landing .l-mac-body { transition: none; }
+}
