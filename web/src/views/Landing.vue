@@ -12,7 +12,9 @@
  * onBeforeUnmount 清理所有 timer；prefers-reduced-motion 直接最终静态排版（无 timer）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { store } from "../store";
+import { useRouter } from "vue-router";
+import { postJson } from "../api";
+import { refreshWhoami, store, toast } from "../store";
 import HeroNebula from "../components/landing/HeroNebula.vue";
 import LanguageToggle from "../components/LanguageToggle.vue";
 import ThemeToggle from "../components/ThemeToggle.vue";
@@ -23,7 +25,24 @@ import "../styles/landing.css";
 const shotModules = import.meta.glob("../assets/shots/*.png", { eager: true, import: "default" });
 const shot = (name) => shotModules[`../assets/shots/${name}.png`] || "";
 
+const router = useRouter();
 const isAuthed = computed(() => !!store.authenticated);
+const demoStarting = ref(false);
+
+async function startDemo() {
+  if (demoStarting.value) return;
+  demoStarting.value = true;
+  try {
+    await postJson("/api/auth/demo-login", {});
+    await refreshWhoami();
+    toast("已进入演示体验模式（只读）", "info", 3200);
+    await router.push("/chat");
+  } catch (e) {
+    toast((e && (e.detail || e.message)) || "演示体验暂不可用，请稍后再试", "error", 5200);
+  } finally {
+    demoStarting.value = false;
+  }
+}
 
 /* ==================== 官网 CTA 弹窗（文档 / 私有化部署） ==================== */
 const GITHUB_URL = "https://github.com/q93304989-bit/qianke-engine";
@@ -702,7 +721,15 @@ onBeforeUnmount(() => {
               <RouterLink v-if="isAuthed" to="/" class="l-btn l-btn-primary l-btn-lg">
                 进入工作台
               </RouterLink>
-              <a v-else href="/login" class="l-btn l-btn-primary l-btn-lg">免费体验 Demo</a>
+              <button
+                v-else
+                type="button"
+                class="l-btn l-btn-primary l-btn-lg"
+                :disabled="demoStarting"
+                @click="startDemo"
+              >
+                {{ demoStarting ? "正在进入体验…" : "免费体验 Demo" }}
+              </button>
               <button type="button" class="l-btn l-btn-ghost l-btn-lg" @click="docsOpen = true">
                 查看文档
               </button>

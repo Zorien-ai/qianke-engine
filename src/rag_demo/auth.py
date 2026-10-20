@@ -58,6 +58,14 @@ SESSION_COOKIE = "rag_session"
 SEED_ADMIN_USERNAME = os.environ.get("RAG_ADMIN_USER", "admin")
 SEED_ADMIN_PASSWORD = os.environ.get("RAG_ADMIN_PASSWORD", "admin123")
 
+# 官网「免费体验 Demo」专用账号：固定账号 + 固定数据集（demo）。
+# 不是可管理的业务账号，只用于匿名访客的一键只读体验；写操作统一在 API
+# 中间件层拦截（见 api/main.py::_attach_account）。
+DEMO_USERNAME = "demo_visitor"
+DEMO_PASSWORD = "Demo@123"
+DEMO_DISPLAY_NAME = "演示访客"
+DEMO_TTL_SECONDS = 2 * 3600
+
 # ---------- PostgreSQL ----------
 # 与 config.py::DB_CONFIG / docker-compose.yml 的账号密码保持一致；
 # 单独读环境变量而不是 import config：config 会顺带 import torch，
@@ -166,6 +174,7 @@ CREATE TABLE IF NOT EXISTS app_user (
     enterprise_id       BIGINT,
     is_system_admin     BOOLEAN NOT NULL DEFAULT FALSE,
     is_enterprise_admin BOOLEAN NOT NULL DEFAULT FALSE,
+    is_demo             BOOLEAN NOT NULL DEFAULT FALSE,
     status              TEXT NOT NULL DEFAULT 'pending',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     reviewed_at         TIMESTAMPTZ,
@@ -176,6 +185,9 @@ CREATE TABLE IF NOT EXISTS app_user (
 -- 部分唯一索引：NULL 不算重复（老账号没有联系方式）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_app_user_contact
     ON app_user (contact) WHERE contact IS NOT NULL AND contact <> '';
+
+-- 老库补列（CREATE TABLE IF NOT EXISTS 不会给已有表加列）
+ALTER TABLE app_user ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS session (
     token_hash  TEXT PRIMARY KEY,
@@ -262,40 +274,100 @@ def _init_schema() -> None:
         cur.execute(_SCHEMA)
 
 
+def ensure_demo_account() -> dict[str, Any]:
+    """确保固定演示账号存在，并强制绑定为只读体验身份（幂等）。
+
+    注意：这里**不创建企业**。_tenant_dataset() 对 is_demo 账号直接回落到
+    DEFAULT_DATASET（demo），这样访客永远只能看到仓库自带的演示底座，
+    也不会因为企业表的唯一约束与真实企业数据集冲突。
+    """
+    _get_pool()
+    with _cursor() as cur:
+        cur.execute("SELECT id FROM app_user WHERE username = %s", (DEMO_USERNAME,))
+        row = cur.fetchone()
+        if row is None:
+            cur.execute(
+                """INSERT INTO app_user
+                   (username, display_name, password_hash, account_type, role,
+                    enterprise_id, is_system_admin, is_enterprise_admin, is_demo, status)
+                   VALUES (%s, %s, %s, %s, %s, NULL, FALSE, FALSE, TRUE, %s)""",
+                (
+                    DEMO_USERNAME,
+                    DEMO_DISPLAY_NAME,
+                    hash_password(DEMO_PASSWORD),
+                    ACCOUNT_EMPLOYEE,
+                    "exec",  # L3：能看来源/切片，但拿不到 SQL/运维能力
+                    STATUS_ACTIVE,
+                ),
+            )
+        else:
+            # 同名账号若被人改过权限/密码，启动时恢复成固定演示身份；
+            # 这是演示账号，不接受人工提升为管理员。
+            cur.execute(
+                """UPDATE app_user
+                   SET display_name = %s,
+                       password_hash = %s,
+                       account_type = %s,
+                       role = %s,
+                       enterprise_id = NULL,
+                       is_system_admin = FALSE,
+                       is_enterprise_admin = FALSE,
+                       is_demo = TRUE,
+                       status = %s
+                   WHERE id = %s""",
+                (
+                    DEMO_DISPLAY_NAME,
+                    hash_password(DEMO_PASSWORD),
+                    ACCOUNT_EMPLOYEE,
+                    "exec",
+                    STATUS_ACTIVE,
+                    row["id"],
+                ),
+            )
+    user = find_user(DEMO_USERNAME)
+    if user is None:  # 理论上不可能
+        raise RuntimeError("演示账号创建失败")
+    logger.info("演示体验账号已就绪: %s（只读 / demo 数据集）", DEMO_USERNAME)
+    return user
+
+
 def init(seed_username: str, seed_password: str) -> None:
     """
-    初始化表 + 迁移旧 SQLite + 种子系统管理员（幂等）
+    初始化表 + 迁移旧 SQLite + 种子系统管理员 + 固定演示账号（幂等）
 
-    只在"一个账号都没有"时创建种子账号：否则每次重启都会把一个已知密码的
-    admin 塞回去，等于给系统留后门。
+    种子管理员只在"一个账号都没有"时创建：否则每次重启都会把一个已知密码的
+    admin 塞回去，等于给系统留后门。演示账号则每次都确保存在并被锁定为只读身份。
     """
     _get_pool()
     _migrate_from_sqlite()
 
     with _cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM app_user")
-        if cur.fetchone()["n"] > 0:
-            return
+        empty = cur.fetchone()["n"] == 0
+    if empty:
         if len(seed_password) < 6:
             raise ValueError("种子管理员密码至少 6 位")
-        cur.execute(
-            """INSERT INTO app_user
-               (username, display_name, password_hash, account_type, role,
-                is_system_admin, status)
-               VALUES (%s, %s, %s, %s, %s, TRUE, %s)""",
-            (
-                seed_username.strip().lower(),
-                "系统管理员",
-                hash_password(seed_password),
-                ACCOUNT_EMPLOYEE,
-                "admin",
-                STATUS_ACTIVE,
-            ),
+        with _cursor() as cur:
+            cur.execute(
+                """INSERT INTO app_user
+                   (username, display_name, password_hash, account_type, role,
+                    is_system_admin, status)
+                   VALUES (%s, %s, %s, %s, %s, TRUE, %s)""",
+                (
+                    seed_username.strip().lower(),
+                    "系统管理员",
+                    hash_password(seed_password),
+                    ACCOUNT_EMPLOYEE,
+                    "admin",
+                    STATUS_ACTIVE,
+                ),
+            )
+        logger.warning(
+            "已创建初始系统管理员 %s（密码来自 RAG_ADMIN_PASSWORD，默认 admin123），"
+            "请在正式使用前修改", seed_username,
         )
-    logger.warning(
-        "已创建初始系统管理员 %s（密码来自 RAG_ADMIN_PASSWORD，默认 admin123），"
-        "请在正式使用前修改", seed_username,
-    )
+
+    ensure_demo_account()
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -526,6 +598,7 @@ def _row_to_user(row: Any) -> dict[str, Any] | None:
     data = dict(row)
     data["is_system_admin"] = bool(data.get("is_system_admin"))
     data["is_enterprise_admin"] = bool(data.get("is_enterprise_admin"))
+    data["is_demo"] = bool(data.get("is_demo"))
     data["status_label"] = STATUS_LABELS.get(data.get("status"), data.get("status"))
     data["account_type_label"] = ACCOUNT_TYPE_LABELS.get(
         data.get("account_type"), data.get("account_type")

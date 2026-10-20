@@ -186,9 +186,10 @@ def kb_overview() -> dict:
 
     system_admin = bool(account and account.get("is_system_admin"))
     enterprise_admin = bool(account and account.get("is_enterprise_admin"))
-    # 系统管理员看的是 demo（没有「自己的企业」）；企业账号看本企业库
-    mode = "demo" if (system_admin or account is None) else "enterprise"
-    can_write = enterprise_admin
+    demo_account = bool(account and account.get("is_demo"))
+    # 系统管理员 / 演示访客看的是 demo（没有「自己的企业」）；企业账号看本企业库
+    mode = "demo" if (system_admin or demo_account or account is None) else "enterprise"
+    can_write = enterprise_admin and not demo_account
     if can_write:
         readonly_reason = None
     elif mode == "demo":

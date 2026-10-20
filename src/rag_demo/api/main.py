@@ -40,7 +40,7 @@ import time
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
@@ -209,6 +209,17 @@ def _require_manager(enterprise_id: int | None = None) -> dict:
 # 改造前 /qa、/search、/stats 根本不切库，企业租户提问拿到的全是 demo 的答案
 # （8110 画像 / 36 篇文档），而界面上没有任何标识——用户会当成自家数据。
 _TENANT_EMPTY = "当前租户数据为空，请先到「数据接入」上传数据并构建"
+_DEMO_MAX_QUESTION = 200
+
+
+def _check_demo_question(question: str) -> None:
+    """演示账号限制单次提问长度，避免匿名会话刷爆生成接口。"""
+    account = auth.current_account()
+    if account and account.get("is_demo") and len((question or "").strip()) > _DEMO_MAX_QUESTION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"演示模式单次提问最多 {_DEMO_MAX_QUESTION} 字，请精简后再试。",
+        )
 
 
 def _tenant_dataset() -> str:
@@ -217,6 +228,9 @@ def _tenant_dataset() -> str:
     if account is None:
         # 离线脚本模式（未强制登录）：沿用请求头语义，由调用方负责数据集
         return current_dataset()
+    if account.get("is_demo"):
+        # 体验账号固定读仓库自带的 demo 底座：它没有企业，也不允许被改绑。
+        return DEFAULT_DATASET
     if account.get("is_system_admin"):
         return DEFAULT_DATASET
     dataset = account.get("dataset")
@@ -413,6 +427,10 @@ async def _attach_account(request: Request, call_next):
     放在入口一次，业务层统一读 current_account()，不必逐个改签名。
 
     `/static` 不解析：静态资源不需要身份，而每次读库/sqlite 都是白花。
+
+    演示账号在这里统一做只读兜底：除问答（/qa、/qa/stream）和退出登录外，
+    所有非 GET 请求直接 403。这样即使以后新增了写接口，也不会因为忘加
+    `is_demo` 判断而让匿名体验账号改到演示数据。
     """
     if auth.AUTH_ENABLED and not request.url.path.startswith("/static"):
         try:
@@ -421,6 +439,18 @@ async def _attach_account(request: Request, call_next):
             logger.exception("会话解析失败，按未登录处理")
             account = None
         auth.set_current_account(account)
+        if account and account.get("is_demo") and request.method not in ("GET", "HEAD", "OPTIONS"):
+            allowed = request.url.path in {
+                "/qa",
+                "/qa/stream",
+                "/auth/logout",
+            }
+            if not allowed:
+                auth.set_current_account(None)
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "演示体验模式为只读：可以对话与查看数据，但不能上传、构建、删除或修改配置。"},
+                )
     try:
         return await call_next(request)
     finally:
@@ -627,6 +657,7 @@ def whoami(
             "status_label": account["status_label"],
             "is_system_admin": account["is_system_admin"],
             "is_enterprise_admin": account["is_enterprise_admin"],
+            "is_demo": bool(account.get("is_demo")),
             "enterprise": (
                 {
                     "id": ent["id"],
@@ -847,6 +878,56 @@ def login(payload: LoginIn, response: Response) -> dict:
         "status_label": account["status_label"],
         "is_system_admin": account["is_system_admin"],
         "is_enterprise_admin": account["is_enterprise_admin"],
+        "is_demo": bool(account.get("is_demo")),
+    }
+
+
+def _purge_demo_runtime_data() -> None:
+    """清理上一批访客留下的演示 trace / usage；失败只降级不影响登录。"""
+    try:
+        ai_monitor.purge_demo_account(auth.DEMO_USERNAME)
+    except Exception as exc:  # noqa: BLE001 演示流量清理不能阻断登录
+        logger.warning("清理演示访客监控流水失败（忽略）: %s: %s", type(exc).__name__, exc)
+
+
+@app.post("/api/auth/demo-login")
+def demo_login(response: Response) -> dict:
+    """官网「免费体验 Demo」一键登录。
+
+    不校验密码 / 验证码，直接下发固定演示账号的短会话。账号绑定 demo 数据集，
+    且 API 中间件会对该账号的所有写请求做只读拦截。
+    """
+    if not auth.AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="当前未启用登录")
+    user = auth.ensure_demo_account()
+    if user.get("status") != auth.STATUS_ACTIVE or not user.get("is_demo"):
+        raise HTTPException(status_code=403, detail="演示账号暂不可用")
+    # 每次进入体验前重置上一批访客留下的监控流水，避免演示数据变脏。
+    _purge_demo_runtime_data()
+    token = auth.create_session(user["id"], auth.DEMO_TTL_SECONDS)
+    account = auth.resolve_session(token)
+    if account is None:
+        raise HTTPException(status_code=503, detail="演示会话创建失败，请稍后重试")
+    response.set_cookie(
+        auth.SESSION_COOKIE,
+        token,
+        max_age=auth.DEMO_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    logger.info("演示体验会话已创建: %s", account["username"])
+    return {
+        "status": "ok",
+        "is_demo": True,
+        "username": account["username"],
+        "display_name": account["display_name"],
+        "role": account["role"],
+        "account_status": account["status"],
+        "status_label": account["status_label"],
+        "expires_in": auth.DEMO_TTL_SECONDS,
+        "redirect": "/v2/#/chat",
     }
 
 
@@ -879,6 +960,7 @@ def qa(
     _require_login()
     role, user = _role(x_role), _user(x_user)
     _require(role, permissions.CAP_ANSWER, user)
+    _check_demo_question(req.question)
 
     limit = permissions.clamp_top_k(
         role, req.top_k, TOP_K_PROFILE_MAX, TOP_K_PROFILE_MIN, user
@@ -1130,6 +1212,7 @@ def qa_stream(
     _require_login()
     role, user = _role(x_role), _user(x_user)
     _require(role, permissions.CAP_ANSWER, user)
+    _check_demo_question(req.question)
 
     limit = permissions.clamp_top_k(
         role, req.top_k, TOP_K_PROFILE_MAX, TOP_K_PROFILE_MIN, user
@@ -1445,7 +1528,17 @@ def _eval_scope() -> tuple[dict, str]:
 
 
 def _eval_scope_name(account: dict) -> str:
+    if account.get("is_demo"):
+        return "demo"
     return "platform" if account.get("is_system_admin") else "enterprise"
+
+
+def _require_eval_viewer() -> dict:
+    """评测看板只读查看：演示账号可看，写操作仍走 _require_manager。"""
+    account = _require_login()
+    if account is not None and account.get("is_demo"):
+        return account
+    return _require_manager()
 
 
 def _run_eval_task(dataset: str, run_id: str, qset: dict) -> None:
@@ -1478,7 +1571,7 @@ def _run_eval_task(dataset: str, run_id: str, qset: dict) -> None:
 
 @app.get("/api/eval/question-sets")
 def eval_question_sets() -> dict:
-    account = _require_manager()
+    account = _require_eval_viewer()
     dataset = _tenant_dataset()
     if not _tenant_ready(dataset):
         raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
@@ -1507,7 +1600,7 @@ def eval_question_set_create(payload: EvalQuestionSetIn) -> dict:
 
 @app.get("/api/eval/runs")
 def eval_runs(limit: int = 10) -> dict:
-    account = _require_manager()
+    account = _require_eval_viewer()
     dataset = _tenant_dataset()
     if not _tenant_ready(dataset):
         raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
@@ -1520,7 +1613,7 @@ def eval_runs(limit: int = 10) -> dict:
 
 @app.get("/api/eval/runs/latest")
 def eval_latest_run() -> dict:
-    account = _require_manager()
+    account = _require_eval_viewer()
     dataset = _tenant_dataset()
     if not _tenant_ready(dataset):
         raise HTTPException(status_code=403, detail=_TENANT_EMPTY)
@@ -1533,7 +1626,7 @@ def eval_latest_run() -> dict:
 
 @app.get("/api/eval/runs/{run_id}")
 def eval_run_detail(run_id: str) -> dict:
-    account = _require_manager()
+    account = _require_eval_viewer()
     dataset = _tenant_dataset()
     if not _tenant_ready(dataset):
         raise HTTPException(status_code=403, detail=_TENANT_EMPTY)

@@ -27,6 +27,8 @@ const EXAMPLE_QUESTIONS = [
 
 const question = ref("");
 const sending = ref(false);
+const DEMO_MAX_QUESTION = 200;
+const demoMode = computed(() => !!(store.account && store.account.is_demo));
 const phase = ref("idle"); // idle | retrieving | generating | reasoning | done | error | stopped
 const answer = ref("");
 const reasoning = ref("");
@@ -57,7 +59,7 @@ const marketingUserIds = computed(() => {
   return [...new Set(found)].slice(0, 10);
 });
 const canGenerateMarketing = computed(
-  () => phase.value === "done" && canAsk.value && marketingUserIds.value.length > 0 && !sending.value
+  () => !demoMode.value && phase.value === "done" && canAsk.value && marketingUserIds.value.length > 0 && !sending.value
 );
 
 const meta = reactive({
@@ -280,6 +282,10 @@ async function submit() {
     toast("当前账号没有提问能力，请联系管理员", "error");
     return;
   }
+  if (demoMode.value && text.length > DEMO_MAX_QUESTION) {
+    toast(`演示模式单次提问最多 ${DEMO_MAX_QUESTION} 字，请精简后再试`, "warn");
+    return;
+  }
   if (sending.value) return;
 
   // 重置上一轮
@@ -479,6 +485,7 @@ onBeforeUnmount(() => {
       <textarea
         v-model="question"
         :disabled="sending || !canAsk"
+        :maxlength="demoMode ? DEMO_MAX_QUESTION : undefined"
         :placeholder="
           canAsk
             ? '问点什么，比如业务规则、用户分布、客单价……（Ctrl / Cmd + Enter 发送）'
@@ -489,6 +496,9 @@ onBeforeUnmount(() => {
 
       <div class="composer-foot">
         <span class="composer-hint"><kbd class="kbd">Ctrl</kbd> / <kbd class="kbd">Cmd</kbd> + <kbd class="kbd">Enter</kbd> 发送</span>
+        <span v-if="demoMode" class="composer-hint demo-composer-hint">
+          演示模式 · 单次最多 {{ DEMO_MAX_QUESTION }} 字
+        </span>
 
         <div v-if="canTopk" class="topk-control">
           <label for="chat-topk">返回用户数</label>

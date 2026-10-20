@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router";
-import { boot, hasCap, isManager, store, toast } from "./store";
+import { boot, hasCap, isDemo, isManager, store, toast } from "./store";
 
 import Landing from "./views/Landing.vue";
 import Dashboard from "./views/Dashboard.vue";
@@ -79,13 +79,17 @@ router.beforeEach(async (to) => {
     toast("当前账号没有权限配置能力（仅系统管理员可用）", "error");
     return { name: "dashboard" };
   }
-  // 导入向导会构建数据（写库），仅管理员可进；后端还会再拦截一次
+  // 导入向导会构建数据（写库），仅管理员可进；演示账号明确禁用
+  if (to.name === "setup" && isDemo()) {
+    toast("演示模式无法导入数据", "warn");
+    return { name: "dashboard" };
+  }
   if (to.name === "setup" && !isManager()) {
     toast("只有企业管理员可以导入或重建数据", "error");
     return { name: "dashboard" };
   }
-  // 离线评测只对管理员开放；后端还会按账号推导 dataset 再拦截一次
-  if (to.name === "eval" && !isManager()) {
+  // 离线评测只读看板对演示账号开放；写接口由后端只读中间件拦截
+  if (to.name === "eval" && !isManager() && !isDemo()) {
     toast("只有管理员可以访问离线评测", "error");
     return { name: "dashboard" };
   }

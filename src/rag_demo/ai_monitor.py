@@ -840,3 +840,34 @@ def admin_tenants() -> list[dict]:
         return rows
     finally:
         conn.close()
+
+
+def purge_demo_account(account_id: str = "demo_visitor") -> dict:
+    """清理演示账号产生的监控流水 / 临时调用记录。
+
+    纯只读体验不会改演示库；但问答会写 trace/usage 给平台监控用，这些属于
+    访客临时痕迹，不需要长期保留。每次 demo-login 调一次，等价于「每次有人
+    访问体验接口时重置」。失败由调用方降级，不影响登录。
+    """
+    conn = _connect()
+    ensure_schema(conn)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """DELETE FROM ai_spans
+               WHERE trace_id IN (SELECT trace_id FROM ai_traces WHERE account_id = %s)""",
+            (account_id,),
+        )
+        spans = cur.rowcount
+        cur.execute(
+            """DELETE FROM ai_usage_events
+               WHERE trace_id IN (SELECT trace_id FROM ai_traces WHERE account_id = %s)""",
+            (account_id,),
+        )
+        usages = cur.rowcount
+        cur.execute("DELETE FROM ai_traces WHERE account_id = %s", (account_id,))
+        traces = cur.rowcount
+        conn.commit()
+        return {"spans": spans, "usage_events": usages, "traces": traces}
+    finally:
+        conn.close()

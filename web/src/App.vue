@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, RouterLink, RouterView } from "vue-router";
-import { hasCap, isManager, logout, store } from "./store";
+import { hasCap, isDemo, isManager, logout, store, toast } from "./store";
 import ToastHost from "./components/ToastHost.vue";
 import LanguageToggle from "./components/LanguageToggle.vue";
 import ThemeToggle from "./components/ThemeToggle.vue";
@@ -10,6 +10,11 @@ import Logo from "./components/Logo.vue";
 const route = useRoute();
 const drawerOpen = ref(false);
 const collapsed = ref(false);
+const demoMode = computed(() => isDemo());
+
+function demoSetupBlocked() {
+  toast("演示模式无法导入数据", "warn");
+}
 
 const ICONS = {
   dashboard:
@@ -43,7 +48,7 @@ const navItems = computed(() => {
     { to: "/kb", key: "kb", label: "知识库", icon: ICONS.kb },
   ];
   if (isManager()) items.push({ to: "/staff", key: "staff", label: "员工管理", icon: ICONS.staff });
-  if (isManager()) items.push({ to: "/eval", key: "eval", label: "离线评测", icon: ICONS.eval });
+  if (isManager() || demoMode.value) items.push({ to: "/eval", key: "eval", label: "离线评测", icon: ICONS.eval });
   if (isManager()) items.push({ to: "/monitor", key: "monitor", label: "实时监控", icon: ICONS.monitor });
   if (isManager()) items.push({ to: "/billing", key: "billing", label: "Token 账单", icon: ICONS.billing });
   if (store.account && store.account.is_system_admin)
@@ -163,8 +168,19 @@ function closeDrawer() {
         </nav>
 
         <div class="sidebar-foot">
+          <button
+            v-if="demoMode"
+            type="button"
+            class="nav-item is-disabled"
+            title="演示模式无法导入数据"
+            @click="demoSetupBlocked"
+          >
+            <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.wizard}</svg>`" />
+            <span class="nav-label">数据导入</span>
+            <span class="nav-lock">只读</span>
+          </button>
           <RouterLink
-            v-if="isManager()"
+            v-else-if="isManager()"
             to="/setup"
             class="nav-item"
             :class="{ 'is-active': route.path === '/setup' }"
@@ -206,6 +222,14 @@ function closeDrawer() {
             </button>
           </div>
         </header>
+
+        <div v-if="demoMode" class="demo-banner" role="status">
+          <span class="demo-banner-icon" aria-hidden="true">🎯</span>
+          <span class="demo-banner-text">
+            您当前处于演示体验模式。为保证系统稳定，演示库为只读，无法上传文件和构建。
+          </span>
+          <span class="demo-banner-tag">DEMO · READ ONLY</span>
+        </div>
 
         <main class="content">
           <RouterView v-slot="{ Component }">
