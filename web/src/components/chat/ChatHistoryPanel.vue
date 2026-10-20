@@ -10,9 +10,10 @@ const props = defineProps({
   activeId: { type: String, default: "" },
   loading: { type: Boolean, default: false },
   open: { type: Boolean, default: false },
+  collapsed: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["new", "select", "rename", "delete", "close"]);
+const emit = defineEmits(["new", "select", "rename", "delete", "close", "toggle"]);
 
 const editingId = ref("");
 const editingTitle = ref("");
@@ -59,69 +60,120 @@ const hasSessions = computed(() => props.sessions.length > 0);
 </script>
 
 <template>
-  <aside class="chat-history-panel" :class="{ 'is-open': open }" aria-label="历史会话">
-    <header class="history-head">
-      <strong>历史会话</strong>
-      <button type="button" class="icon-btn history-close" aria-label="关闭历史会话" @click="$emit('close')">
-        ×
-      </button>
-    </header>
-
-    <button type="button" class="new-chat-btn" @click="$emit('new')">
-      <span aria-hidden="true">＋</span>
-      新对话
-    </button>
-
-    <div v-if="loading" class="history-list">
-      <div v-for="i in 5" :key="i" class="skeleton history-skeleton" />
-    </div>
-
-    <div v-else-if="!hasSessions" class="history-empty">
-      <div class="history-empty-icon">◌</div>
-      <p>还没有历史会话</p>
-      <span>发出第一条问题后自动保存</span>
-    </div>
-
-    <nav v-else class="history-list" aria-label="会话列表">
-      <div
-        v-for="session in sessions"
-        :key="session.id"
-        class="history-item"
-        :class="{ 'is-active': session.id === activeId }"
-      >
-        <template v-if="editingId === session.id">
-          <input
-            ref="editInput"
-            v-model="editingTitle"
-            class="history-rename"
-            maxlength="80"
-            aria-label="会话标题"
-            @keydown="onRenameKey"
-            @blur="commitRename"
-          />
-        </template>
-        <template v-else>
+  <aside
+    class="chat-history-panel"
+    :class="{ 'is-open': open, 'is-collapsed': collapsed }"
+    aria-label="历史会话"
+  >
+    <template v-if="!collapsed">
+      <header class="history-head">
+        <strong>历史会话</strong>
+        <div class="history-head-actions">
           <button
             type="button"
-            class="history-main"
-            :title="session.title"
-            @click="$emit('select', session.id)"
-            @dblclick="startRename(session)"
+            class="history-toggle"
+            aria-label="收起历史会话"
+            aria-expanded="true"
+            title="收起历史会话"
+            @click="$emit('toggle')"
           >
-            <span class="history-title">{{ session.title || "新对话" }}</span>
-            <span class="history-meta">
-              {{ session.message_count || 0 }} 条 · {{ timeLabel(session.updated_at) }}
-            </span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <path d="M8 4v16" />
+            </svg>
           </button>
-          <span class="history-actions">
-            <button type="button" class="history-action" title="重命名" @click.stop="startRename(session)">✎</button>
-            <button type="button" class="history-action is-danger" title="删除" @click.stop="$emit('delete', session.id)">×</button>
-          </span>
-        </template>
-      </div>
-    </nav>
+          <button type="button" class="icon-btn history-close" aria-label="关闭历史会话" @click="$emit('close')">
+            ×
+          </button>
+        </div>
+      </header>
 
-    <footer class="history-foot">历史会话按账号私有保存</footer>
+      <button type="button" class="new-chat-btn" @click="$emit('new')">
+        <span aria-hidden="true">＋</span>
+        新对话
+      </button>
+
+      <div v-if="loading" class="history-list">
+        <div v-for="i in 5" :key="i" class="skeleton history-skeleton" />
+      </div>
+
+      <div v-else-if="!hasSessions" class="history-empty">
+        <div class="history-empty-icon">◌</div>
+        <p>还没有历史会话</p>
+        <span>发出第一条问题后自动保存</span>
+      </div>
+
+      <nav v-else class="history-list" aria-label="会话列表">
+        <div
+          v-for="session in sessions"
+          :key="session.id"
+          class="history-item"
+          :class="{ 'is-active': session.id === activeId }"
+        >
+          <template v-if="editingId === session.id">
+            <input
+              ref="editInput"
+              v-model="editingTitle"
+              class="history-rename"
+              maxlength="80"
+              aria-label="会话标题"
+              @keydown="onRenameKey"
+              @blur="commitRename"
+            />
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="history-main"
+              :title="session.title"
+              @click="$emit('select', session.id)"
+              @dblclick="startRename(session)"
+            >
+              <span class="history-title">{{ session.title || "新对话" }}</span>
+              <span class="history-meta">
+                {{ session.message_count || 0 }} 条 · {{ timeLabel(session.updated_at) }}
+              </span>
+            </button>
+            <span class="history-actions">
+              <button type="button" class="history-action" title="重命名" @click.stop="startRename(session)">✎</button>
+              <button type="button" class="history-action is-danger" title="删除" @click.stop="$emit('delete', session.id)">×</button>
+            </span>
+          </template>
+        </div>
+      </nav>
+
+      <footer class="history-foot">历史会话按账号私有保存</footer>
+    </template>
+
+    <template v-else>
+      <header class="history-head history-head-rail">
+        <button
+          type="button"
+          class="history-toggle"
+          aria-label="展开历史会话"
+          aria-expanded="false"
+          title="展开历史会话"
+          @click="$emit('toggle')"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M8 4v16" />
+          </svg>
+        </button>
+      </header>
+
+      <button
+        type="button"
+        class="new-chat-btn is-rail"
+        title="新建对话"
+        aria-label="新建对话"
+        @click="$emit('new')"
+      >
+        <span aria-hidden="true">＋</span>
+      </button>
+
+      <span class="history-rail-label" aria-hidden="true">历史</span>
+    </template>
   </aside>
   <div v-if="open" class="history-backdrop" @click="$emit('close')" />
 </template>
@@ -137,6 +189,13 @@ const hasSessions = computed(() => props.sessions.length > 0);
   padding: 4px 10px 8px;
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 48%, transparent);
+  transition: width .22s ease, flex-basis .22s ease, padding .22s ease;
+}
+.chat-history-panel.is-collapsed {
+  width: 56px;
+  flex: 0 0 56px;
+  align-items: center;
+  padding: 4px 8px 12px;
 }
 .history-head {
   display: flex;
@@ -146,7 +205,51 @@ const hasSessions = computed(() => props.sessions.length > 0);
   padding: 6px 6px 12px;
 }
 .history-head strong { font-size: 15px; letter-spacing: -0.01em; }
+.history-head-rail {
+  width: 100%;
+  justify-content: center;
+  padding: 6px 0 10px;
+}
+.history-head-actions { display: flex; align-items: center; gap: 2px; }
+.history-toggle,
+.history-close {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.history-toggle svg { width: 17px; height: 17px; }
+.history-toggle:hover,
+.history-close:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--primary);
+}
 .history-close { display: none; font-size: 20px; line-height: 1; }
+.new-chat-btn.is-rail {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 9px;
+  font-size: 18px;
+  line-height: 1;
+}
+.history-rail-label {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 10.5px;
+  letter-spacing: .18em;
+  writing-mode: vertical-rl;
+  user-select: none;
+}
 .new-chat-btn {
   display: flex;
   align-items: center;
@@ -294,6 +397,7 @@ const hasSessions = computed(() => props.sessions.length > 0);
   }
   .chat-history-panel.is-open { transform: translateX(0); }
   .history-close { display: grid; }
+  .history-toggle { display: none; }
   .history-backdrop {
     display: block;
     position: fixed;

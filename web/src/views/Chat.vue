@@ -58,6 +58,25 @@ const currentQuestion = ref("");
 const currentRewritten = ref("");
 const historyOpen = ref(false);
 const SESSION_KEY = "rag-v2-active-chat";
+const HISTORY_COLLAPSED_KEY = "rag-v2-history-collapsed";
+const historyCollapsed = ref(readHistoryCollapsed());
+
+function readHistoryCollapsed() {
+  try {
+    return localStorage.getItem(HISTORY_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function toggleHistoryCollapse() {
+  historyCollapsed.value = !historyCollapsed.value;
+  try {
+    localStorage.setItem(HISTORY_COLLAPSED_KEY, historyCollapsed.value ? "1" : "0");
+  } catch {
+    /* localStorage 不可用时仅当前会话生效 */
+  }
+}
 
 /* ---------- 营销文案生成 ---------- */
 const marketingOpen = ref(false);
@@ -717,11 +736,13 @@ onBeforeUnmount(() => {
       :active-id="activeSessionId"
       :loading="sessionsLoading"
       :open="historyOpen"
+      :collapsed="historyCollapsed && !historyOpen"
       @new="newChat"
       @select="loadSession($event)"
       @rename="renameSession"
       @delete="deleteSession"
       @close="historyOpen = false"
+      @toggle="toggleHistoryCollapse"
     />
 
     <div class="chat-main">
