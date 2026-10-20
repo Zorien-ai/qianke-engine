@@ -12,6 +12,9 @@ import Staff from "./views/Staff.vue";
 import Settings from "./views/Settings.vue";
 import Setup from "./views/Setup.vue";
 import Eval from "./views/Eval.vue";
+import Monitor from "./views/Monitor.vue";
+import Billing from "./views/Billing.vue";
+import MonitorAdmin from "./views/MonitorAdmin.vue";
 
 /**
  * 用 hash 路由：后端把 web/dist 静态挂到 /v2/，没有服务端 fallback，
@@ -40,6 +43,9 @@ const routes = [
   // 四步导入向导（替代老 /wizard 页面；老路径由后端 302 到 /v2/#/setup）
   { path: "/setup", name: "setup", component: Setup, meta: { title: "数据导入" } },
   { path: "/eval", name: "eval", component: Eval, meta: { title: "离线评测" } },
+  { path: "/monitor", name: "monitor", component: Monitor, meta: { title: "实时监控" } },
+  { path: "/billing", name: "billing", component: Billing, meta: { title: "Token 账单" } },
+  { path: "/admin/monitor", name: "monitor-admin", component: MonitorAdmin, meta: { title: "平台监控" } },
   // 未知路径 → 工作台；未登录时守卫会再把人送回 /home
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
@@ -81,6 +87,14 @@ router.beforeEach(async (to) => {
   // 离线评测只对管理员开放；后端还会按账号推导 dataset 再拦截一次
   if (to.name === "eval" && !isManager()) {
     toast("只有管理员可以访问离线评测", "error");
+    return { name: "dashboard" };
+  }
+  if ((to.name === "monitor" || to.name === "billing") && !isManager()) {
+    toast("只有管理员可以访问监控与 Token 账单", "error");
+    return { name: "dashboard" };
+  }
+  if (to.name === "monitor-admin" && !(store.account && store.account.is_system_admin)) {
+    toast("只有系统管理员可以访问平台监控", "error");
     return { name: "dashboard" };
   }
   return true;

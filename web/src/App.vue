@@ -21,6 +21,10 @@ const ICONS = {
     '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   settings:
     '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+  monitor:
+    '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"/><circle cx="12" cy="12" r="9"/>',
+  billing:
+    '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/>',
   wizard:
     '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -39,6 +43,10 @@ const navItems = computed(() => {
   ];
   if (isManager()) items.push({ to: "/staff", key: "staff", label: "员工管理", icon: ICONS.staff });
   if (isManager()) items.push({ to: "/eval", key: "eval", label: "离线评测", icon: ICONS.eval });
+  if (isManager()) items.push({ to: "/monitor", key: "monitor", label: "实时监控", icon: ICONS.monitor });
+  if (isManager()) items.push({ to: "/billing", key: "billing", label: "Token 账单", icon: ICONS.billing });
+  if (store.account && store.account.is_system_admin)
+    items.push({ to: "/admin/monitor", key: "adminMonitor", label: "平台监控", icon: ICONS.monitor });
   if (hasCap("ops"))
     items.push({ to: "/settings", key: "settings", label: "权限配置", icon: ICONS.settings });
   return items;

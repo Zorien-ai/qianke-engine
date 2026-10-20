@@ -45,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import answer_guard, auth, config, marketing, permissions, tenant_eval
+from rag_demo import ai_monitor, answer_guard, auth, config, marketing, permissions, tenant_eval
 from rag_demo.api.demo_showcase import (
     DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
     DEMO_QUERY_TITLE,
@@ -55,6 +55,7 @@ from rag_demo.api.demo_showcase import (
     serialize_user as serialize_demo_user,
 )
 from rag_demo.api.kb import register_kb
+from rag_demo.api.monitor import register_monitor
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache
 from rag_demo.config import (
@@ -525,6 +526,10 @@ register_wizard(app)
 # 实现见 rag_demo/api/kb.py；这里只注册路由（不挂静态），与向导一起排在
 # 既有静态挂载之前，保持「先特殊、后通用」的注册顺序。
 register_kb(app)
+
+# AI 监控 / Token 账单控制面（VIP）：/api/monitor/*、/api/billing/*、/api/admin/*。
+# 采集/账本在 rag_demo/ai_monitor.py，接口在 rag_demo/api/monitor.py。
+register_monitor(app)
 
 # Vue 3 新界面（M3）：把构建产物挂到 /v2。
 # 项目根从本文件位置向上推导（api/main.py → api → rag_demo → src → 项目根），
@@ -1063,7 +1068,7 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _dataset_pinned_stream(dataset: str, inner):
+def _dataset_pinned_stream(dataset: str, inner, trace_id: str | None = None):
     """
     让同步生成器的**每一次恢复**都跑在同一个数据集上（M3 修跨租户串数据）
 
@@ -1080,6 +1085,8 @@ def _dataset_pinned_stream(dataset: str, inner):
     iterator = iter(inner)
     while True:
         pin_dataset(dataset)
+        if trace_id:
+            ai_monitor.pin_trace(trace_id, dataset)
         try:
             item = next(iterator)
         except StopIteration:
@@ -1126,6 +1133,8 @@ def qa_stream(
     # 读哪个库由账号推导，且在**请求线程**里先算好：生成器每次恢复都在新的
     # Context 副本里（见 _dataset_pinned_stream），不能指望它自己切库。
     dataset = _tenant_dataset()
+    trace_id = ai_monitor.begin_trace("chat.stream", auth.current_account())
+    trace_started = time.perf_counter()
 
     def meta(payload: dict, **extra) -> str:
         """构造 meta 事件：先裁剪再序列化，避免各处漏裁剪"""
@@ -1135,7 +1144,12 @@ def qa_stream(
         # 读哪个库由账号决定（与 /qa 同一口径）：dataset 已在请求线程里算好，
         # 生成器自己**不再切库**——它每次恢复都在一个新的 Context 里，
         # 由 `_dataset_pinned_stream` 在每次 next 之前重新钉住（见其 docstring）。
+        trace_status = "success"
+        trace_cache_hit = False
+        trace_guard_hit = False
+        trace_first_token_ms = None
         if not _tenant_ready(dataset):
+            trace_status = "error"
             yield _sse("error", {"message": _TENANT_EMPTY})
             return
         try:
@@ -1147,6 +1161,7 @@ def qa_stream(
                                         req.deep_thinking, dataset=dataset)
             hit = answer_cache.get(key)
             if hit is not None:
+                trace_cache_hit = True
                 yield meta({
                     "route": hit.get("route"),
                     "sources": hit.get("sources", []),
@@ -1163,13 +1178,20 @@ def qa_stream(
                 return
 
             yield _sse("stage", {"stage": "retrieving"})
+            prepare_started = time.perf_counter()
             ctx = prepare(req.question, dept, req.retriever, profile_limit=limit)
+            ai_monitor.record_span(
+                kind="retrieval",
+                name="prepare",
+                latency_ms=round((time.perf_counter() - prepare_started) * 1000),
+            )
             route_name = ctx["route"]
 
             # 检索基础设施不可用：直接告知，不走生成、不写缓存
             # （不能缓存，否则数据库恢复后还会返回这条错误）
             # 兜底文案对**所有角色**透出——把"服务坏了"裁成"资料里没有"是最坏的结果
             if route_name == "error":
+                trace_status = "error"
                 yield meta({"route": route_name, "sources": []})
                 yield _sse("delta", {"delta": ctx["answer"]})
                 yield _sse("done", {})
@@ -1206,23 +1228,40 @@ def qa_stream(
             # 推理段与答案段走两个事件：思维链要单独展示，不能混进回答正文
             # （混进去会污染 [来源N] 与「事实/推断」的呈现）
             chunks = []
+            generation_started = time.perf_counter()
             for kind, text in generate_events(
                 req.question, ctx["candidates"], sql_result,
                 deep_thinking=req.deep_thinking,
             ):
+                if trace_first_token_ms is None:
+                    trace_first_token_ms = round((time.perf_counter() - trace_started) * 1000)
                 if kind == EVENT_REASONING:
                     yield _sse("reasoning", {"delta": text})
                 else:
                     chunks.append(text)
                     yield _sse("delta", {"delta": text})
+            ai_monitor.record_span(
+                kind="llm",
+                name="generate",
+                latency_ms=round((time.perf_counter() - generation_started) * 1000),
+                model=os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
+            )
 
             # 生成后审查：提示词只是约束，模型仍可能编造未来数据。
             # 流式的 token 已经发出去了，收不回来——所以命中时补一个 replace 事件，
             # 让前端把已经渲染的正文整体覆盖成固定文案（非流式的 /qa 直接在
             # pipeline 层替换，见 _plan_and_retrieve）。
             answer = "".join(chunks)
+            guard_started = time.perf_counter()
             guard = answer_guard.inspect(req.question, answer)
+            ai_monitor.record_span(
+                kind="guard",
+                name="answer_guard",
+                latency_ms=round((time.perf_counter() - guard_started) * 1000),
+                status="blocked" if guard else "success",
+            )
             if guard:
+                trace_guard_hit = True
                 logger.warning("流式答案被后置审查替换：%s", answer_guard.summarize(guard))
                 answer = PREDICTION_BLOCKED_REPLY
                 yield _sse("replace", {"answer": answer, "guard": guard})
@@ -1241,6 +1280,7 @@ def qa_stream(
         except APIError as e:
             # LLM 接口故障：与检索不可用分开处理，文案与 route 都不同
             # （排查方向相反：一个查 LLM 接口，一个查数据库）
+            trace_status = "error"
             logger.exception("LLM 服务不可用")
             if not chunks:
                 # 还没吐过任何字，用固定文案兜底——用户看到的是人话，
@@ -1248,11 +1288,21 @@ def qa_stream(
                 yield _sse("delta", {"delta": LLM_UNAVAILABLE_REPLY})
             yield _sse("error", {"message": str(e), "kind": "llm_unavailable"})
         except Exception as e:  # 流式过程中出错也要让前端知道
+            trace_status = "error"
             logger.exception("流式问答失败")
             yield _sse("error", {"message": str(e)})
+        finally:
+            ai_monitor.finish_trace(
+                status=trace_status,
+                cache_hit=trace_cache_hit,
+                guard_hit=trace_guard_hit,
+                total_ms=round((time.perf_counter() - trace_started) * 1000),
+                first_token_ms=trace_first_token_ms,
+                trace_id=trace_id,
+            )
 
     return StreamingResponse(
-        _dataset_pinned_stream(dataset, event_stream()),
+        _dataset_pinned_stream(dataset, event_stream(), trace_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

@@ -28,7 +28,7 @@ client = OpenAI(api_key=API_KEY or "EMPTY", base_url=BASE_URL)
 
 
 def chat_completion(messages, model=None, temperature=0.0, stream=False,
-                    deep_thinking: bool | None = None, **kwargs):
+                    deep_thinking: bool | None = None, feature: str = "llm", **kwargs):
     """
     统一的 LLM 调用入口
 
@@ -53,7 +53,7 @@ def chat_completion(messages, model=None, temperature=0.0, stream=False,
         extra["thinking"] = {"type": "enabled" if deep_thinking else "disabled"}
     elif not ENABLE_THINKING:
         extra.setdefault("thinking", {"type": "disabled"})
-    return client.chat.completions.create(
+    resp = client.chat.completions.create(
         model=model or MODEL,
         messages=messages,
         temperature=temperature,
@@ -61,6 +61,19 @@ def chat_completion(messages, model=None, temperature=0.0, stream=False,
         extra_body=extra or None,
         **kwargs,
     )
+    # 非流式调用在这里统一记账；流式 usage 在最后一个 chunk，由 generate_events 负责。
+    if not stream:
+        try:
+            from rag_demo import ai_monitor
+
+            ai_monitor.record_llm_usage(
+                model=model or MODEL,
+                usage=usage_of(resp),
+                feature=feature,
+            )
+        except Exception:  # noqa: BLE001 监控失败不能影响 LLM 调用
+            pass
+    return resp
 
 
 def usage_of(resp) -> dict:
@@ -186,6 +199,7 @@ def generate(query, candidates, sql_result=None, model=MODEL, deep_thinking=None
         model=model,
         temperature=0.3,
         deep_thinking=deep_thinking,
+        feature="answer",
     )
     answer = resp.choices[0].message.content
     return {"answer": answer, "sources": _build_sources(candidates), "usage": usage_of(resp)}
@@ -220,23 +234,45 @@ def generate_events(query, candidates, sql_result=None, model=MODEL, deep_thinki
 
     context = build_context(candidates, sql_result)
     prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
-    stream = chat_completion(
+    stream_kwargs = dict(
         messages=[{"role": "user", "content": prompt}],
         model=model,
         temperature=0.3,
         stream=True,
         deep_thinking=deep_thinking,
+        feature="answer",
     )
-    for chunk in stream:
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta
-        # 两个字段都取：思考模式下推理先到，漏掉任一个都会丢内容
-        reasoning = getattr(delta, "reasoning_content", None)
-        if reasoning:
-            yield EVENT_REASONING, reasoning
-        if delta.content:
-            yield EVENT_ANSWER, delta.content
+    try:
+        stream = chat_completion(**stream_kwargs, stream_options={"include_usage": True})
+    except Exception:  # noqa: BLE001 兼容不支持 stream_options 的兼容端点
+        stream = chat_completion(**stream_kwargs)
+    last_usage = None
+    try:
+        for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                last_usage = usage_of(chunk)
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            # 两个字段都取：思考模式下推理先到，漏掉任一个都会丢内容
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield EVENT_REASONING, reasoning
+            if delta.content:
+                yield EVENT_ANSWER, delta.content
+    finally:
+        if last_usage:
+            try:
+                from rag_demo import ai_monitor
+
+                ai_monitor.record_llm_usage(
+                    model=model or MODEL,
+                    usage=last_usage,
+                    feature="answer",
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # ---------- Text2SQL 结果自然语言化 ----------
