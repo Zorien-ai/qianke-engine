@@ -46,7 +46,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import ai_monitor, answer_guard, auth, chat_history, config, conversation, marketing, permissions, tenant_eval
+from rag_demo import ai_monitor, answer_guard, auth, chat_history, chat_memory, config, conversation, marketing, permissions, tenant_eval
 from rag_demo.api.demo_showcase import (
     DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
     DEMO_QUERY_TITLE,
@@ -243,7 +243,7 @@ def _load_chat_session(req, account: dict, dataset: str) -> tuple[dict | None, l
     session = chat_history.get_session(dataset, int(account["id"]), session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在或不属于当前账号")
-    return session, chat_history.load_recent(dataset, int(account["id"]), session_id, limit=6)
+    return session, chat_history.load_recent(dataset, int(account["id"]), session_id, limit=12)
 
 
 def _history_sources(sources: list) -> list:
@@ -1042,11 +1042,18 @@ def qa(
     turn_id = uuid.uuid4().hex
     search_question = req.question
     rewrite = {"question": req.question, "rewritten": False}
+    memory = (
+        chat_memory.load_memory(dataset, int(account["id"]), session["id"])
+        if session is not None else {}
+    )
+    history_key = ""
+    if session is not None:
+        history_key = f"{session['id']}:{history[-1]['id'] if history else 'first'}"
 
     # 读哪个库由账号决定（_tenant_scope 内部校验并切换），前端无权指定
     with _tenant_scope():
         if session is not None:
-            rewrite = conversation.rewrite_followup(req.question, history)
+            rewrite = conversation.rewrite_followup(req.question, history, memory=memory)
             search_question = rewrite["question"]
             try:
                 chat_history.append_message(
@@ -1059,6 +1066,8 @@ def qa(
             result = answer_question(
                 search_question, dept, keyword_mode=req.retriever, profile_limit=limit,
                 deep_thinking=req.deep_thinking,
+                memory_context=chat_memory.system_prompt(memory, history) if session is not None else "",
+                history_key=history_key,
             )
         except Exception:
             if session is not None:
@@ -1078,6 +1087,7 @@ def qa(
                     result.get("answer", ""), rewritten_question=search_question,
                     route=result.get("route"), sources=result.get("sources") or [],
                 )
+                chat_memory.schedule_update(dataset, int(account["id"]), session["id"])
             except Exception:  # noqa: BLE001
                 logger.exception("助手消息落库失败 session=%s", session["id"])
 
@@ -1341,9 +1351,13 @@ def qa_stream(
     turn_id = uuid.uuid4().hex
     search_question = req.question
     rewrite = {"question": req.question, "rewritten": False}
+    memory = (
+        chat_memory.load_memory(dataset, int(account["id"]), session["id"])
+        if session is not None else {}
+    )
     if session is not None:
         try:
-            rewrite = conversation.rewrite_followup(req.question, history)
+            rewrite = conversation.rewrite_followup(req.question, history, memory=memory)
             search_question = rewrite["question"]
         except Exception:  # noqa: BLE001 改写失败必须回退原问题
             logger.exception("会话 %s 追问改写异常，按原问题继续", session["id"])
@@ -1360,6 +1374,7 @@ def qa_stream(
     history_key = ""
     if session is not None:
         history_key = f"{session['id']}:{history[-1]['id'] if history else 'first'}"
+    memory_context = chat_memory.system_prompt(memory, history) if session is not None else ""
     chat_extra = {}
     if session is not None:
         chat_extra["session_id"] = session["id"]
@@ -1394,6 +1409,7 @@ def qa_stream(
                 sources=assistant_state["sources"] or [],
                 status=assistant_state["status"],
             )
+            chat_memory.schedule_update(dataset, int(account["id"]), session["id"])
         except Exception:  # noqa: BLE001 历史落库失败不能反向影响已经生成的回答
             logger.exception("助手消息落库失败 session=%s", session["id"])
 
@@ -1508,6 +1524,7 @@ def qa_stream(
             for kind, text in generate_events(
                 search_question, ctx["candidates"], sql_result,
                 deep_thinking=req.deep_thinking,
+                memory_context=memory_context,
             ):
                 if trace_first_token_ms is None:
                     trace_first_token_ms = round((time.perf_counter() - trace_started) * 1000)

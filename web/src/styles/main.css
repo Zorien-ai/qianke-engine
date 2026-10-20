@@ -2740,3 +2740,29 @@ html[data-theme="dark"] .tag.is-profile { color: #c4b5fd; }
   background: rgba(245, 158, 11, 0.1);
 }
 [data-theme="dark"] .demo-composer-hint { color: #fbbf24; }
+
+/* ---------- 对话页：独立滚动消息区 + 底部输入区 ---------- */
+.content.content-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  overflow: hidden;
+}
+.content.content-chat > .page {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 对话页固定视口高度：消息区独立滚动，输入区始终贴底 */
+.app-shell.is-chat-shell {
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+.app-shell.is-chat-shell > .main-col {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}

@@ -44,6 +44,7 @@ const topk = ref("3");
 const thinking = ref(false);
 const showDetail = ref(true);
 const answerCard = ref(null);
+const messagesEl = ref(null);
 
 /* ---------- 历史会话 ---------- */
 const route = useRoute();
@@ -219,6 +220,10 @@ function scheduleAnswer() {
   renderTimer = setTimeout(() => {
     renderTimer = null;
     answer.value = pendingAnswer;
+    const el = messagesEl.value;
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 140) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, 70);
 }
 
@@ -328,6 +333,7 @@ async function submit() {
   sending.value = true;
   t0 = performance.now();
   controller = new AbortController();
+  nextTick(() => scrollToBottom());
 
   try {
     const payload = { question: text };
@@ -367,9 +373,7 @@ async function submit() {
     if (phase.value !== "error") phase.value = "done";
     elapsed.value = (performance.now() - t0) / 1000;
     await nextTick();
-    if (answerCard.value && answerCard.value.scrollIntoView) {
-      answerCard.value.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    scrollToBottom();
   } catch (e) {
     if (e && e.name === "AbortError") {
       phase.value = "stopped";
@@ -536,9 +540,12 @@ function archiveLiveTurn() {
 
 function scrollToBottom() {
   nextTick(() => {
-    const el = answerCard.value;
-    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "end" });
-    else window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    const el = messagesEl.value;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      return;
+    }
+    answerCard.value?.scrollIntoView?.({ behavior: "smooth", block: "end" });
   });
 }
 
@@ -743,6 +750,7 @@ onBeforeUnmount(() => {
       </p>
     </section>
 
+    <div ref="messagesEl" class="chat-messages">
     <!-- 历史消息 + 当前轮用户问题 -->
     <div v-if="historyMessages.length || currentQuestion" class="chat-transcript">
       <div v-if="historyLoading" class="history-loading">
@@ -1040,6 +1048,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -1186,16 +1195,74 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .marketing-drawer { width: 100vw; padding: 18px 16px 28px; }
 }
-/* ---------- 历史会话布局 ---------- */
+/* ---------- 历史会话 + 底部输入区 ---------- */
 .chat-page {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 20px;
+  width: 100%;
   max-width: 1320px;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
 }
-.chat-main { flex: 1; min-width: 0; }
-.chat-mobile-bar { display: none; align-items: center; gap: 8px; margin-bottom: 12px; }
-.chat-transcript { margin-top: 18px; }
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.chat-mobile-bar {
+  display: none;
+  order: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 10px;
+}
+.chat-messages {
+  order: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 4px 18px;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+}
+.chat-main > .composer {
+  order: 2;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: 100%;
+  margin-top: 0;
+  margin-bottom: 2px;
+  padding: 12px 14px;
+  box-shadow: 0 -10px 30px -24px rgba(15, 23, 42, 0.28);
+}
+.chat-main > .composer .examples {
+  order: 0;
+  margin-top: 0;
+  margin-bottom: 9px;
+  gap: 6px;
+}
+.chat-main > .composer .composer-foot {
+  order: 1;
+  margin: 0 0 8px;
+}
+.chat-main > .composer textarea {
+  order: 2;
+  min-height: 58px;
+  max-height: 150px;
+}
+.chat-main > .composer > p.field-hint {
+  order: 4;
+  margin-top: 7px !important;
+}
+.chat-transcript { margin-top: 4px; }
 .history-loading {
   display: flex;
   align-items: center;
@@ -1232,7 +1299,7 @@ onBeforeUnmount(() => {
 .current-rewrite b { color: var(--text-2); font-weight: 600; }
 
 @media (max-width: 900px) {
-  .chat-page { display: block; max-width: none; }
+  .chat-page { max-width: none; gap: 0; }
   .chat-mobile-bar { display: flex; }
   .current-question-bubble, .current-rewrite { max-width: 88%; }
 }

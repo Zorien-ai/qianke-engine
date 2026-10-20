@@ -68,6 +68,8 @@ def answer_question(
     use_cache: bool = True,
     profile_limit: int | None = None,
     deep_thinking: bool | None = None,
+    memory_context: str | None = None,
+    history_key: str = "",
 ) -> dict:
     """
     统一问答入口（带缓存）
@@ -93,7 +95,7 @@ def answer_question(
     """
     # 数据集必须进键：demo 与 user 是两个库，同一问题答案不同（见 cache.make_key）
     key = answer_cache.make_key(question, dept, keyword_mode, profile_limit, deep_thinking,
-                                dataset=current_dataset())
+                                dataset=current_dataset(), history_key=history_key)
 
     if use_cache:
         hit = answer_cache.get(key)
@@ -102,7 +104,8 @@ def answer_question(
             return {**hit, "cached": True}
 
     try:
-        result = _answer_uncached(question, dept, keyword_mode, profile_limit, deep_thinking)
+        result = _answer_uncached(question, dept, keyword_mode, profile_limit, deep_thinking,
+                                  memory_context=memory_context)
     except APIError as e:
         # LLM 接口故障（超时 / 限流 / 5xx）：不写缓存（恢复后要能正常回答），
         # 返回固定文案 + 独立 route，让用户知道该重试、排查的人知道查 LLM 侧
@@ -214,6 +217,7 @@ def _answer_uncached(
     keyword_mode: str | None = None,
     profile_limit: int | None = None,
     deep_thinking: bool | None = None,
+    memory_context: str | None = None,
 ) -> dict:
     """
     实际问答流程
@@ -247,7 +251,8 @@ def _answer_uncached(
 
     # 检索路已在 multi_query_search 内完成「各路 RRF top30 → 分池取舍 → 合并去重」，
     # 这里直接进生成，不再做整体终选（否则等于三层精排）
-    result = generate(question, candidates, sql_result=sql_result, deep_thinking=deep_thinking)
+    result = generate(question, candidates, sql_result=sql_result, deep_thinking=deep_thinking,
+                      memory_context=memory_context)
     result["route"] = ROUTE_RAG
 
     # 生成后审查：提示词只是约束，模型仍可能替数据说话（「明年 GMV 将达到 1.2 亿」）。

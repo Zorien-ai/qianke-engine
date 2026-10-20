@@ -138,7 +138,7 @@ function closeDrawer() {
   </template>
 
   <!-- 应用外壳（登录后的工作台） -->
-  <div v-else class="app-shell" :class="{ 'is-collapsed': collapsed, 'is-drawer-open': drawerOpen }">
+  <div v-else class="app-shell" :class="{ 'is-collapsed': collapsed, 'is-drawer-open': drawerOpen, 'is-chat-shell': route.name === 'chat' }">
       <div class="nav-backdrop" :class="{ show: drawerOpen }" @click="closeDrawer" />
 
       <aside class="sidebar">
@@ -231,7 +231,7 @@ function closeDrawer() {
           <span class="demo-banner-tag">DEMO · READ ONLY</span>
         </div>
 
-        <main class="content">
+        <main class="content" :class="{ 'content-chat': route.name === 'chat' }">
           <RouterView v-slot="{ Component }">
             <transition name="page" mode="out-in">
               <component :is="Component" />

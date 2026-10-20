@@ -72,16 +72,19 @@ def _parse_json(text: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def rewrite_followup(question: str, history: list[dict]) -> dict:
+def rewrite_followup(question: str, history: list[dict], memory: dict | None = None) -> dict:
     """返回 {"question": 用于检索的问题, "rewritten": bool, "original": ...}。"""
     original = (question or "").strip()
     if not should_rewrite(original, history):
         return {"question": original, "rewritten": False, "reason": "skip"}
 
+    from rag_demo import chat_memory
     from rag_demo.generation.generator import chat_completion
     from rag_demo.prompts import QUERY_REWRITE_PROMPT
 
+    memory = memory or {}
     prompt = QUERY_REWRITE_PROMPT.format(
+        memory=chat_memory.rewrite_prompt_context(memory, history) or "（暂无）",
         history=_compact_history(history),
         question=original,
     )

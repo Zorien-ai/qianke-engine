@@ -173,10 +173,14 @@ def _build_sources(candidates):
     ]
 
 
-def generate(query, candidates, sql_result=None, model=MODEL, deep_thinking=None):
+def generate(query, candidates, sql_result=None, model=MODEL, deep_thinking=None,
+             memory_context: str | None = None):
     """
     非流式生成。deep_thinking 见 chat_completion——这是「最后一个 LLM」的开关，
     只有这一次调用该不该慢下来多想，由它决定。
+
+    memory_context: 混合记忆 System Prompt（长期摘要 + 实体 + 最近 6 轮）。
+    为 None 时保持旧行为，不影响评测/脚本。
 
     返回值多一个 usage（token 用量，含 reasoning 明细），供 A/B 与前端核算成本；
     API 层不会透出它（permissions.render 只复制白名单字段）。
@@ -194,8 +198,12 @@ def generate(query, candidates, sql_result=None, model=MODEL, deep_thinking=None
 
     context = build_context(candidates, sql_result)
     prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
+    messages = []
+    if memory_context:
+        messages.append({"role": "system", "content": memory_context})
+    messages.append({"role": "user", "content": prompt})
     resp = chat_completion(
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         model=model,
         temperature=0.3,
         deep_thinking=deep_thinking,
@@ -213,7 +221,8 @@ EVENT_REASONING = "reasoning"
 EVENT_ANSWER = "answer"
 
 
-def generate_events(query, candidates, sql_result=None, model=MODEL, deep_thinking=None):
+def generate_events(query, candidates, sql_result=None, model=MODEL, deep_thinking=None,
+                    memory_context: str | None = None):
     """
     流式生成（带类型的事件流）：yield (kind, text)，kind ∈ {EVENT_REASONING, EVENT_ANSWER}
 
@@ -234,8 +243,12 @@ def generate_events(query, candidates, sql_result=None, model=MODEL, deep_thinki
 
     context = build_context(candidates, sql_result)
     prompt = RAG_ANSWER_PROMPT.format(context=context, question=query)
+    messages = []
+    if memory_context:
+        messages.append({"role": "system", "content": memory_context})
+    messages.append({"role": "user", "content": prompt})
     stream_kwargs = dict(
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         model=model,
         temperature=0.3,
         stream=True,

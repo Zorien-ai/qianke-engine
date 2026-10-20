@@ -36,9 +36,11 @@ DDL = [
         created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_message_at TIMESTAMPTZ,
-        message_count   INTEGER NOT NULL DEFAULT 0
+        message_count   INTEGER NOT NULL DEFAULT 0,
+        context_state   JSONB NOT NULL DEFAULT '{}'::jsonb
     )
     """,
+    "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS context_state JSONB NOT NULL DEFAULT '{}'::jsonb",
     "CREATE INDEX IF NOT EXISTS chat_sessions_owner_time ON chat_sessions (tenant_id, account_id, updated_at DESC)",
     """
     CREATE TABLE IF NOT EXISTS chat_messages (
@@ -294,5 +296,46 @@ def append_message(
             )
         conn.commit()
         return True
+    finally:
+        conn.close()
+
+
+def get_context_state(tenant_id: str, account_id: int, session_id: str) -> dict:
+    """读取会话的长期摘要 / 实体状态（JSON）。不可用时返回空状态，不阻断问答。"""
+    try:
+        ensure_schema()
+        conn = _connect()
+        try:
+            with _cursor(conn) as cur:
+                cur.execute(
+                    """SELECT context_state FROM chat_sessions
+                       WHERE id=%s AND tenant_id=%s AND account_id=%s""",
+                    (session_id, tenant_id, int(account_id)),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return {}
+                state = row.get("context_state") or {}
+                return state if isinstance(state, dict) else {}
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 记忆读取失败只降级，不能阻断当前对话
+        logger.exception("读取会话记忆失败 session=%s", session_id)
+        return {}
+
+
+def update_context_state(tenant_id: str, account_id: int, session_id: str, state: dict) -> None:
+    """写入长期摘要 / 实体状态；仅允许更新当前账号自己的会话。"""
+    ensure_schema()
+    payload = json.dumps(state or {}, ensure_ascii=False, default=str)
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE chat_sessions SET context_state=%s::jsonb
+                   WHERE id=%s AND tenant_id=%s AND account_id=%s""",
+                (payload, session_id, tenant_id, int(account_id)),
+            )
+        conn.commit()
     finally:
         conn.close()
