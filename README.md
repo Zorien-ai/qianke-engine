@@ -6,7 +6,8 @@
 
 <p align="center"><strong>专为电商打造的轻量级 AI 用户画像与业务分析引擎</strong></p>
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml) [![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json) [![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json) [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml) [![Offline Eval](https://img.shields.io/badge/offline%20eval-97.0%25-brightgreen)](tests/eval_report.md) [![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/q93304989-bit/qianke-engine)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml) [![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json) [![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json) <br>
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml) [![Offline Eval](https://img.shields.io/badge/offline%20eval-97.0%25-brightgreen)](tests/eval_report.md) [![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/q93304989-bit/qianke-engine)
 
 </div>
 
