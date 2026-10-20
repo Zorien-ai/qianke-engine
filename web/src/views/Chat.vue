@@ -750,10 +750,6 @@ onBeforeUnmount(() => {
           {{ q }}
         </button>
       </div>
-
-      <p v-if="canTopk" class="field-hint" style="margin-top: 10px">
-        「返回用户数」支持直接输入或按 1 加减，范围 1~30，只接受整数。
-      </p>
     </section>
 
     <div ref="messagesEl" class="chat-messages">
@@ -1251,9 +1247,21 @@ onBeforeUnmount(() => {
 }
 .chat-main > .composer .examples {
   order: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
   margin-top: 0;
   margin-bottom: 9px;
-  gap: 6px;
+  gap: 4px;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.chat-main > .composer .examples::-webkit-scrollbar { display: none; }
+.chat-main > .composer .examples .chip {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 .chat-main > .composer .composer-foot {
   order: 1;
@@ -1263,10 +1271,6 @@ onBeforeUnmount(() => {
   order: 2;
   min-height: 58px;
   max-height: 150px;
-}
-.chat-main > .composer > p.field-hint {
-  order: 4;
-  margin-top: 7px !important;
 }
 .chat-transcript { margin-top: 4px; }
 .history-loading {

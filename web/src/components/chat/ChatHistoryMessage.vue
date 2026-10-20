@@ -111,6 +111,42 @@ const routeLabel = computed(() => {
 .history-answer-body :deep(ul),
 .history-answer-body :deep(ol) { margin: 6px 0 8px; padding-left: 20px; }
 .history-answer-body :deep(li) { margin: 2px 0; }
+.history-answer-body :deep(.md-table-wrap) {
+  margin: 10px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  scrollbar-width: thin;
+}
+.history-answer-body :deep(table) {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.history-answer-body :deep(th),
+.history-answer-body :deep(td) {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.history-answer-body :deep(th:last-child),
+.history-answer-body :deep(td:last-child) { border-right: 0; }
+.history-answer-body :deep(tbody tr:last-child td) { border-bottom: 0; }
+.history-answer-body :deep(thead th) {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-weight: 650;
+  z-index: 1;
+}
+.history-answer-body :deep(tbody tr:hover) { background: var(--surface-2); }
 .history-answer-body :deep(.cite) {
   margin-left: 2px;
   padding: 0 3px;
