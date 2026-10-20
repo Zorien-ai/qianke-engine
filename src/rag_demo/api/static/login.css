@@ -237,6 +237,52 @@ body {
   }
 }
 
+/* ==================== 返回官网 ==================== */
+
+.back-home {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  text-decoration: none;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+[data-theme="dark"] .back-home {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.back-home:hover {
+  color: var(--fg);
+  border-color: var(--primary);
+  transform: translateX(-2px);
+}
+
+@media (max-width: 620px) {
+  .back-home {
+    top: 12px;
+    left: 12px;
+    padding: 7px 9px;
+    font-size: 11px;
+  }
+  .auth-controls {
+    top: 12px;
+    right: 12px;
+    gap: 5px;
+  }
+  .theme-option { width: 28px; height: 28px; }
+  .lang-option { height: 28px; padding: 0 7px; font-size: 11px; }
+}
+
 /* ==================== 主题 / 语言切换 ==================== */
 
 .auth-controls {
