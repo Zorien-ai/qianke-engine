@@ -35,7 +35,7 @@ const errorText = ref("");
 const guardNotice = ref("");
 const elapsed = ref(0);
 const firstCharSec = ref(null);
-const topk = ref("");
+const topk = ref("3");
 const thinking = ref(false);
 const showDetail = ref(true);
 const answerCard = ref(null);
@@ -78,6 +78,44 @@ const canSources = computed(() => hasCap("sources"));
 const canSql = computed(() => hasCap("sql"));
 const canInternals = computed(() => hasCap("internals"));
 const canFlow = computed(() => hasCap("trace_flow"));
+
+const topkMin = computed(() => Math.max(1, Number(store.topkRange?.min) || 1));
+const topkMax = computed(() => Math.max(topkMin.value, Number(store.topkRange?.max) || 30));
+
+function clampTopk(value) {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n)) return "";
+  return String(Math.min(topkMax.value, Math.max(topkMin.value, n)));
+}
+
+function normalizeTopkInput(event) {
+  const raw = event?.target?.value ?? "";
+  if (raw === "") {
+    topk.value = "";
+    return;
+  }
+  // 只保留整数；1.5、31、0 都会被夹到合法范围。
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n)) {
+    topk.value = "";
+    if (event?.target) event.target.value = "";
+    return;
+  }
+  topk.value = clampTopk(n);
+  if (event?.target) event.target.value = topk.value;
+}
+
+function normalizeTopkOnBlur() {
+  if (topk.value === "") return;
+  const normalized = clampTopk(topk.value);
+  topk.value = normalized;
+}
+
+function stepTopk(delta) {
+  const current = topk.value === "" ? topkMin.value : Math.floor(Number(topk.value));
+  const next = Math.min(topkMax.value, Math.max(topkMin.value, (Number.isFinite(current) ? current : topkMin.value) + delta));
+  topk.value = String(next);
+}
 
 const streaming = computed(() => sending.value && ["retrieving", "generating", "reasoning"].includes(phase.value));
 
@@ -447,17 +485,43 @@ onBeforeUnmount(() => {
       <div class="composer-foot">
         <span class="composer-hint"><kbd class="kbd">Ctrl</kbd> / <kbd class="kbd">Cmd</kbd> + <kbd class="kbd">Enter</kbd> 发送</span>
 
-        <label v-if="canTopk" class="topk-control">
-          返回用户数
-          <input
-            v-model="topk"
-            type="number"
-            :min="store.topkRange.min"
-            :max="store.topkRange.max"
-            placeholder="默认"
-          />
-          <span class="field-hint">{{ store.topkRange.min }}~{{ store.topkRange.max }}</span>
-        </label>
+        <div v-if="canTopk" class="topk-control">
+          <label for="chat-topk">返回用户数</label>
+          <div class="topk-stepper">
+            <button
+              type="button"
+              class="topk-step-btn"
+              aria-label="减少用户数"
+              title="减少 1"
+              :disabled="sending || (topk !== '' && Number(topk) <= topkMin)"
+              @click="stepTopk(-1)"
+            >−</button>
+            <input
+              id="chat-topk"
+              name="chat-topk"
+              v-model="topk"
+              type="number"
+              :min="topkMin"
+              :max="topkMax"
+              step="1"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              placeholder="默认"
+              :disabled="sending"
+              @input="normalizeTopkInput"
+              @blur="normalizeTopkOnBlur"
+            />
+            <button
+              type="button"
+              class="topk-step-btn"
+              aria-label="增加用户数"
+              title="增加 1"
+              :disabled="sending || (topk !== '' && Number(topk) >= topkMax)"
+              @click="stepTopk(1)"
+            >+</button>
+          </div>
+          <span class="field-hint">{{ topkMin }}~{{ topkMax }}</span>
+        </div>
 
         <label class="toggle">
           <input v-model="thinking" type="checkbox" :disabled="sending" />
@@ -771,6 +835,52 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.topk-stepper {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.topk-step-btn {
+  width: 25px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.topk-step-btn:hover:not(:disabled) { color: var(--primary); background: var(--primary-soft); }
+.topk-step-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+.topk-stepper input[type="number"] {
+  width: 46px;
+  height: 100%;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: center;
+  outline: none;
+  box-shadow: none;
+}
+.topk-stepper input[type="number"]:focus {
+  border: 0;
+  box-shadow: none;
+}
+.topk-stepper input[type="number"]::-webkit-outer-spin-button,
+.topk-stepper input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+.topk-stepper input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .marketing-cta {
   display: flex;
   align-items: center;
