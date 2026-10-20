@@ -443,6 +443,7 @@ async def _attach_account(request: Request, call_next):
             allowed = request.url.path in {
                 "/qa",
                 "/qa/stream",
+                "/api/marketing/copy",
                 "/auth/logout",
             }
             if not allowed:

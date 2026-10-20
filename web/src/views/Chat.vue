@@ -59,7 +59,7 @@ const marketingUserIds = computed(() => {
   return [...new Set(found)].slice(0, 10);
 });
 const canGenerateMarketing = computed(
-  () => !demoMode.value && phase.value === "done" && canAsk.value && marketingUserIds.value.length > 0 && !sending.value
+  () => phase.value === "done" && canAsk.value && marketingUserIds.value.length > 0 && !sending.value
 );
 
 const meta = reactive({
