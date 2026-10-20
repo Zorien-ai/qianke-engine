@@ -129,35 +129,49 @@
 
   const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
 
-  function applyTheme(theme) {
-    const dark = theme === "dark";
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
-    const btn = $("theme-toggle");
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "切换到浅色模式" : "切换到深色模式");
+  function savedThemeMode() {
+    try {
+      const saved = localStorage.getItem("rag-theme");
+      if (saved === "dark" || saved === "light" || saved === "system") return saved;
+    } catch (e) {
+      /* ignore */
+    }
+    return "system";
+  }
+
+  function resolveTheme(mode) {
+    if (mode === "system") return media && media.matches ? "dark" : "light";
+    return mode === "dark" ? "dark" : "light";
+  }
+
+  function applyTheme(mode) {
+    const nextMode = mode === "dark" || mode === "light" || mode === "system" ? mode : "system";
+    const theme = resolveTheme(nextMode);
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.themeMode = nextMode;
+    document.querySelectorAll("#theme-switch [data-theme-mode]").forEach((btn) => {
+      const active = btn.getAttribute("data-theme-mode") === nextMode;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
   }
 
   function bindTheme() {
-    $("theme-toggle").addEventListener("click", () => {
-      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-      applyTheme(next);
-      try {
-        localStorage.setItem("rag-theme", next);
-      } catch (e) {
-        /* 隐私模式下 localStorage 会抛错，主题仍应能切换 */
-      }
+    document.querySelectorAll("#theme-switch [data-theme-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const mode = btn.getAttribute("data-theme-mode");
+        try {
+          localStorage.setItem("rag-theme", mode);
+        } catch (e) {
+          /* 隐私模式下 localStorage 会抛错，主题仍应能切换 */
+        }
+        applyTheme(mode);
+      });
     });
 
-    // 用户没手动选过主题时，跟随系统设置变化
     if (media) {
-      media.addEventListener("change", (event) => {
-        let saved = null;
-        try {
-          saved = localStorage.getItem("rag-theme");
-        } catch (e) {
-          saved = null;
-        }
-        if (!saved) applyTheme(event.matches ? "dark" : "light");
+      media.addEventListener("change", () => {
+        if (savedThemeMode() === "system") applyTheme("system");
       });
     }
   }
@@ -561,7 +575,7 @@
   /* ==================== 初始化 ==================== */
 
   function init() {
-    applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+    applyTheme(document.documentElement.dataset.themeMode || savedThemeMode());
     bindTheme();
     bindTabs();
     bindReveals();

@@ -172,6 +172,21 @@
   border-color: rgba(255, 255, 255, 0.4);
   background: rgba(255, 255, 255, 0.16);
 }
+.l-nav.is-dark .theme-switch {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+}
+.l-nav.is-dark .theme-option {
+  color: rgba(255, 255, 255, 0.7);
+}
+.l-nav.is-dark .theme-option:hover {
+  color: #fff;
+}
+.l-nav.is-dark .theme-option.is-active {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.16);
+}
 .l-nav-login {
   font-size: 13.5px;
   color: var(--l-ink);

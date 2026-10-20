@@ -22,6 +22,7 @@ export const store = reactive({
   roleLabel: "",
   topkRange: { min: 1, max: 30 },
   theme: "light",
+  themeMode: "system",
   toasts: [],
 });
 

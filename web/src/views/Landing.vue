@@ -15,6 +15,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { store } from "../store";
 import HeroNebula from "../components/landing/HeroNebula.vue";
 import LanguageToggle from "../components/LanguageToggle.vue";
+import ThemeToggle from "../components/ThemeToggle.vue";
 import "../styles/landing.css";
 
 const shotModules = import.meta.glob("../assets/shots/*.png", { eager: true, import: "default" });
@@ -613,6 +614,7 @@ onBeforeUnmount(() => {
         </nav>
 
         <div class="l-nav-actions">
+          <ThemeToggle class="l-nav-theme" />
           <LanguageToggle class="l-nav-lang" />
           <a href="/docs" target="_blank" rel="noopener" class="l-nav-link l-nav-doc">文档</a>
           <a v-if="!isAuthed" href="/login" class="l-nav-login">登录</a>

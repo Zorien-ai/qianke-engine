@@ -237,40 +237,20 @@ body {
   }
 }
 
-/* ==================== 主题切换 ==================== */
+/* ==================== 主题 / 语言切换 ==================== */
 
-.theme-toggle {
+.auth-controls {
   position: fixed;
   top: 16px;
   right: 16px;
   z-index: 3;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-[data-theme="dark"] .theme-toggle {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.theme-toggle:hover {
-  color: var(--fg);
-  border-color: var(--primary);
-}
-
+.theme-switch,
 .lang-switch {
-  position: fixed;
-  top: 16px;
-  right: 64px;
-  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -280,9 +260,32 @@ body {
   background: var(--bg-elevated);
 }
 
+[data-theme="dark"] .theme-switch,
 [data-theme="dark"] .lang-switch {
   background: rgba(255, 255, 255, 0.04);
 }
+
+.theme-option {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+.theme-option:hover { color: var(--fg); }
+.theme-option.is-active {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg));
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.theme-option svg { width: 15px; height: 15px; }
 
 .lang-option {
   height: 32px;
@@ -307,20 +310,6 @@ body {
   border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
   background: color-mix(in srgb, var(--primary) 10%, var(--bg));
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-}
-
-.theme-toggle svg {
-  width: 18px;
-  height: 18px;
-}
-
-.theme-toggle .icon-sun,
-[data-theme="dark"] .theme-toggle .icon-moon {
-  display: none;
-}
-
-[data-theme="dark"] .theme-toggle .icon-sun {
-  display: block;
 }
 
 /* ==================== 布局 ==================== */
