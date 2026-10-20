@@ -106,9 +106,11 @@ function normalizeTopkInput(event) {
 }
 
 function normalizeTopkOnBlur() {
-  if (topk.value === "") return;
-  const normalized = clampTopk(topk.value);
-  topk.value = normalized;
+  if (topk.value === "") {
+    topk.value = String(topkMin.value);
+    return;
+  }
+  topk.value = clampTopk(topk.value);
 }
 
 function stepTopk(delta) {
@@ -311,9 +313,12 @@ async function submit() {
 
   try {
     const payload = { question: text };
-    if (canTopk.value && topk.value !== "") {
-      const n = Number(topk.value);
-      if (Number.isFinite(n)) payload.top_k = n;
+    if (canTopk.value) {
+      // 输入框允许中途为空，但提交时统一夹到 1~30 的整数，空值回落到下限。
+      const n = Math.floor(Number(topk.value));
+      const safe = Number.isFinite(n) ? Math.min(topkMax.value, Math.max(topkMin.value, n)) : topkMin.value;
+      topk.value = String(safe);
+      payload.top_k = safe;
     }
     if (thinking.value) payload.deep_thinking = true;
 
@@ -551,7 +556,7 @@ onBeforeUnmount(() => {
       </div>
 
       <p v-if="canTopk" class="field-hint" style="margin-top: 10px">
-        「返回用户数」只影响画像召回的候选上限，由后端按权限再次夹取；留空用系统默认。
+        「返回用户数」支持直接输入或按 1 加减，范围 1~30，只接受整数。
       </p>
     </section>
 

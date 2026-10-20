@@ -27,6 +27,7 @@
   "。能看到的范围由账号等级决定， 页面只渲染你被允许使用的能力。": ". What you can see is determined by your account level; the page only renders the capabilities you are allowed to use.",
   "「本企业成员管理」由企业管理员身份自带，不在此矩阵中（不能按等级授予或撤销）。 矩阵不允许把管理员等级的「运维 / 权限管理」取消——否则保存后将没有人能再改权限，后端会直接拒绝。": "“Enterprise member management” is built into the enterprise admin role and is not in this matrix (it cannot be granted or revoked by level). The matrix does not allow removing “Ops / Permission Management” from the admin level—otherwise no one could change permissions after saving, and the backend will reject it outright.",
   "「返回用户数」只影响画像召回的候选上限，由后端按权限再次夹取；留空用系统默认。": "“Returned user count” only sets the candidate cap for profile recall and is re-clamped by the backend per permissions; leave blank to use the system default.",
+  "「返回用户数」支持直接输入或按 1 加减，范围 1~30，只接受整数。": "Returned users can be typed directly or stepped by 1; range 1–30, integers only.",
   "「追加更新」只处理本次新增 / 变更的文件，已有用户与文档不受影响；「覆盖重建」会先清空再全量重算。 目标数据空间由登录账号推导，页面不、也无法指定数据集。": "“Append Update” handles only files added/changed in this run; existing users and documents are unaffected. “Overwrite Rebuild” clears everything first, then recomputes in full. The target data space is derived from the signed-in account; this page does not and cannot specify a dataset.",
   "一键全开": "Enable all",
   "上传 CSV / 文档并构建索引": "Upload CSV / documents and build index",
