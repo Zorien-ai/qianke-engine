@@ -66,73 +66,17 @@
 
 ### 端到端数据流
 
-```mermaid
-flowchart LR
-    INGEST["数据接入<br/>CSV 画像 / Markdown 文档"] --> INDEX["索引构建<br/>BGE-M3 稠密+稀疏 / BM25 / pgvector"]
-    INDEX --> ROUTE{"意图路由<br/>BERT + LLM 兜底"}
-    ROUTE -->|知识问答| HYBRID["混合检索<br/>Dense + Sparse + BM25 → RRF → Rerank"]
-    ROUTE -->|统计聚合| SQL["Text2SQL<br/>只读账号 / SELECT-only / LIMIT"]
-    ROUTE -->|闲聊| CHAT["固定回复"]
-    HYBRID --> GEN["生成<br/>DeepSeek + [来源N]"]
-    SQL --> GEN
-    GEN --> GUARD["生成后审查<br/>answer guard / PII 脱敏"]
-    GUARD --> ANSWER["答案 + 来源"]
-    ANSWER -.全量回归.-> EVAL["离线评测<br/>LLM-as-a-Judge · 33 题 · 85% 门禁"]
-    EVAL -.Prompt / 检索 / SQL 修复.-> ROUTE
-```
+![端到端数据流](docs/assets/architecture-pipeline.png)
 
 > 下面是更细的分层架构与数据接入流程。完整的 DDD/分层、代码模块依赖与检索细节见
 > [架构图与流程图](docs/architecture-diagrams.md)，原始手绘版流程见
 > [千客引擎-流程图](docs/千客引擎-流程图.md)。
 
-```mermaid
-flowchart LR
-    subgraph CLIENT["前端 · Vue 3"]
-        UI["工作台<br/>登录 / 对话 / 知识库 / 权限"]
-    end
-
-    subgraph API["接入层 · FastAPI"]
-        AUTH["身份 / 会话 / 租户上下文"]
-        ROUTER{"意图路由<br/>BERT + LLM 兜底"}
-    end
-
-    UI --> AUTH --> ROUTER
-    ROUTER -->|闲聊| CHAT["固定回复"]
-    ROUTER -->|知识问答| QP["查询处理<br/>子查询 / 简化 / 扩写 / HyDE"]
-    ROUTER -->|统计聚合| SQLGEN["Text2SQL<br/>temperature = 0"]
-
-    subgraph RETRIEVAL["混合检索"]
-        QP --> DENSE["BGE-M3 稠密"]
-        QP --> SPARSE["BGE-M3 稀疏 / BM25"]
-        DENSE --> PGV[("PostgreSQL<br/>pgvector")]
-        SPARSE --> IDX[("search_index<br/>BM25 + sparsevec")]
-        PGV --> RRF["RRF 融合<br/>top 30"]
-        IDX --> RRF
-        RRF --> RERANK["bge-reranker-v2-m3<br/>精排"]
-        RERANK --> CTX["画像池 Top-3<br/>文档池"]
-    end
-
-    subgraph SQLPATH["结构化查询 · 安全执行"]
-        SQLGEN --> GUARD["安全审查<br/>SELECT-only / LIMIT"]
-        GUARD --> READONLY[("只读账号<br/>sql_reader")]
-        READONLY --> ROWS["结构化结果"]
-    end
-
-    CTX --> GEN["DeepSeek 生成<br/>事实 / 推断 / [来源N]"]
-    ROWS --> GEN
-    GEN --> ANSWER["答案 + 来源"]
-    ANSWER -.-> EVAL["离线评测<br/>33 题 · 85% 门禁"]
-```
+![分层架构与端到端数据流](docs/assets/architecture-end-to-end.png)
 
 **离线数据接入**（构建/重建索引时写入对应数据集库，不参与在线请求）：
 
-```mermaid
-flowchart LR
-    CSV["CSV 交易数据"] --> BUILDER["增量 / 全量构建"]
-    MD["Markdown 知识库"] --> BUILDER
-    BUILDER --> EMBED["BGE-M3 稠密/稀疏<br/>BM25"]
-    EMBED --> PGV2[("PostgreSQL<br/>pgvector / search_index")]
-```
+![离线数据接入](docs/assets/architecture-data-ingestion.png)
 
 一次知识问答的关键路径：
 
@@ -276,7 +220,7 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 1. **题目必须能在数据集里被验证**。例如「上海 + 钻石 + 美妆」在 demo 库中为 0 人，
    再好的模型也答不对；先跑 SQL 验证 `COUNT(*) > 0`，再谈 acceptance。
 2. **评测是回归，不是刷分**。全量评测通过率低于 85% 直接失败；修改核心 Prompt、
-   路由、检索或 SQL 生成后，提交前必须重跑（见 [提交门禁](#提交门禁)）。
+路由、检索或 SQL 生成后，提交前必须重跑（见 [提交门禁](#提交门禁)）。
 3. **接受「不确定」**。资料不足时明确说「没有这块信息」，比编一个数字更有价值；
    预测类问题由 answer guard 拦截，安全边界题必须拒答。
 
