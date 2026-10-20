@@ -1366,6 +1366,7 @@ onBeforeUnmount(() => {
 }
 /* ---------- 历史会话 + 底部输入区 ---------- */
 .chat-page {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 20px;

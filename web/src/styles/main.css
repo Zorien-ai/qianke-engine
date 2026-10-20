@@ -2820,3 +2820,9 @@ html[data-theme="dark"] .tag.is-profile { color: #c4b5fd; }
   letter-spacing: -0.02em;
   color: var(--text);
 }
+
+/* 收起态历史 Dock 需要越过内容内边距，落在左侧留白区 */
+.content.content-chat { overflow: visible; }
+@media (max-width: 900px) {
+  .content.content-chat { overflow: hidden; }
+}

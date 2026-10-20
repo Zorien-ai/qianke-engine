@@ -57,6 +57,16 @@ function onRenameKey(event) {
 }
 
 const hasSessions = computed(() => props.sessions.length > 0);
+const dockSessions = computed(() => props.sessions.slice(0, 8));
+
+const DOT_COLORS = ["#8b8cf6", "#5aa9e6", "#54b8a7", "#e6a15a", "#d77ca8", "#8f9bb3", "#78b86b", "#b58de0"];
+
+function dotColor(session) {
+  const key = String(session.id || session.title || "");
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return DOT_COLORS[hash % DOT_COLORS.length];
+}
 </script>
 
 <template>
@@ -146,10 +156,10 @@ const hasSessions = computed(() => props.sessions.length > 0);
     </template>
 
     <template v-else>
-      <header class="history-head history-head-rail">
+      <div class="history-dock">
         <button
           type="button"
-          class="history-toggle"
+          class="history-toggle dock-toggle"
           aria-label="展开历史会话"
           aria-expanded="false"
           title="展开历史会话"
@@ -160,19 +170,36 @@ const hasSessions = computed(() => props.sessions.length > 0);
             <path d="M8 4v16" />
           </svg>
         </button>
-      </header>
 
-      <button
-        type="button"
-        class="new-chat-btn is-rail"
-        title="新建对话"
-        aria-label="新建对话"
-        @click="$emit('new')"
-      >
-        <span aria-hidden="true">＋</span>
-      </button>
+        <button
+          type="button"
+          class="new-chat-btn is-rail"
+          title="新建对话"
+          aria-label="新建对话"
+          @click="$emit('new')"
+        >
+          <span aria-hidden="true">＋</span>
+        </button>
 
-      <span class="history-rail-label" aria-hidden="true">历史</span>
+        <div v-if="dockSessions.length" class="history-dots" aria-label="最近会话">
+          <button
+            v-for="session in dockSessions"
+            :key="session.id"
+            type="button"
+            class="history-dot"
+            :class="{ 'is-active': session.id === activeId }"
+            :style="{ '--dot-color': dotColor(session) }"
+            :aria-label="`${session.title || '新对话'}，${session.message_count || 0} 条`"
+            @click="$emit('select', session.id)"
+          >
+            <span class="history-dot-mark" aria-hidden="true"></span>
+            <span class="history-dot-tooltip">
+              <b>{{ session.title || "新对话" }}</b>
+              <span>{{ session.message_count || 0 }} 条 · {{ timeLabel(session.updated_at) }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
     </template>
   </aside>
   <div v-if="open" class="history-backdrop" @click="$emit('close')" />
@@ -191,12 +218,6 @@ const hasSessions = computed(() => props.sessions.length > 0);
   background: color-mix(in srgb, var(--surface) 48%, transparent);
   transition: width .22s ease, flex-basis .22s ease, padding .22s ease;
 }
-.chat-history-panel.is-collapsed {
-  width: 56px;
-  flex: 0 0 56px;
-  align-items: center;
-  padding: 4px 8px 12px;
-}
 .history-head {
   display: flex;
   align-items: center;
@@ -205,11 +226,6 @@ const hasSessions = computed(() => props.sessions.length > 0);
   padding: 6px 6px 12px;
 }
 .history-head strong { font-size: 15px; letter-spacing: -0.01em; }
-.history-head-rail {
-  width: 100%;
-  justify-content: center;
-  padding: 6px 0 10px;
-}
 .history-head-actions { display: flex; align-items: center; gap: 2px; }
 .history-toggle,
 .history-close {
@@ -233,22 +249,113 @@ const hasSessions = computed(() => props.sessions.length > 0);
   color: var(--primary);
 }
 .history-close { display: none; font-size: 20px; line-height: 1; }
+.chat-history-panel.is-collapsed {
+  position: absolute;
+  top: 0;
+  left: -58px;
+  z-index: 12;
+  width: 44px;
+  flex: none;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  border-right: 0;
+  background: transparent;
+}
+.history-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 44px;
+  padding: 7px 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 10px 30px -16px rgba(15, 23, 42, 0.38);
+}
+.dock-toggle { flex: 0 0 auto; border-radius: 12px; }
+.history-dots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+}
+.history-dot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 17px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.history-dot:hover,
+.history-dot:focus-visible { background: var(--surface-2); outline: none; }
+.history-dot-mark {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dot-color, var(--muted));
+  opacity: .8;
+  transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease;
+}
+.history-dot:hover .history-dot-mark,
+.history-dot:focus-visible .history-dot-mark { opacity: 1; transform: scale(1.12); }
+.history-dot.is-active .history-dot-mark {
+  width: 11px;
+  height: 11px;
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-color, var(--primary)) 22%, transparent);
+}
+.history-dot-tooltip {
+  position: absolute;
+  left: 32px;
+  top: 50%;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 154px;
+  max-width: 240px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, .3);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-3px);
+  transition: opacity .14s ease, transform .14s ease, visibility .14s;
+}
+.history-dot-tooltip b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-dot-tooltip span { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+.history-dot:hover .history-dot-tooltip,
+.history-dot:focus-visible .history-dot-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
+}
 .new-chat-btn.is-rail {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   padding: 0;
-  border-radius: 9px;
-  font-size: 18px;
+  border-radius: 10px;
+  font-size: 17px;
   line-height: 1;
-}
-.history-rail-label {
-  margin-top: 14px;
-  color: var(--muted);
-  font-size: 10.5px;
-  letter-spacing: .18em;
-  writing-mode: vertical-rl;
-  user-select: none;
 }
 .new-chat-btn {
   display: flex;
@@ -396,6 +503,7 @@ const hasSessions = computed(() => props.sessions.length > 0);
     transition: transform .24s ease;
   }
   .chat-history-panel.is-open { transform: translateX(0); }
+  .chat-history-panel.is-collapsed { display: none; }
   .history-close { display: grid; }
   .history-toggle { display: none; }
   .history-backdrop {
