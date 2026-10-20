@@ -497,7 +497,6 @@ onBeforeUnmount(() => {
               type="button"
               class="topk-step-btn"
               aria-label="减少用户数"
-              title="减少 1"
               :disabled="sending || (topk !== '' && Number(topk) <= topkMin)"
               @click="stepTopk(-1)"
             >−</button>
@@ -520,7 +519,6 @@ onBeforeUnmount(() => {
               type="button"
               class="topk-step-btn"
               aria-label="增加用户数"
-              title="增加 1"
               :disabled="sending || (topk !== '' && Number(topk) >= topkMax)"
               @click="stepTopk(1)"
             >+</button>
