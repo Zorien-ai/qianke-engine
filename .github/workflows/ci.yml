@@ -1,0 +1,112 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit tests + offline eval gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # 测试全部使用假 Key，不会产生真实 LLM 调用费用
+      DEEPSEEK_API_KEY: sk-ci-placeholder
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      DEEPSEEK_MODEL: deepseek-flash
+
+      # 单测不依赖本地模型/远程模型，留空即可
+      MODEL_API_BASE: ""
+      MODEL_API_KEY: ""
+
+      # 生产安全开关在测试进程里不影响单测，但保持显式
+      RAG_ENABLE_API_DOCS: "0"
+      RAG_AUTH_ENABLED: "0"
+
+      # 评测快照门禁阈值（与 scripts/run_eval.py 的默认值一致）
+      EVAL_MIN_PASS_RATE: "0.85"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.12.5"
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Create venv and install test dependencies
+        # 注意：不要用 uv sync。pyproject.toml 的 torch 固定指向
+        # wheels/torch-2.14.1+cu126-cp312-cp312-win_amd64.whl，Linux CI 没有该文件，
+        # 而且单测通过可选导入支持不安装 torch / sentence-transformers。
+        run: |
+          uv venv --python 3.12
+          uv pip install --python .venv/bin/python \
+            "pytest>=8,<10" \
+            "numpy>=2,<3" \
+            "pandas>=2,<4" \
+            "psycopg2-binary>=2.9" \
+            "argon2-cffi>=23.1" \
+            "fastapi>=0.115" \
+            "uvicorn>=0.30" \
+            "python-multipart>=0.0.9" \
+            "pgvector>=0.3" \
+            "openai>=1.40" \
+            "jieba>=0.42" \
+            "rank-bm25>=0.2" \
+            "langchain-core>=0.3" \
+            "langchain-text-splitters>=0.3" \
+            "alibabacloud-oss-v2>=1.0"
+
+      - name: Run unit tests
+        run: .venv/bin/python -m pytest tests/ -q
+
+      - name: Offline eval snapshot gate
+        # 这是“不调用真实 LLM”的评测门禁：
+        # 校验仓库内最近一次全量离线评测快照的通过率，避免评测报告被悄悄改低。
+        # 真正跑 5 题 RAG 评测需要 PostgreSQL + BGE + DeepSeek Key，
+        # 不适合默认在无服务的 GitHub Actions 上跑；可在本地用：
+        #   uv run python scripts/run_eval.py --limit 5
+        run: |
+          .venv/bin/python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+
+          path = pathlib.Path("tests/eval_results_llm.json")
+          if not path.exists():
+              sys.exit(f"评测快照不存在: {path}")
+
+          data = json.loads(path.read_text(encoding="utf-8"))
+          summary = data.get("summary", {})
+          total = int(summary.get("total", 0))
+          passed = int(summary.get("passed", 0))
+          rate = float(summary.get("pass_rate", 0.0))
+          minimum = float(os.environ.get("EVAL_MIN_PASS_RATE", "0.85"))
+
+          print(f"评测快照: total={total}, passed={passed}, pass_rate={rate:.4f}")
+          print(f"门槛: pass_rate >= {minimum:.2f}, total >= 5")
+
+          if total < 5:
+              sys.exit("评测题数不足 5，无法作为门禁")
+          if rate < minimum:
+              sys.exit("评测通过率低于门禁阈值")
+
+          print("Offline eval gate: PASS")
+          PY

@@ -1,15 +1,15 @@
-# 千客引擎 (Qianke Engine)
+<div align="center">
 
-**专为电商打造的轻量级 AI 用户画像与业务分析引擎**
+<img src="web/public/logo.png" alt="千客引擎 Logo" width="96" height="96" />
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json)
-[![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json)
-[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml)
-[![Offline Eval](https://img.shields.io/badge/offline%20eval-97.0%25-brightgreen)](tests/eval_report.md)
-[![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/q93304989-bit/qianke-engine)
+<h1 align="center">千客引擎 (Qianke Engine)</h1>
+
+<p align="center"><strong>专为电商打造的轻量级 AI 用户画像与业务分析引擎</strong></p>
+
+[![CI](https://github.com/q93304989-bit/qianke-engine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/q93304989-bit/qianke-engine/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml) [![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json) [![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json) <br>
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml) [![Offline Eval](https://img.shields.io/badge/offline%20eval-93.9%25-yellowgreen)](tests/eval_report.md) [![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/q93304989-bit/qianke-engine)
+
+</div>
 
 > Qianke Engine is a lightweight, evaluation-driven RAG engine for e-commerce
 > user-profile analytics: hybrid retrieval, Text2SQL, anti-hallucination guard,
@@ -20,9 +20,11 @@
 或**Text2SQL + 只读安全执行**，最后生成带引用来源的中文答案。内置的离线评测门禁，
 把「回答质量」从主观感觉变成可回归的工程指标。
 
-> **当前评测快照**：33 道黄金题，**97.0% 通过率**（32/33），判定覆盖率 100%，
-> 安全边界 6/6，来源召回率 97.8%。运行 `uv run python scripts/run_eval.py` 可复现；
-> 低于 85% 会以退出码 1 阻止提交。详见 [评测报告](tests/eval_report.md)。
+> **当前评测快照**：33 道黄金题，**93.9% 通过率**（31/33，2026-10-20 全量复跑），
+> 判定覆盖率 100%，安全边界 6/6，来源召回率 97.8%。历史最好快照为 **97.0%**（32/33，
+> 2026-10-18：改 1 道题 + 3 题重跑翻正、1 题翻负）。运行
+> `uv run python scripts/run_eval.py` 可复现；低于 85% 会以退出码 1 阻止提交。
+> 详见 [评测报告](tests/eval_report.md)。
 
 ## 宣传片
 
@@ -59,8 +61,8 @@
    事实与推断分开表述；资料不足时明确说「没有这块信息」，宁可不答也不编造。
 4. **多租户隔离**：企业账号对应独立物理库 `vec_db_ent_<id>`，demo / user / test 数据集分库；
    连接层切换 + 上传批次归属校验，漏传租户参数也不会静默读到别家数据。
-5. **97% 离线评测通过率**：33 道业务黄金题，LLM-as-a-Judge 全量回归；内置 85% 通过率
-   CI 门禁，报告与原始结果随仓库归档，核心 Prompt/路由改动必须可复现。
+5. **93.9%–97.0% 离线评测通过率**：33 道业务黄金题，LLM-as-a-Judge 全量回归；内置
+   85% 通过率提交门禁，报告与原始结果随仓库归档，核心 Prompt/路由改动必须可复现。
 
 ## 系统架构
 
@@ -190,6 +192,9 @@ export DEEPSEEK_API_KEY="sk-..."
 > `.env` 已被 `.gitignore` 排除；`.env.example` 只是变量清单。启动前请用 shell
 > `export`、systemd 或容器 `env_file` 把变量注入进程。完整变量见
 > [`.env.example`](.env.example) 与 [部署指南](docs/部署指南.md)。
+>
+> 可选：文档配图存阿里云 OSS（私有桶 + 签名 URL）的配置步骤见
+> [部署指南 §3.6](docs/部署指南.md)。不配置时文档照常入库，只是不保存图片。
 
 ### 2. 启动数据库（Docker Compose 一键拉起）
 
@@ -248,16 +253,19 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 
 ### 当前结果
 
-| 指标 | 最新全量结果 |
+| 指标 | 最新全量结果（2026-10-20） |
 |---|---:|
 | 题目数 / 成功判定 | 33 / 33 |
-| **通过率** | **97.0%**（32/33） |
+| **通过率** | **93.9%**（31/33） |
 | 判定覆盖率 | 100.0% |
 | 安全边界题 | 6/6 = 100% |
 | 来源召回率（宏平均 / 微平均） | 97.8% / 96.7% |
 
 报告与原始结果：[`tests/eval_report.md`](tests/eval_report.md)、
 [`tests/eval_results_llm.json`](tests/eval_results_llm.json)。
+2026-10-18 的 97.0% 快照见
+[commit b93c851 的评测报告](https://github.com/q93304989-bit/qianke-engine/blob/b93c851/tests/eval_report.md)
+（该 commit 同时包含 MQ-02 题目口径修正）。
 
 ### 从 75% 到 97%：LLM-as-a-Judge + 提示词靶向修复
 
@@ -269,7 +277,8 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 |---|---:|---|
 | 基线 | 75.8% | 先跑通真实 RAG/SQL 链路，用 LLM-as-a-Judge 暴露坏例 |
 | 定向修复 | 87.9% | 按失败案例归因：检索召回、引用、SQL、拒答边界逐项修 |
-| 数据口径修正 + 全量回归 | **97.0%** | 修正评测题中「库里不存在」的条件；刷新报告，不调 Prompt 追分 |
+| 题目口径修正 | **97.0%** | 修 1 道「库里为 0 行」的题；另有 4 题翻正、1 题翻负属重跑波动 |
+| 全量复跑 | 93.9% | 两天后同 harness 复跑：OPT-01 / DA-01 失败；不追单题、不调 Prompt |
 
 关键原则：
 
@@ -284,7 +293,7 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 uv run python scripts/run_eval.py
-# CI 可显式指定阈值：
+# 提交前可显式指定阈值：
 uv run python scripts/run_eval.py --min-pass-rate 0.85
 ```
 
@@ -292,8 +301,8 @@ uv run python scripts/run_eval.py --min-pass-rate 0.85
 - 没有可判定题目、裁判/回答异常未修复 → 同样失败；
 - `--limit` / `--only` 只用于调试，不能替代提交前全量。
 
-> 最新一轮唯一失败是 `OPT-01` 的生成波动（不是安全边界）；按「停止为刷分微调」原则，
-> 不再针对单题调整 Prompt。门禁关注的是整体质量与边界不被突破。
+> 最新一轮（10-20）失败为 `OPT-01`、`DA-01`，均在生成/验收边界，不是安全边界；按
+> 「停止为刷分微调」原则，不再针对单题调整 Prompt。门禁关注整体质量与边界不被突破。
 
 ## 关键设计取舍
 
@@ -340,7 +349,7 @@ uv run python scripts/run_eval.py --min-pass-rate 0.85
 ├── web/                     # Vue 3 + Vite 前端（构建到 web/dist）
 ├── docs/                    # 架构图、接口、数据模型、部署、评测方案
 ├── tests/                   # pytest 单测 + 最新评测报告/原始结果
-├── scripts/                  # 离线评测入口 run_eval.py（LLM-as-a-Judge + CI 门禁）
+├── scripts/                  # 离线评测入口 run_eval.py（LLM-as-a-Judge + 提交门禁）
 ├── docker-compose.yml        # PostgreSQL + pgvector
 ├── pyproject.toml / uv.lock  # Python 依赖与锁
 ├── LICENSE / NOTICE
@@ -374,7 +383,7 @@ uv run python scripts/run_eval.py --min-pass-rate 0.85
 | [宣传片（B 站）](https://www.bilibili.com/video/BV1g9nJ6hEZ9) | 79 秒产品宣传片：6 段 AI 空镜 + 真实录屏 + 配音/字幕 |
 | [产品宣传片脚本](docs/video_script.md) | 75s Demo 分镜、配音文案、字幕与事实核验 |
 | [录屏操作指南](docs/recording_guide.md) | 演示账号/数据准备、逐镜头点击步骤、Auto-Pilot |
-| [评测报告](tests/eval_report.md) | 最新 33 题逐题结果与失败复盘 |
+| [评测报告](tests/eval_report.md) | 最新 33 题逐题结果与失败复盘（历史快照见 commit b93c851） |
 
 ## 开发与贡献
 
