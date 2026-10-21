@@ -27,9 +27,13 @@
 import json
 import logging
 import os
-from typing import Callable
+from typing import Any, Callable
 
-from sentence_transformers import SentenceTransformer
+try:
+    # 本地开发/评测机使用；云端 API 容器走远程模型，不安装该包
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # pragma: no cover - 取决于部署环境
+    SentenceTransformer = Any
 
 from rag_demo import media
 from rag_demo.config import DEFAULT_DATASET, DOCS_DIR, MODEL_PATH, SEARCH_INDEX_TABLE
@@ -147,9 +151,11 @@ def ingest_documents(
     dataset = require_write_scope("ingest_documents")
 
     if model is None:
-        logger.info("正在加载 bge-m3 模型...")
-        model = SentenceTransformer(MODEL_PATH) if os.path.exists(MODEL_PATH) \
-            else SentenceTransformer("BAAI/bge-m3")
+        # 统一走检索侧单例：本地模式是 SentenceTransformer，远程模式是
+        # RemoteEmbedding；云端构建/导入不需要安装 torch。
+        from rag_demo.retrieval.hybrid_retriever import get_model
+
+        model = get_model()
 
     conn = get_conn(dataset)
     cur = conn.cursor()
@@ -238,9 +244,11 @@ def ingest_documents_incremental(
     dataset = require_write_scope("ingest_documents_incremental")
 
     if model is None:
-        logger.info("正在加载 bge-m3 模型...")
-        model = SentenceTransformer(MODEL_PATH) if os.path.exists(MODEL_PATH) \
-            else SentenceTransformer("BAAI/bge-m3")
+        # 统一走检索侧单例：本地模式是 SentenceTransformer，远程模式是
+        # RemoteEmbedding；云端构建/导入不需要安装 torch。
+        from rag_demo.retrieval.hybrid_retriever import get_model
+
+        model = get_model()
 
     conn = get_conn(dataset)
     cur = conn.cursor()

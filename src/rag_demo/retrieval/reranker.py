@@ -8,19 +8,19 @@
 import logging
 import os
 
-from sentence_transformers import CrossEncoder
-
 from rag_demo.config import (
     DEVICE,
     DOCS_DIR,
     DTYPE,
     RERANKER_PATH,
+    USE_REMOTE_MODEL,
     WIKI_EXPAND_FULLTEXT,
     WIKI_MAX_CHARS,
     WIKI_MIN_SCORE,
     WIKI_PARENT_MODE,
     is_doc_source,
 )
+from rag_demo.retrieval.remote_models import RemoteReranker
 
 logger = logging.getLogger(__name__)
 
@@ -53,18 +53,29 @@ def _doc_base_dir() -> str:
 
 
 def get_reranker():
+    """返回精排客户端。
+
+    远程模式（MODEL_API_BASE）下不加载 CrossEncoder；本地模式保持原行为。
+    """
     global _reranker
     if _reranker is None:
-        if os.path.exists(RERANKER_PATH):
-            logger.info(f"正在加载本地 bge-reranker-v2-m3（device={DEVICE}, dtype={DTYPE}）...")
-            _reranker = CrossEncoder(
-                str(RERANKER_PATH),
-                device=DEVICE,
-                model_kwargs={"dtype": DTYPE},
-            )
+        if USE_REMOTE_MODEL:
+            logger.info("使用远程 rerank 服务: %s/v1/rerank", (os.environ.get("MODEL_API_BASE") or "").rstrip("/"))
+            _reranker = RemoteReranker()
         else:
-            logger.warning("本地未找到 bge-reranker-v2-m3，从 HuggingFace 加载（首次会下载）...")
-            _reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device=DEVICE)
+            # 只在本机模型模式下才 import；云端轻量镜像不安装 sentence-transformers
+            from sentence_transformers import CrossEncoder
+
+            if os.path.exists(RERANKER_PATH):
+                logger.info("正在加载本地 bge-reranker-v2-m3（device=%s, dtype=%s）...", DEVICE, DTYPE)
+                _reranker = CrossEncoder(
+                    str(RERANKER_PATH),
+                    device=DEVICE,
+                    model_kwargs={"dtype": DTYPE},
+                )
+            else:
+                logger.warning("本地未找到 bge-reranker-v2-m3，从 HuggingFace 加载（首次会下载）...")
+                _reranker = CrossEncoder("BAAI/bge-reranker-v2-m3", device=DEVICE)
     return _reranker
 
 

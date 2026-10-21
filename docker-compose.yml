@@ -1,52 +1,204 @@
-# 依赖服务：PostgreSQL + pgvector
+# ============================================================================
+# 千客引擎 · 云服务器生产编排
 #
-# 为什么要落成文件：
-#   此前「数据库怎么起」只存在于 Docker Desktop 的点击记录里，
-#   别人拿到代码是跑不起来的 —— 参数（库名/密码/端口）散落在容器配置中，
-#   README 又只写了怎么起应用。落成 compose 文件后，环境可复现、可进版本控制。
+# 目标机器：Ubuntu 22.04 / 2 核 4G
+#   db        PostgreSQL 16 + pgvector，最多 1G 内存
+#   backend   FastAPI，最多 2G 内存 / 1.5 CPU
+#   frontend  Nginx（Vue 静态资源 + API 反向代理），80/443
 #
-# 参数与 src/rag_demo/config.py::DB_CONFIG 严格对齐，改一边务必改另一边。
+# 启动：
+#   1. 准备 .env（禁止提交 Git）
+#   2. 准备 certs/fullchain.pem、certs/privkey.pem（或先用自签证书）
+#   3. docker compose up -d --build
 #
-# 用法：
-#   docker compose up -d     起库（后台）
-#   docker compose ps        看状态，healthy 才是真的好了
-#   docker compose logs -f   看日志
-#   docker compose down      停掉（数据卷保留）
+# 说明：
+#   - 数据库端口 5432 不映射到宿主机，只在 appnet 内部开放；
+#   - backend 通过 db:5432 访问数据库，通过环境变量 RAG_PG_* 注入连接参数；
+#   - backend 的 env_file 读取 .env；同时显式覆盖 DB 主机名为 db，
+#     避免把本地开发用的 localhost 带进容器；
+#   - 2 核 4G 下内存限额总和接近上限，实际部署必须观察 docker stats；
+#     如果模型仍在 API 进程内本地加载，2G 可能不够，见 SOP 的阻塞项。
+# ============================================================================
+
+name: qianke-engine
 
 services:
-  postgres:
+  # ==========================================================================
+  # 1. PostgreSQL + pgvector
+  # ==========================================================================
+  db:
     image: pgvector/pgvector:pg16
-    # 固定容器名：与既有的手工容器保持一致，避免出现两套库抢 5432 端口
-    container_name: pgvector
+    container_name: qianke-db
+    restart: unless-stopped
 
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须在 .env 中设置}
       POSTGRES_DB: ${POSTGRES_DB:-vec_db}
-
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      TZ: Asia/Shanghai
 
     volumes:
+      # 数据库持久化：容器重建数据不丢
       - pgdata:/var/lib/postgresql/data
+      # 首次初始化时创建 rag_auth / vec_db_user / vec_db_test 和 vector 扩展
+      - ./deploy/initdb:/docker-entrypoint-initdb.d:ro
 
-    # 健康检查：这条是防「带病运行」的。
-    # 2026-10-14 踩过一次 —— PostgreSQL 没启动，检索静默返回空，
-    # 所有题都答「根据现有资料无法确定」，评测 0/20，还差点被误判成提示词改坏了。
-    # 有 healthcheck 时 docker compose ps 会显示 (healthy)，
-    # 没起来一眼就能看出来，不必等到跑完评测才发现。
+    # 只在 Docker 网络内开放；不要映射 5432 到公网
+    expose:
+      - "5432"
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d vec_db"]
+      # $$ 让变量在容器内解析，而不是被 compose 提前替换
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-vec_db}"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
       start_period: 10s
 
+    # 2C4G 机器上的硬限制；防止慢查询/大对象把整机拖死
+    mem_limit: 1g
+    cpus: 1.0
+    shm_size: 256mb
+
+    networks:
+      - appnet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================================================
+  # 2. FastAPI 后端
+  # ==========================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qianke-backend:latest
+    container_name: qianke-backend
     restart: unless-stopped
 
+    # .env 不提交 Git；compose 从宿主机读取后注入容器
+    env_file:
+      - .env
+
+    environment:
+      # ---------- 连接 compose 内的数据库 ----------
+      RAG_PG_HOST: db
+      RAG_PG_PORT: "5432"
+      RAG_PG_USER: ${POSTGRES_USER:-postgres}
+      RAG_PG_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须在 .env 中设置}
+
+      # 账号库（auth.py 读取的是 RAG_AUTH_PG_*）
+      RAG_AUTH_PG_HOST: db
+      RAG_AUTH_PG_PORT: "5432"
+      RAG_AUTH_PG_USER: ${POSTGRES_USER:-postgres}
+      RAG_AUTH_PG_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 必须在 .env 中设置}
+      RAG_AUTH_PG_DB: rag_auth
+
+      # Text2SQL 只读账号（应用首次连接时自动创建/授权）
+      RAG_SQL_READONLY_USER: ${RAG_SQL_READONLY_USER:-sql_reader}
+      RAG_SQL_READONLY_PASSWORD: ${RAG_SQL_READONLY_PASSWORD:?RAG_SQL_READONLY_PASSWORD 必须在 .env 中设置}
+
+      # 生产安全开关
+      RAG_ALLOW_HEADER_AUTH: "0"
+      RAG_ENABLE_API_DOCS: "0"
+      RAG_AUTH_ENABLED: "1"
+
+      # 远程 BGE 服务（Cloudflare Tunnel / 内网 HTTP）
+      # 必须设置；不设置时后端会回退到本地模型，云端轻量镜像没有 torch。
+      MODEL_API_BASE: ${MODEL_API_BASE:?MODEL_API_BASE 必须在 .env 中设置}
+      MODEL_API_KEY: ${MODEL_API_KEY:?MODEL_API_KEY 必须在 .env 中设置}
+
+    volumes:
+      # 运行期数据：上传文档、画像、日志、权限配置
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./var:/app/var
+      # 可选：如果模型不在外部服务，而是以目录形式放在宿主机，挂载进来；
+      # 当前 compose 不默认依赖它，外置模型服务时保持空目录即可。
+      - ./models:/app/models:ro
+      # 明确把 .env 只读挂载；应用不会隐式解析它，但便于运维核对
+      - ./.env:/app/.env:ro
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    expose:
+      - "8000"   # 只给 frontend 访问，不映射公网
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+
+    mem_limit: 2g
+    cpus: 1.5
+
+    networks:
+      - appnet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ==========================================================================
+  # 3. Nginx + Vue 静态资源
+  # ==========================================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    image: qianke-frontend:latest
+    container_name: qianke-frontend
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      # TLS 证书；首次启动前必须存在 fullchain.pem / privkey.pem
+      - ./certs:/etc/nginx/certs:ro
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+    mem_limit: 256m
+    cpus: 0.5
+
+    networks:
+      - appnet
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================================================================
+# 网络与卷
+# ============================================================================
+networks:
+  appnet:
+    driver: bridge
+
 volumes:
+  # 生产环境请使用具名卷，并纳入宿主机备份；
+  # 不要执行 docker compose down -v，否则数据库卷会被删除。
   pgdata:
-    # 固定卷名（不加 compose 项目前缀），从而复用已有的 pgdata 卷 —— 现有数据不会丢。
-    # 若写成普通卷，compose 会创建 qianke-engine_pgdata，那是一个空库，
-    # 表现为「应用能连上但一张表都没有」。
-    name: pgdata

@@ -1,0 +1,53 @@
+# Docker 构建上下文排除项
+# 目的：避免把 2.6GB 的 Windows torch wheel、模型权重、数据库数据、密钥、
+# 前端 node_modules 打进 Docker 构建上下文。
+
+.git
+.gitignore
+.idea
+.venv
+.venv-video
+__pycache__
+*.py[oc]
+.pytest_cache
+.ruff_cache
+
+# 密钥与本地配置
+.env
+.env.*
+!.env.example
+certs
+*.pem
+*.key
+
+# 本地模型权重 / CUDA wheel
+models
+wheels
+
+# 运行期数据与日志
+data
+logs
+var
+pgdata
+*.dump
+*.sql.gz
+
+# 前端依赖与构建产物（前端构建阶段只使用源码）
+web/node_modules
+web/dist
+
+# 本地临时文件/截图/文档产物
+.tmp
+image
+promo
+assets
+_audio_test
+.pw
+.mcp
+docs
+bug
+
+# Windows / IDE 文件
+Thumbs.db
+Desktop.ini
+*.code-workspace

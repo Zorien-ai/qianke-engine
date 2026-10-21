@@ -30,7 +30,12 @@ from typing import Any, Callable
 import pandas as pd
 import psycopg2.errors
 from langchain_core.documents import Document
-from sentence_transformers import SentenceTransformer
+
+try:
+    # 本地开发/评测机使用；云端 API 容器走远程模型，不安装该包
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # pragma: no cover - 取决于部署环境
+    SentenceTransformer = Any
 
 from rag_demo.config import (
     DATA_DIR,
@@ -673,10 +678,11 @@ def ingest_transactions(
     require_write_scope("ingest_transactions")
 
     if model is None:
-        logger.info("正在加载 bge-m3 模型（device=%s, dtype=%s）...", DEVICE, DTYPE)
-        model = SentenceTransformer(
-            str(MODEL_PATH), device=DEVICE, model_kwargs={"dtype": DTYPE}
-        )
+        # 统一走检索侧单例：本地模式是 SentenceTransformer，远程模式是
+        # RemoteEmbedding；这样云端构建/导入也不需要安装 torch。
+        from rag_demo.retrieval.hybrid_retriever import get_model
+
+        model = get_model()
 
     df_all = load_transactions(csv_paths, column_map)
     if on_phase:

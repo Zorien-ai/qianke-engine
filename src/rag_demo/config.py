@@ -7,7 +7,13 @@
 """
 import os
 
-import torch
+# 本地开发机安装 torch；云端 API 容器使用远程 BGE 服务，不安装 torch。
+# 这里必须做可选导入：否则删除 torch 依赖后连 config 都无法 import，
+# FastAPI 启动会在导入阶段直接失败。
+try:  # pragma: no cover - 取决于部署环境是否安装本地模型依赖
+    import torch
+except ImportError:  # Docker 轻量 API 镜像的正常路径
+    torch = None
 
 # 项目根目录：src/rag_demo/config.py -> rag_demo -> src -> 根
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -20,10 +26,12 @@ RERANKER_PATH = os.path.join(BASE_DIR, "models", "bge-reranker-v2-m3")
 
 # ---------- 数据库 ----------
 _DB_BASE = {
-    "host": "localhost",
-    "port": 5432,
-    "user": "postgres",
-    "password": "123456",
+    # Docker / 云服务器通过 RAG_PG_* 注入；本地不设置时保持原默认值。
+    # 这是容器里 backend 能连到 compose 的 db 服务的关键。
+    "host": os.environ.get("RAG_PG_HOST", "localhost"),
+    "port": int(os.environ.get("RAG_PG_PORT", "5432")),
+    "user": os.environ.get("RAG_PG_USER", "postgres"),
+    "password": os.environ.get("RAG_PG_PASSWORD", "123456"),
 }
 
 # demo：仓库自带的示例数据。它**同时是评测基线**（33 题、F1 等都跑在这份上），
@@ -135,7 +143,10 @@ TOP_K_PROFILE_MAX = 30
 # ---------- API 文档开关 ----------
 # /docs 与 /openapi.json 会完整暴露所有接口、请求模型与字段结构（含尚未对外的特权接口），
 # 属 Demo 便利项。生产环境必须置 False —— 它是"绕过前端直接看接口"的最短路径。
-ENABLE_API_DOCS = True
+# Docker Compose 设置 RAG_ENABLE_API_DOCS=0；本地默认保持开启，方便调试。
+ENABLE_API_DOCS = os.environ.get("RAG_ENABLE_API_DOCS", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
 
 # ---------- API 角色（Demo 过渡态，⚠ 接入电商系统后必须改） ----------
 # 当前没有登录态，角色只能由请求头 X-Role 传入，等于"调用方自报身份"。
@@ -253,11 +264,30 @@ CONTEXT_INCLUDE_SQL_TEXT = False   # 是否把 SQL 原文也放进 context
 SQL_ROWS_MAX = 20                  # 最多送入多少行结果
 SQL_CELL_MAX_CHARS = 40            # 单个单元格最长字符数
 
+# ---------- 远程模型服务（生产推荐） ----------
+# 云端 2C4G 不适合在 API 进程内加载 BGE-M3 + reranker。
+# 设置 MODEL_API_BASE 后，embedding / rerank 全部走 HTTP，不再创建
+# SentenceTransformer / CrossEncoder；未设置时保持本地模型路径，方便离线开发。
+MODEL_API_BASE = os.environ.get("MODEL_API_BASE", "").strip().rstrip("/")
+MODEL_API_KEY = os.environ.get("MODEL_API_KEY", "").strip()
+MODEL_API_TIMEOUT = float(os.environ.get("MODEL_API_TIMEOUT", "60"))
+MODEL_API_BATCH_SIZE = int(os.environ.get("MODEL_API_BATCH_SIZE", "32"))
+MODEL_API_EMBEDDING_MODEL = os.environ.get(
+    "MODEL_API_EMBEDDING_MODEL", "bge-m3"
+).strip()
+MODEL_API_RERANK_MODEL = os.environ.get(
+    "MODEL_API_RERANK_MODEL", "bge-reranker-v2-m3"
+).strip()
+USE_REMOTE_MODEL = bool(MODEL_API_BASE)
+
 # ---------- 计算设备 ----------
-# RTX 3060 6GB 显存紧张：两个 568M 模型 fp32 约 4.4GB 必 OOM，
-# 故 cuda 下统一用 fp16（约 2.2GB）；cpu 下保持 fp32（CPU 不支持 fp16 算子）。
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+# 远程模式不依赖 torch；本地模式仍保持原有 CUDA/CPU 自动选择。
+if torch is not None:
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+else:
+    DEVICE = "cpu"
+    DTYPE = None
 
 # ---------- 意图路由（闲聊 / 业务）----------
 # 改造前：关键词规则（tools/router.py 的 CHITCHAT_KEYWORDS）。规则只拦得住
