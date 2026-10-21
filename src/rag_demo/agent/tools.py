@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from rag_demo.agent.tool import Tool
-from rag_demo.pipeline import answer_question
+from rag_demo.pipeline import prepare
 from rag_demo.tools import sql_tool
 
 
 def rag_search(question: str) -> dict:
-    """Reuse Qianke's existing RAG pipeline instead of duplicating retrieval."""
-    result = answer_question(question, use_cache=True)
+    """Run Qianke retrieval/planning without generating a second answer."""
+    result = prepare(question)
     return {
-        "answer": result.get("answer", ""),
+        "route": result.get("route"),
         "sources": result.get("sources", []),
-        "route": result.get("route", "rag"),
+        "trace": result.get("trace", {}),
+        "user_cards": result.get("user_cards", []),
+        "sql_result": result.get("sql_result"),
     }
 
 
@@ -21,7 +23,7 @@ def execute_sql(question: str) -> dict:
 
 
 def calculator(expression: str) -> dict:
-    """Intentionally tiny calculator; no eval/exec in v0."""
+    """Tiny arithmetic calculator; never executes arbitrary Python code."""
     import ast
     import operator
 
@@ -50,7 +52,7 @@ def calculator(expression: str) -> dict:
 
 RAG_SEARCH = Tool(
     name="rag_search",
-    description="Search Qianke's e-commerce knowledge/profile data and return grounded sources.",
+    description="Search Qianke's e-commerce knowledge/profile data and return grounded sources. Use for factual/domain questions.",
     schema={
         "type": "object",
         "properties": {"question": {"type": "string"}},
