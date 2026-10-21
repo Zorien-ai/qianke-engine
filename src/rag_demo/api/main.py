@@ -40,6 +40,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 
+import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -2265,3 +2266,18 @@ def admin_reject_user(user_id: int) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"status": "rejected", "user": _public_user(user)}
+
+
+if __name__ == "__main__":
+    # 直接 `uv run python src/rag_demo/api/main.py` 时的入口（等价于下面的 CLI 命令）：
+    #     uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8500
+    #
+    # 端口默认 8500 而不是 8000：本机 8000 落在 Windows 的 winnat 保留段
+    # （netsh 里能看到 7996–8095），绑定会直接报 `[Errno 13] 权限不允许`，
+    # 且这个保留段由 Docker/WSL 动态划走，不是改代码能解决的。
+    # 需要换端口时用环境变量，不必改代码：RAG_PORT=8010 / RAG_HOST=127.0.0.1
+    uvicorn.run(
+        app,
+        host=os.environ.get("RAG_HOST", "0.0.0.0"),
+        port=int(os.environ.get("RAG_PORT", "8500")),
+    )
