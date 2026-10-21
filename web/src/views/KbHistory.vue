@@ -5,10 +5,12 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { getJson } from "../api";
+import { isDemo } from "../store";
 
 const items = ref([]);
 const loading = ref(true);
 const error = ref("");
+const demoMode = computed(() => isDemo());
 
 const total = computed(() => items.value.length);
 const hasFallback = computed(() => items.value.some((x) => x.note));
@@ -67,7 +69,8 @@ onMounted(load);
         </p>
       </div>
       <div class="row-actions">
-        <RouterLink class="btn btn-ghost" to="/setup">数据导入 / 重建</RouterLink>
+        <RouterLink v-if="!demoMode" class="btn btn-ghost" to="/setup">数据导入 / 重建</RouterLink>
+        <span v-else class="field-hint">演示模式 · 只读</span>
         <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">
           {{ loading ? "加载中…" : "刷新" }}
         </button>

@@ -12,6 +12,8 @@ export const store = reactive({
   booted: false,
   bootError: "",
   authenticated: false,
+  demoMode: false,
+  chatTitle: "新对话",
   whoami: null,
   account: null,
   can: {},
@@ -45,6 +47,7 @@ async function doBoot() {
     else {
       // 匿名：清掉可能残留的旧账号信息，模板里按"未登录"渲染
       store.account = null;
+      store.demoMode = false;
       store.can = {};
       store.level = "";
       store.levelLabel = "";
@@ -72,6 +75,7 @@ export async function refreshWhoami() {
   if (mine.authenticated) applyWhoami(mine);
   else {
     store.account = null;
+    store.demoMode = false;
     store.can = {};
   }
   return mine;
@@ -79,6 +83,7 @@ export async function refreshWhoami() {
 
 function applyWhoami(mine) {
   store.account = mine.account || null;
+  store.demoMode = !!(store.account && store.account.is_demo);
   store.can = mine.can || {};
   store.level = mine.level || "";
   store.levelLabel = mine.level_label || mine.level || "";
@@ -97,6 +102,11 @@ export function hasCap(name) {
 export function isManager() {
   const a = store.account;
   return !!(a && (a.is_system_admin || a.is_enterprise_admin));
+}
+
+/** 当前是否官网一键体验的只读演示账号。 */
+export function isDemo() {
+  return !!(store.account && store.account.is_demo);
 }
 
 /* ---------- 轻提示（toast） ---------- */

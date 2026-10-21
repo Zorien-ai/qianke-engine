@@ -10,10 +10,11 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getJson, postJson } from "../api";
-import { toast, toastError } from "../store";
+import { isDemo, toast, toastError } from "../store";
 
 const loading = ref(true);
 const loadError = ref("");
+const demoMode = computed(() => isDemo());
 const setsInfo = ref({ sets: [], dataset: "", scope: "enterprise", judge_model: "deepseek-chat" });
 const latest = ref(null);
 const selectedSet = ref("");
@@ -28,13 +29,16 @@ const summary = computed(() => (latest.value && latest.value.summary) || null);
 const modules = computed(() => (latest.value && latest.value.modules) || []);
 const failures = computed(() => (latest.value && latest.value.failures) || []);
 const isRunning = computed(() => run.value && ["running", "queued"].includes(run.value.status));
-const canStart = computed(() => !isRunning.value && !!selectedSet.value && !starting.value);
+const canStart = computed(() => !demoMode.value && !isRunning.value && !!selectedSet.value && !starting.value);
 
 const boundary = computed(() => {
   const row = modules.value.find((m) => m.module && m.module.includes("边界"));
   return row ? `${row.passed}/${row.judged}` : "—";
 });
-const scopeLabel = computed(() => (setsInfo.value.scope === "platform" ? "平台基线" : "企业数据空间"));
+const scopeLabel = computed(() => {
+  if (setsInfo.value.scope === "demo") return "演示只读基线";
+  return setsInfo.value.scope === "platform" ? "平台基线" : "企业数据空间";
+});
 
 function pct(value) {
   if (value === null || value === undefined) return "—";
@@ -99,6 +103,10 @@ function schedulePoll() {
 }
 
 function pickFile() {
+  if (demoMode.value) {
+    toast("演示模式为只读，不能上传评测题库", "warn");
+    return;
+  }
   const input = fileInput.value;
   if (!input) {
     toast("文件选择器未就绪，请刷新页面后重试", "error");
@@ -134,6 +142,10 @@ async function onFile(event) {
 }
 
 async function startRun() {
+  if (demoMode.value) {
+    toast("演示模式为只读，不能启动新的评测任务", "warn");
+    return;
+  }
   if (!selectedSet.value || starting.value) return;
   starting.value = true;
   try {
@@ -210,6 +222,7 @@ onBeforeUnmount(() => {
             下载题库模板
           </button>
           <label
+            v-if="!demoMode"
             for="eval-file"
             class="btn btn-primary eval-upload-label"
             :class="{ 'is-disabled': uploading }"
@@ -254,6 +267,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="row-actions" style="justify-content: center">
             <label
+              v-if="!demoMode"
               for="eval-file"
               class="btn btn-primary eval-upload-label"
               :class="{ 'is-disabled': uploading }"
@@ -286,11 +300,19 @@ onBeforeUnmount(() => {
                 <option v-for="set in sets" :key="set.id" :value="set.id">{{ setLabel(set) }}</option>
               </select>
             </label>
-            <button type="button" class="btn btn-primary" :disabled="!canStart" @click="startRun">
+            <button
+              v-if="!demoMode"
+              type="button"
+              class="btn btn-primary"
+              :disabled="!canStart"
+              @click="startRun"
+            >
               <span v-if="starting" class="spinner spinner-sm" />
               {{ starting ? "启动中…" : isRunning ? "评测运行中…" : "开始评测" }}
             </button>
-            <span class="field-hint">单次最多 50 题；结果保存到当前数据空间</span>
+            <span class="field-hint">
+              {{ demoMode ? "演示模式 · 只读看板，不能上传题库或启动评测" : "单次最多 50 题；结果保存到当前数据空间" }}
+            </span>
           </div>
 
           <div v-if="run && isRunning" class="eval-running">

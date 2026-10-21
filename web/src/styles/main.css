@@ -2675,3 +2675,154 @@ html[data-theme="dark"] .tag.is-profile { color: #c4b5fd; }
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---------- 演示体验模式 ---------- */
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px clamp(16px, 3vw, 34px);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.26);
+  background: rgba(245, 158, 11, 0.13);
+  color: #92400e;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.demo-banner-icon { flex: 0 0 auto; font-size: 14px; }
+.demo-banner-text { min-width: 0; }
+.demo-banner-tag {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: #b45309;
+  font-family: var(--font-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+[data-theme="dark"] .demo-banner {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  border-bottom-color: rgba(245, 158, 11, 0.2);
+}
+[data-theme="dark"] .demo-banner-tag { color: #fbbf24; }
+
+.nav-item.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.nav-item.is-disabled:hover {
+  background: transparent;
+  color: inherit;
+}
+.nav-lock {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 8.5px;
+  font-weight: 600;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .demo-banner { align-items: flex-start; padding-block: 10px; font-size: 11.5px; }
+  .demo-banner-tag { display: none; }
+}
+
+.demo-composer-hint {
+  padding: 2px 7px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 5px;
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.1);
+}
+[data-theme="dark"] .demo-composer-hint { color: #fbbf24; }
+
+/* ---------- 对话页：独立滚动消息区 + 底部输入区 ---------- */
+.content.content-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 14px;
+  padding-bottom: 14px;
+  overflow: hidden;
+}
+.content.content-chat > .page {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 对话页固定视口高度：消息区独立滚动，输入区始终贴底 */
+.app-shell.is-chat-shell {
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+.app-shell.is-chat-shell > .main-col {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---------- Markdown Mermaid 流程图（轻量降级渲染） ---------- */
+.md-mermaid {
+  margin: 12px 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  scrollbar-width: thin;
+}
+.mm-caption {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.mm-tree,
+.mm-flat { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.mm-node-wrap { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.mm-children {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-left: 9px;
+  padding-left: 11px;
+  border-left: 1px dashed var(--border-strong);
+}
+.mm-edge { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 1px 0; }
+.mm-node {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.mm-arrow { color: var(--primary); font-size: 13px; line-height: 1; }
+
+/* 对话页顶栏：当前会话标题 */
+.chat-session-title {
+  max-width: min(54vw, 720px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+/* 收起态历史 Dock 需要越过内容内边距，落在左侧留白区 */
+.content.content-chat { overflow: visible; }
+@media (max-width: 900px) {
+  .content.content-chat { overflow: hidden; }
+}

@@ -638,6 +638,10 @@ def render(payload: dict, role: str, user: str | None = None) -> dict:
     if CAP_SOURCES in caps and payload.get("sources") is not None:
         out["sources"] = [_render_source(s, caps) for s in payload["sources"]]
 
+    # 本轮检索到的用户池卡片：业务事实，和来源列表同级（L2+ 可见）。
+    if CAP_SOURCES in caps and payload.get("user_cards") is not None:
+        out["user_cards"] = list(payload["user_cards"])[:30]
+
     # 查询结果行是**业务事实**（与回答里的数字同源），所有能提问的身份都能看；
     # 只有 SQL 原文与执行报错属于实现细节（L4）。二者不能捆在同一个能力上：
     # 捆在一起会让「不想给 SQL 语句」连带把用户已经能从回答里看到的数字也藏掉。

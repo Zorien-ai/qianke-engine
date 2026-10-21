@@ -49,7 +49,7 @@ class AnswerCache:
     @staticmethod
     def make_key(question: str, dept: str | None = None, keyword_mode: str | None = None,
                  profile_limit: int | None = None, deep_thinking: bool | None = None,
-                 *, dataset: str) -> str:
+                 *, dataset: str, history_key: str = "") -> str:
         """
         生成缓存键
 
@@ -74,7 +74,8 @@ class AnswerCache:
         """
         raw = (f"{dataset}|{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
                f"|{profile_limit if profile_limit else '-'}"
-               f"|{1 if deep_thinking else 0}")
+               f"|{1 if deep_thinking else 0}"
+               f"|{history_key or '-'}")
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict | None:

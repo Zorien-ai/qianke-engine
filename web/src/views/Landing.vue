@@ -11,17 +11,89 @@
  * 时间轴由 Vue 状态机 + setTimeout 驱动；页面隐藏时暂停、回来按已用时间续播；
  * onBeforeUnmount 清理所有 timer；prefers-reduced-motion 直接最终静态排版（无 timer）。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { store } from "../store";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import { postJson } from "../api";
+import { refreshWhoami, store, toast } from "../store";
 import HeroNebula from "../components/landing/HeroNebula.vue";
 import LanguageToggle from "../components/LanguageToggle.vue";
 import ThemeToggle from "../components/ThemeToggle.vue";
+import Logo from "../components/Logo.vue";
+import wechatQr from "../assets/wechat-qr.png";
 import "../styles/landing.css";
 
 const shotModules = import.meta.glob("../assets/shots/*.png", { eager: true, import: "default" });
 const shot = (name) => shotModules[`../assets/shots/${name}.png`] || "";
 
+const router = useRouter();
 const isAuthed = computed(() => !!store.authenticated);
+const demoStarting = ref(false);
+
+async function startDemo() {
+  if (demoStarting.value) return;
+  demoStarting.value = true;
+  try {
+    await postJson("/api/auth/demo-login", {});
+    await refreshWhoami();
+    toast("已进入演示体验模式（只读）", "info", 3200);
+    await router.push("/chat");
+  } catch (e) {
+    toast((e && (e.detail || e.message)) || "演示体验暂不可用，请稍后再试", "error", 5200);
+  } finally {
+    demoStarting.value = false;
+  }
+}
+
+/* ==================== 官网 CTA 弹窗（文档 / 私有化部署） ==================== */
+const GITHUB_URL = "https://github.com/q93304989-bit/qianke-engine";
+const CONTACT_EMAIL = "contact@qianke-engine.com";
+const TERMINAL_COMMAND = `git clone ${GITHUB_URL}.git
+cd qianke-engine
+docker-compose up -d`;
+const docsOpen = ref(false);
+const deployOpen = ref(false);
+const copied = ref(false);
+let copyTimer = null;
+let bodyOverflow = "";
+let bodyLocked = false;
+
+function closeModals() {
+  docsOpen.value = false;
+  deployOpen.value = false;
+}
+
+function onModalKeydown(event) {
+  if (event.key === "Escape") closeModals();
+}
+
+async function copyTerminalCommand() {
+  try {
+    await navigator.clipboard.writeText(TERMINAL_COMMAND);
+    copied.value = true;
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => {
+      copied.value = false;
+    }, 1600);
+  } catch (err) {
+    /* 剪贴板被浏览器禁用时静默降级：终端代码仍可直接选中复制 */
+  }
+}
+
+watch([docsOpen, deployOpen], ([docs, deploy]) => {
+  const open = docs || deploy;
+  // 不能把「原 overflow 是否为空」当作锁状态：Landing 原本通常就是 ""，
+  // 一旦用它判断，关闭时条件永远不成立，页面会永久停在 overflow:hidden。
+  if (open && !bodyLocked) {
+    bodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    bodyLocked = true;
+  } else if (!open && bodyLocked) {
+    document.body.style.overflow = bodyOverflow;
+    bodyOverflow = "";
+    bodyLocked = false;
+  }
+});
+
 
 /* ==================== 对话式叙事时间轴（task-15，约 8.2s） ==================== */
 const QUESTION = "找出最近一个月高客单的美妆女性用户";
@@ -559,6 +631,7 @@ onMounted(() => {
   if (reducedMotion.value) beginStory();
   window.addEventListener("scroll", updateNavState, { passive: true });
   window.addEventListener("resize", updateNavState);
+  window.addEventListener("keydown", onModalKeydown);
   updateNavState();
   window.__heroFreeze = freezeStoryForQa;
   window.__heroResume = resumeStoryForQa;
@@ -586,6 +659,16 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener("scroll", updateNavState);
   window.removeEventListener("resize", updateNavState);
+  window.removeEventListener("keydown", onModalKeydown);
+  if (copyTimer) {
+    clearTimeout(copyTimer);
+    copyTimer = null;
+  }
+  if (bodyLocked) {
+    document.body.style.overflow = bodyOverflow;
+    bodyOverflow = "";
+    bodyLocked = false;
+  }
   delete window.__heroFreeze;
   delete window.__heroResume;
 });
@@ -597,7 +680,7 @@ onBeforeUnmount(() => {
     <header class="l-nav" :class="{ 'is-dark': navDark, 'is-scrolled': navScrolled }">
       <div class="l-shell l-nav-inner">
         <RouterLink to="/home" class="l-brand" aria-label="千客引擎（Qianke Engine）官网首页">
-          <span class="l-logo">Q</span>
+          <Logo :size="30" :show-text="false" class="l-logo-slot" />
           <span class="l-brand-text"><b>千客引擎</b></span>
         </RouterLink>
 
@@ -616,7 +699,7 @@ onBeforeUnmount(() => {
         <div class="l-nav-actions">
           <ThemeToggle class="l-nav-theme" />
           <LanguageToggle class="l-nav-lang" />
-          <a href="/docs" target="_blank" rel="noopener" class="l-nav-link l-nav-doc">文档</a>
+          <a href="/docs" target="_blank" rel="noopener" class="l-nav-link l-nav-doc" @click.prevent="docsOpen = true">文档</a>
           <a v-if="!isAuthed" href="/login" class="l-nav-login">登录</a>
           <RouterLink v-else to="/" class="l-btn l-btn-primary l-btn-sm">进入工作台</RouterLink>
         </div>
@@ -644,10 +727,18 @@ onBeforeUnmount(() => {
               <RouterLink v-if="isAuthed" to="/" class="l-btn l-btn-primary l-btn-lg">
                 进入工作台
               </RouterLink>
-              <a v-else href="/login" class="l-btn l-btn-primary l-btn-lg">免费体验 Demo</a>
-              <a href="/docs" target="_blank" rel="noopener" class="l-btn l-btn-ghost l-btn-lg">
+              <button
+                v-else
+                type="button"
+                class="l-btn l-btn-primary l-btn-lg"
+                :disabled="demoStarting"
+                @click="startDemo"
+              >
+                {{ demoStarting ? "正在进入体验…" : "免费体验 Demo" }}
+              </button>
+              <button type="button" class="l-btn l-btn-ghost l-btn-lg" @click="docsOpen = true">
                 查看文档
-              </a>
+              </button>
             </div>
           </div>
 
@@ -822,9 +913,9 @@ onBeforeUnmount(() => {
       <section id="security" class="l-private">
         <div class="l-shell l-private-inner" v-reveal>
           <h2 class="l-private-slogan">100% 私有化，数据绝不外传。</h2>
-          <a href="/docs" target="_blank" rel="noopener" class="l-btn l-btn-primary l-btn-lg">
-            预约部署
-          </a>
+          <button type="button" class="l-btn l-btn-primary l-btn-lg" @click="deployOpen = true">
+            预约私有化部署
+          </button>
         </div>
       </section>
     </main>
@@ -840,5 +931,85 @@ onBeforeUnmount(() => {
         </nav>
       </div>
     </footer>
+    <!-- ============ 官网 CTA：开发者文档 / 私有化部署 ============ -->
+    <Teleport to="body">
+      <Transition name="l-modal">
+        <div v-if="docsOpen" class="l-modal" role="presentation" @click.self="docsOpen = false">
+          <section
+            class="l-modal-panel l-doc-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="l-doc-title"
+            @click.stop
+          >
+            <button type="button" class="l-modal-close" aria-label="关闭文档弹窗" @click="docsOpen = false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+            <p class="l-modal-kicker">OPEN SOURCE · DEVELOPER DOCS</p>
+            <h2 id="l-doc-title" class="l-modal-title">千客引擎：开发者文档</h2>
+            <p class="l-modal-lead">
+              从源码到部署，一条命令把千客引擎跑起来。开源、可私有化，数据始终留在你自己的基础设施里。
+            </p>
+            <a class="l-github-cta" :href="GITHUB_URL" target="_blank" rel="noopener">
+              <svg class="l-github-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 .5C5.7.5.7 5.6.7 11.9c0 5 3.2 9.3 7.7 10.8.6.1.8-.3.8-.6v-2.1c-3.1.7-3.8-1.3-3.8-1.3-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.1.1 1.7 1.2 1.7 1.2 1 1.7 2.6 1.2 3.3.9.1-.7.4-1.2.7-1.5-2.5-.3-5.1-1.3-5.1-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.6 5.4-5.1 5.7.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.5-1.5 7.7-5.8 7.7-10.8C23.3 5.6 18.3.5 12 .5Z" />
+              </svg>
+              <span>🚀 前往 GitHub 仓库查看完整源码与部署指南</span>
+              <svg class="l-github-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </a>
+            <div class="l-terminal">
+              <div class="l-terminal-bar">
+                <span class="l-terminal-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span class="l-terminal-title">快速开始</span>
+                <button type="button" class="l-terminal-copy" @click="copyTerminalCommand">
+                  {{ copied ? "已复制" : "复制" }}
+                </button>
+              </div>
+              <pre><code>{{ TERMINAL_COMMAND }}</code></pre>
+            </div>
+            <p class="l-modal-foot">Apache-2.0 · 支持完全离线 / 内网部署</p>
+          </section>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <Teleport to="body">
+      <Transition name="l-modal">
+        <div v-if="deployOpen" class="l-modal" role="presentation" @click.self="deployOpen = false">
+          <section
+            class="l-modal-panel l-deploy-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="l-deploy-title"
+            @click.stop
+          >
+            <button type="button" class="l-modal-close" aria-label="关闭私有化部署弹窗" @click="deployOpen = false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+            <p class="l-modal-kicker">PRIVATE DEPLOYMENT · 1:1</p>
+            <h2 id="l-deploy-title" class="l-modal-title">获取 100% 私有化部署方案</h2>
+            <p class="l-modal-lead">
+              千客引擎支持完全内网部署，数据不出门。添加开发者，获取一对一部署指导。
+            </p>
+            <div class="l-qr-card">
+              <div class="l-qr-frame">
+                <img :src="wechatQr" alt="千客引擎开发者微信二维码" />
+              </div>
+              <p class="l-qr-caption">扫码添加开发者微信</p>
+              <span class="l-qr-hint">备注「私有化部署」优先通过</span>
+            </div>
+            <a class="l-modal-mail" :href="`mailto:${CONTACT_EMAIL}`">
+              或发送邮件至 {{ CONTACT_EMAIL }}
+            </a>
+          </section>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>

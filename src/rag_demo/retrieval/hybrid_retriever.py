@@ -6,12 +6,12 @@
 @Function: 向量召回 + BM25 关键词召回 + RRF 融合
 """
 import logging
+import os
 import re
 
 import jieba
 import numpy as np
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
 
 from rag_demo.config import (
     DEVICE,
@@ -22,9 +22,11 @@ from rag_demo.config import (
     TOP_K_BM25,
     TOP_K_RRF,
     TOP_K_VECTOR,
+    USE_REMOTE_MODEL,
 )
 from rag_demo.db.connection import current_dataset, get_conn
 from rag_demo.retrieval.enrich import attach_wiki_meta
+from rag_demo.retrieval.remote_models import RemoteEmbedding
 
 # 稀疏检索依赖 FlagEmbedding；未安装时降级为仅 BM25，不影响主流程
 try:
@@ -71,14 +73,29 @@ _bm25_corpus: dict[str, list[dict]] = {}
 #             导致无法与离线实验（如 A/B 脚本）并行运行。需补卸载机制或空闲超时释放。
 #             详见 bug/性能隐患台账.md
 def get_model():
+    """返回 embedding 客户端。
+
+    - 设置了 MODEL_API_BASE：走远程 HTTP，不加载 torch/sentence-transformers；
+    - 未设置：保持本地 SentenceTransformer（离线开发 / 评测机）。
+    """
     global _model
     if _model is None:
-        logger.info(f"正在加载 bge-m3 模型（device={DEVICE}, dtype={DTYPE}）...")
-        _model = SentenceTransformer(
-            str(MODEL_PATH),
-            device=DEVICE,
-            model_kwargs={"dtype": DTYPE},
-        )
+        if USE_REMOTE_MODEL:
+            logger.info(
+                "使用远程 embedding 服务: %s/v1/embeddings",
+                (os.environ.get("MODEL_API_BASE") or "").rstrip("/"),
+            )
+            _model = RemoteEmbedding()
+        else:
+            # 只在本机模型模式下才 import，云端轻量镜像无需 sentence-transformers
+            from sentence_transformers import SentenceTransformer
+
+            logger.info("正在加载 bge-m3 模型（device=%s, dtype=%s）...", DEVICE, DTYPE)
+            _model = SentenceTransformer(
+                str(MODEL_PATH),
+                device=DEVICE,
+                model_kwargs={"dtype": DTYPE},
+            )
     return _model
 
 

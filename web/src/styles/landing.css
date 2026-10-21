@@ -94,6 +94,13 @@
   border-color: rgba(255, 255, 255, 0.5);
   background: rgba(255, 255, 255, 0.05);
 }
+.l-logo-slot {
+  border-radius: 9px;
+}
+.l-nav.is-dark .l-logo-slot {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 8px 20px -12px rgba(245, 179, 90, 0.4);
+}
 .l-logo {
   display: grid;
   place-items: center;
@@ -1964,4 +1971,382 @@
   .u-card {
     opacity: 0.82 !important;
   }
+}
+
+/* ==================== 官网 CTA 弹窗：文档 / 私有化部署 ==================== */
+
+button.l-btn {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.l-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+  background: rgba(4, 4, 6, 0.76);
+  backdrop-filter: blur(16px) saturate(0.8);
+  -webkit-backdrop-filter: blur(16px) saturate(0.8);
+}
+
+.l-modal-panel {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  background:
+    radial-gradient(520px 220px at 100% -10%, rgba(245, 158, 11, 0.08), transparent 70%),
+    linear-gradient(180deg, #101012 0%, #0a0a0c 100%);
+  color: #f4f2ec;
+  box-shadow: 0 32px 80px -28px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.l-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #a7a7b0;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.l-modal-close:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+}
+.l-modal-close svg { width: 16px; height: 16px; }
+
+.l-modal-kicker {
+  margin: 0 0 12px;
+  color: #f59e0b;
+  font-family: var(--l-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+.l-modal-title {
+  margin: 0 0 10px;
+  padding-right: 34px;
+  color: #f7f5ef;
+  font-size: clamp(21px, 3vw, 26px);
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+}
+
+.l-modal-lead {
+  margin: 0 0 20px;
+  color: #9c9ca6;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.l-github-cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #f4f1e9;
+  color: #09090b !important;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-decoration: none;
+  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+.l-github-cta:hover {
+  background: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px -16px rgba(255, 255, 255, 0.4);
+}
+.l-github-icon { flex: 0 0 auto; width: 19px; height: 19px; }
+.l-github-arrow { flex: 0 0 auto; width: 17px; height: 17px; margin-left: auto; opacity: 0.55; }
+
+.l-terminal {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: #060608;
+}
+.l-terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+}
+.l-terminal-dots { display: inline-flex; gap: 5px; }
+.l-terminal-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3f3f46;
+}
+.l-terminal-dots i:nth-child(1) { background: #ff5f57; }
+.l-terminal-dots i:nth-child(2) { background: #febc2e; }
+.l-terminal-dots i:nth-child(3) { background: #28c840; }
+.l-terminal-title { color: #77777f; font-size: 10.5px; }
+.l-terminal-copy {
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  background: transparent;
+  color: #8d8d96;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.l-terminal-copy:hover { color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+.l-terminal pre {
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  color: #cfcfd5;
+  font-family: var(--l-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.l-terminal code { font-family: inherit; }
+
+.l-modal-foot {
+  margin: 16px 0 0;
+  color: #686871;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+/* ---- 私有化部署 ---- */
+.l-deploy-panel { width: min(520px, 100%); }
+.l-qr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 18px;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.l-qr-frame {
+  width: 172px;
+  height: 172px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px -14px rgba(0, 0, 0, 0.7);
+}
+.l-qr-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.l-qr-caption { margin: 4px 0 0; color: #e7e4dc; font-size: 12.5px; font-weight: 600; }
+.l-qr-hint { color: #777780; font-size: 10.5px; }
+.l-modal-mail {
+  display: block;
+  color: #888892 !important;
+  font-family: var(--l-mono, "SFMono-Regular", Consolas, monospace);
+  font-size: 11px;
+  text-align: center;
+  text-decoration: none;
+}
+.l-modal-mail:hover { color: #d4d4d8 !important; }
+
+/* 丝滑的渐入淡出 + 轻微上浮 */
+.l-modal-enter-active,
+.l-modal-leave-active { transition: opacity 0.26s ease; }
+.l-modal-enter-from,
+.l-modal-leave-to { opacity: 0; }
+.l-modal-enter-active .l-modal-panel,
+.l-modal-leave-active .l-modal-panel {
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease;
+}
+.l-modal-enter-from .l-modal-panel,
+.l-modal-leave-to .l-modal-panel {
+  opacity: 0;
+  transform: translateY(12px) scale(0.985);
+}
+
+@media (max-width: 640px) {
+  .l-modal { padding: 14px; align-items: flex-start; }
+  .l-modal-panel { margin-top: 6vh; padding: 24px 20px; border-radius: 16px; }
+  .l-modal-title { font-size: 21px; }
+  .l-github-cta { align-items: flex-start; font-size: 12px; }
+  .l-github-icon { margin-top: 1px; }
+  .l-modal-lead { font-size: 12.5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .l-modal-enter-active,
+  .l-modal-leave-active,
+  .l-modal-enter-active .l-modal-panel,
+  .l-modal-leave-active .l-modal-panel { transition: none; }
+}
+
+/* =========================================================
+   官网深浅色：Landing 有自己的 --l-* 变量体系，不能只依赖
+   工作台 main.css 的全局变量，否则切换主题时首页仍然是暖白。
+   Hero 保持电影感深色；内容区 / 导航 / 卡片随主题切换。
+   ========================================================= */
+[data-theme="dark"] .landing {
+  --l-bg: #0b0b0e;
+  --l-bg-soft: #15151a;
+  --l-card: #141419;
+  --l-ink: #f5f2ea;
+  --l-ink-soft: #e8e3d8;
+  --l-body: #aaa8b1;
+  --l-muted: #7d7b85;
+  --l-line: #29292f;
+  --l-line-strong: #3a3a43;
+  --l-accent: #f59e0b;
+  --l-gold: #f5b35a;
+}
+
+/* Hero：暗色模式更冷、更纯黑；光晕稍收，和浅色模式的暖黑区分 */
+[data-theme="dark"] .l-hero {
+  background:
+    radial-gradient(46% 40% at 74% 46%, rgba(245, 179, 90, 0.045), transparent 70%),
+    radial-gradient(30% 26% at 18% 20%, rgba(96, 125, 170, 0.04), transparent 70%),
+    radial-gradient(120% 90% at 50% 50%, transparent 44%, rgba(0, 0, 0, 0.72) 100%),
+    #020204;
+}
+[data-theme="dark"] .l-hero::after {
+  background: linear-gradient(180deg, rgba(2, 2, 4, 0) 0%, rgba(2, 2, 4, 0.55) 68%, #020204 100%);
+}
+
+/* 导航：滚出 Hero 后是深色磨砂，而不是原来的暖白 */
+[data-theme="dark"] .l-nav {
+  background: rgba(10, 10, 14, 0.82);
+  border-bottom-color: transparent;
+}
+[data-theme="dark"] .l-nav.is-scrolled {
+  border-bottom-color: var(--l-line);
+  background: rgba(10, 10, 14, 0.92);
+  box-shadow: 0 10px 30px -24px rgba(0, 0, 0, 0.9);
+}
+[data-theme="dark"] .l-nav.is-dark {
+  background: transparent;
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+[data-theme="dark"] .l-nav.is-dark.is-scrolled {
+  background: linear-gradient(180deg, rgba(2, 2, 4, 0.78), rgba(2, 2, 4, 0));
+}
+[data-theme="dark"] .l-nav-link:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .l-nav-login {
+  color: var(--l-ink);
+  border-color: var(--l-line-strong);
+}
+[data-theme="dark"] .l-nav-login:hover {
+  background: #1b1b21;
+  border-color: var(--l-ink);
+}
+[data-theme="dark"] .l-logo-slot {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+/* 按钮 */
+[data-theme="dark"] .l-btn-ghost:hover {
+  background: #1b1b21;
+  border-color: var(--l-ink);
+}
+[data-theme="dark"] .l-private .l-btn-primary {
+  background: #f4f1e9;
+  color: #09090b;
+}
+[data-theme="dark"] .l-private .l-btn-primary:hover {
+  background: #ffffff;
+}
+
+/* 产品截图的 Mac 窗口：避免深色页面里出现一块暖白 */
+[data-theme="dark"] .l-mac {
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.06) inset,
+    0 70px 140px -52px rgba(0, 0, 0, 0.75),
+    0 26px 64px -34px rgba(0, 0, 0, 0.5);
+}
+[data-theme="dark"] .l-mac:hover {
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.08) inset,
+    0 84px 160px -52px rgba(0, 0, 0, 0.8),
+    0 30px 70px -34px rgba(0, 0, 0, 0.56);
+}
+[data-theme="dark"] .l-mac-bar {
+  background: #17171d;
+  border-bottom-color: var(--l-line);
+}
+[data-theme="dark"] .l-mac-url {
+  background: #0f0f14;
+  border-color: var(--l-line);
+  color: var(--l-muted);
+}
+[data-theme="dark"] .l-mac-body {
+  background: #0d0d12;
+}
+[data-theme="dark"] .l-shot-placeholder {
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 14px, rgba(255, 255, 255, 0.005) 14px 28px),
+    #0d0d12;
+  color: var(--l-muted);
+}
+
+/* 下方内容区 / Slogan / 页脚 */
+[data-theme="dark"] .l-private {
+  background: linear-gradient(180deg, rgba(21, 21, 26, 0), rgba(21, 21, 26, 0.72));
+}
+[data-theme="dark"] .l-footer {
+  background: rgba(15, 15, 20, 0.62);
+}
+[data-theme="dark"] .l-highlight {
+  border-color: rgba(245, 158, 11, 0.9);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+/* 主题切换时不要瞬间跳色 */
+.landing,
+.landing .l-nav,
+.landing .l-showcase,
+.landing .l-private,
+.landing .l-footer,
+.landing .l-mac,
+.landing .l-mac-bar,
+.landing .l-mac-url,
+.landing .l-mac-body {
+  transition: background-color 0.24s ease, border-color 0.24s ease, color 0.24s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing,
+  .landing .l-nav,
+  .landing .l-showcase,
+  .landing .l-private,
+  .landing .l-footer,
+  .landing .l-mac,
+  .landing .l-mac-bar,
+  .landing .l-mac-url,
+  .landing .l-mac-body { transition: none; }
 }
