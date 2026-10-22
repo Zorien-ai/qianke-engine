@@ -6,8 +6,8 @@
 
 <p align="center"><strong>专为电商打造的轻量级 AI 用户画像与业务分析引擎</strong></p>
 
-[![CI](https://github.com/q93304989-bit/qianke-engine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/q93304989-bit/qianke-engine/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml) [![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json) [![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json) <br>
-[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml) [![Offline Eval](https://img.shields.io/badge/offline%20eval-93.9%25-yellowgreen)](tests/eval_report.md) [![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/q93304989-bit/qianke-engine)
+[![CI](https://github.com/Zorien-ai/qianke-engine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Zorien-ai/qianke-engine/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml) [![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json) [![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json) <br>
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml) [![Offline Eval](https://img.shields.io/badge/offline%20eval-93.9%25-yellowgreen)](tests/eval_report.md) [![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/Zorien-ai/qianke-engine)
 
 </div>
 
@@ -123,7 +123,7 @@
 ### 1. 获取代码与配置
 
 ```bash
-git clone https://github.com/q93304989-bit/qianke-engine.git
+git clone https://github.com/Zorien-ai/qianke-engine.git
 cd qianke-engine
 
 cp .env.example .env
@@ -208,7 +208,7 @@ uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 报告与原始结果：[`tests/eval_report.md`](tests/eval_report.md)、
 [`tests/eval_results_llm.json`](tests/eval_results_llm.json)。
 2026-10-18 的 97.0% 快照见
-[commit b93c851 的评测报告](https://github.com/q93304989-bit/qianke-engine/blob/b93c851/tests/eval_report.md)
+[commit b93c851 的评测报告](https://github.com/Zorien-ai/qianke-engine/blob/b93c851/tests/eval_report.md)
 （该 commit 同时包含 MQ-02 题目口径修正）。
 
 ### 从 75% 到 97%：LLM-as-a-Judge + 提示词靶向修复
