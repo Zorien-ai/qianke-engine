@@ -45,7 +45,7 @@ async function startDemo() {
 }
 
 /* ==================== 官网 CTA 弹窗（文档 / 私有化部署） ==================== */
-const GITHUB_URL = "https://github.com/q93304989-bit/qianke-engine";
+const GITHUB_URL = "https://github.com/Zorien-ai/qianke-engine";
 const CONTACT_EMAIL = "contact@qianke-engine.com";
 const TERMINAL_COMMAND = `git clone ${GITHUB_URL}.git
 cd qianke-engine
