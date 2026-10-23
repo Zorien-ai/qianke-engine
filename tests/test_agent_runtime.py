@@ -26,7 +26,7 @@ def test_agent_loop_executes_tool_then_returns_answer(monkeypatch):
     calls = []
 
     def fake_chat_completion(**kwargs):
-        calls.append(kwargs["messages"])
+        calls.append(list(kwargs["messages"]))
         if len(calls) == 1:
             message = SimpleNamespace(
                 content=None,
