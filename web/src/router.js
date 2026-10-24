@@ -15,7 +15,6 @@ import Eval from "./views/Eval.vue";
 import Monitor from "./views/Monitor.vue";
 import Billing from "./views/Billing.vue";
 import MonitorAdmin from "./views/MonitorAdmin.vue";
-import AgentDemo from "./views/AgentDemo.vue";
 
 /**
  * 用 hash 路由：后端把 web/dist 静态挂到 /v2/，没有服务端 fallback，
@@ -35,7 +34,6 @@ const routes = [
   },
   { path: "/", name: "dashboard", component: Dashboard, meta: { title: "工作台" } },
   { path: "/chat", name: "chat", component: Chat, meta: { title: "对话" } },
-  { path: "/agent", name: "agent", component: AgentDemo, meta: { title: "Agent 智能助理" } },
   { path: "/kb", name: "kb", component: Kb, meta: { title: "知识库" } },
   { path: "/kb/profiles", name: "kb-profiles", component: KbProfiles, meta: { title: "用户画像" } },
   { path: "/kb/docs", name: "kb-docs", component: KbDocs, meta: { title: "文档管理" } },

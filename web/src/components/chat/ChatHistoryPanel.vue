@@ -250,17 +250,14 @@ function dotColor(session) {
 }
 .history-close { display: none; font-size: 20px; line-height: 1; }
 .chat-history-panel.is-collapsed {
-  /* 参与 flex 布局，不再用负 left 悬在内容左侧：
-     负偏移会落到 App 侧边栏下面，表现为历史记录栏被裁掉/缩进错位。 */
-  position: relative;
-  top: auto;
-  left: auto;
+  position: absolute;
+  top: 0;
+  left: -58px;
   z-index: 12;
   width: 44px;
-  flex: 0 0 44px;
+  flex: none;
   min-height: 0;
   height: auto;
-  align-self: flex-start;
   padding: 0;
   border-right: 0;
   background: transparent;

@@ -23,21 +23,27 @@ ARG PYTHON_VERSION=3.12
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 # ---------- 基础环境 ----------
-# 阿里云服务器走国内 PyPI 镜像，避免 pip 长时间卡在 pypi.org
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONPATH=/app/src \
-    TZ=Asia/Shanghai \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
-    PIP_TRUSTED_HOST=mirrors.aliyun.com
+    TZ=Asia/Shanghai
 
-# 不安装 apt 系统依赖：
-#   - psycopg2-binary 自带 libpq，不需要 libpq-dev；
-#   - 云端不装 torch，因此不需要 build-essential / libgomp1；
-#   - 健康检查改用 Python 标准库，不再依赖 curl。
-# 这样可以避开 Debian apt 源在国内构建时长时间卡住的问题。
+# psycopg2 / 模型依赖需要的系统库：
+#   build-essential  某些包需要源码编译（无 wheel 时）
+#   libpq-dev        PostgreSQL 头文件（psycopg2 编译兜底）
+#   curl             容器健康检查
+#   libgomp1         PyTorch/NumPy 的 OpenMP 运行库
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+        curl \
+        ca-certificates \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # ---------- 安装 Python 依赖 ----------
@@ -81,18 +87,16 @@ USER app
 EXPOSE 8000
 
 # 健康检查：DB 已就绪、应用已启动才返回 {"status":"ok"}
-# 使用 Python 标准库，避免依赖 curl / apt。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" || exit 1
+    CMD curl -fsS http://127.0.0.1:8000/health || exit 1
 
 # ---------- 启动命令 ----------
-# 2 核 4G：使用 1 个 uvicorn worker 更稳。
-# 原因：uvicorn 每个 worker 都会执行一次 lifespan，而 auth.init() 会在启动时
-# 并发创建/更新账号库；2 个 worker 同时初始化曾触发 PostgreSQL DeadlockDetected。
-# 远程模型模式下单个 worker 足够支撑演示，也避免启动竞态。
+# 2 核 4G 的硬性上限：最多 2 个 uvicorn worker。
+# 云端必须设置 MODEL_API_BASE，embedding/rerank 走远程服务，
+# 因此每个 worker 只保留轻量 HTTP 客户端，不再各加载一份本地模型。
 CMD ["uvicorn", "rag_demo.api.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
-     "--workers", "1", \
+     "--workers", "2", \
      "--proxy-headers", \
      "--forwarded-allow-ips", "*"]

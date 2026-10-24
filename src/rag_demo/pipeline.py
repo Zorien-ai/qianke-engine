@@ -38,7 +38,7 @@ import logging
 from openai import APIError
 
 from rag_demo import answer_guard
-from rag_demo.cache import answer_cache, dataset_data_version
+from rag_demo.cache import answer_cache
 from rag_demo.chitchat import build_reply
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF
 from rag_demo.db.connection import current_dataset
@@ -94,13 +94,8 @@ def answer_question(
     不会因为加了权限而失能。
     """
     # 数据集必须进键：demo 与 user 是两个库，同一问题答案不同（见 cache.make_key）
-    dataset = current_dataset()
-    key = answer_cache.make_key(
-        question, dept, keyword_mode, profile_limit, deep_thinking,
-        dataset=dataset,
-        history_key=history_key,
-        data_version=dataset_data_version(dataset),
-    )
+    key = answer_cache.make_key(question, dept, keyword_mode, profile_limit, deep_thinking,
+                                dataset=current_dataset(), history_key=history_key)
 
     if use_cache:
         hit = answer_cache.get(key)

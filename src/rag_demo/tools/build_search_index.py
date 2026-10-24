@@ -19,7 +19,6 @@
     uv run python src/rag_demo/tools/build_search_index.py
 """
 import io
-import importlib.util
 import logging
 import os
 import time
@@ -27,13 +26,7 @@ from typing import Callable
 
 from psycopg2.extras import execute_values
 
-from rag_demo.config import (
-    BASE_DIR,
-    DEFAULT_DATASET,
-    KEYWORD_RETRIEVER,
-    SEARCH_INDEX_TABLE,
-    SPARSE_VEC_DIM,
-)
+from rag_demo.config import BASE_DIR, DEFAULT_DATASET, SEARCH_INDEX_TABLE, SPARSE_VEC_DIM
 from rag_demo.db.connection import (
     close_conn,
     get_conn,
@@ -79,42 +72,6 @@ def load_corpus() -> list[dict]:
     return corpus
 
 
-def _encode_sparse_or_none(texts: list[str]) -> list[dict | None]:
-    """按运行配置决定是否生成 BGE-M3 稀疏权重。
-
-    云端轻量镜像不安装 FlagEmbedding（embedding/rerank 都走远程服务），而
-    KEYWORD_RETRIEVER 默认是 bm25；此时索引只需要 BM25 分词，sparse_weights
-    写 NULL 即可。旧实现无条件调用 encode_sparse，导致上传构建在最后一步
-    「建立检索索引」报 No module named 'FlagEmbedding'，前面的画像/文档都已经
-    写入，用户看到的就是「画像切分完了却失败」。
-
-    显式配置 sparse/both 但缺少 FlagEmbedding 时也降级为 BM25-only，并留下
-    warning；否则一次构建会因为可选检索路缺失而整体失败。
-    """
-    if not texts:
-        return []
-
-    if KEYWORD_RETRIEVER == "bm25":
-        logger.info(
-            "KEYWORD_RETRIEVER=bm25，跳过 BGE-M3 稀疏编码（sparse_weights 写 NULL）"
-        )
-        return [None] * len(texts)
-
-    if importlib.util.find_spec("FlagEmbedding") is None:
-        logger.warning(
-            "KEYWORD_RETRIEVER=%s 但未安装 FlagEmbedding，本次索引降级为 BM25-only"
-            "（sparse_weights 写 NULL）",
-            KEYWORD_RETRIEVER,
-        )
-        return [None] * len(texts)
-
-    try:
-        return list(encode_sparse(texts))
-    except ImportError as e:  # pragma: no cover - 防御性兜底
-        logger.warning("稀疏编码依赖不可用，本次索引降级为 BM25-only: %s", e)
-        return [None] * len(texts)
-
-
 def build_index(
     progress: ProgressFn | None = None,
     on_phase: PhaseFn | None = None,
@@ -156,9 +113,9 @@ def build_index(
     if on_phase:
         on_phase("tokenize_done", {"rows": len(corpus)})
 
-    # ---------- 2. BGE-M3 稀疏编码（可选：bm25 模式 / 缺 FlagEmbedding 时跳过） ----------
+    # ---------- 2. BGE-M3 稀疏编码 ----------
     t = time.time()
-    weights_list = _encode_sparse_or_none([c["text"] for c in corpus])
+    weights_list = encode_sparse([c["text"] for c in corpus])
     timings["encode"] = time.time() - t
     logger.info("稀疏编码完成: %.2fs", timings["encode"])
     if on_phase:
@@ -171,7 +128,7 @@ def build_index(
             c["source"],
             c["text"],
             tokens,
-            weights_to_sparsevec(weights, SPARSE_VEC_DIM) if weights is not None else None,
+            weights_to_sparsevec(weights, SPARSE_VEC_DIM),
         )
         for c, tokens, weights in zip(corpus, tokenized, weights_list)
     ]
@@ -221,9 +178,7 @@ def build_index(
     # ---------- 5. 稀疏检索自测（确认库内算子可用） ----------
     probe = corpus[0]["text"][:20] if corpus else ""
     probe_rows: list[tuple] = []
-    # BM25-only 索引没有 sparse_weights，跳过 sparsevec 自测；
-    # 否则会再次触发 FlagEmbedding 依赖，等于把刚修好的构建又打回去。
-    if probe and any(weight is not None for weight in weights_list):
+    if probe:
         probe_vec = weights_to_sparsevec(encode_sparse([probe])[0], SPARSE_VEC_DIM)
         cur.execute(
             f"""SELECT corpus_id, sparse_weights <#> %s::sparsevec AS neg_ip
@@ -335,14 +290,14 @@ def update_index(
         rows: list[tuple] = []
         if corpus:
             tokenized = [_tokenize(c["text"]) for c in corpus]
-            weights_list = _encode_sparse_or_none([c["text"] for c in corpus])
+            weights_list = encode_sparse([c["text"] for c in corpus])
             rows = [
                 (
                     c["id"],
                     c["source"],
                     c["text"],
                     tokens,
-                    weights_to_sparsevec(weights, SPARSE_VEC_DIM) if weights is not None else None,
+                    weights_to_sparsevec(weights, SPARSE_VEC_DIM),
                 )
                 for c, tokens, weights in zip(corpus, tokenized, weights_list)
             ]

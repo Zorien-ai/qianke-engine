@@ -27,53 +27,12 @@ BM25 / 稀疏向量后会拿到另一套策略的结果，看起来像「策略�
   的代价只是让 demo 的缓存也重算一遍，不值得为它把哈希改成带前缀的复合键。
 """
 import hashlib
-import json
 import threading
 import time
 from collections import OrderedDict
 
 DEFAULT_MAXSIZE = 256
 DEFAULT_TTL = 3600  # 秒
-_VERSION_TTL = 2.0  # 数据版本短期缓存，避免每次问答都读 meta 表
-_version_cache: dict[str, tuple[float, str]] = {}
-_version_lock = threading.Lock()
-
-
-def dataset_data_version(dataset: str) -> str:
-    """返回当前数据集的数据版本，用于让缓存随构建失效。
-
-    优先级：
-    1. last_build.at（最近一次成功构建时间）
-    2. ingest manifest 的哈希（旧库没有 last_build 时仍可感知文件变化）
-    3. unknown（无库/离线环境）
-
-    这里不负责切数据集；调用方必须已经 use_dataset(dataset)。
-    """
-    now = time.time()
-    with _version_lock:
-        cached = _version_cache.get(dataset)
-        if cached and cached[0] > now:
-            return cached[1]
-
-    version = "unknown"
-    try:
-        from rag_demo.db.schema import read_ingest_manifest, read_last_build
-
-        last_build = read_last_build()
-        at = (last_build or {}).get("at")
-        if at:
-            version = f"build:{at}"
-        else:
-            manifest = read_ingest_manifest()
-            if manifest.get("csv") or manifest.get("docs"):
-                raw = json.dumps(manifest, ensure_ascii=False, sort_keys=True)
-                version = "manifest:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    except Exception:  # noqa: BLE001 - 读不到版本不能把问答打挂
-        version = "unknown"
-
-    with _version_lock:
-        _version_cache[dataset] = (now + _VERSION_TTL, version)
-    return version
 
 
 class AnswerCache:
@@ -90,7 +49,7 @@ class AnswerCache:
     @staticmethod
     def make_key(question: str, dept: str | None = None, keyword_mode: str | None = None,
                  profile_limit: int | None = None, deep_thinking: bool | None = None,
-                 *, dataset: str, history_key: str = "", data_version: str = "") -> str:
+                 *, dataset: str, history_key: str = "") -> str:
         """
         生成缓存键
 
@@ -116,7 +75,7 @@ class AnswerCache:
         raw = (f"{dataset}|{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
                f"|{profile_limit if profile_limit else '-'}"
                f"|{1 if deep_thinking else 0}"
-               f"|{history_key or '-'}|{data_version or '-'}")
+               f"|{history_key or '-'}")
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict | None:
