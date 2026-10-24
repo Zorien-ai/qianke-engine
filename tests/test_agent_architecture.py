@@ -9,7 +9,11 @@ from rag_demo.agent import loop
 from rag_demo.agent.registry import get_tool_contracts, get_tool_schemas, get_tools
 from rag_demo.agent.state import AgentConfig, AgentState, AgentStatus
 from rag_demo.agent.tool import ToolResult
-from rag_demo.agent.tools.calculator import calculator
+from rag_demo.agent.tools.calculator import (
+    MAX_AST_NODES,
+    MAX_EXPRESSION_LENGTH,
+    calculator,
+)
 from rag_demo.agent.tools.rag import rag_search
 from rag_demo.agent.tools.sql import execute_sql
 from rag_demo.tools.sql_tool import _json_value
@@ -60,6 +64,36 @@ def test_calculator_json_contract_and_safe_ast():
     div0 = calculator.invoke({"expression": "1/0"})
     assert div0["ok"] is False
     assert div0["error"]["code"] == "DIVISION_BY_ZERO"
+
+
+def test_calculator_safety_limits():
+    too_long = "1+" * (MAX_EXPRESSION_LENGTH // 2 + 1) + "1"
+    long_result = calculator.invoke({"expression": too_long})
+    assert long_result["ok"] is False
+    assert long_result["error"]["code"] == "INVALID_EXPRESSION"
+
+    too_many_nodes = "1" + "+1" * (MAX_AST_NODES + 5)
+    nodes_result = calculator.invoke({"expression": too_many_nodes})
+    assert nodes_result["ok"] is False
+
+    huge_operand = calculator.invoke({"expression": "999999999999999999 + 1"})
+    assert huge_operand["ok"] is False
+
+    huge_exponent = calculator.invoke({"expression": "2 ** 999"})
+    assert huge_exponent["ok"] is False
+
+    huge_result = calculator.invoke({"expression": "10 ** 16"})
+    assert huge_result["ok"] is False
+
+
+def test_system_prompt_is_config_driven(monkeypatch):
+    import rag_demo.db.schema_facts as facts
+
+    monkeypatch.setattr(facts, "get_sql_schema", lambda: "表 user_profile_vectors")
+    prompt = loop.build_system_prompt(AgentConfig(max_steps=2, max_tool_calls=4))
+    assert "最多进行 2 个推理步骤" in prompt
+    assert "最多调用 4 次工具" in prompt
+    assert "表 user_profile_vectors" in prompt
 
 
 def test_sql_contract_success_and_error(monkeypatch):
@@ -189,7 +223,7 @@ def _tool_call_message():
 def test_run_agent_uses_config_and_completes(monkeypatch):
     fake = _FakeLLM([_tool_call_message(), AIMessage(content="结果是 5")])
     monkeypatch.setattr(loop, "get_llm", lambda: fake)
-    monkeypatch.setattr(loop, "build_system_prompt", lambda: "sys")
+    monkeypatch.setattr(loop, "build_system_prompt", lambda config=None: "sys")
 
     result = loop.run_agent("2+3 等于多少？", config=AgentConfig(max_steps=4))
 
@@ -203,7 +237,7 @@ def test_run_agent_uses_config_and_completes(monkeypatch):
 def test_run_agent_max_steps_is_configurable(monkeypatch):
     fake = _FakeLLM([_tool_call_message(), _tool_call_message(), _tool_call_message()])
     monkeypatch.setattr(loop, "get_llm", lambda: fake)
-    monkeypatch.setattr(loop, "build_system_prompt", lambda: "sys")
+    monkeypatch.setattr(loop, "build_system_prompt", lambda config=None: "sys")
 
     result = loop.run_agent("一直算", config=AgentConfig(max_steps=1))
 
@@ -215,10 +249,11 @@ def test_run_agent_max_steps_is_configurable(monkeypatch):
 def test_run_agent_max_tool_calls_status(monkeypatch):
     fake = _FakeLLM([_tool_call_message(), _tool_call_message()])
     monkeypatch.setattr(loop, "get_llm", lambda: fake)
-    monkeypatch.setattr(loop, "build_system_prompt", lambda: "sys")
+    monkeypatch.setattr(loop, "build_system_prompt", lambda config=None: "sys")
 
     result = loop.run_agent("一直算", config=AgentConfig(max_steps=5, max_tool_calls=1))
 
     assert result["status"] == AgentStatus.MAX_TOOL_CALLS_EXCEEDED.value
     assert "最大工具调用次数" in result["final_answer"]
     assert fake.calls == 1
+
