@@ -13,6 +13,21 @@ if str(AGENT_EVAL_DIR) not in sys.path:
 import evaluator  # noqa: E402
 
 
+def test_dataset_uses_demo_and_has_20_tasks():
+    payload = json.loads((AGENT_EVAL_DIR / "dataset.json").read_text(encoding="utf-8"))
+    assert payload["dataset"] == "demo"
+    assert len(payload["tasks"]) == 20
+    counts = {}
+    for task in payload["tasks"]:
+        counts[task["category"]] = counts.get(task["category"], 0) + 1
+    assert counts == {
+        "calculator": 5,
+        "execute_sql": 5,
+        "rag_search": 5,
+        "multi_tool": 5,
+    }
+
+
 def _tool_message(name: str, ok: bool, error=None):
     payload = {"ok": ok}
     if error:

@@ -20,12 +20,12 @@ import evaluator  # noqa: E402
 from rag_demo.agent.loop import run_agent  # noqa: E402
 from rag_demo.agent.state import AgentConfig  # noqa: E402
 
-DEFAULT_DATASET = HERE / "dataset.json"
+DEFAULT_DATASET = "demo"
 DEFAULT_OUT = HERE / "results" / "agent_eval_v0.1.json"
 DEFAULT_REPORT = HERE / "reports" / "agent_eval_v0.1.md"
 
 
-def load_tasks(path: Path | str = DEFAULT_DATASET) -> list[dict[str, Any]]:
+def load_tasks(path: Path | str = HERE / "dataset.json") -> list[dict[str, Any]]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     tasks = payload.get("tasks") if isinstance(payload, dict) else payload
     if not isinstance(tasks, list) or len(tasks) != 20:
@@ -58,7 +58,7 @@ def run_task(task: dict[str, Any], *, dataset: str, config: AgentConfig) -> dict
     return scored
 
 
-def write_report(results: list[dict[str, Any]], summary: dict[str, Any], path: Path) -> None:
+def write_report(results: list[dict[str, Any]], summary: dict[str, Any], path: Path, dataset: str) -> None:
     rate = summary["task_success_rate"] * 100
     selection = summary["tool_selection_accuracy"] * 100
     execution = summary["tool_execution_success"] * 100
@@ -70,7 +70,7 @@ def write_report(results: list[dict[str, Any]], summary: dict[str, Any], path: P
         "# Agent Eval v0.1",
         "",
         f"- 任务数：{summary['total']}",
-        f"- 数据集：`test`",
+        f"- 数据集：`{dataset}`",
         f"- 运行方式：真实 DeepSeek + LangGraph `run_agent` + 真实工具",
         "",
         "## 核心指标",
@@ -120,8 +120,8 @@ def write_report(results: list[dict[str, Any]], summary: dict[str, Any], path: P
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Agent Eval v0.1（20 个真实任务）")
-    parser.add_argument("--dataset", default="test")
-    parser.add_argument("--cases", default=str(DEFAULT_DATASET))
+    parser.add_argument("--dataset", default=DEFAULT_DATASET)
+    parser.add_argument("--cases", default=str(HERE / "dataset.json"))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--report", default=str(DEFAULT_REPORT))
     parser.add_argument("--only", default="", help="逗号分隔 task_id")
@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
-    write_report(results, summary, Path(args.report))
+    write_report(results, summary, Path(args.report), args.dataset)
 
     print(f"task_success_rate={summary['task_success_rate'] * 100:.1f}%")
     print(f"tool_selection_accuracy={summary['tool_selection_accuracy'] * 100:.1f}%")

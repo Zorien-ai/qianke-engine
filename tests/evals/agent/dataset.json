@@ -1,7 +1,7 @@
 {
-  "version": "agent-eval-v0.1",
-  "dataset": "test",
-  "description": "20 个 Agent Task：calculator 5、execute_sql 5、rag_search 5、multi-tool 5；安全类暂不纳入。",
+  "version": "agent-eval-v0.1-demo",
+  "dataset": "demo",
+  "description": "20 个 Agent Task：calculator 5、execute_sql 5、rag_search 5、multi_tool 5；使用 demo 8110 用户数据集，不再使用 9 用户的 test 小样本。",
   "tasks": [
     {
       "task_id": "calc_001",
@@ -48,7 +48,7 @@
       "category": "execute_sql",
       "question": "统计当前数据集里的用户总数",
       "expected_tools": ["execute_sql"],
-      "expected_keywords": ["9"],
+      "expected_keywords": ["811"],
       "expected_success": true
     },
     {
@@ -56,15 +56,15 @@
       "category": "execute_sql",
       "question": "统计黑卡用户数量",
       "expected_tools": ["execute_sql"],
-      "expected_keywords": ["3"],
+      "expected_keywords": ["黑卡", "3"],
       "expected_success": true
     },
     {
       "task_id": "sql_003",
       "category": "execute_sql",
-      "question": "统计上海用户数量",
+      "question": "统计钻石用户数量",
       "expected_tools": ["execute_sql"],
-      "expected_keywords": ["1"],
+      "expected_keywords": ["403"],
       "expected_success": true
     },
     {
@@ -72,53 +72,53 @@
       "category": "execute_sql",
       "question": "按会员等级统计用户数量",
       "expected_tools": ["execute_sql"],
-      "expected_keywords": ["黑卡", "普通"],
+      "expected_keywords": ["普通", "钻石"],
       "expected_success": true
     },
     {
       "task_id": "sql_005",
       "category": "execute_sql",
-      "question": "按城市统计用户数量",
+      "question": "按城市统计用户数量，哪个城市用户最多？",
       "expected_tools": ["execute_sql"],
-      "expected_keywords": ["上海"],
+      "expected_keywords": ["北京"],
       "expected_success": true
     },
     {
       "task_id": "rag_001",
       "category": "rag_search",
-      "question": "流失预警的判定标准是什么？",
+      "question": "高价值用户怎么定义？",
       "expected_tools": ["rag_search"],
-      "expected_keywords": ["30"],
+      "expected_keywords": ["90"],
       "expected_success": true
     },
     {
       "task_id": "rag_002",
       "category": "rag_search",
-      "question": "美妆类目用户发放什么权益？",
+      "question": "流失预警用户的判定标准是什么？",
       "expected_tools": ["rag_search"],
-      "expected_keywords": ["100"],
+      "expected_keywords": ["30"],
       "expected_success": true
     },
     {
       "task_id": "rag_003",
       "category": "rag_search",
-      "question": "数码类目用户发放什么优惠券？",
+      "question": "钻石会员有哪些专属折扣权益？",
       "expected_tools": ["rag_search"],
-      "expected_keywords": ["150"],
+      "expected_keywords": ["9"],
       "expected_success": true
     },
     {
       "task_id": "rag_004",
       "category": "rag_search",
-      "question": "流失用户每月最多触达几次？",
+      "question": "钻石会员的累计平均客单价门槛是多少？",
       "expected_tools": ["rag_search"],
-      "expected_keywords": ["2"],
+      "expected_keywords": ["14555"],
       "expected_success": true
     },
     {
       "task_id": "rag_005",
       "category": "rag_search",
-      "question": "美妆商品签收后多少天内支持无理由退换货？",
+      "question": "商品质量问题在签收后多少天内可以退换？",
       "expected_tools": ["rag_search"],
       "expected_keywords": ["7"],
       "expected_success": true
@@ -126,41 +126,41 @@
     {
       "task_id": "multi_001",
       "category": "multi_tool",
-      "question": "查上海黑卡流失用户数量并计算占比",
+      "question": "统计黑卡用户数量，并计算黑卡用户占总用户的比例",
       "expected_tools": ["execute_sql", "calculator"],
-      "expected_keywords": ["100"],
+      "expected_keywords": ["3", "0.03"],
       "expected_success": true
     },
     {
       "task_id": "multi_002",
       "category": "multi_tool",
-      "question": "流失用户定义是什么，并统计当前流失用户数量",
+      "question": "流失预警用户的定义是什么？同时统计黑卡用户数量",
       "expected_tools": ["rag_search", "execute_sql"],
-      "expected_keywords": ["30"],
+      "expected_keywords": ["30", "3"],
       "expected_success": true
     },
     {
       "task_id": "multi_003",
       "category": "multi_tool",
-      "question": "黑卡用户占总用户的比例是多少？",
+      "question": "统计普通用户数量，并计算普通用户占总用户的比例",
       "expected_tools": ["execute_sql", "calculator"],
-      "expected_keywords": ["33"],
+      "expected_keywords": ["4053", "49"],
       "expected_success": true
     },
     {
       "task_id": "multi_004",
       "category": "multi_tool",
-      "question": "上海用户中黑卡用户占比是多少？",
+      "question": "统计上海用户中钻石用户的数量，并计算其占上海用户的比例",
       "expected_tools": ["execute_sql", "calculator"],
-      "expected_keywords": ["100"],
+      "expected_keywords": ["32", "4.6"],
       "expected_success": true
     },
     {
       "task_id": "multi_005",
       "category": "multi_tool",
-      "question": "黑卡用户总数是多少？同时告诉我美妆类目发放什么权益",
+      "question": "统计钻石用户数量，并告诉我钻石会员的专属折扣权益",
       "expected_tools": ["execute_sql", "rag_search"],
-      "expected_keywords": ["3", "100"],
+      "expected_keywords": ["403", "9"],
       "expected_success": true
     }
   ]

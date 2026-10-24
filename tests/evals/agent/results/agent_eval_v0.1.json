@@ -1,18 +1,18 @@
 {
   "version": "agent-eval-v0.1",
-  "dataset": "test",
+  "dataset": "demo",
   "summary": {
     "total": 20,
-    "passed": 19,
-    "task_success_rate": 0.95,
-    "tool_selection_accuracy": 0.95,
-    "tool_execution_success": 0.9791666666666666,
+    "passed": 20,
+    "task_success_rate": 1.0,
+    "tool_selection_accuracy": 1.0,
+    "tool_execution_success": 0.9761904761904762,
     "error_recovery": 1.0,
     "error_cases": 1,
     "tool_error_count": 1,
-    "avg_steps": 2.6,
-    "avg_tool_calls": 2.4,
-    "avg_elapsed_s": 7.227500000000001,
+    "avg_steps": 2.55,
+    "avg_tool_calls": 2.1,
+    "avg_elapsed_s": 7.390000000000001,
     "modules": {
       "calculator": {
         "total": 5,
@@ -26,8 +26,8 @@
       },
       "multi_tool": {
         "total": 5,
-        "passed": 4,
-        "task_success_rate": 0.8
+        "passed": 5,
+        "task_success_rate": 1.0
       },
       "rag_search": {
         "total": 5,
@@ -70,8 +70,8 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.86,
-      "final_answer": "计算结果：\n\n**(156000 − 128000) / 128000 × 100 = 21.875%**\n\n即从 128000 到 156000，增长 28000，增幅为 **21.875%**（约 21.9%）。\n\n依据：calculator 工具返回 result=21.875。",
+      "elapsed_s": 3.53,
+      "final_answer": "(156000 − 128000) / 128000 × 100 = **21.875**\n\n也就是说，从 128000 增长到 156000，增幅为 28000，增长率为 **21.875%**（依据：calculator 工具返回结果 21.875）。",
       "run_error": null
     },
     {
@@ -107,8 +107,8 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.45,
-      "final_answer": "1280 × 15% = **192**（依据：calculator 计算 1280*0.15 = 192.0）",
+      "elapsed_s": 2.41,
+      "final_answer": "1280 的 15% = **192**（计算式：1280 × 15 ÷ 100 = 192.0，依据 calculator 工具结果）。",
       "run_error": null
     },
     {
@@ -145,7 +145,7 @@
       "steps": 2,
       "tool_call_count": 1,
       "elapsed_s": 1.72,
-      "final_answer": "3478.5 ÷ 3 = **1159.5**（依据：calculator 工具返回结果 1159.5）",
+      "final_answer": "3478.5 ÷ 3 = **1159.5**\n\n依据：calculator 工具计算结果为 1159.5。",
       "run_error": null
     },
     {
@@ -181,8 +181,8 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.08,
-      "final_answer": "计算结果：1200 × 0.8 − 200 = **760**\n\n依据：calculator 工具返回 result = 760.0（表达式 `1200 * 0.8 - 200`）。",
+      "elapsed_s": 2.64,
+      "final_answer": "计算结果：1200 × 0.8 = 960，再减去 200 = **760**。\n\n依据：calculator 工具返回 result = 760.0。",
       "run_error": null
     },
     {
@@ -218,8 +218,8 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.92,
-      "final_answer": "**增长率 = 56%**\n\n计算过程（计算器工具）：\n- 增量 = 15600 − 10000 = 5600\n- 增长率 = 5600 ÷ 10000 × 100 = **56%**（工具返回值 56.00000000000001，四舍五入为 56%）\n\n说明：该结果来自纯数学计算，不涉及库内数据口径。",
+      "elapsed_s": 2.75,
+      "final_answer": "从 10000 增长到 15600 的增长率是 **56%**。\n\n计算依据：`(15600 - 10000) / 10000 × 100 = 56`，由 calculator 工具计算，精度误差（56.00000000000001）已归一。\n\n说明：这是纯算术计算，未涉及数据库中的用户数据。",
       "run_error": null
     },
     {
@@ -239,7 +239,7 @@
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "9"
+        "811"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -255,8 +255,8 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.95,
-      "final_answer": "当前数据集里用户总数为 **9 人**。\n\n依据：执行 `SELECT COUNT(*) AS user_count, COUNT(DISTINCT user_id) AS distinct_users FROM user_profile_vectors`，返回 user_count=9、distinct_users=9，即 9 条画像记录对应 9 个不同 user_id，无重复用户。",
+      "elapsed_s": 3.06,
+      "final_answer": "当前数据集（user_profile_vectors 表）的用户总数为 **8110 人**。\n\n依据：`SELECT COUNT(*) AS user_count, COUNT(DISTINCT user_id) AS distinct_user_count FROM user_profile_vectors`。统计结果为：总记录数为 8110 条，去重后的用户 ID 数为 8110 个。两者一致，说明 user_id 没有重复，每个用户对应一条画像记录。",
       "run_error": null
     },
     {
@@ -276,6 +276,7 @@
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
+        "黑卡",
         "3"
       ],
       "missing_keywords": [],
@@ -292,14 +293,14 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.17,
-      "final_answer": "**黑卡用户共 3 人。**\n\n依据：`SELECT member_level, COUNT(*) FROM user_profile_vectors GROUP BY member_level` 结果显示，会员等级分布为：普通 3 人、黑卡 3 人、金卡 2 人、等级缺失（NaN）1 人，合计 9 人。\n\n黑卡用户占全部用户的 1/3，约为 33.3%。如果需要这几位的具体画像，比如客单价、最近购买时间和偏好品类，我可以继续查询明细。",
+      "elapsed_s": 3.34,
+      "final_answer": "黑卡用户共 **3 人**。\n\n- 依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '黑卡'` → 3\n- 占全部 8110 名用户约 0.04%，属于极稀有高价值群体（等级分布：普通 4053 / 白银 2434 / 黄金 1217 / 钻石 403 / 黑卡 3）。",
       "run_error": null
     },
     {
       "task_id": "sql_003",
       "category": "execute_sql",
-      "question": "统计上海用户数量",
+      "question": "统计钻石用户数量",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -307,14 +308,13 @@
         "execute_sql"
       ],
       "actual_tools": [
-        "execute_sql",
-        "calculator"
+        "execute_sql"
       ],
       "missing_tools": [],
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "1"
+        "403"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -323,20 +323,15 @@
           "name": "execute_sql",
           "ok": true,
           "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 3,
-      "tool_call_count": 2,
-      "elapsed_s": 2.81,
-      "final_answer": "上海用户共 **1 人**，占全部 9 位用户的 **11.1%**。\n\n依据：\n- SQL：`SELECT COUNT(*) FROM user_profile_vectors WHERE city='上海'` → 1\n- 占比：1 ÷ 9 ≈ 11.1%（calculator）\n\n如需进一步看这位上海用户的会员等级、客单价或最近购买间隔，可以继续查询。",
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 2.47,
+      "final_answer": "钻石等级用户数量：**403 人**\n\n- 依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '钻石'` → 403\n- 占全部用户（8110 人）的约 5.0%（403/8110），是五个等级中人数最少的一档（黑卡仅 3 人除外）。",
       "run_error": null
     },
     {
@@ -352,14 +347,18 @@
       "actual_tools": [
         "execute_sql",
         "calculator",
+        "calculator",
+        "calculator",
+        "calculator",
+        "calculator",
         "calculator"
       ],
       "missing_tools": [],
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "黑卡",
-        "普通"
+        "普通",
+        "钻石"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -381,9 +380,29 @@
           "name": "calculator",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
         }
       ],
-      "tool_execution_ok": 0.6666666666666666,
+      "tool_execution_ok": 0.8571428571428571,
       "tool_errors": [
         {
           "name": "calculator",
@@ -396,15 +415,15 @@
       ],
       "error_recovered": true,
       "steps": 4,
-      "tool_call_count": 3,
-      "elapsed_s": 4.42,
-      "final_answer": "**按会员等级统计用户数量（共 9 位用户）**\n\n| 会员等级 | 用户数 | 占比 |\n|---|---|---|\n| 普通 | 3 | 33.3% |\n| 黑卡 | 3 | 33.3% |\n| 金卡 | 2 | 22.2% |\n| NaN（未标注） | 1 | 11.1% |\n| 合计 | 9 | 100% |\n\n依据：执行 `SELECT member_level, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY member_level ORDER BY user_count DESC LIMIT 20`，返回的 4 行结果与上表一致；占比的计算方式是用各类用户数除以总数 9。\n\n说明：\n- 有 1 位用户的会员等级为 `NaN`（空值），建议补齐会员等级字段后再统计。\n- 该表 `age`、`gender` 两列均无可用取值，因此本次统计不涉及人口属性。",
+      "tool_call_count": 7,
+      "elapsed_s": 7.12,
+      "final_answer": "**按会员等级统计的用户数量（表 user_profile_vectors，总计 8110 人）**\n\n| 会员等级 | 用户数 | 占比 |\n|---|---|---|\n| 普通 | 4053 | 49.98% |\n| 白银 | 2434 | 30.01% |\n| 黄金 | 1217 | 15.01% |\n| 钻石 | 403 | 4.97% |\n| 黑卡 | 3 | 0.04% |\n| **合计** | **8110** | 100% |\n\n依据 SQL：\n```sql\nSELECT member_level, COUNT(*) AS user_count\nFROM user_profile_vectors\nGROUP BY member_level\nORDER BY user_count DESC LIMIT 100;\n```\n占比按各等级人数/8110 计算。\n\n几点观察：\n- 等级分布呈典型金字塔结构：普通与白银两级合计约 80%，是运营覆盖的主体。\n- 黄金及以上（黄金 1217、钻石 403、黑卡 3）合计仅 1623 人，约 20.0%，属于高价值小圈层，适合做精细化/高客单运营。\n- 黑卡仅 3 人，样本极少，任何针对黑卡的结论都不具备统计意义。",
       "run_error": null
     },
     {
       "task_id": "sql_005",
       "category": "execute_sql",
-      "question": "按城市统计用户数量",
+      "question": "按城市统计用户数量，哪个城市用户最多？",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -412,13 +431,14 @@
         "execute_sql"
       ],
       "actual_tools": [
-        "execute_sql"
+        "execute_sql",
+        "calculator"
       ],
       "missing_tools": [],
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "上海"
+        "北京"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -427,21 +447,26 @@
           "name": "execute_sql",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 2,
-      "tool_call_count": 1,
-      "elapsed_s": 2.84,
-      "final_answer": "按城市统计的用户数量如下，依据 `user_profile_vectors` 全表分组统计：\n\n| 城市 | 用户数 | 占比 |\n|---|---|---|\n| 上海 | 1 | 11.1% |\n| 北京 | 1 | 11.1% |\n| 广州 | 1 | 11.1% |\n| 成都 | 1 | 11.1% |\n| 杭州 | 1 | 11.1% |\n| 武汉 | 1 | 11.1% |\n| 深圳 | 1 | 11.1% |\n| 西安 | 1 | 11.1% |\n| 重庆 | 1 | 11.1% |\n| **合计** | **9** | **100%** |\n\n说明：\n- 统计 SQL：`SELECT city, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY city ORDER BY user_count DESC, city LIMIT 20`，共返回 9 行，合计 9 位用户。\n- 当前库内 9 位用户恰好分布在 9 个不同城市，每个城市各 1 人，城市维度没有集中度差异；样本量仅 9，占比仅作参考，不宜外推。\n- 表中没有城市为空或缺失记录（无 NULL 城市行）。",
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 4.64,
+      "final_answer": "**按城市统计用户数量（覆盖 12 个城市，合计 8110 人）**\n\n| 排名 | 城市 | 用户数 | 占比 |\n|---|---|---|---|\n| 1 | 北京 | 722 | 8.90% |\n| 2 | 杭州 | 714 | 8.80% |\n| 3 | 南京 | 694 | 8.56% |\n| 4 | 上海 | 686 | 8.46% |\n| 5 | 深圳 | 673 | 8.30% |\n| 6 | 苏州 | 672 | 8.29% |\n| 7 | 天津 | 672 | 8.29% |\n| 8 | 广州 | 671 | 8.27% |\n| 9 | 重庆 | 665 | 8.20% |\n| 10 | 武汉 | 663 | 8.18% |\n| 11 | 成都 | 639 | 7.88% |\n| 12 | 西安 | 639 | 7.88% |\n\n**结论：北京用户最多，为 722 人，占全库 8.90%。**\n\n结论如下：\n- 各城市用户数分布很平均，最多与最少仅差 83 人（722 对 639），占比集中在 7.9%~8.9% 区间，说明该用户库在单个城市层面基本没有明显集中，属于均衡分布。\n- 排名前两位的北京、杭州，与第三名南京的差距很小（分别多 28 人和 20 人），因此不宜把“北京最多”解读为区位优势。\n\n依据：`SELECT city, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY city ORDER BY user_count DESC LIMIT 20`（返回 12 行）；占比由 calculator 计算（722/8110）。",
       "run_error": null
     },
     {
       "task_id": "rag_001",
       "category": "rag_search",
-      "question": "流失预警的判定标准是什么？",
+      "question": "高价值用户怎么定义？",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -451,9 +476,56 @@
       "actual_tools": [
         "rag_search",
         "rag_search",
-        "execute_sql",
-        "execute_sql",
-        "calculator"
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "tool_selection_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "90"
+      ],
+      "missing_keywords": [],
+      "final_ok": true,
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 3,
+      "elapsed_s": 63.53,
+      "final_answer": "## 一、官方口径（知识库原文）\n\n**「高价值用户」标签**（来源：`tag_definitions.md`）\n> 定义：**近 90 天消费金额排名前 20%**，且**近 30 天有活跃行为**（登录、浏览、下单任一）。\n> 更新频率：T+1；负责人：数据部-用户增长组。\n> 用途：营销优先级排序、专属客服分配。\n\n**用户分群中的价值分层**（来源：`segmentation.md`）：\n- 高价值：近 90 天消费前 20%\n- 中价值：20%–70%\n- 低价值：后 30%\n- 组合分群：“高价值活跃客”对应专属客服、新品优先体验、生日礼遇；“高价值沉默客”对应一对一召回、大额优惠券、电话回访。\n\n**容易混淆、但并非同一回事的口径**：\n| 标签 | 口径 | 来源 |\n|---|---|---|\n| 高客单用户 | 累计**平均客单价 ≥ 1000 元** | tag_definitions.md |\n| 中客单、低客单 | 500–1000 元、< 500 元 | tag_definitions.md |\n| 会员等级 | 按累计平均客单价划分：普通 < 2495，白银 2495–6680，黄金 6680–14555，钻石 ≥ 14555 | member_benefits.md |\n\n⚠️ 两处口径冲突提醒：\n1. 知识库写“**近 90 天**消费金额”，但当前画像数据是**累计口径**（profile_text 注明“累计口径，T+1 更新”）。\n2. `tag_definitions.md` 的高客单阈值是 1000 元，而本库实测客单价 P25=1326 元，因此 1000 元阈值在本库几乎全员命中；若要分层，建议改用库内分位值 P50=2496、P75=5474、P90=10383。\n\n## 二、在本库的可实现程度（实测）\n\n当前表无“近 90 天消费金额”和活跃行为字段，只能用 `total_amount` 近似替代；`days_since_last_buy ≤ 30` 近似替代“近 30 天活跃”：\n\n| 指标 | 数值 |\n|---|---|\n| 总用户 | 8,110 |\n| 累计消费前 20% 人数 | 1,622 |\n| 再叠加近 30 天有购买（≤30 天） | 430 |\n| 前 20% 的消费额下限阈值 | 19,255.7 元 |\n\n即按近似口径，当前库中可识别的“高价值用户”约 **430 人**，占全库约 5.3%，占前 20% 群体的约 26.5%（后者说明：前 20% 高消费用户中七成以上已 30 天以上无购买，召回空间很大）。\n\n## 三、结论建议\n\n- 对外沟通严格遵循 `tag_definitions.md` 的字面定义是 **“近 90 天消费前 20% 且近 30 天活跃”**；\n- 在内部分析时，由于本库只有累计消费与相对天数，只能以 **total_amount 前 20%（≥19,255.7 元）且 days_since_last_buy ≤ 30** 作为近似口径，结果与官方口径不完全等价；\n- 如果更关注“单笔价值”而非“总额”，应改用“高客单用户（平均客单价 P75 以上）”口径，避免与高价值标签混用。\n\n需要我按哪个口径（近似高价值、高客单、会员等级）拉一份具体名单或城市与品类分布吗？",
+      "run_error": null
+    },
+    {
+      "task_id": "rag_002",
+      "category": "rag_search",
+      "question": "流失预警用户的判定标准是什么？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "expected_tools": [
+        "rag_search"
+      ],
+      "actual_tools": [
+        "rag_search",
+        "rag_search",
+        "execute_sql"
       ],
       "missing_tools": [],
       "tool_selection_ok": true,
@@ -478,31 +550,21 @@
           "name": "execute_sql",
           "ok": true,
           "error": null
-        },
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 4,
-      "tool_call_count": 5,
-      "elapsed_s": 67.39,
-      "final_answer": "## 流失预警的判定标准（来源：《运营SOP.md》1.1 触发条件）\n\n系统满足以下条件之一，即触发「高价值用户流失挽回策略」：\n\n**界定对象**：会员等级为 **黑卡** 或 **金卡** 的用户。\n\n**触发条件（满足任一即可）**：\n1. **最近 30 天未产生购买行为**，即 `days_since_last_buy > 30`；\n2. **客单价环比下降超过 40%**。\n\n触发后的标准动作（SOP 1.2 与 1.3）：\n- 美妆类目用户 → 自动发放「无门槛 100 元美妆专用券」；数码类目用户 → 发放「满 1000 减 150 全场通用券」；\n- 券发放后 **24 小时内**，客服通过企微或电话做一对一回访；\n- 触达频次上限：**每人每月最多 2 次**。\n\n## 本库按口径①实际命中的用户（SQL 实测）\n\n| 用户 | 等级 | 偏好品类 | 距上次购买 | 客单价 | 累计消费 |\n|---|---|---|---|---|---|\n| 科技宅男 | 黑卡 | 数码家电 | 106 天 | 4610 元 | 9220 元 |\n| 最爱喝奶茶 | 黑卡 | 美妆护肤 | 55 天 | 1159.5 元 | 3478.5 元 |\n| 小仙女本仙 | 金卡 | 美妆护肤 | 31 天 | 810 元 | 2430 元 |\n\n- 9 位用户中共 **3 人**命中，占比 33.3%（3/9）。\n- 高价值会员共 5 人（黑卡 3、金卡 2），其中 3 人已超 30 天未购，占高价值会员的 60%。未命中的是 2 位黑卡用户（距上次购买 5 天及另一短周期用户）。\n\n## 需要说明的口径限制\n\n- **条件②「客单价环比下降超 40%」在本库无法验证**：库内只有 `avg_amount` 单一累计均值，没有按月或按周期的历史客单价快照，也无时间序列，因此无法计算环比降幅。上面 3 人仅按条件①（30 天未购）命中。\n- 时间口径只有相对天数 `days_since_last_buy`（本库范围 0–153 天），无法按自然月或自然年筛选，也无法预测未来流失时点。\n- 另外 1 位用户会员等级为缺失值（`NaN`），距上次购买 153 天，因等级不满足「黑卡/金卡」而不在本 SOP 覆盖范围内，建议单独补充等级后再判断。",
+      "steps": 3,
+      "tool_call_count": 3,
+      "elapsed_s": 7.78,
+      "final_answer": "## 流失预警用户判定标准（知识库口径）\n\n依据 `tag_definitions.md`，原文定义如下：\n\n> **流失预警用户**：近 **30 天未活跃**，且 **历史客单价 > 500 元**，且 **累计购买次数 ≥ 3 次**。\n> 更新频率：T+1；负责人：数据部-用户留存组；用途：召回活动、定向优惠券发放。\n\n三个条件需要同时满足（AND）：\n1. 近 30 天未活跃（登录、浏览、下单均无；即 30 天无任何活跃行为）\n2. 历史客单价 > 500 元\n3. 累计购买次数 ≥ 3 次\n\n**注意区分**（`segmentation.md`、`marketing_playbook.md`）：\n- 生命周期分层中的“沉默客” = 31–90 天无行为；“流失客” = > 90 天无行为；流失预警整体对应的是“31 天以上无行为 + 中高客单 + 多次购买”这批可召回人群，并不等同于“已流失”。\n- 挽回动作面向“流失客（> 90 天无行为）”，时机为第 91/120 天，回归礼包 100 元券，每月最多 1 次。\n\n## 在本库中的近似可执行口径与规模\n\n本库没有独立的“活跃行为”字段，只能用 `days_since_last_buy`（距最后一次购买天数）近似“未活跃”：\n\n```sql\nSELECT COUNT(*) AS cnt,\n       ROUND(100.0*COUNT(*)/(SELECT COUNT(*) FROM user_profile_vectors),2) AS pct\nFROM user_profile_vectors\nWHERE days_since_last_buy > 30 AND avg_amount > 500 AND order_count >= 3\nLIMIT 10;\n```\n\n实测结果：**2,616 人，占全库 8,110 人的 32.26%**。\n\n口径提示：知识库定义的“历史客单价 > 500 元”在本库可用 `avg_amount > 500` 对应；但本库客单价中位数约 2,496 元（P25=1,326），500 元这个阈值在本库中偏低，几乎不构成筛选条件，实际区分度主要来自“>30 天未购买”和“订单数 ≥3”这两项。另外，`days_since_last_buy` 仅反映购买间隔，无法还原“登录/浏览未下单”类的活跃，所以结果只能作为近似人群，若需精确口径仍需用户行为日志。",
       "run_error": null
     },
     {
-      "task_id": "rag_002",
+      "task_id": "rag_003",
       "category": "rag_search",
-      "question": "美妆类目用户发放什么权益？",
+      "question": "钻石会员有哪些专属折扣权益？",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -511,14 +573,14 @@
       ],
       "actual_tools": [
         "rag_search",
-        "execute_sql",
-        "rag_search"
+        "rag_search",
+        "execute_sql"
       ],
       "missing_tools": [],
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "100"
+        "9"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -529,12 +591,12 @@
           "error": null
         },
         {
-          "name": "execute_sql",
+          "name": "rag_search",
           "ok": true,
           "error": null
         },
         {
-          "name": "rag_search",
+          "name": "execute_sql",
           "ok": true,
           "error": null
         }
@@ -544,14 +606,14 @@
       "error_recovered": false,
       "steps": 3,
       "tool_call_count": 3,
-      "elapsed_s": 8.19,
-      "final_answer": "## 美妆类目用户权益（依据：运营SOP.md）\n\n**① 流失挽回场景（SOP 1.1–1.3）**\n- 触发条件：黑卡或金卡会员，且最近 30 天未产生购买行为，或客单价环比下降超过 40%\n- 权益发放：美妆类目用户自动发放**【无门槛 100 元美妆专用券】**；作为对比，数码类目发放【满 1000 减 150 全场通用券】\n- 配套动作：发券后 **24 小时内**由客服企微或电话一对一回访\n- 频次限制：每人每月最多触达 **2 次**\n\n**② 美妆品类专属关怀（SOP 3.1 / 3.2）**\n- 小样派发：**购买金额超过 1000 元的黑卡会员**，仓库随单附赠品牌限定小样 **3 件套**\n- 售后：签收后 **7 天内无理由退换货**，退款审核优先级调至最高\n\n**③ 通用（非美妆专属）**：物流超 72 小时未更新，补偿 20 元无门槛券或等值积分。\n\n## 库内 3 位美妆用户匹配情况\n\nSQL：`SELECT user_id, member_level, avg_amount, days_since_last_buy FROM user_profile_vectors WHERE top_category='美妆护肤' ORDER BY avg_amount DESC LIMIT 20`\n\n| 用户 | 城市/等级 | 客单价 | 距上次购买 | 建议权益 |\n|---|---|---|---|---|\n| 美妆达人 | 成都/黑卡 | 2190 元 | 5 天 | 未达 30 天门槛 → 不触发挽回券；但客单价>1000 且为黑卡，**下单随单附赠小样 3 件套** |\n| 最爱喝奶茶 | 上海/黑卡 | 1159.5 元 | 55 天 | **100 元美妆专用券 + 24h 内回访** |\n| 小仙女本仙 | 北京/金卡 | 810 元 | 31 天 | **100 元美妆专用券 + 24h 内回访**（刚过 30 天） |\n\n## 口径说明\n- 库内无绝对时间列，只能按 `days_since_last_buy`（0–153 天）判断“30 天未购买”；**客单价环比下降 40%** 这条触发条件因无时间序列数据，本库无法计算，需接入订单明细后校验。\n- 小样规则的“购买金额超过 1000 元”，我按客单价（avg_amount）理解；若按单笔订单金额判定，需订单明细表核对。",
+      "elapsed_s": 8.22,
+      "final_answer": "## 钻石会员权益（来源：member_benefits.md「钻石会员权益」章节）\n\n**你问的专属折扣：全场商品 9 折**，并且**不与平台活动价叠加**，也就是说，两种优惠不能同时使用，只能二选一。\n\n完整权益共 7 项：\n\n| # | 权益 | 钻石档标准 |\n|---|---|---|\n| 1 | 专属客服 | 7×24 小时一对一专属顾问，平均响应 1 分钟内 |\n| 2 | 全场免运费 | 不限订单金额、不限次数 |\n| 3 | **专属折扣** | **全场商品 9 折（不与平台活动价叠加）** |\n| 4 | 生日礼遇 | 生日当月赠 200 元无门槛券，当月消费双倍积分 |\n| 5 | 新品优先购 | 新品可提前 48 小时购买 |\n| 6 | 退换货延长 | 30 天无理由退换，质量问题来回运费全免 |\n| 7 | 积分加速 | 消费积分 2 倍累计 |\n\n**等级门槛**（member_benefits.md「等级划分标准」）：钻石会员 = 累计平均客单价 ≥ 14555 元（约前 5%），按 T+1 更新、升级后次日生效；无固定保级考核期，等级随累计客单价实时调整。\n库内核对结果（SQL）：钻石会员 403 人，平均客单价区间 14,555.44 ~ 49,304.50 元（均值 21,416.52），与门槛一致。\n\n**两条使用提醒**\n- 折扣与其他档位对比：黄金档无全场折扣（仅满 99 元免运费）、白银/普通档同样无折扣，所以 9 折是钻石档独有的价格权益，回答用户时可据此强调。\n- 客服口径：按 cs_sop.md「场景三：会员权益咨询」，应先查用户当前等级与权益有效期，再逐条解释；如用户接近升级，提示还差多少消费额（钻石门槛 14555 元），最后记录工单并标记「会员咨询」。\n\n> 说明：知识库未提及「黑卡」档的权益说明（库内仅 3 人，平均客单价 31,451 ~ 47,924 元），若需黑卡权益，建议向数据部-用户价值组确认，资料中暂无依据。",
       "run_error": null
     },
     {
-      "task_id": "rag_003",
+      "task_id": "rag_004",
       "category": "rag_search",
-      "question": "数码类目用户发放什么优惠券？",
+      "question": "钻石会员的累计平均客单价门槛是多少？",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -566,7 +628,7 @@
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "150"
+        "14555"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -587,14 +649,14 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 6.08,
-      "final_answer": "## 结论：数码类目用户发放【满 1000 减 150 全场通用券】\n\n**依据：运营SOP.md 第一章《高价值用户流失挽回策略》1.2 挽回动作**\n- 美妆类目用户：无门槛 100 元美妆专用券\n- **数码类目用户：满 1000 减 150 全场通用券**\n- 配套动作：券发放后 **24 小时内**由客服通过企微或电话一对一回访\n- 话术：以“最近少来逛、特地申请专属心意、有新品适合您”切入\n\n## 库内数码类目用户情况（SQL 实测，2 人）\n\n| 用户 | 城市 | 会员 | 客单价 | 距上次购买 | 是否适配该券 |\n|---|---|---|---|---|---|\n| 科技宅男 | 深圳 | 黑卡 | 4610 元 | 106 天 | ✅ 高客单（>P90=2674），106 天未回购，典型流失挽回对象，满 1000 减 150 几乎必用得上 |\n| 夜猫子 | 重庆 | 普通 | 450 元 | 45 天 | ⚠️ 客单价 450 元低于 1000 元门槛，该券对其吸引力弱，且 45 天未达明显流失 |\n\n## 两点执行提醒\n\n1. **这条券的适用场景是“流失挽回”**，并非所有数码类目用户的通用券。发券前需先圈定流失风险人群（例如距上次购买天数偏高的用户），避免把券发放给正常活跃用户。库里只有相对天数 `days_since_last_buy`，没有绝对日期，无法按年、月维度圈人。\n2. **夜猫子这类低客单数码用户**，满 1000 减 150 门槛高于其历史客单价（450 元），建议先做小额品类券或凑单引导，或先确认是否有更高门槛的细则。SOP 中没有其他档位的数码券规则，这部分需业务侧确认，我不能自行编造。\n\n如果你需要，我可以按 `days_since_last_buy` 划分全库流失分层，列出应发该券的完整名单。",
+      "elapsed_s": 5.19,
+      "final_answer": "**结论：钻石会员的门槛是「累计平均客单价 ≥ 14555 元」**（约前 5% 用户）。\n\n**依据一：知识库口径**（member_benefits.md「等级划分标准」）\n| 等级 | 累计平均客单价区间 |\n|---|---|\n| 黑卡 | 文档未给出（库内实测 ≥ 31451 元） |\n| 钻石 | **≥ 14555 元** |\n| 黄金 | 6680–14555 元 |\n| 白银 | 2495–6680 元 |\n| 普通 | < 2495 元 |\n\n另据同文档「会员升级与保级」：升级按累计平均客单价达标后 T+1 自动生效，无固定保级考核期，等级随累计平均客单价实时调整。\n\n**依据二：库内数据实测（印证口径一致）**\n```sql\nSELECT member_level, COUNT(*), MIN(avg_amount), MAX(avg_amount)\nFROM user_profile_vectors GROUP BY member_level;\n```\n| 等级 | 人数 | 最低 avg_amount | 最高 avg_amount |\n|---|---|---|---|\n| 黑卡 | 3 | 31451.64 | 47924.35 |\n| 钻石 | 403 | **14555.44** | 49304.50 |\n| 黄金 | 1217 | 6680.48 | 14551.01 |\n| 白银 | 2434 | 2495.30 | 6675.85 |\n| 普通 | 4053 | 20.38 | 2494.17 |\n\n钻石档实际最低值为 14555.44 元，与文档 14555 元门槛吻合；黄金档上限 14551.01 元刚好卡在其下，分档无重叠。\n\n注意：门槛衡量的是**累计平均客单价（avg_amount）**，不是累计总消费（total_amount）——两者在库里差别很大，例如钻石会员 total_amount 最低仅 14563.5 元而最高达 93859.78 元。若你要做升级提示，请用 avg_amount 判断缺口。",
       "run_error": null
     },
     {
-      "task_id": "rag_004",
+      "task_id": "rag_005",
       "category": "rag_search",
-      "question": "流失用户每月最多触达几次？",
+      "question": "商品质量问题在签收后多少天内可以退换？",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -603,48 +665,6 @@
       ],
       "actual_tools": [
         "rag_search",
-        "rag_search"
-      ],
-      "missing_tools": [],
-      "tool_selection_ok": true,
-      "tool_recall": 1.0,
-      "expected_keywords": [
-        "2"
-      ],
-      "missing_keywords": [],
-      "final_ok": true,
-      "tool_results": [
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
-        }
-      ],
-      "tool_execution_ok": 1.0,
-      "tool_errors": [],
-      "error_recovered": false,
-      "steps": 2,
-      "tool_call_count": 2,
-      "elapsed_s": 3.67,
-      "final_answer": "**结论：每人每月最多触达 2 次。**\n\n依据：《运营SOP.md》「一、高价值用户流失挽回策略 · 1.3 跟进频次」中写明“每人每月最多触达 2 次，避免过度打扰”。\n\n需要注意适用范围的界定：\n- 该频次限制挂在「高价值用户流失挽回」SOP 下，触发条件是：**黑卡或金卡会员，且最近 30 天未产生购买**，或者**客单价环比下降超过 40%**（同文档 1.1）。\n- 触达节奏参考（同文档 1.2）：先发券（美妆类为无门槛 100 元美妆券，数码类为满 1000 减 150 全场券），发券后 24 小时内由客服通过企微或电话进行一对一回访。\n- 知识库中没有针对“普通会员流失”单独规定的触达频次；如果需要对普通会员做唤醒，建议沿用“每人每月最多触达 2 次”的上限；这一点属于我的推断，并非 SOP 原文。\n\n若需要，我可以按 `days_since_last_buy >= 30` 且会员等级为黑卡或金卡的条件，查询本库中符合该挽回 SOP 的用户名单（注意：库内没有绝对时间列，只能按相对天数筛选）。",
-      "run_error": null
-    },
-    {
-      "task_id": "rag_005",
-      "category": "rag_search",
-      "question": "美妆商品签收后多少天内支持无理由退换货？",
-      "status": "COMPLETED",
-      "status_ok": true,
-      "task_success": true,
-      "expected_tools": [
-        "rag_search"
-      ],
-      "actual_tools": [
         "rag_search"
       ],
       "missing_tools": [],
@@ -660,163 +680,26 @@
           "name": "rag_search",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
       "steps": 2,
-      "tool_call_count": 1,
-      "elapsed_s": 2.78,
-      "final_answer": "**结论：美妆类商品签收后 7 天内支持无理由退换货**；同时退款审核优先级调至最高。\n\n依据：知识库文档《运营SOP.md》「三、美妆品类专属关怀 / 3.2 售后标准」原文：“美妆类商品签收后 7 天内支持无理由退换货，退款审核优先级调至最高。”\n\n补充说明：库内没有更细的例外条款（如拆封、临期品等），也没有订单级签收时间字段可用，因此无法针对具体用户或订单判断是否仍在 7 天窗口内。若需要，可按用户维度进一步排查。",
+      "tool_call_count": 2,
+      "elapsed_s": 5.41,
+      "final_answer": "**结论：默认在签收后 7 天内可以退换，但会员等级越高，期限会相应延长。**\n\n具体规则（来源：cs_sop.md「场景二：商品质量问题」、member_benefits.md）：\n\n| 会员等级 | 退换货期限 |\n|---|---|\n| 普通会员（基础标准） | 签收后 **7 天**（7 天无理由退换） |\n| 白银会员 | 10 天 |\n| 黄金会员 | 15 天 |\n| 钻石会员 | 30 天，且**质量问题来回运费全免** |\n\n处理质量问题的客服流程（cs_sop.md）：\n1. 请用户提供照片或视频证据；\n2. 确认在退换货期内（签收后 7 天，即标准期限；会员等级对应的延长权益也适用）；\n3. 提供换货或退款选项，**优先换货**；\n4. 若用户不满，升级至客服主管；\n5. 记录工单，标记“质量问题”。\n\n补充说明：\n- 库内文档只对“质量问题”明确写了签收后 7 天这一基础期限，并用“退换货延长”描述各等级的额外期限；没有单独针对质量问题的延长条款，因此判定时建议按“基础 7 天加会员等级的延长天数”合并计算；\n- 需要判断某个具体用户是否仍在退换货期内时，可以查询该用户的 `member_level` 和 `days_since_last_buy`（相对最后一次购买天数）。但请注意：表中只有相对天数，没有签收日期，只能做近似判断。如果你需要，我可以按会员等级统计还在 7 天内的用户数量。",
       "run_error": null
     },
     {
       "task_id": "multi_001",
       "category": "multi_tool",
-      "question": "查上海黑卡流失用户数量并计算占比",
-      "status": "COMPLETED",
-      "status_ok": true,
-      "task_success": true,
-      "expected_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "actual_tools": [
-        "rag_search",
-        "execute_sql",
-        "execute_sql",
-        "calculator",
-        "calculator",
-        "calculator",
-        "calculator"
-      ],
-      "missing_tools": [],
-      "tool_selection_ok": true,
-      "tool_recall": 1.0,
-      "expected_keywords": [
-        "100"
-      ],
-      "missing_keywords": [],
-      "final_ok": true,
-      "tool_results": [
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        }
-      ],
-      "tool_execution_ok": 1.0,
-      "tool_errors": [],
-      "error_recovered": false,
-      "steps": 4,
-      "tool_call_count": 7,
-      "elapsed_s": 9.58,
-      "final_answer": "## 结论\n\n**上海黑卡流失用户 = 1 人**\n\n统计定义来自《运营SOP.md》1.1 触发条件：黑卡或金卡会员，且最近 30 天未产生购买行为；对应字段为 `days_since_last_buy > 30`。\n\n| 口径 | 占比 |\n|---|---|\n| 上海黑卡会员内流失率 | 1/1 = **100%** |\n| 该用户在全部用户（9人）中占比 | 1/9 = **11.1%** |\n| 该用户在全部黑卡会员（3人）中占比 | 1/3 = **33.3%** |\n| 该用户在全部黑卡流失用户（2人）中占比 | 1/2 = **50%** |\n\n**明细（唯一命中用户）**：最爱喝奶茶 · 上海 · 黑卡 · 订单3笔 · 累计消费 3478.5 元 · 客单价 1159.5 元（介于 P50=810 和 P75=1160 之间，属中高客单）· 偏好美妆护肤 · 距上次购买 **55 天**。\n\n**执行建议**（依据 SOP 1.2、1.3）：该用户与 SOP 中的触发条件匹配，并且偏好美妆，因此应发放【无门槛 100 元美妆专用券】，在 24 小时内通过企微或电话进行一对一回访，话术按“最近少来逛了 + 专属心意 + 新品”模板；同一用户每月触达不超过 2 次。\n\n## 口径提示\n- 该库共 9 条用户记录，上海黑卡仅 1 人，样本极小，100% 的流失率只代表“这一人的状态”，不宜作为城市或等级层面的趋势结论。\n- 库中只有相对天数 `days_since_last_buy`（0–153 天），没有绝对时间列，因此无法回答“近3个月流失了多少”这类时间窗口问题，也无法预测未来流失。\n- 若您所说的“流失”另有定义（如 60/90 天未购），告诉我阈值，我可以按新阈值重算。\n\n依据：`rag_search(运营SOP.md 1.1/1.2/1.3)`、`execute_sql(user_profile_vectors 聚合与明细)`、`calculator` 占比运算。",
-      "run_error": null
-    },
-    {
-      "task_id": "multi_002",
-      "category": "multi_tool",
-      "question": "流失用户定义是什么，并统计当前流失用户数量",
-      "status": "COMPLETED",
-      "status_ok": true,
-      "task_success": true,
-      "expected_tools": [
-        "rag_search",
-        "execute_sql"
-      ],
-      "actual_tools": [
-        "rag_search",
-        "rag_search",
-        "execute_sql",
-        "execute_sql",
-        "calculator",
-        "calculator"
-      ],
-      "missing_tools": [],
-      "tool_selection_ok": true,
-      "tool_recall": 1.0,
-      "expected_keywords": [
-        "30"
-      ],
-      "missing_keywords": [],
-      "final_ok": true,
-      "tool_results": [
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        }
-      ],
-      "tool_execution_ok": 1.0,
-      "tool_errors": [],
-      "error_recovered": false,
-      "steps": 4,
-      "tool_call_count": 6,
-      "elapsed_s": 10.08,
-      "final_answer": "## 一、流失用户定义（库内口径）\n\n知识库**没有**独立的通用“流失用户”定义条款，唯一可用的判定口径出现在 `运营SOP.md` →「一、高价值用户流失挽回策略 / 1.1 触发条件」：\n\n> 当系统检测到“**黑卡**”或“**金卡**”会员，且**最近 30 天未产生购买行为**，或客单价环比下降超过 40% 时，触发此 SOP。\n\n因此严谨表述是：\n- **有明确口径的**：高价值（黑卡、金卡）用户 + 最近 30 天未购买 = 流失挽回触发人群；\n- **普通会员的流失定义、以及“沉睡、活跃”的完整分层阈值**，知识库中缺失，不能自行编造。若运营需要全量分层，建议先在 SOP 中补一条“全会员 N 天未购即判定流失”的统一口径。\n\n⚠️ 口径限制：库内只有相对天数 `days_since_last_buy`，无绝对时间列，所以“30 天未购”只能按该字段判断；且“客单价环比下降 40%”这一支需月度序列，当前库无法计算。\n\n## 二、流失用户数量统计\n\n`user_profile_vectors` 共 9 位用户（SQL 依据：`SELECT COUNT(*), SUM(CASE WHEN days_since_last_buy>=30 …)`）。\n\n| 口径 | 人数 | 说明 |\n|---|---|---|\n| 全部用户 ≥30 天未购 | **5 人** | 占 9 人中的 55.6% |\n| 黑卡、金卡且 ≥30 天未购（SOP 口径） | **3 人** | 占有有效天数用户（7 人）的 42.9% |\n| ≥60 天未购 | 2 人 | — |\n| ≥90 天未购 | 2 人 | — |\n\n**SOP 口径下的 3 位流失高价值用户**（按最近购买天数降序）：\n\n| 用户 | 会员等级 | 距上次购买 | 累计消费 | 客单价 |\n|---|---|---|---|---|\n| 科技宅男 | 黑卡 | 106 天 | 9220 元 | 4610 元 |\n| 最爱喝奶茶 | 黑卡 | 55 天 | 3478.5 元 | 1159.5 元 |\n| 小仙女本仙 | 金卡 | 31 天 | 2430 元 | 810 元 |\n\n另有 2 人为全量 ≥30 天口径下的流失：吃货一号（等级字段为 NaN，153 天）、夜猫子（普通，45 天）。\n\n## 三、数据质量提醒\n\n- **路人甲、穿搭博主** 的 `days_since_last_buy` 为 **NULL**，无法判定是否流失，已从占比分母中排除（故用 7 人而非 9 人）；其中穿搭博主是**金卡**会员，属高价值人群，建议先补齐该字段再做召回判定。\n- 吃货一号会员等级为 “NaN”（缺失），影响其是否进入高价值挽回名单。\n\n## 四、按 SOP 可执行动作\n\n对上述 3 位高价值流失用户：科技宅男（数码家电偏好）发【满 1000 减 150 全场通用券】；最爱喝奶茶、小仙女本仙涉及美妆类目发【无门槛 100 元美妆专用券】；券发出后 24 小时内企微或电话一对一回访，每人每月触达不超过 2 次。",
-      "run_error": null
-    },
-    {
-      "task_id": "multi_003",
-      "category": "multi_tool",
-      "question": "黑卡用户占总用户的比例是多少？",
+      "question": "统计黑卡用户数量，并计算黑卡用户占总用户的比例",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -826,15 +709,14 @@
       ],
       "actual_tools": [
         "execute_sql",
-        "execute_sql",
-        "calculator",
-        "execute_sql"
+        "calculator"
       ],
       "missing_tools": [],
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "33"
+        "3",
+        "0.03"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -845,17 +727,7 @@
           "error": null
         },
         {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
           "name": "calculator",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
           "ok": true,
           "error": null
         }
@@ -864,45 +736,44 @@
       "tool_errors": [],
       "error_recovered": false,
       "steps": 3,
-      "tool_call_count": 4,
-      "elapsed_s": 4.33,
-      "final_answer": "**黑卡用户占 33.3%（9 人中有 3 人）**\n\n依据 `user_profile_vectors` 表（`SELECT member_level, COUNT(*) ... GROUP BY member_level`）：\n\n| 会员等级 | 人数 | 占比 |\n|---|---|---|\n| 黑卡 | 3 | 33.3% |\n| 普通 | 3 | 33.3% |\n| 金卡 | 2 | 22.2% |\n| 未知（NaN） | 1 | 11.1% |\n| **合计** | **9** | 100% |\n\n计算：3 ÷ 9 × 100 = 33.33%。\n\n两点说明：\n1. **样本极小**：总用户仅 9 人（该表是非脱敏的示例画像库），3÷9 的比例波动很大，不宜直接外推为整体黑卡用户占比。\n2. **口径提醒**：有 1 条记录的会员等级为空（“NaN”）。上表把“未知”计入了分母，得到 3/9 = 33.3%；若剔除未知等级，仅在有明确等级的用户中计算，则为 3÷8 = 37.5%。如需对外汇报，建议明确采用哪一种口径。",
+      "tool_call_count": 2,
+      "elapsed_s": 3.92,
+      "final_answer": "统计结果如下：\n\n| 指标 | 数值 |\n|---|---|\n| 总用户数 | 8,110 |\n| 黑卡用户数 | 3 |\n| 黑卡占比 | 约 0.037%（3 ÷ 8110 × 100 ≈ 0.03699%） |\n\n依据：\n- SQL：`SELECT COUNT(*) AS total_users, SUM(CASE WHEN member_level='黑卡' THEN 1 ELSE 0 END) AS black_card_users FROM user_profile_vectors LIMIT 10`，返回结果（8110, 3）；\n- 占比由 calculator 计算：3 / 8110 × 100 ≈ 0.03699%。\n\n说明：黑卡用户仅 3 人，属于极少量群体（钻石 403 人、黄金 1217 人、白银 2434 人、普通 4053 人），任何针对黑卡的画像统计都容易受个体影响，不宜做比例类结论。",
       "run_error": null
     },
     {
-      "task_id": "multi_004",
+      "task_id": "multi_002",
       "category": "multi_tool",
-      "question": "上海用户中黑卡用户占比是多少？",
+      "question": "流失预警用户的定义是什么？同时统计黑卡用户数量",
       "status": "COMPLETED",
       "status_ok": true,
-      "task_success": false,
+      "task_success": true,
       "expected_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "actual_tools": [
-        "execute_sql",
         "rag_search",
         "execute_sql"
       ],
-      "missing_tools": [
-        "calculator"
+      "actual_tools": [
+        "rag_search",
+        "execute_sql",
+        "execute_sql"
       ],
-      "tool_selection_ok": false,
-      "tool_recall": 0.5,
+      "missing_tools": [],
+      "tool_selection_ok": true,
+      "tool_recall": 1.0,
       "expected_keywords": [
-        "100"
+        "30",
+        "3"
       ],
       "missing_keywords": [],
       "final_ok": true,
       "tool_results": [
         {
-          "name": "execute_sql",
+          "name": "rag_search",
           "ok": true,
           "error": null
         },
         {
-          "name": "rag_search",
+          "name": "execute_sql",
           "ok": true,
           "error": null
         },
@@ -917,14 +788,104 @@
       "error_recovered": false,
       "steps": 3,
       "tool_call_count": 3,
-      "elapsed_s": 5.39,
-      "final_answer": "**结论：上海用户中黑卡占比 = 1/1 = 100%，但样本仅 1 人，参考意义有限。**\n\n数据依据\n\n| 指标 | 数值 |\n|---|---|\n| 上海用户总数 | 1 |\n| 其中黑卡会员 | 1 |\n| 黑卡占比 | 100% |\n\n- 明细查询（`SELECT city, member_level, COUNT(*) ... WHERE city='上海' GROUP BY ...`）：上海仅 1 条画像，会员等级为「黑卡」，对应用户「最爱喝奶茶」（3 单、总消费 3478 元、客单 1160 元、偏好美妆护肤，与知识库检索结果一致）。\n- 汇总查询（`COUNT(*)` + `SUM(CASE WHEN member_level='黑卡' ...)`）同样返回 1 / 1。\n\n口径提示\n- 该库只有 9 条用户画像，城市分布为每城 1 人，因此任何单城占比只可能是 0% 或 100%，不能代表真实客群的会员结构。\n- `member_level` 字段存在 1 条缺失（NaN），本次上海用户等级有值，不影响统计。\n- 若要看有意义的会员结构，建议看全库：黑卡 3 人 / 9 人 ≈ 33.3%（如需精确结果我可以再跑一次全库分布 SQL）。",
+      "elapsed_s": 5.75,
+      "final_answer": "已完成两项查询。\n\n## 一、流失预警用户的定义（知识库依据）\n\n来源：`wiki_vectors` → `tag_definitions.md`（相似度 0.68）\n\n> **定义**：近 30 天未活跃，且历史客单价 > 500 元，且累计购买次数 ≥ 3 次。\n> 更新频率：T+1；负责人：数据部-用户留存组；用途：召回活动、定向优惠券发放。\n\n需要注意两点口径边界：\n- 知识库中的“未活跃”指行为层面的活跃，包括浏览、加购等；而本库只有 `days_since_last_buy`（距最后一次购买的天数）这一个相对天数指标，**没有浏览或加购行为表**，因此只能用“距最后购买 > 30 天”作为近似代理指标，两者并不完全等价。\n- 知识库中的“流失预警用户”不同于营销手册里的“流失客”（> 90 天无行为），后者的触达策略是流失第 91、120 天发送回归礼包。\n\n## 二、黑卡用户数量\n\n```sql\nSELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '黑卡';\n```\n结果：**3 人**（与表结构中黑卡计数一致，占 8110 人的约 0.04%）。\n\n## 三、附：按上述口径的近似统计（参考）\n\n```sql\nSELECT COUNT(*) FROM user_profile_vectors\nWHERE days_since_last_buy > 30 AND avg_amount > 500 AND order_count >= 3;\n```\n结果：**2616 人**（约占全库 8110 人的 32.3%）。\n\n说明：该数字是基于“距最后购买 > 30 天”的近似口径，并非官方标签值（画像表未预置流失预警标签字段）；若需精确口径，需接入用户行为表（浏览/加购）后重算。",
+      "run_error": null
+    },
+    {
+      "task_id": "multi_003",
+      "category": "multi_tool",
+      "question": "统计普通用户数量，并计算普通用户占总用户的比例",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "actual_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "tool_selection_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "4053",
+        "49"
+      ],
+      "missing_keywords": [],
+      "final_ok": true,
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 4.33,
+      "final_answer": "**结果**\n\n| 指标 | 数值 |\n|---|---|\n| 普通会员用户数 | 4,053 人 |\n| 总用户数 | 8,110 人 |\n| 普通用户占比 | 约 **49.98%**（4053 ÷ 8110 × 100） |\n\n**依据**\n- SQL：`SELECT COUNT(*) AS total_users, SUM(CASE WHEN member_level='普通' THEN 1 ELSE 0 END) AS normal_users FROM user_profile_vectors LIMIT 10`，返回 8110 / 4053。\n- 占比由计算器得出：4053 / 8110 × 100 = 49.9753…% ≈ 49.98%。\n\n补充：普通用户是占比最大的会员等级，接近一半；其余依次为白银 2,434、黄金 1,217、钻石 403、黑卡 3（按表结构统计口径）。",
+      "run_error": null
+    },
+    {
+      "task_id": "multi_004",
+      "category": "multi_tool",
+      "question": "统计上海用户中钻石用户的数量，并计算其占上海用户的比例",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "actual_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "tool_selection_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "32",
+        "4.6"
+      ],
+      "missing_keywords": [],
+      "final_ok": true,
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 3.83,
+      "final_answer": "**结果（基于 user_profile_vectors 表实测数据）**\n\n- 上海用户总数：**686 人**\n- 其中钻石会员：**32 人**\n- 占上海用户比例：**4.66%**（32 ÷ 686）\n\nSQL 依据：\n```sql\nSELECT COUNT(*) AS total_sh,\n       SUM(CASE WHEN member_level='钻石' THEN 1 ELSE 0 END) AS diamond_sh\nFROM user_profile_vectors\nWHERE city='上海' LIMIT 10;\n-- total_sh=686, diamond_sh=32\n```\n\n补充参考：全库钻石会员仅 403 人，占全部 8110 用户的约 4.97%，上海钻石占比（4.66%）略低于全库水平，可作为高价值用户运营的对照口径。",
       "run_error": null
     },
     {
       "task_id": "multi_005",
       "category": "multi_tool",
-      "question": "黑卡用户总数是多少？同时告诉我美妆类目发放什么权益",
+      "question": "统计钻石用户数量，并告诉我钻石会员的专属折扣权益",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -934,14 +895,15 @@
       ],
       "actual_tools": [
         "execute_sql",
-        "rag_search"
+        "rag_search",
+        "calculator"
       ],
       "missing_tools": [],
       "tool_selection_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "3",
-        "100"
+        "403",
+        "9"
       ],
       "missing_keywords": [],
       "final_ok": true,
@@ -955,15 +917,20 @@
           "name": "rag_search",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 2,
-      "tool_call_count": 2,
-      "elapsed_s": 3.84,
-      "final_answer": "**1）黑卡用户总数：3 人**\n\n依据 SQL：\n```sql\nSELECT COUNT(*) AS black_card_users FROM user_profile_vectors WHERE member_level = '黑卡' LIMIT 10;\n-- 结果：3\n```\n\n**2）美妆类目相关权益（来自知识库 运营SOP.md）**\n\n- **流失挽回场景的权益发放**（SOP 1.2 挽回动作）：针对美妆类目用户，系统自动发放 **【无门槛 100 元美妆专用券】**；作为对照，数码类目发放【满 1000 减 150 全场通用券】。配套动作是客服在券发放后 24 小时内通过企微或电话一对一回访。\n- **美妆品类售后关怀**（SOP 3.2）：美妆商品签收后 **7 天内支持无理由退换货**，退款审核优先级调至最高。\n\n**注意口径**：SOP 中的“无门槛 100 元美妆券”是**高价值用户流失挽回**场景下的动作，并非面向所有美妆用户的通用权益；是否触发需依据流失判定规则（本库只有 `days_since_last_buy` 相对天数，无绝对日期）。所以这两条不能直接合并为“美妆用户常规权益”。",
+      "steps": 3,
+      "tool_call_count": 3,
+      "elapsed_s": 6.16,
+      "final_answer": "## 一、钻石会员数量\n\n依据 SQL：`SELECT member_level, COUNT(*) FROM user_profile_vectors GROUP BY member_level`\n\n| 会员等级 | 人数 |\n|---|---|\n| 普通 | 4053 |\n| 白银 | 2434 |\n| 黄金 | 1217 |\n| **钻石** | **403** |\n| 黑卡 | 3 |\n| 合计 | 8110 |\n\n- **钻石会员共 403 人**，占全部 8110 名用户的 **4.97%**（403/8110）。\n- 金字塔结构很典型：普通 50.0% > 白银 30.0% > 黄金 15.0% > 钻石 5.0% > 黑卡仅 3 人（0.04%）。\n\n## 二、钻石会员专属折扣权益\n\n依据知识库 `member_benefits.md`「钻石会员权益」章节，钻石会员的**折扣类权益**为：\n\n- **专属折扣：全场商品 9 折（不与平台活动价叠加）** —— 这是唯一的直接价格折扣，注意不与平台活动价叠加，实际让利以二者中更低者为准。\n\n同一层级还包含的其他权益（非折扣，但常与折扣权益一起说明）：\n1. 专属客服：7×24 小时一对一专属顾问，平均 1 分钟内响应；\n2. 全场免运费：不限订单金额、不限次数；\n3. 生日礼遇：生日当月赠 200 元无门槛券，当月消费双倍积分；\n4. 新品优先购：新品发布可提前 48 小时购买；\n5. 退换货延长：30 天无理由退换，质量问题来回运费全免；\n6. 积分加速：消费积分 2 倍累计。\n\n> 说明：知识库中未定义“黑卡”权益，也未提供折扣权益的有效期或起止规则，这部分无法从现有资料中回答。另需注意本库只有相对天数 `days_since_last_buy`，无绝对时间维度，因此不能给出钻石会员数量的时间趋势。",
       "run_error": null
     }
   ]
