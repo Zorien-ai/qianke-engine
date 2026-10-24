@@ -1,0 +1,222 @@
+[
+  {
+    "id": "CALC-01",
+    "module": "calculator",
+    "question": "计算 (156000 - 128000) / 128000 * 100",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["calculator"],
+      "final_must_contain": ["21"]
+    },
+    "acceptance": "使用 calculator 计算增长率，结果约为 21.875"
+  },
+  {
+    "id": "CALC-02",
+    "module": "calculator",
+    "question": "1280 的 15% 是多少？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["calculator"],
+      "final_must_contain": ["192"]
+    },
+    "acceptance": "使用 calculator 计算 1280 * 0.15"
+  },
+  {
+    "id": "CALC-03",
+    "module": "calculator",
+    "question": "计算 3478.5 除以 3",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["calculator"],
+      "final_must_contain": ["1159.5"]
+    },
+    "acceptance": "使用 calculator 做除法"
+  },
+  {
+    "id": "CALC-04",
+    "module": "calculator",
+    "question": "计算 1200 乘以 0.8，再减去 200",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["calculator"],
+      "final_must_contain": ["760"]
+    },
+    "acceptance": "使用 calculator 计算复合表达式"
+  },
+  {
+    "id": "CALC-05",
+    "module": "calculator",
+    "question": "10000 到 15600 的增长率是多少？请用百分比表示",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["calculator"],
+      "final_must_contain": ["56"]
+    },
+    "acceptance": "使用 calculator 计算 (15600-10000)/10000*100"
+  },
+  {
+    "id": "RAG-01",
+    "module": "rag_search",
+    "question": "高价值用户怎么定义？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["rag_search"],
+      "final_must_contain": ["90"]
+    },
+    "acceptance": "调用 rag_search 检索定义，回答应包含近 90 天口径"
+  },
+  {
+    "id": "RAG-02",
+    "module": "rag_search",
+    "question": "流失预警的判定标准是什么？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["rag_search"],
+      "final_must_contain": ["30"]
+    },
+    "acceptance": "调用 rag_search 检索 SOP，回答应包含最近 30 天未购买"
+  },
+  {
+    "id": "RAG-03",
+    "module": "rag_search",
+    "question": "美妆类目用户发放什么权益？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["rag_search"],
+      "final_must_contain": ["100"]
+    },
+    "acceptance": "调用 rag_search 检索美妆权益，回答应包含 100 元美妆券"
+  },
+  {
+    "id": "RAG-04",
+    "module": "rag_search",
+    "question": "数码类目用户发放什么优惠券？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["rag_search"],
+      "final_must_contain": ["150"]
+    },
+    "acceptance": "调用 rag_search 检索数码权益，回答应包含满 1000 减 150"
+  },
+  {
+    "id": "RAG-05",
+    "module": "rag_search",
+    "question": "流失用户每月最多触达几次？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["rag_search"],
+      "final_must_contain": ["2"]
+    },
+    "acceptance": "调用 rag_search 检索触达频次，回答应为 2 次"
+  },
+  {
+    "id": "SQL-01",
+    "module": "execute_sql",
+    "question": "统计当前数据集里的用户总数",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql"],
+      "final_must_contain": ["9"]
+    },
+    "acceptance": "调用 execute_sql 统计 user_profile_vectors"
+  },
+  {
+    "id": "SQL-02",
+    "module": "execute_sql",
+    "question": "统计黑卡用户数量",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql"],
+      "final_must_contain": ["3"]
+    },
+    "acceptance": "调用 execute_sql 按 member_level 过滤"
+  },
+  {
+    "id": "SQL-03",
+    "module": "execute_sql",
+    "question": "统计上海用户数量",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql"],
+      "final_must_contain": ["1"]
+    },
+    "acceptance": "调用 execute_sql 按 city 过滤"
+  },
+  {
+    "id": "SQL-04",
+    "module": "execute_sql",
+    "question": "按会员等级统计用户数量",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql"],
+      "final_must_contain": ["黑卡", "普通"]
+    },
+    "acceptance": "调用 execute_sql 做 GROUP BY member_level"
+  },
+  {
+    "id": "SQL-05",
+    "module": "execute_sql",
+    "question": "按城市统计用户数量",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql"],
+      "final_must_contain": ["上海"]
+    },
+    "acceptance": "调用 execute_sql 做 GROUP BY city"
+  },
+  {
+    "id": "COL-01",
+    "module": "collaboration",
+    "question": "查上海黑卡流失用户数量并计算占比",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql", "calculator"],
+      "final_must_contain": ["100"]
+    },
+    "acceptance": "SQL 查数量，Calculator 算占比"
+  },
+  {
+    "id": "COL-02",
+    "module": "collaboration",
+    "question": "流失用户定义是什么，并统计当前流失用户数量",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["rag_search", "execute_sql"],
+      "final_must_contain": ["30"]
+    },
+    "acceptance": "RAG 取口径，SQL 统计数量"
+  },
+  {
+    "id": "COL-03",
+    "module": "collaboration",
+    "question": "黑卡用户占总用户的比例是多少？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql", "calculator"],
+      "final_must_contain": ["33"]
+    },
+    "acceptance": "SQL 取黑卡/总用户，Calculator 算比例"
+  },
+  {
+    "id": "COL-04",
+    "module": "collaboration",
+    "question": "上海用户中黑卡用户占比是多少？",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql", "calculator"],
+      "final_must_contain": ["100"]
+    },
+    "acceptance": "SQL 取上海黑卡/上海用户，Calculator 算比例"
+  },
+  {
+    "id": "COL-05",
+    "module": "collaboration",
+    "question": "黑卡用户总数是多少？同时解释高价值用户定义",
+    "expected": {
+      "status": "COMPLETED",
+      "required_tools": ["execute_sql", "rag_search"],
+      "final_must_contain": ["3"]
+    },
+    "acceptance": "SQL 统计黑卡数量，RAG 解释高价值用户定义"
+  }
+]
