@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 """Agent 架构、Tool Contract 与 LangGraph 路由单测（不调真实 LLM / 数据库）。"""
+from decimal import Decimal
+
+import pytest
 from langchain_core.messages import AIMessage
 
 from rag_demo.agent import loop
 from rag_demo.agent.registry import get_tool_contracts, get_tool_schemas, get_tools
-from rag_demo.agent.state import AgentState
+from rag_demo.agent.state import AgentConfig, AgentState, AgentStatus
 from rag_demo.agent.tool import ToolResult
 from rag_demo.agent.tools.calculator import calculator
 from rag_demo.agent.tools.rag import rag_search
 from rag_demo.agent.tools.sql import execute_sql
 from rag_demo.tools.sql_tool import _json_value
-from decimal import Decimal
 
 
 def test_tool_result_contract():
@@ -91,12 +93,25 @@ def test_sql_contract_success_and_error(monkeypatch):
             "columns": [],
             "rows": [],
             "row_count": 0,
-            "error": "SQL 校验失败：仅允许 SELECT/WITH",
+            "error": {
+                "code": "SQL_VALIDATION_ERROR",
+                "message": "SQL 校验失败：仅允许 SELECT/WITH",
+            },
         },
     )
     bad = execute_sql.invoke({"sql": "DELETE FROM user_profile_vectors"})
     assert bad["ok"] is False
     assert bad["error"]["code"] == "SQL_VALIDATION_ERROR"
+
+
+def test_sql_bottom_returns_structured_error_without_string_matching():
+    from rag_demo.tools.sql_tool import execute_sql_dict
+
+    result = execute_sql_dict("DELETE FROM user_profile_vectors")
+    assert result["error"] == {
+        "code": "SQL_VALIDATION_ERROR",
+        "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表",
+    }
 
 
 def test_rag_contract_has_results_and_no_final_answer(monkeypatch):
@@ -121,21 +136,89 @@ def test_rag_contract_has_results_and_no_final_answer(monkeypatch):
 
 
 def test_state_contract_and_graph_shape():
-    graph = loop.build_graph().get_graph()
+    graph = loop.build_graph(AgentConfig(max_steps=3)).get_graph()
     assert {"chatbot", "tools"} <= set(graph.nodes)
     assert any(e.source == "chatbot" and e.target == "tools" for e in graph.edges)
     assert any(e.source == "tools" and e.target == "chatbot" for e in graph.edges)
     assert AgentState.__annotations__["messages"]
     assert AgentState.__annotations__["step_count"]
+    assert AgentState.__annotations__["status"]
+    assert AgentState.__annotations__["tool_call_count"]
 
 
-def test_should_continue_routes_tool_calls_and_stops_at_max():
+def test_agent_config_validation():
+    with pytest.raises(ValueError, match="max_steps"):
+        AgentConfig(max_steps=0)
+    with pytest.raises(ValueError, match="max_tool_calls"):
+        AgentConfig(max_tool_calls=0)
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        AgentConfig(timeout_seconds=0)
+
+
+def test_should_continue_routes_tool_calls_and_stops_on_terminal():
     tool_call = {"name": "calculator", "args": {"expression": "1+1"}, "id": "c1", "type": "tool_call"}
     state = {
         "messages": [AIMessage(content="", tool_calls=[tool_call])],
-        "step_count": 1,
+        "status": AgentStatus.RUNNING.value,
     }
     assert loop.should_continue(state) == "tools"
 
-    state["step_count"] = loop.MAX_STEPS
+    state["status"] = AgentStatus.MAX_STEPS_EXCEEDED.value
     assert loop.should_continue(state) == "__end__"
+
+
+class _FakeLLM:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = 0
+
+    def invoke(self, messages):
+        self.calls += 1
+        return self._responses.pop(0)
+
+
+def _tool_call_message():
+    return AIMessage(content="", tool_calls=[{
+        "name": "calculator",
+        "args": {"expression": "2+3"},
+        "id": "call_1",
+        "type": "tool_call",
+    }])
+
+
+def test_run_agent_uses_config_and_completes(monkeypatch):
+    fake = _FakeLLM([_tool_call_message(), AIMessage(content="结果是 5")])
+    monkeypatch.setattr(loop, "get_llm", lambda: fake)
+    monkeypatch.setattr(loop, "build_system_prompt", lambda: "sys")
+
+    result = loop.run_agent("2+3 等于多少？", config=AgentConfig(max_steps=4))
+
+    assert result["status"] == AgentStatus.COMPLETED.value
+    assert result["final_answer"] == "结果是 5"
+    assert result["steps"] == 2
+    assert result["tool_call_count"] == 1
+    assert fake.calls == 2
+
+
+def test_run_agent_max_steps_is_configurable(monkeypatch):
+    fake = _FakeLLM([_tool_call_message(), _tool_call_message(), _tool_call_message()])
+    monkeypatch.setattr(loop, "get_llm", lambda: fake)
+    monkeypatch.setattr(loop, "build_system_prompt", lambda: "sys")
+
+    result = loop.run_agent("一直算", config=AgentConfig(max_steps=1))
+
+    assert result["status"] == AgentStatus.MAX_STEPS_EXCEEDED.value
+    assert "最大推理步数" in result["final_answer"]
+    assert fake.calls == 1
+
+
+def test_run_agent_max_tool_calls_status(monkeypatch):
+    fake = _FakeLLM([_tool_call_message(), _tool_call_message()])
+    monkeypatch.setattr(loop, "get_llm", lambda: fake)
+    monkeypatch.setattr(loop, "build_system_prompt", lambda: "sys")
+
+    result = loop.run_agent("一直算", config=AgentConfig(max_steps=5, max_tool_calls=1))
+
+    assert result["status"] == AgentStatus.MAX_TOOL_CALLS_EXCEEDED.value
+    assert "最大工具调用次数" in result["final_answer"]
+    assert fake.calls == 1

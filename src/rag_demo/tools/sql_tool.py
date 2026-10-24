@@ -149,11 +149,15 @@ def _json_value(value):
     return value
 
 
+SQL_VALIDATION_ERROR = "SQL_VALIDATION_ERROR"
+SQL_EXECUTION_ERROR = "SQL_EXECUTION_ERROR"
+
+
 def execute_sql_dict(sql: str) -> dict:
     """执行只读 SQL，返回列名 + dict 行（供 Agent Tool 的 JSON Contract 使用）。
 
-    错误以 ``{"error": "..."}`` 返回，不抛给 Agent；调用方统一映射成
-    ToolError code。SQL 必须通过 validate_sql。
+    error 是结构化对象：``{"code": "...", "message": "..."}``，调用方
+    不需要靠错误字符串猜类型。SQL 必须通过 validate_sql。
     """
     if not validate_sql(sql):
         return {
@@ -161,7 +165,10 @@ def execute_sql_dict(sql: str) -> dict:
             "columns": [],
             "rows": [],
             "row_count": 0,
-            "error": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表",
+            "error": {
+                "code": SQL_VALIDATION_ERROR,
+                "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表",
+            },
         }
 
     conn = get_readonly_conn()
@@ -190,7 +197,10 @@ def execute_sql_dict(sql: str) -> dict:
             "columns": [],
             "rows": [],
             "row_count": 0,
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": {
+                "code": SQL_EXECUTION_ERROR,
+                "message": f"{type(exc).__name__}: {exc}",
+            },
         }
     finally:
         conn.rollback()

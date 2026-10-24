@@ -1146,11 +1146,10 @@ def marketing_copy(
 
 
 @app.post("/api/agent/run")
-def agent_run(req: AgentRunIn, request: Request) -> dict:
-    """LangGraph 多智能体：主管 → 数据分析师 → 文案专家。
+def agent_run(req: AgentRunIn) -> dict:
+    """LangGraph Agent Runtime：chatbot ↔ tools（RAG / SQL / Calculator）。
 
-    Tool 仍调用既有 /api/wizard/query 与底层 hybrid_search；
-    本接口只负责数据集/身份上下文与 LangGraph 编排。
+    只保留一套 Agent 实现：`rag_demo.agent`。旧 Supervisor 实现已移除。
     """
     query = (req.query or "").strip()
     if not query:
@@ -1159,21 +1158,36 @@ def agent_run(req: AgentRunIn, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="需求太长了（超过 500 字），请精简后再试")
 
     dataset = _agent_dataset()
-    from agent.service import run_agent
+    from rag_demo.agent.loop import run_agent
 
-    base = str(request.base_url).rstrip("/")
-    cookie = request.cookies.get(auth.SESSION_COOKIE)
     try:
-        result = run_agent(
-            query,
-            dataset=dataset,
-            api_base=base,
-            auth_cookie=f"{auth.SESSION_COOKIE}={cookie}" if cookie else None,
-        )
+        result = run_agent(query)
     except Exception as exc:  # noqa: BLE001 - 给前端一句可读错误，不暴露栈
         logger.exception("Agent 运行失败 dataset=%s", dataset)
         raise HTTPException(status_code=502, detail=f"Agent 运行失败：{exc}") from exc
-    return {"ok": True, "dataset": dataset, **result}
+
+    steps = []
+    for call in result.get("tool_calls", []):
+        steps.append({
+            "agent": call.get("name", "tool"),
+            "label": "Agent Tool",
+            "status": "done",
+            "message": f"调用工具：{call.get('name')}",
+        })
+
+    return {
+        "ok": True,
+        "dataset": dataset,
+        "user_query": query,
+        "final_reply": result.get("final_answer", ""),
+        "status": result.get("status"),
+        "tool_calls": result.get("tool_calls", []),
+        "steps": steps,
+        # 前端旧展示字段：新 Runtime 不做营销候选卡，留空占位
+        "profiles": {},
+        "sop": {},
+        "user_cards": [],
+    }
 
 
 @app.post("/search")

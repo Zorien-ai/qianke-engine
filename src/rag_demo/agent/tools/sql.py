@@ -25,9 +25,15 @@ def run_sql(sql: str) -> dict[str, Any]:
 
 def _sql_adapter(sql: str) -> dict[str, Any]:
     result = run_sql(sql)
-    if result.get("error"):
-        message = str(result["error"])
-        code = "SQL_VALIDATION_ERROR" if "校验失败" in message else "SQL_EXECUTION_ERROR"
+    error = result.get("error")
+    if error:
+        # 底层已经返回结构化错误，不在 Agent 层用 message 猜错误类型。
+        if isinstance(error, dict):
+            code = error.get("code") or "SQL_EXECUTION_ERROR"
+            message = error.get("message") or str(error)
+        else:  # 兼容极旧的调用方，但正常路径不会走这里
+            code = "SQL_EXECUTION_ERROR"
+            message = str(error)
         return ToolResult.failure(
             code,
             message,

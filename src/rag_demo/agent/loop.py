@@ -1,7 +1,8 @@
-"""LangGraph Agent 主循环：chatbot ↔ tools，最多 5 步。"""
+"""LangGraph Agent 主循环：chatbot ↔ tools，带 Runtime Config 与终态。"""
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -10,11 +11,18 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from rag_demo.agent.registry import get_tools
-from rag_demo.agent.state import AgentState
+from rag_demo.agent.state import AgentConfig, AgentState, AgentStatus
 
 logger = logging.getLogger(__name__)
 
-MAX_STEPS = 5
+MAX_STEPS = AgentConfig().max_steps
+_TERMINAL_STATUSES = {
+    AgentStatus.COMPLETED.value,
+    AgentStatus.MAX_STEPS_EXCEEDED.value,
+    AgentStatus.MAX_TOOL_CALLS_EXCEEDED.value,
+    AgentStatus.TIMEOUT.value,
+    AgentStatus.FAILED.value,
+}
 
 SYSTEM_PROMPT = """你是千客引擎的电商运营分析 Agent。
 
@@ -61,35 +69,13 @@ def get_llm():
     return _llm_cache
 
 
-def chatbot_node(state: AgentState) -> dict[str, Any]:
-    """LLM 节点：决定是否调用工具或直接回答。"""
-    step = int(state.get("step_count") or 0)
-    if step >= MAX_STEPS:
-        return {
-            "messages": [
-                AIMessage(
-                    content=f"已达到最大推理步数（{MAX_STEPS}），未能完成全部工具调用。"
-                )
-            ],
-            "step_count": step,
-        }
-
-    response = get_llm().invoke(state["messages"])
+def _terminate(state: AgentState, status: AgentStatus, message: str) -> dict[str, Any]:
+    """生成明确的终态，而不是把“超限”伪装成普通 AI 回答。"""
     return {
-        "messages": [response],
-        "step_count": step + 1,
+        "messages": [AIMessage(content=message)],
+        "status": status.value,
+        "error": message,
     }
-
-
-def should_continue(state: AgentState) -> str:
-    """条件边：有 tool_calls 且未超过步数 → tools；否则 END。"""
-    if int(state.get("step_count") or 0) >= MAX_STEPS:
-        return END
-    messages = state.get("messages") or []
-    if not messages:
-        return END
-    last = messages[-1]
-    return "tools" if getattr(last, "tool_calls", None) else END
 
 
 def build_system_prompt() -> str:
@@ -107,10 +93,68 @@ def build_system_prompt() -> str:
     return f"{SYSTEM_PROMPT}\n\n【当前数据库表结构】\n{schema}"
 
 
-def build_graph():
-    """构建并编译 LangGraph。"""
+def make_chatbot_node(config: AgentConfig):
+    """按 Runtime Config 生成 chatbot 节点。"""
+
+    def chatbot_node(state: AgentState) -> dict[str, Any]:
+        step = int(state.get("step_count") or 0)
+        tool_count = int(state.get("tool_call_count") or 0)
+        started_at = float(state.get("started_at") or time.monotonic())
+
+        if time.monotonic() - started_at > config.timeout_seconds:
+            return _terminate(
+                state,
+                AgentStatus.TIMEOUT,
+                f"已达到运行超时（{config.timeout_seconds:.0f}s），未能完成回答。",
+            )
+        if step >= config.max_steps:
+            return _terminate(
+                state,
+                AgentStatus.MAX_STEPS_EXCEEDED,
+                f"已达到最大推理步数（{config.max_steps}），未能完成全部工具调用。",
+            )
+        if tool_count >= config.max_tool_calls:
+            return _terminate(
+                state,
+                AgentStatus.MAX_TOOL_CALLS_EXCEEDED,
+                f"已达到最大工具调用次数（{config.max_tool_calls}），未能完成回答。",
+            )
+
+        response = get_llm().invoke(state["messages"])
+        calls = getattr(response, "tool_calls", None) or []
+        next_tool_count = tool_count + len(calls)
+        status = AgentStatus.RUNNING.value if calls else AgentStatus.COMPLETED.value
+        error = None
+        if calls and next_tool_count > config.max_tool_calls:
+            status = AgentStatus.MAX_TOOL_CALLS_EXCEEDED.value
+            error = f"工具调用次数超过上限（{config.max_tool_calls}），已停止执行。"
+        return {
+            "messages": [response],
+            "step_count": step + 1,
+            "tool_call_count": next_tool_count,
+            "status": status,
+            "error": error,
+        }
+
+    return chatbot_node
+
+
+def should_continue(state: AgentState) -> str:
+    """条件边：终态结束；有 tool_calls → tools；否则 END。"""
+    if state.get("status") in _TERMINAL_STATUSES:
+        return END
+    messages = state.get("messages") or []
+    if not messages:
+        return END
+    last = messages[-1]
+    return "tools" if getattr(last, "tool_calls", None) else END
+
+
+def build_graph(config: AgentConfig | None = None):
+    """构建并编译 LangGraph；运行时可传不同 AgentConfig。"""
+    config = config or AgentConfig()
     graph = StateGraph(AgentState)
-    graph.add_node("chatbot", chatbot_node)
+    graph.add_node("chatbot", make_chatbot_node(config))
     graph.add_node("tools", ToolNode(get_tools()))
 
     graph.add_edge(START, "chatbot")
@@ -123,21 +167,36 @@ def build_graph():
     return graph.compile()
 
 
-def run_agent(question: str, *, max_steps: int = MAX_STEPS) -> dict[str, Any]:
-    """执行一轮 Agent，返回最终答案与完整消息轨迹，供日志/前端使用。"""
-    if max_steps != MAX_STEPS:
-        # 当前 StateGraph 使用模块级上限；保留参数用于显式拒绝错误配置
-        raise ValueError(f"max_steps 必须是 {MAX_STEPS}")
-
-    graph = build_graph()
+def run_agent(question: str, config: AgentConfig | None = None) -> dict[str, Any]:
+    """执行一轮 Agent，返回最终答案、状态与完整消息轨迹。"""
+    config = config or AgentConfig()
+    graph = build_graph(config)
     initial: AgentState = {
         "messages": [
             SystemMessage(content=build_system_prompt()),
             HumanMessage(content=question),
         ],
         "step_count": 0,
+        "tool_call_count": 0,
+        "status": AgentStatus.RUNNING.value,
+        "error": None,
+        "started_at": time.monotonic(),
     }
-    state = graph.invoke(initial)
+
+    try:
+        state = graph.invoke(initial)
+    except Exception as exc:  # noqa: BLE001 - Runtime 不把异常裸抛给 API
+        logger.exception("Agent 执行失败")
+        return {
+            "question": question,
+            "final_answer": "",
+            "steps": 0,
+            "tool_call_count": 0,
+            "tool_calls": [],
+            "messages": [],
+            "status": AgentStatus.FAILED.value,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
     messages = state.get("messages") or []
     final = ""
@@ -154,17 +213,25 @@ def run_agent(question: str, *, max_steps: int = MAX_STEPS) -> dict[str, Any]:
                 "args": call.get("args"),
             })
 
+    status = state.get("status") or AgentStatus.FAILED.value
+    if not final and status == AgentStatus.COMPLETED.value:
+        status = AgentStatus.FAILED.value
     return {
         "question": question,
         "final_answer": final,
         "steps": int(state.get("step_count") or 0),
+        "tool_call_count": int(state.get("tool_call_count") or 0),
         "tool_calls": tool_calls,
         "messages": messages,
+        "status": status,
+        "error": state.get("error"),
     }
 
 
 __all__ = [
+    "AgentConfig",
     "AgentState",
+    "AgentStatus",
     "MAX_STEPS",
     "SYSTEM_PROMPT",
     "build_graph",
