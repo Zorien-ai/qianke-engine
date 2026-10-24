@@ -17,7 +17,10 @@ dependencies = [
     "huggingface-hub>=1.33.0",
     "jieba>=0.42.1",
     "langchain>=1.4.3",
+    "langchain-core>=1.6.7",
+    "langchain-openai>=0.3",
     "langchain-text-splitters>=1.1.3",
+    "langgraph>=1.2.14",
     "matplotlib>=3.11.2",
     "modelscope>=1.40.1",
     "openai>=3.26.0",
@@ -63,5 +66,5 @@ dev = [
 # 只收 tests/ 下的单测：src/rag_demo/tests 里是历史评测脚本（要模型/数据/网络），
 # 不是 pytest 用例，被自动收进来会一跑就红。
 testpaths = ["tests"]
-# 让源码目录可直接导入，无需先安装为包；也避免不同机器的 cwd 影响导入。
-pythonpath = ["src"]
+# 让源码目录与仓库根的 agent/ 包都可直接导入，无需先安装为包。
+pythonpath = ["src", "."]

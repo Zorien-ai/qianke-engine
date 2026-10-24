@@ -1259,6 +1259,8 @@ def query(req: QueryRequest) -> dict:
         # sources 直接用生成层的产出（编号 + 来源名 + 片段），
         # 正文里的 [来源N] 与它的下标一一对应，前端据此做「点引用跳出处」
         "sources": sources,
+        # 画像卡片供 Agent / 前端展示结构化结果；原有调用方可忽略
+        "user_cards": result.get("user_cards", []),
         "route": result.get("route"),
         "busy": False,
         "cached": bool(result.get("cached")),

@@ -14,6 +14,8 @@
 """
 import logging
 import re
+from datetime import date, datetime
+from decimal import Decimal
 
 from rag_demo.config import SQL_FETCH_MAX
 from rag_demo.db.connection import get_readonly_conn
@@ -132,6 +134,68 @@ def execute_sql(sql: str) -> list[tuple]:
     finally:
         conn.rollback()  # 清理查询事务，避免连接长期停在 idle in transaction
         cur.close()
+
+
+def _json_value(value):
+    """把 psycopg2 返回的 Decimal/date 转成 JSON-compatible 值。"""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_value(v) for v in value]
+    return value
+
+
+def execute_sql_dict(sql: str) -> dict:
+    """执行只读 SQL，返回列名 + dict 行（供 Agent Tool 的 JSON Contract 使用）。
+
+    错误以 ``{"error": "..."}`` 返回，不抛给 Agent；调用方统一映射成
+    ToolError code。SQL 必须通过 validate_sql。
+    """
+    if not validate_sql(sql):
+        return {
+            "sql": sql,
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "error": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表",
+        }
+
+    conn = get_readonly_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SET statement_timeout = '{STATEMENT_TIMEOUT}'")
+        cur.execute(sql)
+        columns = [desc[0] for desc in (cur.description or [])]
+        raw_rows = cur.fetchmany(SQL_FETCH_MAX)
+        rows = [
+            {str(col): _json_value(value) for col, value in zip(columns, row)}
+            for row in raw_rows
+        ]
+        logger.info("SQL(dict) 执行完成，返回 %d 行（上限 %d）", len(rows), SQL_FETCH_MAX)
+        return {
+            "sql": sql,
+            "columns": columns,
+            "rows": rows,
+            "row_count": len(rows),
+            "error": None,
+        }
+    except Exception as exc:  # noqa: BLE001 - 交给 Agent 映射错误码
+        logger.error("SQL(dict) 执行失败: %s", exc)
+        return {
+            "sql": sql,
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    finally:
+        conn.rollback()
+        cur.close()
+
 
 
 def query(question: str) -> dict:

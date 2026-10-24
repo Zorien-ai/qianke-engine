@@ -244,6 +244,7 @@ def get_conn(dataset: str | None = None):
 _ro_conns: dict[str, "psycopg2.extensions.connection"] = {}
 # 已建角色 + 授权的数据集（进程级）。授权本身是持久的，这里只避免重复发 DDL。
 _ro_ready: set[str] = set()
+_ro_lock = threading.Lock()
 
 
 def readonly_params(dataset: str | None = None) -> dict:
@@ -270,6 +271,13 @@ def ensure_readonly_access(dataset: str | None = None) -> str:
     这就是 Text2SQL 那条路的最终边界。
     """
     name = _resolve(dataset)
+    # ToolNode 会并行执行多个 SQL 工具；Role 授权必须串行，否则 PostgreSQL
+    # 会对并发 ALTER ROLE / GRANT 报 "tuple concurrently updated"。
+    with _ro_lock:
+        return _ensure_readonly_access_locked(name)
+
+
+def _ensure_readonly_access_locked(name: str) -> str:
     if name in _ro_ready:
         return name
 

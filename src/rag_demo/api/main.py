@@ -59,7 +59,7 @@ from rag_demo.api.demo_showcase import (
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
 from rag_demo.api.wizard import register_wizard
-from rag_demo.cache import answer_cache
+from rag_demo.cache import answer_cache, dataset_data_version
 from rag_demo.config import (
     DEFAULT_API_ROLE,
     DEFAULT_DATASET,
@@ -559,6 +559,28 @@ class EvalRunIn(BaseModel):
 class MarketingCopyIn(BaseModel):
     question: str
     user_ids: list[str] = []
+
+
+class AgentRunIn(BaseModel):
+    query: str
+
+
+def _agent_dataset() -> str:
+    """Agent 入口的数据集：管理员调试库 / 企业库；离线模式用环境变量。"""
+    account = _require_login()
+    if account is None:
+        return os.environ.get("QIANKE_AGENT_DATASET", "test")
+    if account.get("is_demo"):
+        raise HTTPException(
+            status_code=403,
+            detail="演示体验账号只读：Agent 需要可构建的用户数据空间",
+        )
+    if account.get("is_system_admin"):
+        return "test"
+    dataset = account.get("dataset")
+    if not dataset:
+        raise HTTPException(status_code=403, detail="当前账号还没有绑定数据空间")
+    return dataset
 
 
 def _brief(hits: list[dict], text_len: int = 90) -> list[dict]:
@@ -1123,6 +1145,37 @@ def marketing_copy(
     return {"dataset": dataset, **data}
 
 
+@app.post("/api/agent/run")
+def agent_run(req: AgentRunIn, request: Request) -> dict:
+    """LangGraph 多智能体：主管 → 数据分析师 → 文案专家。
+
+    Tool 仍调用既有 /api/wizard/query 与底层 hybrid_search；
+    本接口只负责数据集/身份上下文与 LangGraph 编排。
+    """
+    query = (req.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="请输入要分析的运营需求")
+    if len(query) > 500:
+        raise HTTPException(status_code=400, detail="需求太长了（超过 500 字），请精简后再试")
+
+    dataset = _agent_dataset()
+    from agent.service import run_agent
+
+    base = str(request.base_url).rstrip("/")
+    cookie = request.cookies.get(auth.SESSION_COOKIE)
+    try:
+        result = run_agent(
+            query,
+            dataset=dataset,
+            api_base=base,
+            auth_cookie=f"{auth.SESSION_COOKIE}={cookie}" if cookie else None,
+        )
+    except Exception as exc:  # noqa: BLE001 - 给前端一句可读错误，不暴露栈
+        logger.exception("Agent 运行失败 dataset=%s", dataset)
+        raise HTTPException(status_code=502, detail=f"Agent 运行失败：{exc}") from exc
+    return {"ok": True, "dataset": dataset, **result}
+
+
 @app.post("/search")
 def search(
     req: SearchRequest,
@@ -1439,6 +1492,7 @@ def qa_stream(
             key = answer_cache.make_key(
                 search_question, dept, req.retriever, limit,
                 req.deep_thinking, dataset=dataset, history_key=history_key,
+                data_version=dataset_data_version(dataset),
             )
             hit = answer_cache.get(key)
             if hit is not None:
@@ -2279,5 +2333,5 @@ if __name__ == "__main__":
     uvicorn.run(
         app,
         host=os.environ.get("RAG_HOST", "0.0.0.0"),
-        port=int(os.environ.get("RAG_PORT", "8500")),
+        port=int(os.environ.get("RAG_PORT", "8000")),
     )
