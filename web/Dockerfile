@@ -13,7 +13,9 @@ WORKDIR /app
 
 # 先复制依赖清单，利用 Docker 层缓存：代码改动不会重复 npm install
 COPY web/package*.json ./
-RUN npm install --no-audit --no-fund
+# 阿里云服务器使用国内 npm 镜像，避免 npm install 卡住
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install --no-audit --no-fund
 
 # 再复制前端源码（node_modules / dist 由 .dockerignore 排除）
 COPY web/ ./
@@ -25,9 +27,8 @@ RUN npm run build
 # ---------- 阶段 2：Nginx 托管 ----------
 FROM nginx:alpine AS runtime
 
-# 安装 wget 用于容器健康检查（nginx:alpine 自带 busybox wget 也可以，
-# 这里显式安装 curl/wget，避免不同基础镜像差异）
-RUN apk add --no-cache curl
+# nginx:alpine 自带 busybox wget，健康检查不再额外安装 curl
+# （Alpine 源在国内也可能很慢，能省一步是一步）
 
 # 项目根目录的 nginx.conf：静态站点 + 反向代理 + gzip + TLS
 COPY nginx.conf /etc/nginx/conf.d/default.conf
@@ -38,6 +39,6 @@ COPY --from=build /app/dist /usr/share/nginx/html/v2
 EXPOSE 80 443
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -fsS http://127.0.0.1/healthz || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1/healthz || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]
