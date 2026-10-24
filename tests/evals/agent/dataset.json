@@ -1,0 +1,167 @@
+{
+  "version": "agent-eval-v0.1",
+  "dataset": "test",
+  "description": "20 个 Agent Task：calculator 5、execute_sql 5、rag_search 5、multi-tool 5；安全类暂不纳入。",
+  "tasks": [
+    {
+      "task_id": "calc_001",
+      "category": "calculator",
+      "question": "计算 (156000 - 128000) / 128000 * 100",
+      "expected_tools": ["calculator"],
+      "expected_keywords": ["21"],
+      "expected_success": true
+    },
+    {
+      "task_id": "calc_002",
+      "category": "calculator",
+      "question": "1280 的 15% 是多少？",
+      "expected_tools": ["calculator"],
+      "expected_keywords": ["192"],
+      "expected_success": true
+    },
+    {
+      "task_id": "calc_003",
+      "category": "calculator",
+      "question": "计算 3478.5 除以 3",
+      "expected_tools": ["calculator"],
+      "expected_keywords": ["1159.5"],
+      "expected_success": true
+    },
+    {
+      "task_id": "calc_004",
+      "category": "calculator",
+      "question": "计算 1200 乘以 0.8，再减去 200",
+      "expected_tools": ["calculator"],
+      "expected_keywords": ["760"],
+      "expected_success": true
+    },
+    {
+      "task_id": "calc_005",
+      "category": "calculator",
+      "question": "10000 到 15600 的增长率是多少？请用百分比表示",
+      "expected_tools": ["calculator"],
+      "expected_keywords": ["56"],
+      "expected_success": true
+    },
+    {
+      "task_id": "sql_001",
+      "category": "execute_sql",
+      "question": "统计当前数据集里的用户总数",
+      "expected_tools": ["execute_sql"],
+      "expected_keywords": ["9"],
+      "expected_success": true
+    },
+    {
+      "task_id": "sql_002",
+      "category": "execute_sql",
+      "question": "统计黑卡用户数量",
+      "expected_tools": ["execute_sql"],
+      "expected_keywords": ["3"],
+      "expected_success": true
+    },
+    {
+      "task_id": "sql_003",
+      "category": "execute_sql",
+      "question": "统计上海用户数量",
+      "expected_tools": ["execute_sql"],
+      "expected_keywords": ["1"],
+      "expected_success": true
+    },
+    {
+      "task_id": "sql_004",
+      "category": "execute_sql",
+      "question": "按会员等级统计用户数量",
+      "expected_tools": ["execute_sql"],
+      "expected_keywords": ["黑卡", "普通"],
+      "expected_success": true
+    },
+    {
+      "task_id": "sql_005",
+      "category": "execute_sql",
+      "question": "按城市统计用户数量",
+      "expected_tools": ["execute_sql"],
+      "expected_keywords": ["上海"],
+      "expected_success": true
+    },
+    {
+      "task_id": "rag_001",
+      "category": "rag_search",
+      "question": "流失预警的判定标准是什么？",
+      "expected_tools": ["rag_search"],
+      "expected_keywords": ["30"],
+      "expected_success": true
+    },
+    {
+      "task_id": "rag_002",
+      "category": "rag_search",
+      "question": "美妆类目用户发放什么权益？",
+      "expected_tools": ["rag_search"],
+      "expected_keywords": ["100"],
+      "expected_success": true
+    },
+    {
+      "task_id": "rag_003",
+      "category": "rag_search",
+      "question": "数码类目用户发放什么优惠券？",
+      "expected_tools": ["rag_search"],
+      "expected_keywords": ["150"],
+      "expected_success": true
+    },
+    {
+      "task_id": "rag_004",
+      "category": "rag_search",
+      "question": "流失用户每月最多触达几次？",
+      "expected_tools": ["rag_search"],
+      "expected_keywords": ["2"],
+      "expected_success": true
+    },
+    {
+      "task_id": "rag_005",
+      "category": "rag_search",
+      "question": "美妆商品签收后多少天内支持无理由退换货？",
+      "expected_tools": ["rag_search"],
+      "expected_keywords": ["7"],
+      "expected_success": true
+    },
+    {
+      "task_id": "multi_001",
+      "category": "multi_tool",
+      "question": "查上海黑卡流失用户数量并计算占比",
+      "expected_tools": ["execute_sql", "calculator"],
+      "expected_keywords": ["100"],
+      "expected_success": true
+    },
+    {
+      "task_id": "multi_002",
+      "category": "multi_tool",
+      "question": "流失用户定义是什么，并统计当前流失用户数量",
+      "expected_tools": ["rag_search", "execute_sql"],
+      "expected_keywords": ["30"],
+      "expected_success": true
+    },
+    {
+      "task_id": "multi_003",
+      "category": "multi_tool",
+      "question": "黑卡用户占总用户的比例是多少？",
+      "expected_tools": ["execute_sql", "calculator"],
+      "expected_keywords": ["33"],
+      "expected_success": true
+    },
+    {
+      "task_id": "multi_004",
+      "category": "multi_tool",
+      "question": "上海用户中黑卡用户占比是多少？",
+      "expected_tools": ["execute_sql", "calculator"],
+      "expected_keywords": ["100"],
+      "expected_success": true
+    },
+    {
+      "task_id": "multi_005",
+      "category": "multi_tool",
+      "question": "黑卡用户总数是多少？同时告诉我美妆类目发放什么权益",
+      "expected_tools": ["execute_sql", "rag_search"],
+      "expected_keywords": ["3", "100"],
+      "expected_success": true
+    }
+  ]
+}

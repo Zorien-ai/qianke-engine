@@ -1,0 +1,150 @@
+"""Agent Eval evaluator：真实 Agent 轨迹 -> Task / Tool / Recovery 指标。"""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+
+def _json_content(content: Any) -> dict[str, Any]:
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        try:
+            parsed = json.loads(content)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def tool_observations(messages: list[Any]) -> list[dict[str, Any]]:
+    """从 LangGraph 消息里提取每次工具结果是否成功。"""
+    observations: list[dict[str, Any]] = []
+    for message in messages or []:
+        if getattr(message, "type", "") != "tool":
+            continue
+        payload = _json_content(getattr(message, "content", None))
+        observations.append({
+            "name": getattr(message, "name", None) or payload.get("name") or "unknown",
+            "ok": bool(payload.get("ok")),
+            "error": payload.get("error"),
+        })
+    return observations
+
+
+def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """评价单个任务。"""
+    expected = [str(x) for x in (task.get("expected_tools") or [])]
+    expected_set = set(expected)
+    actual_calls = [
+        str(call.get("name"))
+        for call in (result.get("tool_calls") or [])
+        if call.get("name")
+    ]
+    actual_set = set(actual_calls)
+    missing_tools = sorted(expected_set - actual_set)
+    tool_selection_ok = not missing_tools
+    tool_recall = len(expected_set & actual_set) / len(expected_set) if expected_set else 1.0
+
+    final = str(result.get("final_answer") or "")
+    keywords = [str(x) for x in (task.get("expected_keywords") or [])]
+    missing_keywords = [word for word in keywords if word not in final]
+    final_ok = not missing_keywords
+
+    observations = tool_observations(result.get("messages") or [])
+    executed = [item for item in observations if item.get("ok") is not None]
+    executed_ok = [item for item in observations if item.get("ok")]
+    tool_errors = [item for item in observations if not item.get("ok")]
+    tool_execution_ok = (
+        len(executed_ok) / len(executed) if executed else (1.0 if not actual_calls else 0.0)
+    )
+
+    status = result.get("status")
+    status_ok = status == "COMPLETED"
+    task_success = bool(
+        task.get("expected_success", True)
+        and status_ok
+        and tool_selection_ok
+        and final_ok
+    )
+    error_recovered = bool(tool_errors and task_success)
+
+    return {
+        "task_id": task.get("task_id"),
+        "category": task.get("category"),
+        "question": task.get("question"),
+        "status": status,
+        "status_ok": status_ok,
+        "task_success": task_success,
+        "expected_tools": expected,
+        "actual_tools": actual_calls,
+        "missing_tools": missing_tools,
+        "tool_selection_ok": tool_selection_ok,
+        "tool_recall": tool_recall,
+        "expected_keywords": keywords,
+        "missing_keywords": missing_keywords,
+        "final_ok": final_ok,
+        "tool_results": observations,
+        "tool_execution_ok": tool_execution_ok,
+        "tool_errors": tool_errors,
+        "error_recovered": error_recovered,
+        "steps": result.get("steps"),
+        "tool_call_count": result.get("tool_call_count"),
+        "elapsed_s": result.get("elapsed_s"),
+        "final_answer": final,
+        "run_error": result.get("run_error"),
+    }
+
+
+def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(results)
+    passed = sum(1 for r in results if r.get("task_success"))
+    tool_selection_passed = sum(1 for r in results if r.get("tool_selection_ok"))
+    observations = [
+        item
+        for r in results
+        for item in (r.get("tool_results") or [])
+    ]
+    executed_errors = [
+        item
+        for r in results
+        for item in (r.get("tool_errors") or [])
+    ]
+    error_cases = [r for r in results if r.get("tool_errors")]
+    recovered_cases = [r for r in error_cases if r.get("error_recovered")]
+
+    steps = [r.get("steps") for r in results if isinstance(r.get("steps"), int)]
+    calls = [r.get("tool_call_count") for r in results if isinstance(r.get("tool_call_count"), int)]
+    elapsed = [r.get("elapsed_s") for r in results if isinstance(r.get("elapsed_s"), (int, float))]
+
+    modules: dict[str, dict[str, Any]] = {}
+    for r in results:
+        row = modules.setdefault(str(r.get("category") or "未分类"), {"total": 0, "passed": 0})
+        row["total"] += 1
+        row["passed"] += int(bool(r.get("task_success")))
+
+    return {
+        "total": total,
+        "passed": passed,
+        "task_success_rate": passed / total if total else 0.0,
+        "tool_selection_accuracy": tool_selection_passed / total if total else 0.0,
+        "tool_execution_success": (
+            sum(1 for item in observations if item.get("ok")) / len(observations)
+            if observations else 0.0
+        ),
+        "error_recovery": (
+            len(recovered_cases) / len(error_cases) if error_cases else None
+        ),
+        "error_cases": len(error_cases),
+        "tool_error_count": len(executed_errors),
+        "avg_steps": sum(steps) / len(steps) if steps else 0.0,
+        "avg_tool_calls": sum(calls) / len(calls) if calls else 0.0,
+        "avg_elapsed_s": sum(elapsed) / len(elapsed) if elapsed else 0.0,
+        "modules": {
+            name: {
+                **row,
+                "task_success_rate": row["passed"] / row["total"] if row["total"] else 0.0,
+            }
+            for name, row in sorted(modules.items())
+        },
+    }
