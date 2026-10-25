@@ -14,7 +14,7 @@ import evaluator  # noqa: E402
 
 
 def test_dataset_uses_demo_and_has_20_tasks():
-    payload = json.loads((AGENT_EVAL_DIR / "dataset.json").read_text(encoding="utf-8"))
+    payload = json.loads((AGENT_EVAL_DIR / "regression" / "dataset.v1.json").read_text(encoding="utf-8"))
     assert payload["dataset"] == "demo"
     assert len(payload["tasks"]) == 20
     counts = {}
@@ -25,6 +25,23 @@ def test_dataset_uses_demo_and_has_20_tasks():
         "execute_sql": 5,
         "rag_search": 5,
         "multi_tool": 5,
+    }
+
+
+def test_benchmark_has_40_tasks_and_expected_distribution():
+    payload = json.loads((AGENT_EVAL_DIR / "benchmark" / "dataset.v1.json").read_text(encoding="utf-8"))
+    tasks = payload["tasks"]
+    assert payload["dataset"] == "demo"
+    assert len(tasks) == 40
+    counts = {}
+    for task in tasks:
+        counts[task["category"]] = counts.get(task["category"], 0) + 1
+    assert counts == {
+        "execute_sql": 10,
+        "rag_search": 8,
+        "multi_tool": 12,
+        "negative": 6,
+        "calculator": 4,
     }
 
 
@@ -110,3 +127,100 @@ def test_error_recovery_only_counts_error_cases():
     summary = evaluator.summarize([scored])
     assert summary["error_recovery"] == 1.0
     assert summary["error_cases"] == 1
+
+
+def test_negative_case_supports_any_refusal_and_number_guard():
+    task = {
+        "task_id": "neg-x",
+        "category": "negative",
+        "question": "统计没有的数据",
+        "expected_tools": [],
+        "expected_keywords_any": ["无法", "没有", "不存在"],
+        "must_not_contain_numbers": True,
+        "allowed_numbers": ["90"],
+        "expected_success": True,
+    }
+    safe = {
+        "status": "COMPLETED",
+        "tool_calls": [],
+        "messages": [],
+        "final_answer": "当前数据没有对应字段，无法给出具体人数，需补充数据。",
+    }
+    bad = {
+        "status": "COMPLETED",
+        "tool_calls": [],
+        "messages": [],
+        "final_answer": "无法精确统计，但按活跃用户推算约 430 人。",
+    }
+    safe_scored = evaluator.evaluate_task(task, safe)
+    bad_scored = evaluator.evaluate_task(task, bad)
+    assert safe_scored["task_success"] is True
+    assert bad_scored["task_success"] is False
+    assert "430" in bad_scored["disallowed_numbers"]
+
+
+def test_negative_semantic_guard_allows_facts_but_rejects_approx_results():
+    task = {
+        "task_id": "neg-y",
+        "category": "negative",
+        "question": "统计触达人数",
+        "expected_tools": [],
+        "expected_keywords_any": ["无法", "没有", "不存在"],
+        "must_not_contain_numbers": True,
+        "allowed_numbers": ["8110", "36"],
+        "must_not_contain_approx_numbers": True,
+        "expected_success": True,
+    }
+    fact = {
+        "status": "COMPLETED",
+        "tool_calls": [],
+        "messages": [],
+        "final_answer": "数据只有 8110 条画像、36 个知识块，没有触达字段，无法统计。",
+    }
+    fabricated = {
+        "status": "COMPLETED",
+        "tool_calls": [],
+        "messages": [],
+        "final_answer": "无法精确统计，估算触达约 36 人。",
+    }
+    fact_scored = evaluator.evaluate_task(task, fact)
+    fabricated_scored = evaluator.evaluate_task(task, fabricated)
+    assert fact_scored["task_success"] is True
+    assert fabricated_scored["task_success"] is False
+    assert "36" in fabricated_scored["approx_numbers"]
+
+
+def test_negative_result_unit_guard_catches_clear_fabrication():
+    task = {
+        "task_id": "neg-z",
+        "category": "negative",
+        "question": "统计触达人数",
+        "expected_tools": [],
+        "expected_keywords_any": ["无法", "没有", "不存在"],
+        "must_not_contain_numbers": True,
+        "allowed_numbers": ["8110", "36"],
+        "must_not_contain_approx_numbers": True,
+        "forbidden_result_units": ["人"],
+        "expected_success": True,
+    }
+    fact = {
+        "status": "COMPLETED",
+        "tool_calls": [],
+        "messages": [],
+        "final_answer": "数据只有 8110 位用户的画像，没有触达字段，无法统计。",
+    }
+    clear_fake = {
+        "status": "COMPLETED",
+        "tool_calls": [],
+        "messages": [],
+        "final_answer": "没有触达记录，但触达 8110 人。",
+    }
+    forecast = {
+        "status": "COMPLETED",
+        "tool_calls": [],
+        "messages": [],
+        "final_answer": "无法预测，预计仍为 403 人左右。",
+    }
+    assert evaluator.evaluate_task(task, fact)["task_success"] is True
+    assert evaluator.evaluate_task(task, clear_fake)["task_success"] is False
+    assert evaluator.evaluate_task(task, forecast)["task_success"] is False

@@ -2,7 +2,47 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_APPROX_RE = re.compile(
+    r"(?:约|大约|预计|预测|估算|估计|推算|大概|接近|左右|约为)"
+    r"\s*[^。！？\n]{0,8}?(\d+(?:\.\d+)?)\s*"
+    r"(?:人|位|名|%|元|万元|天|倍|次|笔|单|个)"
+)
+_RESULT_CLAIM_RE = re.compile(
+    r"(?:触达|退货率|预测|预计|估算|推算|数量|人数|约为|为)"
+    r"\s*[^。！？\n]{0,8}?(\d+(?:\.\d+)?)\s*"
+    r"(人|位|名|%|元|万元|天|倍|次|笔|单|个)"
+)
+
+
+def _numbers(text: str) -> list[str]:
+    return _NUMBER_RE.findall(text or "")
+
+
+def _approximate_numbers(text: str) -> list[str]:
+    return _APPROX_RE.findall(text or "")
+
+
+def _result_claim_numbers(text: str, units: list[str]) -> list[str]:
+    wanted = set(units)
+    return [
+        number
+        for number, unit in _RESULT_CLAIM_RE.findall(text or "")
+        if unit in wanted
+    ]
+
+
+def _allowed_number(token: str, allowed: list[str]) -> bool:
+    """允许 90 命中 90.0 这类格式差异。"""
+    if token in allowed:
+        return True
+    try:
+        return any(float(token) == float(item) for item in allowed)
+    except (TypeError, ValueError):
+        return False
 
 
 def _json_content(content: Any) -> dict[str, Any]:
@@ -49,7 +89,32 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
     final = str(result.get("final_answer") or "")
     keywords = [str(x) for x in (task.get("expected_keywords") or [])]
     missing_keywords = [word for word in keywords if word not in final]
-    final_ok = not missing_keywords
+    keywords_any = [str(x) for x in (task.get("expected_keywords_any") or [])]
+    hit_any = [word for word in keywords_any if word in final]
+    missing_any = [] if not keywords_any or hit_any else keywords_any
+    disallowed_numbers: list[str] = []
+    if task.get("must_not_contain_numbers"):
+        allowed_numbers = [str(x) for x in (task.get("allowed_numbers") or [])]
+        disallowed_numbers = [
+            token for token in _numbers(final) if not _allowed_number(token, allowed_numbers)
+        ]
+    approx_numbers: list[str] = []
+    if task.get("must_not_contain_approx_numbers"):
+        # 语义护栏：允许引用事实数字，但禁止“约/预计/估算 + 数字”的结果型表达。
+        approx_numbers = _approximate_numbers(final)
+        for token in approx_numbers:
+            if token not in disallowed_numbers:
+                disallowed_numbers.append(token)
+
+    result_claim_numbers: list[str] = []
+    forbidden_units = [str(x) for x in (task.get("forbidden_result_units") or [])]
+    if forbidden_units:
+        result_claim_numbers = _result_claim_numbers(final, forbidden_units)
+        for token in result_claim_numbers:
+            if token not in disallowed_numbers:
+                disallowed_numbers.append(token)
+
+    final_ok = not missing_keywords and not missing_any and not disallowed_numbers
 
     observations = tool_observations(result.get("messages") or [])
     executed = [item for item in observations if item.get("ok") is not None]
@@ -82,8 +147,18 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         "tool_selection_ok": tool_selection_ok,
         "tool_recall": tool_recall,
         "expected_keywords": keywords,
+        "expected_keywords_any": keywords_any,
         "missing_keywords": missing_keywords,
+        "missing_keywords_any": missing_any,
+        "must_not_contain_numbers": bool(task.get("must_not_contain_numbers")),
+        "allowed_numbers": [str(x) for x in (task.get("allowed_numbers") or [])],
+        "disallowed_numbers": disallowed_numbers,
+        "approx_numbers": approx_numbers,
+        "result_claim_numbers": result_claim_numbers,
+        "must_not_contain_approx_numbers": bool(task.get("must_not_contain_approx_numbers")),
+        "forbidden_result_units": [str(x) for x in (task.get("forbidden_result_units") or [])],
         "final_ok": final_ok,
+        "manual_review": list(task.get("manual_review") or []),
         "tool_results": observations,
         "tool_execution_ok": tool_execution_ok,
         "tool_errors": tool_errors,
