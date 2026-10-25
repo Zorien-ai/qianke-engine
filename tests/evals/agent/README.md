@@ -105,6 +105,8 @@ tests/evals/agent/benchmark/results/benchmark_v1.json
 tests/evals/agent/benchmark/reports/benchmark_v1.md
 ```
 
+基线人工复核说明：[benchmark/baseline_notes.md](benchmark/baseline_notes.md)。
+
 ## 结果判定
 
 ```text
