@@ -124,12 +124,13 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
             if token not in disallowed_numbers:
                 disallowed_numbers.append(token)
 
-    final_ok = not missing_keywords and not missing_any and not disallowed_numbers
     observed_fact_numbers = _observed_fact_numbers(final)
-    business_disallowed = [
+    fact_aware_disallowed = [
         token for token in disallowed_numbers
         if token not in observed_fact_numbers
     ]
+    final_ok = not missing_keywords and not missing_any and not fact_aware_disallowed
+    business_disallowed = fact_aware_disallowed
     business_final_ok = not missing_keywords and not missing_any and not business_disallowed
 
     observations = tool_observations(result.get("messages") or [])

@@ -12,11 +12,11 @@
 | Business Correctness | **100.0%** |
 | Tool Policy Compliance | **100.0%** |
 | Tool Selection Accuracy | **100.0%** |
-| Tool Execution Success | **68.9%** |
-| Error Recovery | 100.0% |
-| 平均 Steps | 2.75 |
-| 平均 Tool Calls | 2.25 |
-| 平均耗时 | 5.3s |
+| Tool Execution Success | **100.0%** |
+| Error Recovery | N/A |
+| 平均 Steps | 2.15 |
+| 平均 Tool Calls | 1.35 |
+| 平均耗时 | 3.5s |
 
 ## 分类结果
 

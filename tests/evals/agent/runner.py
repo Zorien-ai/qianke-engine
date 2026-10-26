@@ -37,6 +37,16 @@ SUITES: dict[str, dict[str, Any]] = {
 DEFAULT_SUITE = "regression"
 
 
+def warmup_retrieval() -> None:
+    """评测进程启动时串行预热检索模型，避免首个请求撞上半转换的 fp16 模型。"""
+    try:
+        from rag_demo.retrieval.hybrid_retriever import get_model
+
+        get_model()
+    except Exception as exc:  # noqa: BLE001 - 预热失败仍由工具错误正常上报
+        print(f"warmup retrieval failed: {type(exc).__name__}: {exc}")
+
+
 def load_tasks(path: Path | str, expected_count: int | None = None) -> list[dict[str, Any]]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     tasks = payload.get("tasks") if isinstance(payload, dict) else payload
@@ -200,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     config = AgentConfig(max_steps=6, max_tool_calls=12, timeout_seconds=180)
+    warmup_retrieval()
     results = []
     for index, task in enumerate(tasks, 1):
         print(f"[{index}/{len(tasks)}] {task['task_id']} {task['question']}")

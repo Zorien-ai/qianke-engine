@@ -111,6 +111,8 @@ tests/evals/agent/benchmark/reports/benchmark_v1.md
 
 v1.5 → v1.6 对比与 rag_001 根因：[benchmark/baseline_v1.6.md](benchmark/baseline_v1.6.md)。
 
+v1.6 → v1.6.1 小修对比：[benchmark/baseline_v1.6.1.md](benchmark/baseline_v1.6.1.md)。
+
 ## 结果判定
 
 ```text

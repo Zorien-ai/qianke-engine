@@ -244,8 +244,8 @@ def test_business_correctness_separates_tool_policy_and_observed_facts():
         "final_answer": "无法预测 2026 年 11 月数量；当前钻石会员为 403 人，仅作事实引用。",
     }
     scored = evaluator.evaluate_task(task, result)
-    # v1 复合口径仍因事实单位判失败；新口径把业务答案判对
-    assert scored["task_success"] is False
+    # 事实引用不再被旧口径误杀；工具策略仍独立判断
+    assert scored["task_success"] is True
     assert scored["business_correctness"] is True
     assert scored["tool_policy_compliance"] is True
     assert "403" in scored["observed_fact_numbers"]

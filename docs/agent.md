@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.6  
+> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.6.1  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -253,19 +253,29 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.6：
+v1.6.1 基线：
 
 ```text
 Regression 20
   Task Success（v1）      100.0%
   Business Correctness    100.0%
   Tool Policy Compliance  100.0%
+  Tool Execution          100.0%
 
 Benchmark 40
   Task Success（v1）       97.5%
   Business Correctness    100.0%
-  Tool Policy Compliance  100.0%
-  Tool Selection          100.0%
+  Tool Policy Compliance  97.5%
+  Tool Selection          97.5%
+  Tool Execution          93.1%
+  Error Recovery          100.0%
+```
+
+v1.6 基线（保留对比）：
+
+```text
+Regression 20    Task Success 100.0%
+Benchmark 40     Task Success 97.5%
 ```
 
 v1.5 旧基线：
@@ -280,6 +290,7 @@ Benchmark   92.5%
 ```text
 tests/evals/agent/baselines/v1.5.json
 tests/evals/agent/baselines/v1.6.json
+tests/evals/agent/baselines/v1.6.1.json
 ```
 
 ### 7.4 运行
@@ -322,8 +333,8 @@ tests/evals/agent/benchmark/reports/benchmark_v1.md
 
 ## 10. 当前已知限制
 
-1. `bench_neg_003` 的自动 v1 口径会把“玩具 838 人”事实引用误判为结果数字；业务正确性仍为 PASS。
-2. Regression 的 Tool Execution Success 在 v1.6 为 68.9%，但 Error Recovery 为 100%，需要继续观察工具错误来源。
+1. `bench_multi_004` 的业务答案正确，但没有调用 calculator（在 SQL 内用 `ROUND` 算比例），属于工具路径与业务答案的口径差异。
+2. Benchmark 的 Tool Execution Success 为 93.1%，剩余错误为少量 SQL / calculator 参数错误，均被 Agent 恢复，Error Recovery 为 100%。
 3. Agent 仍是单 Agent、固定工具集；没有 Planner、Memory、多 Agent 协同。
 4. 第一阶段不做自动业务执行，只做分析与建议。
 5. 评测依赖本地 demo 数据库和模型 API；环境不可用时不能伪造跑分。
@@ -358,4 +369,5 @@ Agent Runtime
 - Dataset Quality Policy：[`tests/evals/agent/DATASET_QUALITY_POLICY.md`](../tests/evals/agent/DATASET_QUALITY_POLICY.md)
 - Eval 使用说明：[`tests/evals/agent/README.md`](../tests/evals/agent/README.md)
 - v1.6 基线对比：[`tests/evals/agent/benchmark/baseline_v1.6.md`](../tests/evals/agent/benchmark/baseline_v1.6.md)
+- v1.6.1 小修对比：[`tests/evals/agent/benchmark/baseline_v1.6.1.md`](../tests/evals/agent/benchmark/baseline_v1.6.1.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)
