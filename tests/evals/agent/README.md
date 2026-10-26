@@ -52,7 +52,9 @@ tests/evals/agent/
 
 | 指标 | 定义 |
 |---|---|
-| Task Success Rate | 状态 COMPLETED + 期望工具全部调用 + 期望关键词/任一关键词通过 |
+| Task Success Rate（v1） | 状态 COMPLETED + 期望工具全部调用 + 期望关键词/任一关键词通过 |
+| Business Correctness | 只判断状态 + 业务答案，不看工具路径 |
+| Tool Policy Compliance | 只判断必需工具是否满足、禁用工具是否出现 |
 | Tool Selection Accuracy | 期望工具全部被选中的任务占比 |
 | Tool Execution Success | 工具结果 `ok=true` 数 / 工具结果总数 |
 | Error Recovery | 出现工具错误但仍 Task Success 的比例 |
@@ -106,6 +108,8 @@ tests/evals/agent/benchmark/reports/benchmark_v1.md
 ```
 
 基线人工复核说明：[benchmark/baseline_notes.md](benchmark/baseline_notes.md)。
+
+v1.5 → v1.6 对比与 rag_001 根因：[benchmark/baseline_v1.6.md](benchmark/baseline_v1.6.md)。
 
 ## 结果判定
 

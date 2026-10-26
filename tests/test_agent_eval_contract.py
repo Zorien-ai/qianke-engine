@@ -224,3 +224,49 @@ def test_negative_result_unit_guard_catches_clear_fabrication():
     assert evaluator.evaluate_task(task, fact)["task_success"] is True
     assert evaluator.evaluate_task(task, clear_fake)["task_success"] is False
     assert evaluator.evaluate_task(task, forecast)["task_success"] is False
+
+
+def test_business_correctness_separates_tool_policy_and_observed_facts():
+    task = {
+        "task_id": "neg-fact",
+        "category": "negative",
+        "question": "预测未来人数",
+        "expected_tools": [],
+        "expected_keywords_any": ["无法", "没有", "不存在"],
+        "must_not_contain_approx_numbers": True,
+        "forbidden_result_units": ["人"],
+        "expected_success": True,
+    }
+    result = {
+        "status": "COMPLETED",
+        "tool_calls": [{"name": "execute_sql"}],
+        "messages": [],
+        "final_answer": "无法预测 2026 年 11 月数量；当前钻石会员为 403 人，仅作事实引用。",
+    }
+    scored = evaluator.evaluate_task(task, result)
+    # v1 复合口径仍因事实单位判失败；新口径把业务答案判对
+    assert scored["task_success"] is False
+    assert scored["business_correctness"] is True
+    assert scored["tool_policy_compliance"] is True
+    assert "403" in scored["observed_fact_numbers"]
+
+
+def test_business_correctness_can_pass_without_calculator_when_answer_is_right():
+    task = {
+        "task_id": "multi-ratio",
+        "category": "multi_tool",
+        "question": "计算占比",
+        "expected_tools": ["execute_sql", "calculator"],
+        "expected_keywords": ["29.38"],
+        "expected_success": True,
+    }
+    result = {
+        "status": "COMPLETED",
+        "tool_calls": [{"name": "execute_sql"}],
+        "messages": [],
+        "final_answer": "沉默客 2383 人，占 29.38%",
+    }
+    scored = evaluator.evaluate_task(task, result)
+    assert scored["task_success"] is False
+    assert scored["business_correctness"] is True
+    assert scored["tool_policy_compliance"] is False

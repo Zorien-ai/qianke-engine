@@ -16,6 +16,16 @@ _RESULT_CLAIM_RE = re.compile(
     r"\s*[^。！？\n]{0,8}?(\d+(?:\.\d+)?)\s*"
     r"(人|位|名|%|元|万元|天|倍|次|笔|单|个)"
 )
+_OBSERVED_FACT_RE = re.compile(
+    r"(?:当前|目前|现有|快照|截止|已有|全库|总计)"
+    r"[^。！？\n]{0,20}?(\d+(?:\.\d+)?)\s*"
+    r"(?:人|位|名|%|元|万元|天|倍|次|笔|单|个)"
+)
+
+
+def _observed_fact_numbers(text: str) -> list[str]:
+    """事实引用：如“当前钻石会员为 403 人”。"""
+    return _OBSERVED_FACT_RE.findall(text or "")
 
 
 def _numbers(text: str) -> list[str]:
@@ -115,6 +125,12 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
                 disallowed_numbers.append(token)
 
     final_ok = not missing_keywords and not missing_any and not disallowed_numbers
+    observed_fact_numbers = _observed_fact_numbers(final)
+    business_disallowed = [
+        token for token in disallowed_numbers
+        if token not in observed_fact_numbers
+    ]
+    business_final_ok = not missing_keywords and not missing_any and not business_disallowed
 
     observations = tool_observations(result.get("messages") or [])
     executed = [item for item in observations if item.get("ok") is not None]
@@ -132,6 +148,12 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         and tool_selection_ok
         and final_ok
     )
+    business_correctness = bool(
+        task.get("expected_success", True)
+        and status_ok
+        and business_final_ok
+    )
+    tool_policy_compliance = bool(tool_selection_ok)
     error_recovered = bool(tool_errors and task_success)
 
     return {
@@ -141,6 +163,8 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         "status": status,
         "status_ok": status_ok,
         "task_success": task_success,
+        "business_correctness": business_correctness,
+        "tool_policy_compliance": tool_policy_compliance,
         "expected_tools": expected,
         "actual_tools": actual_calls,
         "missing_tools": missing_tools,
@@ -153,6 +177,8 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         "must_not_contain_numbers": bool(task.get("must_not_contain_numbers")),
         "allowed_numbers": [str(x) for x in (task.get("allowed_numbers") or [])],
         "disallowed_numbers": disallowed_numbers,
+        "business_disallowed_numbers": business_disallowed,
+        "observed_fact_numbers": observed_fact_numbers,
         "approx_numbers": approx_numbers,
         "result_claim_numbers": result_claim_numbers,
         "must_not_contain_approx_numbers": bool(task.get("must_not_contain_approx_numbers")),
@@ -174,6 +200,8 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(results)
     passed = sum(1 for r in results if r.get("task_success"))
+    business_passed = sum(1 for r in results if r.get("business_correctness"))
+    policy_passed = sum(1 for r in results if r.get("tool_policy_compliance"))
     tool_selection_passed = sum(1 for r in results if r.get("tool_selection_ok"))
     observations = [
         item
@@ -194,14 +222,21 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
 
     modules: dict[str, dict[str, Any]] = {}
     for r in results:
-        row = modules.setdefault(str(r.get("category") or "未分类"), {"total": 0, "passed": 0})
+        row = modules.setdefault(
+            str(r.get("category") or "未分类"),
+            {"total": 0, "passed": 0, "business_passed": 0, "policy_passed": 0},
+        )
         row["total"] += 1
         row["passed"] += int(bool(r.get("task_success")))
+        row["business_passed"] += int(bool(r.get("business_correctness")))
+        row["policy_passed"] += int(bool(r.get("tool_policy_compliance")))
 
     return {
         "total": total,
         "passed": passed,
         "task_success_rate": passed / total if total else 0.0,
+        "business_correctness_rate": business_passed / total if total else 0.0,
+        "tool_policy_compliance_rate": policy_passed / total if total else 0.0,
         "tool_selection_accuracy": tool_selection_passed / total if total else 0.0,
         "tool_execution_success": (
             sum(1 for item in observations if item.get("ok")) / len(observations)
@@ -219,6 +254,8 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
             name: {
                 **row,
                 "task_success_rate": row["passed"] / row["total"] if row["total"] else 0.0,
+                "business_correctness_rate": row["business_passed"] / row["total"] if row["total"] else 0.0,
+                "tool_policy_compliance_rate": row["policy_passed"] / row["total"] if row["total"] else 0.0,
             }
             for name, row in sorted(modules.items())
         },
