@@ -86,3 +86,21 @@ models/
 # 本地模型缓存与 Ollama / HuggingFace 缓存
 .cache/
 .huggingface/
+
+# 本地临时/媒体/演示产物（2026-10-26 已归档到项目外）
+.tmp/
+_audio_test/
+pytest-of-Lenovo/
+tmp_probe_ml*
+assets/
+promo/
+deliverables/
+recording/
+.venv-video/
+_pw/
+image/
+compose_video.py
+local_model_server.py
+scripts/run_local_server.py
+scripts/start_local_recording.ps1
+data/eval/
