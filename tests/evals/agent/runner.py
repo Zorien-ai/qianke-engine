@@ -143,6 +143,8 @@ def write_report(
             f"- 业务正确性：{'PASS' if row.get('business_correctness') else 'FAIL'}",
             f"- 工具策略：{'PASS' if row.get('tool_policy_compliance') else 'FAIL'}",
             f"- 期望工具：{row.get('expected_tools')}",
+            f"- 必需工具：{row.get('required_tools') or '—'}",
+            f"- 可选工具：{row.get('optional_tools') or '—'}",
             f"- 实际工具：{row.get('actual_tools')}",
             f"- 缺少工具：{row.get('missing_tools') or '—'}",
             f"- 缺少关键词：{row.get('missing_keywords') or '—'}",

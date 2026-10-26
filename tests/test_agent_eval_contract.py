@@ -270,3 +270,28 @@ def test_business_correctness_can_pass_without_calculator_when_answer_is_right()
     assert scored["task_success"] is False
     assert scored["business_correctness"] is True
     assert scored["tool_policy_compliance"] is False
+
+
+def test_tool_policy_can_mark_calculator_optional():
+    task = {
+        "task_id": "multi-optional",
+        "category": "multi_tool",
+        "question": "计算占比",
+        "expected_tools": ["execute_sql", "calculator"],
+        "required_tools": ["execute_sql"],
+        "optional_tools": ["calculator"],
+        "expected_keywords": ["29.38"],
+        "expected_success": True,
+    }
+    result = {
+        "status": "COMPLETED",
+        "tool_calls": [{"name": "execute_sql"}],
+        "messages": [],
+        "final_answer": "沉默客 2383 人，占 29.38%",
+    }
+    scored = evaluator.evaluate_task(task, result)
+    assert scored["task_success"] is False  # 旧复合口径仍按 expected_tools
+    assert scored["business_correctness"] is True
+    assert scored["tool_policy_compliance"] is True
+    assert scored["missing_tools"] == ["calculator"]
+    assert scored["missing_required_tools"] == []

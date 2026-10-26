@@ -10,7 +10,7 @@
 |---|---:|
 | Task Success Rate（v1 复合口径） | **97.5%** |
 | Business Correctness | **100.0%** |
-| Tool Policy Compliance | **97.5%** |
+| Tool Policy Compliance | **100.0%** |
 | Tool Selection Accuracy | **97.5%** |
 | Tool Execution Success | **93.1%** |
 | Error Recovery | 100.0% |
@@ -35,8 +35,10 @@
 - 问题：按用户分群文档中的“沉默客”定义统计 demo 数据集中沉默客的数量及占全库比例（百分比保留两位小数）。
 - 状态：COMPLETED
 - 业务正确性：PASS
-- 工具策略：FAIL
+- 工具策略：PASS
 - 期望工具：['rag_search', 'execute_sql', 'calculator']
+- 必需工具：['rag_search', 'execute_sql']
+- 可选工具：['calculator']
 - 实际工具：['rag_search', 'rag_search', 'execute_sql']
 - 缺少工具：['calculator']
 - 缺少关键词：—

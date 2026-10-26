@@ -45,6 +45,7 @@
 
 - `task_id` 唯一，前缀与 category 对应。
 - `expected_tools` 必须来自 `rag_search / execute_sql / calculator`；negative 允许 `[]`。
+- 工具策略可选字段：`required_tools`（必需）、`optional_tools`（可选）、`forbidden_tools`（禁用）。未提供时，`required_tools` 默认等于 `expected_tools`；旧 `expected_tools` 仍用于 Task Success v1 和 Tool Selection，`Tool Policy Compliance` 使用 required/optional/forbidden。
 - `expected_keywords` 只放稳定、可从真实结果推出的片段；不要放模型随机措辞。
 - `expected_success` v1 只允许 `true`；负样本用“拒答/无数据”作为正常完成。
 - 禁止安全类任务进入 v1（安全评测单独建集）。

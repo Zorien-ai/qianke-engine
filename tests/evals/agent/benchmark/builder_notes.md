@@ -1,5 +1,7 @@
 # Agent Benchmark v1.5 · Builder Notes
 
+> **v1.7 工具策略元数据（2026-10-26）：** 数据集版本升至 `agent-benchmark-v1.7-demo`。只给 `bench_multi_004` 增加 `required_tools=["rag_search","execute_sql"]` / `optional_tools=["calculator"]`，给 `bench_multi_011` 增加 `required_tools=["execute_sql"]` / `optional_tools=["calculator"]`；题目、expected 和判分口径不变。`Tool Policy Compliance` 现在按 required/optional 判定，旧 `expected_tools` 仍用于 Task Success v1 和 Tool Selection。
+
 > 任务：task-31（Benchmark v1.5：negative 关闭硬数字白名单，交给语义护栏+人工复核；前序 task-28 修订 v1.4、task-25 v1.3、task-22 v1.2、task-19 v1.1、task-16 构建 v1）
 > 数据：`demo`，快照构建时间 `2026-10-16 17:43:04`（`search_index_meta.built_at`，`profile_count=8110`、`wiki_count=36`）
 > 数据集版本：**`agent-benchmark-v1.5-demo`**（dataset：`demo`，dataset_version：`demo@2026-10-16`）

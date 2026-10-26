@@ -86,6 +86,12 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
     """评价单个任务。"""
     expected = [str(x) for x in (task.get("expected_tools") or [])]
     expected_set = set(expected)
+    required = task.get("required_tools")
+    required = [str(x) for x in required] if required is not None else list(expected)
+    optional = [str(x) for x in (task.get("optional_tools") or [])]
+    forbidden = [str(x) for x in (task.get("forbidden_tools") or [])]
+    required_set = set(required)
+    forbidden_set = set(forbidden)
     actual_calls = [
         str(call.get("name"))
         for call in (result.get("tool_calls") or [])
@@ -93,7 +99,10 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
     ]
     actual_set = set(actual_calls)
     missing_tools = sorted(expected_set - actual_set)
+    missing_required_tools = sorted(required_set - actual_set)
+    forbidden_tools_hit = sorted(forbidden_set & actual_set)
     tool_selection_ok = not missing_tools
+    tool_policy_ok = not missing_required_tools and not forbidden_tools_hit
     tool_recall = len(expected_set & actual_set) / len(expected_set) if expected_set else 1.0
 
     final = str(result.get("final_answer") or "")
@@ -154,7 +163,7 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         and status_ok
         and business_final_ok
     )
-    tool_policy_compliance = bool(tool_selection_ok)
+    tool_policy_compliance = bool(tool_policy_ok)
     error_recovered = bool(tool_errors and task_success)
 
     return {
@@ -167,9 +176,15 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         "business_correctness": business_correctness,
         "tool_policy_compliance": tool_policy_compliance,
         "expected_tools": expected,
+        "required_tools": required,
+        "optional_tools": optional,
+        "forbidden_tools": forbidden,
         "actual_tools": actual_calls,
         "missing_tools": missing_tools,
+        "missing_required_tools": missing_required_tools,
+        "forbidden_tools_hit": forbidden_tools_hit,
         "tool_selection_ok": tool_selection_ok,
+        "tool_policy_ok": tool_policy_ok,
         "tool_recall": tool_recall,
         "expected_keywords": keywords,
         "expected_keywords_any": keywords_any,

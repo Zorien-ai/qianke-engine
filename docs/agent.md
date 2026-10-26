@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.6.1  
+> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.7  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -253,7 +253,7 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.6.1 基线：
+v1.7 基线（当前）：
 
 ```text
 Regression 20
@@ -265,10 +265,17 @@ Regression 20
 Benchmark 40
   Task Success（v1）       97.5%
   Business Correctness    100.0%
-  Tool Policy Compliance  97.5%
+  Tool Policy Compliance  100.0%
   Tool Selection          97.5%
   Tool Execution          93.1%
   Error Recovery          100.0%
+```
+
+v1.6.1 基线（保留对比）：
+
+```text
+Regression 20    Task Success 100.0% / Tool Execution 100.0%
+Benchmark 40     Task Success 97.5% / Business 100.0% / Tool Policy 97.5%
 ```
 
 v1.6 基线（保留对比）：
@@ -291,6 +298,7 @@ Benchmark   92.5%
 tests/evals/agent/baselines/v1.5.json
 tests/evals/agent/baselines/v1.6.json
 tests/evals/agent/baselines/v1.6.1.json
+tests/evals/agent/baselines/v1.7.json
 ```
 
 ### 7.4 运行
@@ -333,7 +341,7 @@ tests/evals/agent/benchmark/reports/benchmark_v1.md
 
 ## 10. 当前已知限制
 
-1. `bench_multi_004` 的业务答案正确，但没有调用 calculator（在 SQL 内用 `ROUND` 算比例），属于工具路径与业务答案的口径差异。
+1. `bench_multi_004` 的旧 Task Success 仍因缺少 calculator 失败，但业务答案正确；v1.7 已把 calculator 标为可选，Tool Policy Compliance 为 PASS。
 2. Benchmark 的 Tool Execution Success 为 93.1%，剩余错误为少量 SQL / calculator 参数错误，均被 Agent 恢复，Error Recovery 为 100%。
 3. Agent 仍是单 Agent、固定工具集；没有 Planner、Memory、多 Agent 协同。
 4. 第一阶段不做自动业务执行，只做分析与建议。
@@ -370,4 +378,5 @@ Agent Runtime
 - Eval 使用说明：[`tests/evals/agent/README.md`](../tests/evals/agent/README.md)
 - v1.6 基线对比：[`tests/evals/agent/benchmark/baseline_v1.6.md`](../tests/evals/agent/benchmark/baseline_v1.6.md)
 - v1.6.1 小修对比：[`tests/evals/agent/benchmark/baseline_v1.6.1.md`](../tests/evals/agent/benchmark/baseline_v1.6.1.md)
+- v1.7 工具策略：[`tests/evals/agent/benchmark/baseline_v1.7.md`](../tests/evals/agent/benchmark/baseline_v1.7.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)

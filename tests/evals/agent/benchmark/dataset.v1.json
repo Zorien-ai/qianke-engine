@@ -1,8 +1,8 @@
 {
-  "version": "agent-benchmark-v1.5-demo",
+  "version": "agent-benchmark-v1.7-demo",
   "dataset": "demo",
   "dataset_version": "demo@2026-10-16",
-  "description": "40 条独立 Agent Benchmark v1.5：execute_sql 10、rag_search 8、multi_tool 12、negative 6、calculator 4。统一使用 demo 数据集（8110 个用户画像，构建时间 2026-10-16 17:43:04），全部 expected 已用 demo SQL 复算。v1.1 修订：移除可由 schema facts 枚举计数/范围直接读出的 expected（sql_001/006/008、multi_005/007/008/009/012 替换或重做）、multi 题干去掉工具与答案提示、negative 增加 expected_keywords_any / must_not_contain_numbers / allowed_numbers / manual_review 字段。v1.2 修订（negative 语义护栏）：6 条 negative 增加 must_not_contain_approx_numbers=true（禁止“约/预计/估算”等近似表述+结果数字），allowed_numbers 统一为数据事实数字并集，neg_004 去掉过窄的 expected_keywords=[\"预测\"] 并改由 expected_keywords_any 覆盖。v1.3 修订（negative 最终收口）：neg_004 的 expected_keywords_any 移除“预测”（保留 无法/没有/不存在/未提供/缺少/不支持/不能），6 条 negative 增加 forbidden_result_units 拦截“N 人 / N%”等带单位明确结果，manual_review 统一要求人工确认未给出编造结果。v1.4 小修：multi_009 的 expected_keywords 由 48.7 改为 48.69（334/686=48.69%）；6 条 negative 的 allowed_numbers 统一补充 21000/16（合规事实引用，approx/result_unit 护栏仍拦截编造结果）。v1.5 修订：真实 baseline 发现 negative 的 must_not_contain_numbers 会误伤正常事实引用（如列数/文档数/8110/403），故 6 条 negative 将 must_not_contain_numbers 设为 false（allowed_numbers 保留但不再硬拦截事实数字），保留 must_not_contain_approx_numbers 与 forbidden_result_units 拦截“约/预计/估算+结果数字”“N 人 / N%”类编造结果，并由 manual_review 人工复核。与 regression 20 条无声义换皮重复（问法、工具链、期望答案均不同）；构建期 dry-run 披露见 builder_notes.md。",
+  "description": "40 条独立 Agent Benchmark v1.7：execute_sql 10、rag_search 8、multi_tool 12、negative 6、calculator 4。v1.7 只增加工具策略元数据：multi_004 要求 rag_search+execute_sql、calculator 可选；multi_011 要求 execute_sql、calculator 可选。题目、expected 与判分口径不变。",
   "tasks": [
     {
       "task_id": "bench_sql_001",
@@ -263,6 +263,9 @@
       "category": "multi_tool",
       "question": "按用户分群文档中的“沉默客”定义统计 demo 数据集中沉默客的数量及占全库比例（百分比保留两位小数）。",
       "expected_tools": ["rag_search", "execute_sql", "calculator"],
+      "required_tools": ["rag_search", "execute_sql"],
+      "optional_tools": ["calculator"],
+      "forbidden_tools": [],
       "expected_keywords": ["31", "29.3"],
       "expected_success": true,
       "acceptance": "业务口径题。segmentation.md：沉默客=31–90 天无行为。近似 SQL：COUNT(*) WHERE days_since_last_buy BETWEEN 31 AND 90 = 2383；2383/8110=29.38%。数据无浏览/登录日志，只能用最后购买天数近似“有行为”，acceptance 要求回答说明该近似。",
@@ -347,6 +350,9 @@
       "category": "multi_tool",
       "question": "黑卡会员的平均客单价是钻石会员的多少倍（保留两位小数）？",
       "expected_tools": ["execute_sql", "calculator"],
+      "required_tools": ["execute_sql"],
+      "optional_tools": ["calculator"],
+      "forbidden_tools": [],
       "expected_keywords": ["1.7"],
       "expected_success": true,
       "acceptance": "SQL：黑卡 avg_amount=37665.00（3 人）、钻石 21416.52（403 人）；37665/21416.52=1.7587→1.76 倍（keyword 1.7 兼容 1.75/1.76）。近似/小样本说明：黑卡仅 3 人，倍数结论样本不稳定；schema facts 只给 avg_amount min-max，平均值不可直接读出。",

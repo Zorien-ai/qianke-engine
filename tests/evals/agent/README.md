@@ -113,6 +113,8 @@ v1.5 → v1.6 对比与 rag_001 根因：[benchmark/baseline_v1.6.md](benchmark/
 
 v1.6 → v1.6.1 小修对比：[benchmark/baseline_v1.6.1.md](benchmark/baseline_v1.6.1.md)。
 
+v1.7 工具策略：[benchmark/baseline_v1.7.md](benchmark/baseline_v1.7.md)。
+
 ## 结果判定
 
 ```text
