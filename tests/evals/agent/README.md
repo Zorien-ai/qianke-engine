@@ -44,7 +44,7 @@ tests/evals/agent/
 | 集合 | 数量 | 用途 | 是否用于日常调优 |
 |---|---:|---|---|
 | regression | 20 | 每次 Agent 变更必跑，防退化 | 可以 |
-| benchmark | 60 | 阶段评测、对外汇报 | 不可以 |
+| benchmark | 80 | 阶段评测、对外汇报 | 不可以 |
 
 数据集固定为 `demo`（8110 个用户画像）。禁止使用 9 用户的 `test` 小样本做比例/分布评测。
 
@@ -128,6 +128,8 @@ v1.9 Runtime v0.2：[benchmark/baseline_v1.9.md](benchmark/baseline_v1.9.md)。
 v1.9.1 Budget / Cancel：[benchmark/baseline_v1.9.1.md](benchmark/baseline_v1.9.1.md)。
 
 v1.9.2 Retry / Checkpoint：[benchmark/baseline_v1.9.2.md](benchmark/baseline_v1.9.2.md)。
+
+v2.2 Benchmark 80：[benchmark/baseline_v2.2.md](benchmark/baseline_v2.2.md)。
 
 ## 结果判定
 

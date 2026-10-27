@@ -1,12 +1,15 @@
 """RAG 检索薄壳：JSON 输入/输出，不生成最终答案。"""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict, Field
 
 from rag_demo.agent.tool import ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 class RagSearchInput(BaseModel):
@@ -18,10 +21,17 @@ class RagSearchInput(BaseModel):
 
 
 def retrieve(query: str, top_k: int = 5) -> list[dict[str, Any]]:
-    """领域逻辑：复用千客引擎的混合检索，只返回资料与来源。"""
-    from rag_demo.retrieval.hybrid_retriever import hybrid_search
+    """领域逻辑：复用千客引擎的混合检索，只返回资料与来源。
 
-    hits = hybrid_search(query, top_k=top_k)
+    混合检索失败时降级到关键词召回；降级仍然失败才把结构化错误交给 LLM。
+    """
+    from rag_demo.retrieval.hybrid_retriever import hybrid_search, keyword_search
+
+    try:
+        hits = hybrid_search(query, top_k=top_k)
+    except Exception as exc:  # noqa: BLE001 - 记录原因后尝试关键词降级
+        logger.warning("混合检索失败，降级到关键词召回: %s: %s", type(exc).__name__, exc)
+        hits = keyword_search(query, top_k=top_k)
     results: list[dict[str, Any]] = []
     for item in hits or []:
         meta = item.get("metadata") or {}

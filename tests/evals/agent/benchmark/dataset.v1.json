@@ -1,8 +1,8 @@
 {
-  "version": "agent-benchmark-v1.8-demo",
+  "version": "agent-benchmark-v2.2-demo",
   "dataset": "demo",
   "dataset_version": "demo@2026-10-16",
-  "description": "60 条 Agent Benchmark v1.8：在 v1.7 40 条基础上新增 20 条 execute_sql 5 / rag_search 4 / multi_tool 7 / negative 2 / calculator 2。新题 expected 由 demo SQL 与知识库原文复算；新增 multi 任务标记 required/optional tools；所有新题构建期未运行 run_agent。",
+  "description": "80 条 Agent Benchmark v2.2：v1.8 的 60 条 + v2.0 holdout 20 条（holdout 完成首次基线后退役并纳入公共集）。新 holdout 将在后续版本重建。",
   "tasks": [
     {
       "task_id": "bench_sql_001",
@@ -1360,6 +1360,371 @@
         "200,211.99",
         "200211.99"
       ]
+    },
+    {
+      "task_id": "hold_001",
+      "category": "execute_sql",
+      "question": "demo 数据集中用户的平均年龄是多少（保留两位小数）？",
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "expected_keywords": [
+        "41.62"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL: AVG(age)=41.62。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_002",
+      "category": "execute_sql",
+      "question": "杭州用户有多少人？",
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "expected_keywords": [
+        "714"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL: COUNT(*) WHERE city=杭州 = 714。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_003",
+      "category": "execute_sql",
+      "question": "南京用户有多少人？",
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "expected_keywords": [
+        "694"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL: COUNT(*) WHERE city=南京 = 694。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_004",
+      "category": "execute_sql",
+      "question": "哪个城市的用户平均累计消费金额最高？金额是多少（保留两位小数）？",
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "expected_keywords": [
+        "成都",
+        "11984.84"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL: GROUP BY city AVG(total_amount)；成都 11984.84 最高。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_005",
+      "category": "execute_sql",
+      "question": "女性用户有多少人？",
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "expected_keywords": [
+        "4105"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL: COUNT(*) WHERE gender=女 = 4105。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_006",
+      "category": "rag_search",
+      "question": "黄金会员的生日礼遇是什么？",
+      "expected_tools": [
+        "rag_search"
+      ],
+      "expected_keywords": [
+        "100 元",
+        "黄金"
+      ],
+      "expected_success": true,
+      "acceptance": "member_benefits.md：黄金会员生日当月赠 100 元无门槛券。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_007",
+      "category": "rag_search",
+      "question": "新客转化的触达时机和频控是什么？",
+      "expected_tools": [
+        "rag_search"
+      ],
+      "expected_keywords": [
+        "24 小时",
+        "3",
+        "7"
+      ],
+      "expected_success": true,
+      "acceptance": "marketing_playbook.md 一：注册后 24 小时内、第 3 天、第 7 天；每周最多 2 次。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_008",
+      "category": "rag_search",
+      "question": "物流延迟投诉的客服补偿标准是什么？",
+      "expected_tools": [
+        "rag_search"
+      ],
+      "expected_keywords": [
+        "10 元",
+        "7 天"
+      ],
+      "expected_success": true,
+      "acceptance": "cs_sop.md 场景一：超过 7 天未更新；10 元无门槛券或积分补偿。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_009",
+      "category": "rag_search",
+      "question": "“中客单用户”的定义是什么？",
+      "expected_tools": [
+        "rag_search"
+      ],
+      "expected_keywords": [
+        "500",
+        "1000"
+      ],
+      "expected_success": true,
+      "acceptance": "tag_definitions.md：近 90 天平均客单价 500–1000 元。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_010",
+      "category": "multi_tool",
+      "question": "杭州用户中钻石会员占杭州用户的比例是多少（百分比保留两位小数）？",
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "expected_keywords": [
+        "5.18"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL：杭州 714 人，钻石 37 人；37/714=5.18%。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_011",
+      "category": "multi_tool",
+      "question": "男性用户占全库用户的比例是多少（百分比保留两位小数）？",
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "expected_keywords": [
+        "49.38"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL：男 4005/8110=49.38%。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_012",
+      "category": "multi_tool",
+      "question": "黄金会员占全库用户的比例是多少（百分比保留两位小数）？",
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "expected_keywords": [
+        "15.01"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL：黄金 1217/8110=15.01%。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_013",
+      "category": "multi_tool",
+      "question": "家居品类贡献的累计消费金额占全库比例是多少（百分比保留两位小数）？",
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "expected_keywords": [
+        "27.39"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL：家居 25179796.68 / 91923627.92 = 27.39%。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_014",
+      "category": "multi_tool",
+      "question": "南京用户占全库用户的比例是多少（百分比保留两位小数）？",
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "expected_keywords": [
+        "8.56"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL：南京 694/8110=8.56%。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_015",
+      "category": "multi_tool",
+      "question": "普通会员与钻石会员的平均订单数相差多少（保留两位小数）？",
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "expected_keywords": [
+        "0.54"
+      ],
+      "expected_success": true,
+      "acceptance": "SQL：普通 2.34、钻石 1.80；差 0.54。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_016",
+      "category": "multi_tool",
+      "question": "流失客（>90 天无行为）占全库用户的比例是多少（百分比保留两位小数）？",
+      "expected_tools": [
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
+      "expected_keywords": [
+        "50.02",
+        "90"
+      ],
+      "expected_success": true,
+      "acceptance": "segmentation.md：>90 天；4057/8110=50.02%。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_017",
+      "category": "negative",
+      "question": "统计 demo 数据集中用户的投诉率。如果现有数据不支持，请说明缺少什么；不要编造数字。",
+      "expected_tools": [],
+      "expected_keywords": [],
+      "expected_success": true,
+      "acceptance": "demo 无投诉/工单明细；不得编造投诉率。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16",
+      "expected_keywords_any": [
+        "无法",
+        "没有",
+        "不存在",
+        "未提供",
+        "缺少",
+        "不支持"
+      ],
+      "must_not_contain_numbers": false,
+      "must_not_contain_approx_numbers": true,
+      "forbidden_result_units": [
+        "%",
+        "单"
+      ],
+      "manual_review": [
+        "必须人工确认未给出编造投诉率"
+      ]
+    },
+    {
+      "task_id": "hold_018",
+      "category": "negative",
+      "question": "统计 demo 数据集中商品的毛利率。如果现有数据不支持，请说明缺少什么；不要编造数字。",
+      "expected_tools": [],
+      "expected_keywords": [
+        "无法",
+        "没有",
+        "不存在"
+      ],
+      "expected_success": true,
+      "acceptance": "demo 无成本/采购字段；不得编造毛利率。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16",
+      "expected_keywords_any": [
+        "无法",
+        "没有",
+        "不存在",
+        "未提供",
+        "缺少",
+        "不支持"
+      ],
+      "must_not_contain_numbers": false,
+      "must_not_contain_approx_numbers": true,
+      "forbidden_result_units": [
+        "%",
+        "元"
+      ],
+      "manual_review": [
+        "必须人工确认未给出编造毛利率"
+      ]
+    },
+    {
+      "task_id": "hold_019",
+      "category": "calculator",
+      "question": "钻石会员每人 200 元生日券，403 人共需多少万元（保留两位小数）？",
+      "expected_tools": [
+        "calculator"
+      ],
+      "expected_keywords": [
+        "8.06"
+      ],
+      "expected_success": true,
+      "acceptance": "calculator: 403*200=80600 元=8.06 万元。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
+    },
+    {
+      "task_id": "hold_020",
+      "category": "calculator",
+      "question": "对 4057 名流失客每人发 50 元券，总预算是多少万元（保留两位小数）？",
+      "expected_tools": [
+        "calculator"
+      ],
+      "expected_keywords": [
+        "20.29"
+      ],
+      "expected_success": true,
+      "acceptance": "calculator: 4057*50=202850 元=20.29 万元。",
+      "difficulty": "medium",
+      "dataset": "demo",
+      "dataset_version": "demo@2026-10-16"
     }
   ]
 }

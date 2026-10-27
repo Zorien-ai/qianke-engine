@@ -29,20 +29,20 @@ def test_dataset_uses_demo_and_has_20_tasks():
     }
 
 
-def test_benchmark_has_60_tasks_and_expected_distribution():
+def test_benchmark_has_80_tasks_and_expected_distribution():
     payload = json.loads((AGENT_EVAL_DIR / "benchmark" / "dataset.v1.json").read_text(encoding="utf-8"))
     tasks = payload["tasks"]
     assert payload["dataset"] == "demo"
-    assert len(tasks) == 60
+    assert len(tasks) == 80
     counts = {}
     for task in tasks:
         counts[task["category"]] = counts.get(task["category"], 0) + 1
     assert counts == {
-        "execute_sql": 15,
-        "rag_search": 12,
-        "multi_tool": 19,
-        "negative": 8,
-        "calculator": 6,
+        "execute_sql": 20,
+        "rag_search": 16,
+        "multi_tool": 26,
+        "negative": 10,
+        "calculator": 8,
     }
 
 

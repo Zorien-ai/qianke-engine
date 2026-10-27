@@ -174,7 +174,7 @@ Agent 根据任务决定是否调用 RAG；禁止为了“看起来用了 RAG”
 | 集合 | 题量 | 用途 |
 |---|---:|---|
 | Regression Set | 20 | 防止已有能力回归；Agent 核心逻辑变化后优先跑 |
-| Benchmark Set | 60 | 衡量真实任务完成能力；不能替代单元测试 |
+| Benchmark Set | 80 | 衡量真实任务完成能力；不能替代单元测试 |
 
 审核链路：
 
@@ -250,7 +250,7 @@ Commit 保持单一职责。
 
 ```text
 RAG → Evaluation-driven RAG → Agent v0.1
-→ Agent Eval v1.9.2 → Agent Runtime v0.2.2
+→ Agent Eval v2.2 → Agent Runtime v0.2.2
 ```
 
 Agent v0.1 已具备：State、Loop、Tool Contract、SQL Tool、Calculator Tool、RAG、Tool Calling、Step/Tool Call Limit、Timeout、Agent Eval。
@@ -354,7 +354,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 | Secondary | 用户/客户分析、客服/销售坐席画像 |
 | Data Ingestion | CSV v1 |
 | Agent | v0.1 |
-| Evaluation | Regression 20 / Benchmark 60 / Eval v1.9.2 |
+| Evaluation | Regression 20 / Benchmark 80 / Eval v2.2 |
 | Next | Agent Runtime v0.2 |
 
 ## 变更记录

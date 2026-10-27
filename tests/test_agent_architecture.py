@@ -169,6 +169,26 @@ def test_rag_contract_has_results_and_no_final_answer(monkeypatch):
     assert "answer" not in result
 
 
+def test_rag_falls_back_to_keyword_search(monkeypatch):
+    import rag_demo.retrieval.hybrid_retriever as hybrid
+
+    def boom(query, top_k=5):
+        raise RuntimeError("dtype mismatch")
+
+    monkeypatch.setattr(hybrid, "hybrid_search", boom)
+    monkeypatch.setattr(
+        hybrid,
+        "keyword_search",
+        lambda query, top_k=5: [
+            {"id": "doc-fallback", "text": "关键词降级结果", "score": 0.5, "source": "fallback.md"},
+        ],
+    )
+    result = rag_search.invoke({"query": "黑卡权益", "top_k": 3})
+    assert result["ok"] is True
+    assert result["results"][0]["content"] == "关键词降级结果"
+    assert result["results"][0]["source"] == "fallback.md"
+
+
 def test_state_contract_and_graph_shape():
     graph = loop.build_graph(AgentConfig(max_steps=3)).get_graph()
     assert {"chatbot", "tools"} <= set(graph.nodes)

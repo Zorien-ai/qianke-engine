@@ -5,7 +5,7 @@
 把 Agent 评测从“临时凑题”变成可维护的数据资产：
 
 - **Regression Set**：20 条稳定任务，每次 Agent 变更必跑，防退化。
-- **Benchmark Set**：60 条更难、更独立的评测任务，用于阶段评测，不参与日常 Prompt 调优。
+- **Benchmark Set**：80 条更难、更独立的评测任务，用于阶段评测，不参与日常 Prompt 调优。
 
 ## 2. 数据来源
 
@@ -58,16 +58,16 @@
   - `manual_review`: 人工复核项，不参与自动判分；runner 报告必须单独列出所有人工复核项（无论自动 PASS/FAIL）
 - 任何“必须说明…”但 evaluator 无法自动校验的要求，必须写入 `manual_review`，不能只写在 acceptance。
 
-## 5. Benchmark 60 条分布
+## 5. Benchmark 80 条分布
 
 ```text
-execute_sql      15
-rag_search       12
-multi_tool       19
-negative          8   # 无数据 / 不可回答 / 应拒答
-calculator        6
+execute_sql      20
+rag_search       16
+multi_tool       26
+negative         10   # 无数据 / 不可回答 / 应拒答
+calculator        8
 ----------------------
-合计             60
+合计             80
 ```
 
 要求：
@@ -89,7 +89,7 @@ Benchmark case 在最终跑分前只允许 evaluator / 业务专家 / Lead 查�
 
 ## 7. 评审门禁
 
-Builder 提交 60 条后，必须同时通过：
+Builder 提交 80 条后，必须同时通过：
 
 1. **evaluator 评审**：独立复算 expected、检查数据、工具名、关键词、重复项。
 2. **业务专家评审**：检查业务问题是否合理、acceptance 是否可验收、覆盖是否均衡。

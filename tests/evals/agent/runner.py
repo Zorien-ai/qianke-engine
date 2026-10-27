@@ -29,9 +29,15 @@ SUITES: dict[str, dict[str, Any]] = {
     },
     "benchmark": {
         "cases": HERE / "benchmark" / "dataset.v1.json",
-        "count": 60,
+        "count": 80,
         "results": HERE / "benchmark" / "results" / "benchmark_v1.json",
         "report": HERE / "benchmark" / "reports" / "benchmark_v1.md",
+    },
+    "holdout": {
+        "cases": HERE / "holdout" / "dataset.v1.json",
+        "count": 20,
+        "results": HERE / "holdout" / "results" / "holdout_v1.json",
+        "report": HERE / "holdout" / "reports" / "holdout_v1.md",
     },
 }
 DEFAULT_SUITE = "regression"

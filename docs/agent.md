@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.2.2 · **Agent Eval:** v1.9.2  
+> **Status:** Active · **Agent Runtime:** v0.2.2 · **Agent Eval:** v2.2  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -278,7 +278,7 @@ tables:
 | 集合 | 题量 | 用途 |
 |---|---:|---|
 | Regression | 20 | 防止已有能力回归 |
-| Benchmark | 60 | 衡量真实任务完成能力 |
+| Benchmark | 80 | 衡量真实任务完成能力 |
 
 题目位置：
 
@@ -313,7 +313,7 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.9.2 基线（当前，Runtime v0.2.2；指标沿用 v1.8.2 真实运行）：
+v2.2 基线（当前）：
 
 ```text
 Regression 20
@@ -322,17 +322,23 @@ Regression 20
   Tool Policy Compliance  100.0%
   Tool Execution          100.0%
 
-Benchmark 60
-  Task Success（v1）       95.0%
+Benchmark 80
+  Task Success（v1）       96.2%
   Business Correctness    100.0%
-  Tool Policy Compliance  100.0%
-  Tool Selection          95.0%
-  Tool Execution          97.2%
+  Tool Policy Compliance  97.5%
+  Tool Selection          96.2%
+  Tool Execution          96.0%
   Error Recovery          100.0%
-  Input Tokens            353,534
-  Output Tokens            28,524
-  Total Tokens             382,058
-  平均 Tokens / 任务       6,368
+  Input Tokens            505,678
+  Output Tokens            35,806
+  Total Tokens             541,484
+  平均 Tokens / 任务       6,769
+```
+
+v1.9.2 基线（保留对比）：
+
+```text
+Runtime v0.2.2；60 题指标沿用 v1.8.2：Task Success 95.0%
 ```
 
 v1.8.3 基线（保留对比）：
@@ -396,6 +402,7 @@ tests/evals/agent/baselines/v1.8.3.json
 tests/evals/agent/baselines/v1.9.json
 tests/evals/agent/baselines/v1.9.1.json
 tests/evals/agent/baselines/v1.9.2.json
+tests/evals/agent/baselines/v2.2.json
 ```
 
 ### 7.4 运行
@@ -498,4 +505,7 @@ Agent Runtime
 - v1.9 Runtime v0.2：[`tests/evals/agent/benchmark/baseline_v1.9.md`](../tests/evals/agent/benchmark/baseline_v1.9.md)
 - v1.9.1 Budget / Cancel：[`tests/evals/agent/benchmark/baseline_v1.9.1.md`](../tests/evals/agent/benchmark/baseline_v1.9.1.md)
 - v1.9.2 Retry / Checkpoint：[`tests/evals/agent/benchmark/baseline_v1.9.2.md`](../tests/evals/agent/benchmark/baseline_v1.9.2.md)
+- v2.0 Holdout：[`tests/evals/agent/holdout/baseline_v2.0.md`](../tests/evals/agent/holdout/baseline_v2.0.md)
+- v2.1 RAG Fallback：[`tests/evals/agent/benchmark/baseline_v2.1.md`](../tests/evals/agent/benchmark/baseline_v2.1.md)
+- v2.2 Benchmark 80：[`tests/evals/agent/benchmark/baseline_v2.2.md`](../tests/evals/agent/benchmark/baseline_v2.2.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)
