@@ -117,6 +117,8 @@ v1.7 工具策略：[benchmark/baseline_v1.7.md](benchmark/baseline_v1.7.md)。
 
 v1.8 60 题扩展：[benchmark/baseline_v1.8.md](benchmark/baseline_v1.8.md)。
 
+v1.8.1 收口：[benchmark/baseline_v1.8.1.md](benchmark/baseline_v1.8.1.md)。
+
 ## 结果判定
 
 ```text

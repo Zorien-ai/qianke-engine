@@ -1,0 +1,132 @@
+{
+  "version": "agent-eval-baseline-v1.8.1",
+  "metrics_version": 2,
+  "agent_commit": "pending",
+  "model": "deepseek-flash",
+  "dataset": "demo",
+  "date": "2026-10-27",
+  "regression": {
+    "dataset": "regression/dataset.v1.json",
+    "dataset_sha256": "74b794c59a95fb2087b4d55870d125e36250e32480f112c55661c656e6fd19a5",
+    "summary": {
+      "total": 20,
+      "passed": 20,
+      "task_success_rate": 1.0,
+      "business_correctness_rate": 1.0,
+      "tool_policy_compliance_rate": 1.0,
+      "tool_selection_accuracy": 1.0,
+      "tool_execution_success": 1.0,
+      "error_recovery": null,
+      "error_cases": 0,
+      "tool_error_count": 0,
+      "avg_steps": 2.15,
+      "avg_tool_calls": 1.35,
+      "avg_elapsed_s": 3.4875,
+      "modules": {
+        "calculator": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "execute_sql": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "multi_tool": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "rag_search": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        }
+      }
+    }
+  },
+  "benchmark": {
+    "dataset": "benchmark/dataset.v1.json",
+    "dataset_sha256": "a0d61fd994bf8169d813f03b6b3b8643ed9501c6fee57867509be5a250a52ca3",
+    "summary": {
+      "total": 60,
+      "passed": 56,
+      "task_success_rate": 0.9333333333333333,
+      "business_correctness_rate": 1.0,
+      "tool_policy_compliance_rate": 0.9833333333333333,
+      "tool_selection_accuracy": 0.9333333333333333,
+      "tool_execution_success": 0.95,
+      "error_recovery": 1.0,
+      "error_cases": 4,
+      "tool_error_count": 6,
+      "avg_steps": 2.533333333333333,
+      "avg_tool_calls": 2.0,
+      "avg_elapsed_s": 4.327333333333333,
+      "modules": {
+        "calculator": {
+          "total": 6,
+          "passed": 6,
+          "business_passed": 6,
+          "policy_passed": 6,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "execute_sql": {
+          "total": 15,
+          "passed": 15,
+          "business_passed": 15,
+          "policy_passed": 15,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "multi_tool": {
+          "total": 19,
+          "passed": 15,
+          "business_passed": 19,
+          "policy_passed": 18,
+          "task_success_rate": 0.7894736842105263,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 0.9473684210526315
+        },
+        "negative": {
+          "total": 8,
+          "passed": 8,
+          "business_passed": 8,
+          "policy_passed": 8,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "rag_search": {
+          "total": 12,
+          "passed": 12,
+          "business_passed": 12,
+          "policy_passed": 12,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        }
+      }
+    }
+  },
+  "notes": "60 题；v1.8.1 收口数字格式、negative proxy 与 optional calculator。"
+}

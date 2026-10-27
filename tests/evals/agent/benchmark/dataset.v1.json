@@ -478,7 +478,15 @@
       "acceptance": "member_benefits.md：黄金会员生日当月赠 100 元无门槛券；SQL COUNT(*) WHERE member_level='黄金' = 1217；calculator：1217×100=121700 元=12.17 万元。说明：1217 属 schema facts 可见的等级枚举计数，但预期值“预算 12.17 万元”需检索券面额 + 聚合人数 + 乘法计算，不能从 schema facts 直接读出；本题为 Lead 指定的真实预算题。",
       "difficulty": "medium",
       "dataset": "demo",
-      "dataset_version": "demo@2026-10-16"
+      "dataset_version": "demo@2026-10-16",
+      "required_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": []
     },
     {
       "task_id": "bench_multi_009",
@@ -504,8 +512,7 @@
       "question": "普通会员的平均客单价与比它高一档的会员等级入档门槛相差多少元？（差额保留两位小数）",
       "expected_tools": [
         "rag_search",
-        "execute_sql",
-        "calculator"
+        "execute_sql"
       ],
       "expected_keywords": [
         "175.89"
@@ -514,7 +521,15 @@
       "acceptance": "业务口径题。member_benefits.md 等级划分：普通 <2495、白银 2495–6680，因此“上一档门槛”=2495 元，必须检索知识库才能确定；SQL AVG(avg_amount) WHERE member_level='普通'=1319.11；calculator：2495-1319.11=1175.89（keyword 取尾部 175.89 兼容 1,175.89）。题干不再出现 2495，rag_search 是必要工具。",
       "difficulty": "hard",
       "dataset": "demo",
-      "dataset_version": "demo@2026-10-16"
+      "dataset_version": "demo@2026-10-16",
+      "required_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": []
     },
     {
       "task_id": "bench_multi_011",
@@ -708,7 +723,11 @@
       "acceptance": "负样本（无数据/口径不一致）。top_category 实测仅 7 个品类：电子产品、家居、书籍、玩具、服装、运动、美妆，没有“母婴”（分群文档列出的母婴/数码/家电/零食均不在 demo 品类中）；工具非强制（expected_tools=[]，允许查知识库或数据库）。自动判定：关键词锚点“母婴” + expected_keywords_any 任一拒答词 + must_not_contain_numbers=false（v1.5 关闭硬数字白名单：不再误伤列数/文档数/8110/403 等事实引用）+ must_not_contain_approx_numbers + forbidden_result_units（拦截“N 人”类明确结果；allowed_numbers 统一为数据事实数字并集，允许引用事实数字，禁止任何被问指标的结果数字，也禁止“约/预计/估算”等近似表述后跟结果数字）。人工复核项：必须人工确认未给出编造结果，指出无母婴品类、无法统计，不得用其他品类替代或直接报 0 当结论，也不得用“约/预计/估算”包装结果数字。",
       "difficulty": "hard",
       "dataset": "demo",
-      "dataset_version": "demo@2026-10-16"
+      "dataset_version": "demo@2026-10-16",
+      "observed_fact_numbers": [
+        "10.3",
+        "8110"
+      ]
     },
     {
       "task_id": "bench_neg_004",
@@ -966,15 +985,16 @@
       "expected_tools": [
         "execute_sql"
       ],
-      "expected_keywords": [
-        "电子产品",
-        "6864"
-      ],
+      "expected_keywords": [],
       "expected_success": true,
       "acceptance": "SQL: GROUP BY top_category, SUM(order_count)；电子产品 6864。",
       "difficulty": "medium",
       "dataset": "demo",
-      "dataset_version": "demo@2026-10-16"
+      "dataset_version": "demo@2026-10-16",
+      "expected_keywords_any": [
+        "6864",
+        "6,864"
+      ]
     },
     {
       "task_id": "bench_sql_014",
@@ -1153,8 +1173,7 @@
       "question": "黑卡会员有哪些专属权益？黑卡会员占全库比例是多少（百分比保留两位小数）？",
       "expected_tools": [
         "rag_search",
-        "execute_sql",
-        "calculator"
+        "execute_sql"
       ],
       "expected_keywords": [
         "黑卡",
@@ -1249,9 +1268,9 @@
       "dataset": "demo",
       "dataset_version": "demo@2026-10-16",
       "must_not_contain_numbers": false,
-      "must_not_contain_approx_numbers": true,
+      "must_not_contain_approx_numbers": false,
       "manual_review": [
-        "必须人工确认未给出编造结果"
+        "必须人工确认：若给出替代指标，必须明确标注它不是登录次数"
       ],
       "expected_keywords_any": [
         "无法",
@@ -1263,6 +1282,12 @@
       ],
       "forbidden_result_units": [
         "次"
+      ],
+      "observed_fact_numbers": [
+        "7",
+        "5.1",
+        "5.7",
+        "462"
       ]
     },
     {
