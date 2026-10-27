@@ -104,3 +104,6 @@ local_model_server.py
 scripts/run_local_server.py
 scripts/start_local_recording.ps1
 data/eval/
+
+# 本地私有 holdout：不进入公共仓库、不用于 Prompt 调优
+tests/evals/agent/private_holdout/

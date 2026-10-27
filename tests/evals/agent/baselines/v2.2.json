@@ -1,7 +1,7 @@
 {
   "version": "agent-eval-baseline-v2.2",
   "metrics_version": 2,
-  "agent_commit": "pending",
+  "agent_commit": "a84dcc0",
   "model": "deepseek-flash",
   "dataset": "demo",
   "date": "2026-10-27",
@@ -209,5 +209,5 @@
       }
     }
   },
-  "notes": "v2.2：Benchmark 80；v2.0 holdout 20 已完成首次基线后退役；v2.1 RAG fallback。"
+  "notes": "v2.2：Benchmark 80；v2.0 holdout 20 已完成首次基线后退役；v2.1 RAG fallback；public 80 已标记为 development set，独立 private holdout 见 KNOWN_ISSUES。"
 }

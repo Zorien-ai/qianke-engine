@@ -353,9 +353,9 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 | Primary | 运营活动策略助手 |
 | Secondary | 用户/客户分析、客服/销售坐席画像 |
 | Data Ingestion | CSV v1 |
-| Agent | v0.1 |
-| Evaluation | Regression 20 / Benchmark 80 / Eval v2.2 |
-| Next | Agent Runtime v0.2 |
+| Agent | Runtime v0.2.2 |
+| Evaluation | Regression 20 / Benchmark 80（development set） / Eval v2.2 |
+| Next | 重建 private holdout / 读 KNOWN_ISSUES.md |
 
 ## 变更记录
 
