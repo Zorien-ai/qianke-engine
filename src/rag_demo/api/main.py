@@ -563,6 +563,8 @@ class MarketingCopyIn(BaseModel):
 
 class AgentRunIn(BaseModel):
     query: str
+    request_id: str | None = None
+    parent_execution_id: str | None = None
 
 
 def _agent_dataset() -> str:
@@ -1161,7 +1163,11 @@ def agent_run(req: AgentRunIn) -> dict:
     from rag_demo.agent.loop import run_agent
 
     try:
-        result = run_agent(query)
+        result = run_agent(
+            query,
+            request_id=req.request_id,
+            parent_execution_id=req.parent_execution_id,
+        )
     except Exception as exc:  # noqa: BLE001 - 给前端一句可读错误，不暴露栈
         logger.exception("Agent 运行失败 dataset=%s", dataset)
         raise HTTPException(status_code=502, detail=f"Agent 运行失败：{exc}") from exc
@@ -1181,6 +1187,10 @@ def agent_run(req: AgentRunIn) -> dict:
         "user_query": query,
         "final_reply": result.get("final_answer", ""),
         "status": result.get("status"),
+        "request_id": result.get("request_id"),
+        "execution_id": result.get("execution_id"),
+        "parent_execution_id": result.get("parent_execution_id"),
+        "event_trace": result.get("event_trace", []),
         "tool_calls": result.get("tool_calls", []),
         "steps": steps,
         # 前端旧展示字段：新 Runtime 不做营销候选卡，留空占位

@@ -1,0 +1,138 @@
+{
+  "version": "agent-eval-baseline-v1.9",
+  "metrics_version": 2,
+  "agent_commit": "pending",
+  "model": "deepseek-flash",
+  "dataset": "demo",
+  "date": "2026-10-27",
+  "runtime_version": "v0.2",
+  "regression": {
+    "dataset": "regression/dataset.v1.json",
+    "dataset_sha256": "74b794c59a95fb2087b4d55870d125e36250e32480f112c55661c656e6fd19a5",
+    "summary": {
+      "total": 20,
+      "passed": 20,
+      "task_success_rate": 1.0,
+      "business_correctness_rate": 1.0,
+      "tool_policy_compliance_rate": 1.0,
+      "tool_selection_accuracy": 1.0,
+      "tool_execution_success": 1.0,
+      "error_recovery": null,
+      "error_cases": 0,
+      "tool_error_count": 0,
+      "avg_steps": 2.15,
+      "avg_tool_calls": 1.35,
+      "avg_elapsed_s": 3.4875,
+      "modules": {
+        "calculator": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "execute_sql": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "multi_tool": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "rag_search": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        }
+      }
+    }
+  },
+  "benchmark": {
+    "dataset": "benchmark/dataset.v1.json",
+    "dataset_sha256": "40b018d226ec558aa4c6646e92ef63dd4282a05be0c704f7d23177e0d508a3ff",
+    "summary": {
+      "total": 60,
+      "passed": 57,
+      "task_success_rate": 0.95,
+      "business_correctness_rate": 1.0,
+      "tool_policy_compliance_rate": 1.0,
+      "tool_selection_accuracy": 0.95,
+      "tool_execution_success": 0.9724770642201835,
+      "error_recovery": 1.0,
+      "error_cases": 3,
+      "tool_error_count": 3,
+      "avg_steps": 2.4,
+      "avg_tool_calls": 1.8166666666666667,
+      "avg_elapsed_s": 4.235333333333333,
+      "total_input_tokens": 353534,
+      "total_output_tokens": 28524,
+      "total_tokens": 382058,
+      "avg_tokens_per_task": 6367.633333333333,
+      "token_usage_tasks": 60,
+      "modules": {
+        "calculator": {
+          "total": 6,
+          "passed": 6,
+          "business_passed": 6,
+          "policy_passed": 6,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "execute_sql": {
+          "total": 15,
+          "passed": 15,
+          "business_passed": 15,
+          "policy_passed": 15,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "multi_tool": {
+          "total": 19,
+          "passed": 16,
+          "business_passed": 19,
+          "policy_passed": 19,
+          "task_success_rate": 0.8421052631578947,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "negative": {
+          "total": 8,
+          "passed": 8,
+          "business_passed": 8,
+          "policy_passed": 8,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "rag_search": {
+          "total": 12,
+          "passed": 12,
+          "business_passed": 12,
+          "policy_passed": 12,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        }
+      }
+    }
+  },
+  "notes": "Runtime v0.2：request/execution ID、event trace、eval 集成；60 题指标沿用 v1.8.2 真实运行。"
+}

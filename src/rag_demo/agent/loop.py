@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
@@ -14,6 +16,74 @@ from rag_demo.agent.registry import get_tools
 from rag_demo.agent.state import AgentConfig, AgentState, AgentStatus
 
 logger = logging.getLogger(__name__)
+
+
+class TraceCallbackHandler(BaseCallbackHandler):
+    """轻量执行轨迹：记录 LLM / Tool 的开始、结束、错误和耗时。
+
+    不改变 Graph，也不改变 Tool Contract；只通过 LangChain callbacks 旁路采集。
+    """
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+        self._starts: dict[str, float] = {}
+        self._names: dict[str, str] = {}
+
+    @staticmethod
+    def _timestamp() -> float:
+        return round(time.time(), 6)
+
+    def _record(self, event: str, **fields: Any) -> None:
+        self.events.append({"event": event, "timestamp": self._timestamp(), **fields})
+
+    def _start(self, kind: str, run_id: Any, name: str, **fields: Any) -> None:
+        key = f"{kind}:{run_id}"
+        self._starts[key] = time.monotonic()
+        self._names[key] = name
+        self._record(f"{kind}_started", run_id=str(run_id), name=name, **fields)
+
+    def _finish(self, kind: str, run_id: Any, name: str, **fields: Any) -> None:
+        key = f"{kind}:{run_id}"
+        started = self._starts.pop(key, None)
+        name = self._names.pop(key, name)
+        duration_ms = round((time.monotonic() - started) * 1000, 2) if started is not None else None
+        self._record(f"{kind}_finished", run_id=str(run_id), name=name,
+                     duration_ms=duration_ms, **fields)
+
+    def _error(self, kind: str, run_id: Any, name: str, error: BaseException) -> None:
+        key = f"{kind}:{run_id}"
+        started = self._starts.pop(key, None)
+        name = self._names.pop(key, name)
+        duration_ms = round((time.monotonic() - started) * 1000, 2) if started is not None else None
+        self._record(f"{kind}_failed", run_id=str(run_id), name=name,
+                     duration_ms=duration_ms, error=f"{type(error).__name__}: {error}")
+
+    @staticmethod
+    def _tool_name(serialized: Any) -> str:
+        if isinstance(serialized, dict):
+            return str(serialized.get("name") or serialized.get("id") or "unknown")
+        return "unknown"
+
+    def on_llm_start(self, serialized: dict, prompts: list[str], **kwargs: Any) -> None:
+        self._start("llm", kwargs.get("run_id"), "chat_model",
+                    prompt_chars=sum(len(str(p)) for p in prompts))
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        self._finish("llm", kwargs.get("run_id"), "chat_model")
+
+    def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
+        self._error("llm", kwargs.get("run_id"), "chat_model", error)
+
+    def on_tool_start(self, serialized: dict, input_str: str, **kwargs: Any) -> None:
+        self._start("tool", kwargs.get("run_id"), self._tool_name(serialized),
+                    input_preview=str(input_str)[:300])
+
+    def on_tool_end(self, output: Any, **kwargs: Any) -> None:
+        self._finish("tool", kwargs.get("run_id"), kwargs.get("name") or "tool",
+                     output_preview=str(output)[:300])
+
+    def on_tool_error(self, error: BaseException, **kwargs: Any) -> None:
+        self._error("tool", kwargs.get("run_id"), kwargs.get("name") or "tool", error)
 
 MAX_STEPS = AgentConfig().max_steps
 _TERMINAL_STATUSES = {
@@ -179,9 +249,26 @@ def build_graph(config: AgentConfig | None = None):
     return graph.compile()
 
 
-def run_agent(question: str, config: AgentConfig | None = None) -> dict[str, Any]:
-    """执行一轮 Agent，返回最终答案、状态与完整消息轨迹。"""
+def run_agent(
+    question: str,
+    config: AgentConfig | None = None,
+    *,
+    request_id: str | None = None,
+    execution_id: str | None = None,
+    parent_execution_id: str | None = None,
+) -> dict[str, Any]:
+    """执行一轮 Agent，返回最终答案、状态、执行身份与事件轨迹。"""
     config = config or AgentConfig()
+    request_id = request_id or f"req_{uuid.uuid4().hex[:16]}"
+    execution_id = execution_id or f"exec_{uuid.uuid4().hex[:16]}"
+    tracer = TraceCallbackHandler()
+    tracer.events.append({
+        "event": "run_started",
+        "timestamp": round(time.time(), 6),
+        "request_id": request_id,
+        "execution_id": execution_id,
+        "parent_execution_id": parent_execution_id,
+    })
     graph = build_graph(config)
     initial: AgentState = {
         "messages": [
@@ -193,12 +280,21 @@ def run_agent(question: str, config: AgentConfig | None = None) -> dict[str, Any
         "status": AgentStatus.RUNNING.value,
         "error": None,
         "started_at": time.monotonic(),
+        "request_id": request_id,
+        "execution_id": execution_id,
+        "parent_execution_id": parent_execution_id,
     }
 
     try:
-        state = graph.invoke(initial)
+        state = graph.invoke(initial, config={"callbacks": [tracer]})
     except Exception as exc:  # noqa: BLE001 - Runtime 不把异常裸抛给 API
         logger.exception("Agent 执行失败")
+        tracer.events.append({
+            "event": "run_failed",
+            "timestamp": round(time.time(), 6),
+            "status": AgentStatus.FAILED.value,
+            "error": f"{type(exc).__name__}: {exc}",
+        })
         return {
             "question": question,
             "final_answer": "",
@@ -208,6 +304,10 @@ def run_agent(question: str, config: AgentConfig | None = None) -> dict[str, Any
             "messages": [],
             "status": AgentStatus.FAILED.value,
             "error": f"{type(exc).__name__}: {exc}",
+            "request_id": request_id,
+            "execution_id": execution_id,
+            "parent_execution_id": parent_execution_id,
+            "event_trace": tracer.events,
         }
 
     messages = state.get("messages") or []
@@ -228,6 +328,13 @@ def run_agent(question: str, config: AgentConfig | None = None) -> dict[str, Any
     status = state.get("status") or AgentStatus.FAILED.value
     if not final and status == AgentStatus.COMPLETED.value:
         status = AgentStatus.FAILED.value
+    tracer.events.append({
+        "event": "run_finished",
+        "timestamp": round(time.time(), 6),
+        "status": status,
+        "steps": int(state.get("step_count") or 0),
+        "tool_call_count": int(state.get("tool_call_count") or 0),
+    })
     return {
         "question": question,
         "final_answer": final,
@@ -237,6 +344,10 @@ def run_agent(question: str, config: AgentConfig | None = None) -> dict[str, Any
         "messages": messages,
         "status": status,
         "error": state.get("error"),
+        "request_id": request_id,
+        "execution_id": execution_id,
+        "parent_execution_id": parent_execution_id,
+        "event_trace": tracer.events,
     }
 
 
@@ -246,6 +357,7 @@ __all__ = [
     "AgentStatus",
     "MAX_STEPS",
     "SYSTEM_PROMPT",
+    "TraceCallbackHandler",
     "build_graph",
     "run_agent",
 ]

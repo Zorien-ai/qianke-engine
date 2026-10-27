@@ -50,3 +50,6 @@ class AgentState(TypedDict, total=False):
     status: str
     error: str | None
     started_at: float
+    request_id: str
+    execution_id: str
+    parent_execution_id: str | None

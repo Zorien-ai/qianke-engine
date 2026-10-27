@@ -148,6 +148,8 @@ def write_report(
             "",
             f"- 问题：{row['question']}",
             f"- 状态：{row.get('status')}",
+            f"- Request ID：{row.get('request_id') or '—'}",
+            f"- Execution ID：{row.get('execution_id') or '—'}",
             f"- 业务正确性：{'PASS' if row.get('business_correctness') else 'FAIL'}",
             f"- 工具策略：{'PASS' if row.get('tool_policy_compliance') else 'FAIL'}",
             f"- 期望工具：{row.get('expected_tools')}",
@@ -162,6 +164,15 @@ def write_report(
             f"- 最终回答：{str(row.get('final_answer') or '')[:500]}",
             "",
         ])
+        trace = row.get("event_trace") or []
+        if trace:
+            lines.append(f"- Trace events：{len(trace)}")
+            for event in trace[-8:]:
+                lines.append(
+                    f"  - {event.get('event')} · {event.get('name') or event.get('status') or ''}"
+                    f" · {event.get('duration_ms') if event.get('duration_ms') is not None else ''}"
+                )
+            lines.append("")
 
     _append_manual_review(lines, results)
 

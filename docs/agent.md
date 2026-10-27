@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.8.3  
+> **Status:** Active · **Agent Runtime:** v0.2 · **Agent Eval:** v1.9  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -71,10 +71,36 @@ AgentConfig(
     "status": "RUNNING",
     "error": None,
     "started_at": 0.0,
+    "request_id": "req_...",
+    "execution_id": "exec_...",
+    "parent_execution_id": None,
 }
 ```
 
-### 3.3 终态
+### 3.3 Execution Trace
+
+Runtime v0.2 通过 LangChain callbacks 旁路采集事件，不改 Graph：
+
+```text
+run_started
+llm_started / llm_finished / llm_failed
+tool_started / tool_finished / tool_failed
+run_finished / run_failed
+```
+
+每个事件包含：
+
+```text
+timestamp
+run_id
+name
+duration_ms
+status / error
+```
+
+工具事件只记录输入/输出摘要，避免把完整 SQL 结果或用户数据写进 trace。
+
+### 3.4 终态
 
 | 状态 | 含义 |
 |---|---|
@@ -94,7 +120,9 @@ AgentConfig(
 
 ```json
 {
-  "query": "统计 demo 数据集中被营销活动触达过的用户数量"
+  "query": "统计 demo 数据集中被营销活动触达过的用户数量",
+  "request_id": "可选；调用方幂等 ID",
+  "parent_execution_id": "可选；父执行 ID"
 }
 ```
 
@@ -112,6 +140,15 @@ AgentConfig(
   "user_query": "...",
   "final_reply": "...",
   "status": "COMPLETED",
+  "request_id": "req_...",
+  "execution_id": "exec_...",
+  "parent_execution_id": null,
+  "event_trace": [
+    {"event": "run_started", "timestamp": 0.0},
+    {"event": "tool_started", "name": "execute_sql", "timestamp": 0.0},
+    {"event": "tool_finished", "name": "execute_sql", "duration_ms": 12.3},
+    {"event": "run_finished", "status": "COMPLETED", "timestamp": 0.0}
+  ],
   "tool_calls": [
     {"name": "execute_sql", "args": {"sql": "..."}}
   ],
@@ -253,7 +290,7 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.8.3 基线（当前，沿用 v1.8.2 真实运行）：
+v1.9 基线（当前，Runtime v0.2；指标沿用 v1.8.2 真实运行）：
 
 ```text
 Regression 20
@@ -273,6 +310,12 @@ Benchmark 60
   Output Tokens            28,524
   Total Tokens             382,058
   平均 Tokens / 任务       6,368
+```
+
+v1.8.3 基线（保留对比）：
+
+```text
+Benchmark 60    Task Success 95.0% / Business 100.0% / Tool Policy 100.0%
 ```
 
 v1.8.1 基线（保留对比）：
@@ -327,6 +370,7 @@ tests/evals/agent/baselines/v1.8.json
 tests/evals/agent/baselines/v1.8.1.json
 tests/evals/agent/baselines/v1.8.2.json
 tests/evals/agent/baselines/v1.8.3.json
+tests/evals/agent/baselines/v1.9.json
 ```
 
 ### 7.4 运行
@@ -426,4 +470,5 @@ Agent Runtime
 - v1.8.1 收口：[`tests/evals/agent/benchmark/baseline_v1.8.1.md`](../tests/evals/agent/benchmark/baseline_v1.8.1.md)
 - v1.8.2 Token 指标：[`tests/evals/agent/benchmark/baseline_v1.8.2.md`](../tests/evals/agent/benchmark/baseline_v1.8.2.md)
 - v1.8.3 对比与成本：[`tests/evals/agent/benchmark/baseline_v1.8.3.md`](../tests/evals/agent/benchmark/baseline_v1.8.3.md)
+- v1.9 Runtime v0.2：[`tests/evals/agent/benchmark/baseline_v1.9.md`](../tests/evals/agent/benchmark/baseline_v1.9.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)

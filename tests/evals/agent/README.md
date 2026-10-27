@@ -123,6 +123,8 @@ v1.8.2 Token 指标：[benchmark/baseline_v1.8.2.md](benchmark/baseline_v1.8.2.m
 
 v1.8.3 对比与成本：[benchmark/baseline_v1.8.3.md](benchmark/baseline_v1.8.3.md)。
 
+v1.9 Runtime v0.2：[benchmark/baseline_v1.9.md](benchmark/baseline_v1.9.md)。
+
 ## 结果判定
 
 ```text

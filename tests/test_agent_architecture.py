@@ -231,6 +231,10 @@ def test_run_agent_uses_config_and_completes(monkeypatch):
     assert result["final_answer"] == "结果是 5"
     assert result["steps"] == 2
     assert result["tool_call_count"] == 1
+    assert result["request_id"].startswith("req_")
+    assert result["execution_id"].startswith("exec_")
+    assert any(e["event"] == "run_started" for e in result["event_trace"])
+    assert any(e["event"] == "run_finished" for e in result["event_trace"])
     assert fake.calls == 2
 
 
