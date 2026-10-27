@@ -1190,6 +1190,7 @@ def agent_run(req: AgentRunIn) -> dict:
         "request_id": result.get("request_id"),
         "execution_id": result.get("execution_id"),
         "parent_execution_id": result.get("parent_execution_id"),
+        "total_tokens": result.get("total_tokens", 0),
         "event_trace": result.get("event_trace", []),
         "tool_calls": result.get("tool_calls", []),
         "steps": steps,

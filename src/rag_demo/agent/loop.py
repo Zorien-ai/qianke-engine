@@ -28,6 +28,7 @@ class TraceCallbackHandler(BaseCallbackHandler):
         self.events: list[dict[str, Any]] = []
         self._starts: dict[str, float] = {}
         self._names: dict[str, str] = {}
+        self.total_tokens = 0
 
     @staticmethod
     def _timestamp() -> float:
@@ -69,7 +70,11 @@ class TraceCallbackHandler(BaseCallbackHandler):
                     prompt_chars=sum(len(str(p)) for p in prompts))
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
-        self._finish("llm", kwargs.get("run_id"), "chat_model")
+        usage = getattr(response, "llm_output", None) or {}
+        token_usage = usage.get("token_usage") if isinstance(usage, dict) else None
+        if isinstance(token_usage, dict):
+            self.total_tokens += int(token_usage.get("total_tokens") or 0)
+        self._finish("llm", kwargs.get("run_id"), "chat_model", total_tokens=self.total_tokens)
 
     def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
         self._error("llm", kwargs.get("run_id"), "chat_model", error)
@@ -91,6 +96,8 @@ _TERMINAL_STATUSES = {
     AgentStatus.MAX_STEPS_EXCEEDED.value,
     AgentStatus.MAX_TOOL_CALLS_EXCEEDED.value,
     AgentStatus.TIMEOUT.value,
+    AgentStatus.CANCELLED.value,
+    AgentStatus.BUDGET_EXCEEDED.value,
     AgentStatus.FAILED.value,
 }
 
@@ -175,7 +182,11 @@ def build_system_prompt(config: AgentConfig | None = None) -> str:
     return f"{base}\n\n【当前数据库表结构】\n{schema}"
 
 
-def make_chatbot_node(config: AgentConfig):
+def make_chatbot_node(
+    config: AgentConfig,
+    tracer: TraceCallbackHandler | None = None,
+    cancel_event: Any = None,
+):
     """按 Runtime Config 生成 chatbot 节点。"""
 
     def chatbot_node(state: AgentState) -> dict[str, Any]:
@@ -183,6 +194,8 @@ def make_chatbot_node(config: AgentConfig):
         tool_count = int(state.get("tool_call_count") or 0)
         started_at = float(state.get("started_at") or time.monotonic())
 
+        if cancel_event is not None and cancel_event.is_set():
+            return _terminate(state, AgentStatus.CANCELLED, "运行已被取消。")
         if time.monotonic() - started_at > config.timeout_seconds:
             return _terminate(
                 state,
@@ -210,6 +223,13 @@ def make_chatbot_node(config: AgentConfig):
         if calls and next_tool_count > config.max_tool_calls:
             status = AgentStatus.MAX_TOOL_CALLS_EXCEEDED.value
             error = f"工具调用次数超过上限（{config.max_tool_calls}），已停止执行。"
+        if tracer is not None and config.max_total_tokens:
+            if tracer.total_tokens > config.max_total_tokens:
+                return _terminate(
+                    state,
+                    AgentStatus.BUDGET_EXCEEDED,
+                    f"已达到 token 预算（{config.max_total_tokens}），已停止执行。",
+                )
         return {
             "messages": [response],
             "step_count": step + 1,
@@ -232,11 +252,15 @@ def should_continue(state: AgentState) -> str:
     return "tools" if getattr(last, "tool_calls", None) else END
 
 
-def build_graph(config: AgentConfig | None = None):
+def build_graph(
+    config: AgentConfig | None = None,
+    tracer: TraceCallbackHandler | None = None,
+    cancel_event: Any = None,
+):
     """构建并编译 LangGraph；运行时可传不同 AgentConfig。"""
     config = config or AgentConfig()
     graph = StateGraph(AgentState)
-    graph.add_node("chatbot", make_chatbot_node(config))
+    graph.add_node("chatbot", make_chatbot_node(config, tracer=tracer, cancel_event=cancel_event))
     graph.add_node("tools", ToolNode(get_tools()))
 
     graph.add_edge(START, "chatbot")
@@ -256,6 +280,7 @@ def run_agent(
     request_id: str | None = None,
     execution_id: str | None = None,
     parent_execution_id: str | None = None,
+    cancel_event: Any = None,
 ) -> dict[str, Any]:
     """执行一轮 Agent，返回最终答案、状态、执行身份与事件轨迹。"""
     config = config or AgentConfig()
@@ -269,7 +294,7 @@ def run_agent(
         "execution_id": execution_id,
         "parent_execution_id": parent_execution_id,
     })
-    graph = build_graph(config)
+    graph = build_graph(config, tracer=tracer, cancel_event=cancel_event)
     initial: AgentState = {
         "messages": [
             SystemMessage(content=build_system_prompt(config)),
@@ -326,6 +351,8 @@ def run_agent(
             })
 
     status = state.get("status") or AgentStatus.FAILED.value
+    if cancel_event is not None and cancel_event.is_set() and status == AgentStatus.RUNNING.value:
+        status = AgentStatus.CANCELLED.value
     if not final and status == AgentStatus.COMPLETED.value:
         status = AgentStatus.FAILED.value
     tracer.events.append({
@@ -334,6 +361,7 @@ def run_agent(
         "status": status,
         "steps": int(state.get("step_count") or 0),
         "tool_call_count": int(state.get("tool_call_count") or 0),
+        "total_tokens": tracer.total_tokens,
     })
     return {
         "question": question,
@@ -347,6 +375,7 @@ def run_agent(
         "request_id": request_id,
         "execution_id": execution_id,
         "parent_execution_id": parent_execution_id,
+        "total_tokens": tracer.total_tokens,
         "event_trace": tracer.events,
     }
 

@@ -125,6 +125,8 @@ v1.8.3 对比与成本：[benchmark/baseline_v1.8.3.md](benchmark/baseline_v1.8.
 
 v1.9 Runtime v0.2：[benchmark/baseline_v1.9.md](benchmark/baseline_v1.9.md)。
 
+v1.9.1 Budget / Cancel：[benchmark/baseline_v1.9.1.md](benchmark/baseline_v1.9.1.md)。
+
 ## 结果判定
 
 ```text

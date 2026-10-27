@@ -16,6 +16,8 @@ class AgentStatus(str, Enum):
     MAX_STEPS_EXCEEDED = "MAX_STEPS_EXCEEDED"
     MAX_TOOL_CALLS_EXCEEDED = "MAX_TOOL_CALLS_EXCEEDED"
     TIMEOUT = "TIMEOUT"
+    CANCELLED = "CANCELLED"
+    BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
     FAILED = "FAILED"
 
 
@@ -26,6 +28,7 @@ class AgentConfig:
     max_steps: int = 5
     max_tool_calls: int = 10
     timeout_seconds: float = 60.0
+    max_total_tokens: int = 0
 
     def __post_init__(self) -> None:
         if self.max_steps < 1:
@@ -34,6 +37,8 @@ class AgentConfig:
             raise ValueError("max_tool_calls 必须 >= 1")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds 必须 > 0")
+        if self.max_total_tokens < 0:
+            raise ValueError("max_total_tokens 必须 >= 0")
 
 
 class AgentState(TypedDict, total=False):

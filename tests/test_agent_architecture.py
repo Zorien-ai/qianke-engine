@@ -187,6 +187,40 @@ def test_agent_config_validation():
         AgentConfig(max_tool_calls=0)
     with pytest.raises(ValueError, match="timeout_seconds"):
         AgentConfig(timeout_seconds=0)
+    with pytest.raises(ValueError, match="max_total_tokens"):
+        AgentConfig(max_total_tokens=-1)
+
+
+def test_run_agent_can_be_cancelled(monkeypatch):
+    import threading
+
+    fake = _FakeLLM([AIMessage(content="不应被调用")])
+    monkeypatch.setattr(loop, "get_llm", lambda: fake)
+    monkeypatch.setattr(loop, "build_system_prompt", lambda config=None: "sys")
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    result = loop.run_agent("取消", config=AgentConfig(), cancel_event=cancel_event)
+
+    assert result["status"] == AgentStatus.CANCELLED.value
+    assert fake.calls == 0
+    assert any(e["event"] == "run_finished" and e["status"] == "CANCELLED"
+               for e in result["event_trace"])
+
+
+def test_token_budget_terminates_run(monkeypatch):
+    fake = _FakeLLM([AIMessage(content="完成")])
+    monkeypatch.setattr(loop, "get_llm", lambda: fake)
+    tracer = loop.TraceCallbackHandler()
+    tracer.total_tokens = 100
+    node = loop.make_chatbot_node(AgentConfig(max_total_tokens=10), tracer=tracer)
+    result = node({
+        "messages": [AIMessage(content="hi")],
+        "step_count": 0,
+        "tool_call_count": 0,
+        "started_at": 0.0,
+    })
+    assert result["status"] == AgentStatus.BUDGET_EXCEEDED.value
 
 
 def test_should_continue_routes_tool_calls_and_stops_on_terminal():

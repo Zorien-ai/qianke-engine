@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.2 · **Agent Eval:** v1.9  
+> **Status:** Active · **Agent Runtime:** v0.2.1 · **Agent Eval:** v1.9.1  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -56,10 +56,11 @@ AgentConfig(
     max_steps=5,
     max_tool_calls=10,
     timeout_seconds=60.0,
+    max_total_tokens=0,   # 0 = 不限制
 )
 ```
 
-三个参数都会进入真正的运行时约束，不是展示字段。
+参数都会进入真正的运行时约束，不是展示字段。`run_agent(..., cancel_event=threading.Event())` 支持协作式取消。
 
 ### 3.2 状态字段
 
@@ -108,6 +109,8 @@ status / error
 | `MAX_STEPS_EXCEEDED` | 超过推理步数上限 |
 | `MAX_TOOL_CALLS_EXCEEDED` | 超过工具调用上限 |
 | `TIMEOUT` | 超时 |
+| `CANCELLED` | 调用方取消 |
+| `BUDGET_EXCEEDED` | 超过 token 预算 |
 | `FAILED` | 执行异常或没有有效最终回答 |
 
 终态会明确返回，不会把“超限”伪装成普通 AI 回答。
@@ -290,7 +293,7 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.9 基线（当前，Runtime v0.2；指标沿用 v1.8.2 真实运行）：
+v1.9.1 基线（当前，Runtime v0.2.1；指标沿用 v1.8.2 真实运行）：
 
 ```text
 Regression 20
@@ -371,6 +374,7 @@ tests/evals/agent/baselines/v1.8.1.json
 tests/evals/agent/baselines/v1.8.2.json
 tests/evals/agent/baselines/v1.8.3.json
 tests/evals/agent/baselines/v1.9.json
+tests/evals/agent/baselines/v1.9.1.json
 ```
 
 ### 7.4 运行
@@ -471,4 +475,5 @@ Agent Runtime
 - v1.8.2 Token 指标：[`tests/evals/agent/benchmark/baseline_v1.8.2.md`](../tests/evals/agent/benchmark/baseline_v1.8.2.md)
 - v1.8.3 对比与成本：[`tests/evals/agent/benchmark/baseline_v1.8.3.md`](../tests/evals/agent/benchmark/baseline_v1.8.3.md)
 - v1.9 Runtime v0.2：[`tests/evals/agent/benchmark/baseline_v1.9.md`](../tests/evals/agent/benchmark/baseline_v1.9.md)
+- v1.9.1 Budget / Cancel：[`tests/evals/agent/benchmark/baseline_v1.9.1.md`](../tests/evals/agent/benchmark/baseline_v1.9.1.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)
