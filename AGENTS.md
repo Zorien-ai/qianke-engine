@@ -250,7 +250,7 @@ Commit 保持单一职责。
 
 ```text
 RAG → Evaluation-driven RAG → Agent v0.1
-→ Agent Eval v1.9.1 → Agent Runtime v0.2.1
+→ Agent Eval v1.9.2 → Agent Runtime v0.2.2
 ```
 
 Agent v0.1 已具备：State、Loop、Tool Contract、SQL Tool、Calculator Tool、RAG、Tool Calling、Step/Tool Call Limit、Timeout、Agent Eval。
@@ -354,7 +354,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 | Secondary | 用户/客户分析、客服/销售坐席画像 |
 | Data Ingestion | CSV v1 |
 | Agent | v0.1 |
-| Evaluation | Regression 20 / Benchmark 60 / Eval v1.9.1 |
+| Evaluation | Regression 20 / Benchmark 60 / Eval v1.9.2 |
 | Next | Agent Runtime v0.2 |
 
 ## 变更记录

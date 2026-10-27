@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.2.1 · **Agent Eval:** v1.9.1  
+> **Status:** Active · **Agent Runtime:** v0.2.2 · **Agent Eval:** v1.9.2  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -101,7 +101,27 @@ status / error
 
 工具事件只记录输入/输出摘要，避免把完整 SQL 结果或用户数据写进 trace。
 
-### 3.4 终态
+### 3.4 Retry / Checkpoint
+
+```python
+result = run_agent_with_retry(
+    question,
+    max_retries=1,
+    request_id="req_...",
+    checkpoint_dir="tests/evals/agent/checkpoints",
+)
+```
+
+规则：
+
+- 同一个 `request_id`
+- 每次 retry 生成新的 `execution_id`
+- retry 的 `parent_execution_id` 指向上一次 execution
+- 只重试 `FAILED / TIMEOUT / MAX_STEPS_EXCEEDED / MAX_TOOL_CALLS_EXCEEDED`
+- 不重试 `BUDGET_EXCEEDED / CANCELLED`
+- 每次尝试落一个 checkpoint JSON
+
+### 3.5 终态
 
 | 状态 | 含义 |
 |---|---|
@@ -293,7 +313,7 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.9.1 基线（当前，Runtime v0.2.1；指标沿用 v1.8.2 真实运行）：
+v1.9.2 基线（当前，Runtime v0.2.2；指标沿用 v1.8.2 真实运行）：
 
 ```text
 Regression 20
@@ -375,6 +395,7 @@ tests/evals/agent/baselines/v1.8.2.json
 tests/evals/agent/baselines/v1.8.3.json
 tests/evals/agent/baselines/v1.9.json
 tests/evals/agent/baselines/v1.9.1.json
+tests/evals/agent/baselines/v1.9.2.json
 ```
 
 ### 7.4 运行
@@ -476,4 +497,5 @@ Agent Runtime
 - v1.8.3 对比与成本：[`tests/evals/agent/benchmark/baseline_v1.8.3.md`](../tests/evals/agent/benchmark/baseline_v1.8.3.md)
 - v1.9 Runtime v0.2：[`tests/evals/agent/benchmark/baseline_v1.9.md`](../tests/evals/agent/benchmark/baseline_v1.9.md)
 - v1.9.1 Budget / Cancel：[`tests/evals/agent/benchmark/baseline_v1.9.1.md`](../tests/evals/agent/benchmark/baseline_v1.9.1.md)
+- v1.9.2 Retry / Checkpoint：[`tests/evals/agent/benchmark/baseline_v1.9.2.md`](../tests/evals/agent/benchmark/baseline_v1.9.2.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)

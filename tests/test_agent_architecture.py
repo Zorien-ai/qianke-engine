@@ -191,6 +191,41 @@ def test_agent_config_validation():
         AgentConfig(max_total_tokens=-1)
 
 
+def test_run_agent_with_retry_uses_new_execution_id(monkeypatch, tmp_path):
+    statuses = ["FAILED", "COMPLETED"]
+    calls = []
+
+    def fake_run(question, config=None, *, request_id=None, execution_id=None,
+                 parent_execution_id=None, cancel_event=None):
+        calls.append((request_id, execution_id, parent_execution_id))
+        return {
+            "status": statuses.pop(0),
+            "final_answer": "ok" if len(calls) == 2 else "",
+            "steps": len(calls),
+            "tool_call_count": 0,
+            "total_tokens": 0,
+            "event_trace": [],
+        }
+
+    monkeypatch.setattr(loop, "run_agent", fake_run)
+    result = loop.run_agent_with_retry(
+        "重试问题",
+        max_retries=1,
+        checkpoint_dir=tmp_path,
+    )
+
+    assert result["status"] == AgentStatus.COMPLETED.value
+    assert result["retried"] is True
+    assert len(result["attempts"]) == 2
+    assert len({row["execution_id"] for row in result["attempts"]}) == 2
+    assert len({row[0] for row in calls}) == 1
+    assert calls[0][2] is None
+    assert calls[1][2] == calls[0][1]
+    assert len(result["checkpoint_paths"]) == 2
+    assert all((tmp_path / f"{row['execution_id']}.json").exists()
+               for row in result["attempts"])
+
+
 def test_run_agent_can_be_cancelled(monkeypatch):
     import threading
 

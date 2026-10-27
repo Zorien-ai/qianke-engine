@@ -1,9 +1,11 @@
 """LangGraph Agent 主循环：chatbot ↔ tools，带 Runtime Config 与终态。"""
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -380,6 +382,83 @@ def run_agent(
     }
 
 
+_RETRYABLE_STATUSES = {
+    AgentStatus.FAILED.value,
+    AgentStatus.TIMEOUT.value,
+    AgentStatus.MAX_STEPS_EXCEEDED.value,
+    AgentStatus.MAX_TOOL_CALLS_EXCEEDED.value,
+}
+
+
+def run_agent_with_retry(
+    question: str,
+    config: AgentConfig | None = None,
+    *,
+    max_retries: int = 1,
+    request_id: str | None = None,
+    parent_execution_id: str | None = None,
+    checkpoint_dir: str | Path | None = None,
+    cancel_event: Any = None,
+) -> dict[str, Any]:
+    """在同一 request_id 下执行；每次 retry 使用新的 execution_id。
+
+    checkpoint_dir 不为空时，每次尝试落一个 JSON checkpoint，便于失败复盘。
+    """
+    if max_retries < 0:
+        raise ValueError("max_retries 必须 >= 0")
+    request_id = request_id or f"req_{uuid.uuid4().hex[:16]}"
+    checkpoint_paths: list[str] = []
+    attempts: list[dict[str, Any]] = []
+    result: dict[str, Any] = {}
+
+    for attempt in range(max_retries + 1):
+        execution_id = f"exec_{uuid.uuid4().hex[:16]}"
+        result = run_agent(
+            question,
+            config=config,
+            request_id=request_id,
+            execution_id=execution_id,
+            parent_execution_id=parent_execution_id,
+            cancel_event=cancel_event,
+        )
+        attempt_row = {
+            "attempt": attempt + 1,
+            "execution_id": execution_id,
+            "parent_execution_id": parent_execution_id,
+            "status": result.get("status"),
+            "steps": result.get("steps"),
+            "tool_call_count": result.get("tool_call_count"),
+            "total_tokens": result.get("total_tokens", 0),
+        }
+        attempts.append(attempt_row)
+
+        if checkpoint_dir is not None:
+            directory = Path(checkpoint_dir)
+            directory.mkdir(parents=True, exist_ok=True)
+            checkpoint = {
+                **attempt_row,
+                "request_id": request_id,
+                "question": question,
+                "final_answer": result.get("final_answer", ""),
+                "error": result.get("error"),
+                "event_trace": result.get("event_trace") or [],
+            }
+            path = directory / f"{execution_id}.json"
+            path.write_text(json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8")
+            checkpoint_paths.append(str(path))
+
+        status = str(result.get("status") or "")
+        if status not in _RETRYABLE_STATUSES or attempt >= max_retries:
+            break
+        parent_execution_id = execution_id
+
+    result["request_id"] = request_id
+    result["attempts"] = attempts
+    result["retried"] = len(attempts) > 1
+    result["checkpoint_paths"] = checkpoint_paths
+    return result
+
+
 __all__ = [
     "AgentConfig",
     "AgentState",
@@ -389,4 +468,5 @@ __all__ = [
     "TraceCallbackHandler",
     "build_graph",
     "run_agent",
+    "run_agent_with_retry",
 ]

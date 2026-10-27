@@ -127,6 +127,8 @@ v1.9 Runtime v0.2：[benchmark/baseline_v1.9.md](benchmark/baseline_v1.9.md)。
 
 v1.9.1 Budget / Cancel：[benchmark/baseline_v1.9.1.md](benchmark/baseline_v1.9.1.md)。
 
+v1.9.2 Retry / Checkpoint：[benchmark/baseline_v1.9.2.md](benchmark/baseline_v1.9.2.md)。
+
 ## 结果判定
 
 ```text

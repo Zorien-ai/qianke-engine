@@ -565,6 +565,7 @@ class AgentRunIn(BaseModel):
     query: str
     request_id: str | None = None
     parent_execution_id: str | None = None
+    max_retries: int = 0
 
 
 def _agent_dataset() -> str:
@@ -1160,11 +1161,12 @@ def agent_run(req: AgentRunIn) -> dict:
         raise HTTPException(status_code=400, detail="需求太长了（超过 500 字），请精简后再试")
 
     dataset = _agent_dataset()
-    from rag_demo.agent.loop import run_agent
+    from rag_demo.agent.loop import run_agent_with_retry
 
     try:
-        result = run_agent(
+        result = run_agent_with_retry(
             query,
+            max_retries=max(0, min(req.max_retries, 3)),
             request_id=req.request_id,
             parent_execution_id=req.parent_execution_id,
         )
@@ -1191,6 +1193,7 @@ def agent_run(req: AgentRunIn) -> dict:
         "execution_id": result.get("execution_id"),
         "parent_execution_id": result.get("parent_execution_id"),
         "total_tokens": result.get("total_tokens", 0),
+        "attempts": result.get("attempts", []),
         "event_trace": result.get("event_trace", []),
         "tool_calls": result.get("tool_calls", []),
         "steps": steps,
