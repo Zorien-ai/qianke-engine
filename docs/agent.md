@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.8.2  
+> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.8.3  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -253,7 +253,7 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.8.2 基线（当前）：
+v1.8.3 基线（当前，沿用 v1.8.2 真实运行）：
 
 ```text
 Regression 20
@@ -326,6 +326,7 @@ tests/evals/agent/baselines/v1.7.json
 tests/evals/agent/baselines/v1.8.json
 tests/evals/agent/baselines/v1.8.1.json
 tests/evals/agent/baselines/v1.8.2.json
+tests/evals/agent/baselines/v1.8.3.json
 ```
 
 ### 7.4 运行
@@ -348,6 +349,21 @@ tests/evals/agent/regression/reports/regression_v1.md
 tests/evals/agent/benchmark/reports/benchmark_v1.md
 ```
 
+### 7.5 版本对比与成本
+
+```bash
+python tests/evals/agent/compare.py v1.8.1 v1.8.2
+```
+
+成本单价不写死在仓库里；需要时配置：
+
+```bash
+export EVAL_INPUT_COST_PER_1M=...
+export EVAL_OUTPUT_COST_PER_1M=...
+```
+
+未配置时报告显示 `N/A`。
+
 ## 8. Eval 设计原则
 
 - 不让 Builder 在构建 Benchmark 时运行 Agent，避免污染 held-out
@@ -368,8 +384,8 @@ tests/evals/agent/benchmark/reports/benchmark_v1.md
 
 ## 10. 当前已知限制
 
-1. `bench_multi_004` 的旧 Task Success 仍因缺少 calculator 失败，但业务答案正确；v1.7 已把 calculator 标为可选，Tool Policy Compliance 为 PASS。
-2. Benchmark 的 Tool Execution Success 为 93.1%，剩余错误为少量 SQL / calculator 参数错误，均被 Agent 恢复，Error Recovery 为 100%。
+1. `bench_multi_001` / `multi_004` / `multi_014` 的旧 Task Success 仍因缺少 calculator 失败，但业务答案正确；v1.8.2 已让 Tool Policy Compliance 达到 100%。
+2. Benchmark 的 Tool Execution Success 为 97.2%，剩余错误为少量 SQL / calculator 参数错误，均被 Agent 恢复，Error Recovery 为 100%。
 3. Agent 仍是单 Agent、固定工具集；没有 Planner、Memory、多 Agent 协同。
 4. 第一阶段不做自动业务执行，只做分析与建议。
 5. 评测依赖本地 demo 数据库和模型 API；环境不可用时不能伪造跑分。
@@ -409,4 +425,5 @@ Agent Runtime
 - v1.8 60 题扩展：[`tests/evals/agent/benchmark/baseline_v1.8.md`](../tests/evals/agent/benchmark/baseline_v1.8.md)
 - v1.8.1 收口：[`tests/evals/agent/benchmark/baseline_v1.8.1.md`](../tests/evals/agent/benchmark/baseline_v1.8.1.md)
 - v1.8.2 Token 指标：[`tests/evals/agent/benchmark/baseline_v1.8.2.md`](../tests/evals/agent/benchmark/baseline_v1.8.2.md)
+- v1.8.3 对比与成本：[`tests/evals/agent/benchmark/baseline_v1.8.3.md`](../tests/evals/agent/benchmark/baseline_v1.8.3.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)

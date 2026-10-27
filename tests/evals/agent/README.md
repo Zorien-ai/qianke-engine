@@ -121,6 +121,8 @@ v1.8.1 收口：[benchmark/baseline_v1.8.1.md](benchmark/baseline_v1.8.1.md)。
 
 v1.8.2 Token 指标：[benchmark/baseline_v1.8.2.md](benchmark/baseline_v1.8.2.md)。
 
+v1.8.3 对比与成本：[benchmark/baseline_v1.8.3.md](benchmark/baseline_v1.8.3.md)。
+
 ## 结果判定
 
 ```text

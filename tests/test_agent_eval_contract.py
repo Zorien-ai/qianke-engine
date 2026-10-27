@@ -11,6 +11,7 @@ if str(AGENT_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_EVAL_DIR))
 
 import evaluator  # noqa: E402
+import compare  # noqa: E402
 
 
 def test_dataset_uses_demo_and_has_20_tasks():
@@ -315,3 +316,21 @@ def test_token_usage_aggregates_langchain_messages():
         "total_tokens": 155,
         "token_usage_found": True,
     }
+
+
+def test_estimate_cost_is_configurable(monkeypatch):
+    monkeypatch.setenv("EVAL_INPUT_COST_PER_1M", "2")
+    monkeypatch.setenv("EVAL_OUTPUT_COST_PER_1M", "8")
+    assert evaluator.estimate_cost(1_000_000, 500_000) == 6.0
+    monkeypatch.delenv("EVAL_INPUT_COST_PER_1M")
+    monkeypatch.delenv("EVAL_OUTPUT_COST_PER_1M")
+    assert evaluator.estimate_cost(100, 100) is None
+
+
+def test_compare_renders_metric_delta():
+    old = {"version": "v-old", "benchmark": {"summary": {"task_success_rate": 0.9}}}
+    new = {"version": "v-new", "benchmark": {"summary": {"task_success_rate": 0.95}}}
+    text = compare.compare(old, new)
+    assert "v-old" in text
+    assert "v-new" in text
+    assert "+5.0pp" in text

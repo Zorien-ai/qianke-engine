@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -103,6 +104,28 @@ def token_usage(messages: list[Any]) -> dict[str, int | bool]:
         "total_tokens": input_tokens + output_tokens,
         "token_usage_found": found,
     }
+
+
+def estimate_cost(input_tokens: int, output_tokens: int) -> float | None:
+    """按可配置单价估算成本；未配置时返回 None，不写死厂商价格。"""
+    def _rate(name: str) -> float:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return 0.0
+        try:
+            return float(raw)
+        except ValueError:
+            return 0.0
+
+    input_rate = _rate("EVAL_INPUT_COST_PER_1M")
+    output_rate = _rate("EVAL_OUTPUT_COST_PER_1M")
+    if input_rate == 0.0 and output_rate == 0.0:
+        return None
+    return round(
+        input_tokens / 1_000_000 * input_rate
+        + output_tokens / 1_000_000 * output_rate,
+        6,
+    )
 
 
 def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
@@ -270,6 +293,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     input_tokens = sum(int(r.get("input_tokens") or 0) for r in results)
     output_tokens = sum(int(r.get("output_tokens") or 0) for r in results)
     token_tasks = sum(1 for r in results if r.get("token_usage_found"))
+    estimated_cost = estimate_cost(input_tokens, output_tokens)
 
     modules: dict[str, dict[str, Any]] = {}
     for r in results:
@@ -306,6 +330,8 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "total_tokens": input_tokens + output_tokens,
         "avg_tokens_per_task": (input_tokens + output_tokens) / total if total else 0.0,
         "token_usage_tasks": token_tasks,
+        "estimated_cost": estimated_cost,
+        "cost_configured": estimated_cost is not None,
         "modules": {
             name: {
                 **row,

@@ -121,7 +121,11 @@ def write_report(
         f"| Input Tokens | {summary.get('total_input_tokens', 0):,} |",
         f"| Output Tokens | {summary.get('total_output_tokens', 0):,} |",
         f"| 平均 Tokens / 任务 | {summary.get('avg_tokens_per_task', 0):.0f} |",
-        "| Estimated Cost | N/A（未配置模型单价） |",
+        (
+            f"| Estimated Cost | ${summary['estimated_cost']:.4f} |"
+            if summary.get("cost_configured")
+            else "| Estimated Cost | N/A（未配置 EVAL_*_COST_PER_1M） |"
+        ),
         "",
         "## 分类结果",
         "",
