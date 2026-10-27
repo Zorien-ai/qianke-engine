@@ -1,0 +1,132 @@
+{
+  "version": "agent-eval-baseline-v1.8",
+  "metrics_version": 2,
+  "agent_commit": "pending",
+  "model": "deepseek-flash",
+  "dataset": "demo",
+  "date": "2026-10-27",
+  "regression": {
+    "dataset": "regression/dataset.v1.json",
+    "dataset_sha256": "74b794c59a95fb2087b4d55870d125e36250e32480f112c55661c656e6fd19a5",
+    "summary": {
+      "total": 20,
+      "passed": 20,
+      "task_success_rate": 1.0,
+      "business_correctness_rate": 1.0,
+      "tool_policy_compliance_rate": 1.0,
+      "tool_selection_accuracy": 1.0,
+      "tool_execution_success": 1.0,
+      "error_recovery": null,
+      "error_cases": 0,
+      "tool_error_count": 0,
+      "avg_steps": 2.15,
+      "avg_tool_calls": 1.35,
+      "avg_elapsed_s": 3.4875,
+      "modules": {
+        "calculator": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "execute_sql": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "multi_tool": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "rag_search": {
+          "total": 5,
+          "passed": 5,
+          "business_passed": 5,
+          "policy_passed": 5,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        }
+      }
+    }
+  },
+  "benchmark": {
+    "dataset": "benchmark/dataset.v1.json",
+    "dataset_sha256": "3879418188d85151b89e1be8ee52c5b889eaa57c21ea4b6eccd003bd03fc7ce0",
+    "summary": {
+      "total": 60,
+      "passed": 56,
+      "task_success_rate": 0.9333333333333333,
+      "business_correctness_rate": 0.9666666666666667,
+      "tool_policy_compliance_rate": 0.9833333333333333,
+      "tool_selection_accuracy": 0.9666666666666667,
+      "tool_execution_success": 0.926829268292683,
+      "error_recovery": 1.0,
+      "error_cases": 6,
+      "tool_error_count": 9,
+      "avg_steps": 2.55,
+      "avg_tool_calls": 2.05,
+      "avg_elapsed_s": 4.373333333333333,
+      "modules": {
+        "calculator": {
+          "total": 6,
+          "passed": 6,
+          "business_passed": 6,
+          "policy_passed": 6,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "execute_sql": {
+          "total": 15,
+          "passed": 14,
+          "business_passed": 14,
+          "policy_passed": 15,
+          "task_success_rate": 0.9333333333333333,
+          "business_correctness_rate": 0.9333333333333333,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "multi_tool": {
+          "total": 19,
+          "passed": 17,
+          "business_passed": 19,
+          "policy_passed": 18,
+          "task_success_rate": 0.8947368421052632,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 0.9473684210526315
+        },
+        "negative": {
+          "total": 8,
+          "passed": 7,
+          "business_passed": 7,
+          "policy_passed": 8,
+          "task_success_rate": 0.875,
+          "business_correctness_rate": 0.875,
+          "tool_policy_compliance_rate": 1.0
+        },
+        "rag_search": {
+          "total": 12,
+          "passed": 12,
+          "business_passed": 12,
+          "policy_passed": 12,
+          "task_success_rate": 1.0,
+          "business_correctness_rate": 1.0,
+          "tool_policy_compliance_rate": 1.0
+        }
+      }
+    }
+  },
+  "notes": "60 条 benchmark；20 条新题由 demo SQL/知识库复算；构建期未跑 Agent。"
+}

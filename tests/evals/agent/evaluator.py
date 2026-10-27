@@ -134,6 +134,10 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
                 disallowed_numbers.append(token)
 
     observed_fact_numbers = _observed_fact_numbers(final)
+    for token in (task.get("observed_fact_numbers") or []):
+        token = str(token)
+        if token not in observed_fact_numbers:
+            observed_fact_numbers.append(token)
     fact_aware_disallowed = [
         token for token in disallowed_numbers
         if token not in observed_fact_numbers

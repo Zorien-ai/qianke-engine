@@ -29,7 +29,7 @@ SUITES: dict[str, dict[str, Any]] = {
     },
     "benchmark": {
         "cases": HERE / "benchmark" / "dataset.v1.json",
-        "count": 40,
+        "count": 60,
         "results": HERE / "benchmark" / "results" / "benchmark_v1.json",
         "report": HERE / "benchmark" / "reports" / "benchmark_v1.md",
     },

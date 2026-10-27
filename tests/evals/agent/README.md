@@ -44,7 +44,7 @@ tests/evals/agent/
 | 集合 | 数量 | 用途 | 是否用于日常调优 |
 |---|---:|---|---|
 | regression | 20 | 每次 Agent 变更必跑，防退化 | 可以 |
-| benchmark | 40 | 阶段评测、对外汇报 | 不可以 |
+| benchmark | 60 | 阶段评测、对外汇报 | 不可以 |
 
 数据集固定为 `demo`（8110 个用户画像）。禁止使用 9 用户的 `test` 小样本做比例/分布评测。
 
@@ -114,6 +114,8 @@ v1.5 → v1.6 对比与 rag_001 根因：[benchmark/baseline_v1.6.md](benchmark/
 v1.6 → v1.6.1 小修对比：[benchmark/baseline_v1.6.1.md](benchmark/baseline_v1.6.1.md)。
 
 v1.7 工具策略：[benchmark/baseline_v1.7.md](benchmark/baseline_v1.7.md)。
+
+v1.8 60 题扩展：[benchmark/baseline_v1.8.md](benchmark/baseline_v1.8.md)。
 
 ## 结果判定
 

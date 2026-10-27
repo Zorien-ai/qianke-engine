@@ -1,10 +1,12 @@
-# Agent Benchmark v1.5 · Builder Notes
+# Agent Benchmark v1.8 · Builder Notes
+
+> **v1.8 扩展（2026-10-27）：** 数据集版本升至 `agent-benchmark-v1.8-demo`，在 v1.7 40 条基础上新增 20 条（SQL 5 / RAG 4 / multi 7 / negative 2 / calculator 2），共 60 条。新题 expected 由 demo SQL 与知识库原文复算，构建期未运行 `run_agent`；旧 40 条题目与 expected 未改。新题中的 multi 任务使用 `required_tools` / `optional_tools`。
 
 > **v1.7 工具策略元数据（2026-10-26）：** 数据集版本升至 `agent-benchmark-v1.7-demo`。只给 `bench_multi_004` 增加 `required_tools=["rag_search","execute_sql"]` / `optional_tools=["calculator"]`，给 `bench_multi_011` 增加 `required_tools=["execute_sql"]` / `optional_tools=["calculator"]`；题目、expected 和判分口径不变。`Tool Policy Compliance` 现在按 required/optional 判定，旧 `expected_tools` 仍用于 Task Success v1 和 Tool Selection。
 
 > 任务：task-31（Benchmark v1.5：negative 关闭硬数字白名单，交给语义护栏+人工复核；前序 task-28 修订 v1.4、task-25 v1.3、task-22 v1.2、task-19 v1.1、task-16 构建 v1）
 > 数据：`demo`，快照构建时间 `2026-10-16 17:43:04`（`search_index_meta.built_at`，`profile_count=8110`、`wiki_count=36`）
-> 数据集版本：**`agent-benchmark-v1.5-demo`**（dataset：`demo`，dataset_version：`demo@2026-10-16`）
+> 数据集版本：**`agent-benchmark-v1.8-demo`**（dataset：`demo`，dataset_version：`demo@2026-10-16`）
 > 交付文件：`tests/evals/agent/benchmark/dataset.v1.json`、`tests/evals/agent/benchmark/builder_notes.md`（本文件）
 > 未修改：`regression/`、`DATASET_QUALITY_POLICY.md`、`runner.py`、`evaluator.py`、`src/` 下任何代码；未提交 Git。
 > **v1.1 / v1.2 / v1.3 / v1.4 / v1.5 修订过程均未运行 `run_agent`**：所有 expected 均由 demo 库 SQL 复算 + 知识库原文核对得出；构建期 dry-run 情况见 §11.3（如实披露）。

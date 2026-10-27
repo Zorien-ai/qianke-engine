@@ -1,50 +1,23 @@
 {
-  "version": "agent-eval-v1.7",
+  "version": "agent-eval-v0.1",
   "suite": "benchmark",
   "dataset": "demo",
   "summary": {
-    "total": 40,
-    "passed": 39,
-    "task_success_rate": 0.975,
-    "business_correctness_rate": 1.0,
-    "tool_policy_compliance_rate": 1.0,
-    "tool_selection_accuracy": 0.975,
-    "tool_execution_success": 0.9310344827586207,
+    "total": 60,
+    "passed": 56,
+    "task_success_rate": 0.9333333333333333,
+    "business_correctness_rate": 0.9666666666666667,
+    "tool_policy_compliance_rate": 0.9833333333333333,
+    "tool_selection_accuracy": 0.9666666666666667,
+    "tool_execution_success": 0.926829268292683,
     "error_recovery": 1.0,
-    "error_cases": 4,
-    "tool_error_count": 6,
-    "avg_steps": 2.575,
-    "avg_tool_calls": 2.175,
-    "avg_elapsed_s": 4.7945,
+    "error_cases": 6,
+    "tool_error_count": 9,
+    "avg_steps": 2.55,
+    "avg_tool_calls": 2.05,
+    "avg_elapsed_s": 4.373333333333333,
     "modules": {
       "calculator": {
-        "total": 4,
-        "passed": 4,
-        "business_passed": 4,
-        "policy_passed": 4,
-        "task_success_rate": 1.0,
-        "business_correctness_rate": 1.0,
-        "tool_policy_compliance_rate": 1.0
-      },
-      "execute_sql": {
-        "total": 10,
-        "passed": 10,
-        "business_passed": 10,
-        "policy_passed": 10,
-        "task_success_rate": 1.0,
-        "business_correctness_rate": 1.0,
-        "tool_policy_compliance_rate": 1.0
-      },
-      "multi_tool": {
-        "total": 12,
-        "passed": 11,
-        "business_passed": 12,
-        "policy_passed": 12,
-        "task_success_rate": 0.9166666666666666,
-        "business_correctness_rate": 1.0,
-        "tool_policy_compliance_rate": 1.0
-      },
-      "negative": {
         "total": 6,
         "passed": 6,
         "business_passed": 6,
@@ -53,11 +26,38 @@
         "business_correctness_rate": 1.0,
         "tool_policy_compliance_rate": 1.0
       },
-      "rag_search": {
+      "execute_sql": {
+        "total": 15,
+        "passed": 14,
+        "business_passed": 14,
+        "policy_passed": 15,
+        "task_success_rate": 0.9333333333333333,
+        "business_correctness_rate": 0.9333333333333333,
+        "tool_policy_compliance_rate": 1.0
+      },
+      "multi_tool": {
+        "total": 19,
+        "passed": 17,
+        "business_passed": 19,
+        "policy_passed": 18,
+        "task_success_rate": 0.8947368421052632,
+        "business_correctness_rate": 1.0,
+        "tool_policy_compliance_rate": 0.9473684210526315
+      },
+      "negative": {
         "total": 8,
-        "passed": 8,
-        "business_passed": 8,
+        "passed": 7,
+        "business_passed": 7,
         "policy_passed": 8,
+        "task_success_rate": 0.875,
+        "business_correctness_rate": 0.875,
+        "tool_policy_compliance_rate": 1.0
+      },
+      "rag_search": {
+        "total": 12,
+        "passed": 12,
+        "business_passed": 12,
+        "policy_passed": 12,
         "task_success_rate": 1.0,
         "business_correctness_rate": 1.0,
         "tool_policy_compliance_rate": 1.0
@@ -77,11 +77,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "成都",
@@ -113,17 +121,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 3.34,
-      "final_answer": "按城市统计，**人均累计消费金额最高的是成都市**：\n\n- 用户数：639 人\n- 累计消费总额：7,658,313.49 元\n- 人均累计消费金额：**11,984.84 元**\n\n排名第二、第三的依次是北京（11,841.94 元）、杭州（11,792.65 元）。\n\n统计口径：`AVG(total_amount)`，即按 `city` 分组，按“累计总消费 ÷ 用户数”计算。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 4.81,
+      "final_answer": "**结论：成都最高，人均累计消费 11,984.84 元。**\n\n按城市统计（人均累计消费 = 该城市累计消费总额 ÷ 该城市用户数）：\n\n| 排名 | 城市 | 用户数 | 人均累计消费（元） | 累计消费总额（元） |\n|---|---|---|---|---|\n| 1 | 成都 | 639 | 11,984.84 | 7,658,313.49 |\n| 2 | 北京 | 722 | 11,841.94 | 8,549,883.31 |\n| 3 | 杭州 | 714 | 11,792.65 | 8,419,950.13 |\n| 4 | 深圳 | 673 | 11,601.04 | 7,807,499.74 |\n| 5 | 南京 | 694 | 11,413.69 | 7,921,102.45 |\n| 6 | 苏州 | 672 | 11,356.74 | 7,631,729.80 |\n| 7 | 重庆 | 665 | 11,346.17 | 7,545,203.56 |\n| 8 | 武汉 | 663 | 11,334.61 | 7,514,844.91 |\n| 9 | 上海 | 686 | 11,292.13 | 7,746,398.44 |\n| 10 | 天津 | 672 | 10,925.60 | 7,342,004.91 |\n| 11 | 广州 | 671 | 10,811.45 | 7,254,481.30 |\n| 12 | 西安 | 639 | 10,222.56 | 6,532,215.88 |\n\n补充说明：\n- 12 个城市人均累计消费区间为 10,222.56 ~ 11,984.84 元，差距不大（最高/最低约 1.17 倍）；成都与北京仅相差 142.90 元。\n- 若看**总量**，北京（854.99 万）和杭州（841.99 万）最高，因为它们用户数更多；成都则是用户数中偏少、人均最高的城市。\n\n依据：`user_profile_vectors` 表中 `total_amount` 按 `city` 分组，执行 `COUNT(*)`、`AVG(total_amount)`、`SUM(total_amount)` 查询（SQL 见上一步执行结果，覆盖全部 8,110 条用户记录，12 个城市均有数据）。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_002",
@@ -137,11 +137,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "白银",
@@ -175,17 +183,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.39,
-      "final_answer": "**平均订单数最高的等级：白银，平均订单数 2.98 单**（2434 人）。\n\n各等级明细（`user_profile_vectors` 按 `member_level` 分组，`AVG(order_count)` 保留两位）：\n\n| 会员等级 | 人数 | 平均订单数 |\n|---|---|---|\n| 白银 | 2434 | 2.98 |\n| 黄金 | 1217 | 2.90 |\n| 普通 | 4053 | 2.34 |\n| 钻石 | 403 | 1.80 |\n| 黑卡 | 3 | 1.33 |\n\n依据 SQL：\n```sql\nSELECT member_level, COUNT(*) AS user_count, ROUND(AVG(order_count),2) AS avg_order_count\nFROM user_profile_vectors GROUP BY member_level ORDER BY avg_order_count DESC LIMIT 20\n```\n\n注：黑卡仅 3 人，其均值参考性很弱；白银与黄金差异很小（0.08 单）。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 2.84,
+      "final_answer": "按会员等级统计平均订单数（order_count 均值，保留两位小数）结果如下：\n\n| 会员等级 | 用户数 | 平均订单数 |\n|---|---|---|\n| 白银 | 2434 | 2.98 |\n| 黄金 | 1217 | 2.90 |\n| 普通 | 4053 | 2.34 |\n| 钻石 | 403 | 1.80 |\n| 黑卡 | 3 | 1.33 |\n\n**平均订单数最高的是白银等级，数值为 2.98 单/人**，其次是黄金（2.90）。黑卡仅 3 人、样本过小，其均值（1.33）参考意义有限。\n\n依据：对 `user_profile_vectors` 按 `member_level` 分组执行 `AVG(order_count)`（SQL 见上）。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_003",
@@ -199,11 +199,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "627.92"
@@ -234,17 +242,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.33,
-      "final_answer": "**统计结果**\n\n- 用户数：8,110 人\n- 累计总消费金额（total_amount）合计：**91,923,627.92 元**\n- 人均约 11,335.22 元（= 91,923,627.92 ÷ 8,110）\n\n依据：`SELECT SUM(total_amount), COUNT(*) FROM user_profile_vectors`（返回 1 行，sum=91923627.92，count=8110）。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 2.91,
+      "final_answer": "**统计结果**\n\n对 `user_profile_vectors` 表中全部 8,110 名用户的累计总消费金额（`total_amount`）求和，结果为 **91,923,627.92 元**（约 9,192.36 万元）。\n\n| 指标 | 数值 |\n|---|---|\n| 用户数 | 8,110 |\n| 累计总消费合计 | **91,923,627.92 元** |\n| 人均消费 | 11,334.60 元 |\n\n依据 SQL：\n```sql\nSELECT COUNT(*) AS user_count,\n       ROUND(SUM(total_amount), 2) AS total_amount_sum,\n       ROUND(AVG(total_amount), 2) AS avg_per_user\nFROM user_profile_vectors\nLIMIT 1;\n```\n说明：`total_amount` 为累计消费金额（元），口径为全表用户加总，无时间筛选（库内只有 `days_since_last_buy` 相对天数，无绝对时间列）。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_004",
@@ -258,11 +258,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "41.62",
@@ -275,9 +283,7 @@
       "allowed_numbers": [],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [
-        "8110"
-      ],
+      "observed_fact_numbers": [],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": false,
@@ -296,17 +302,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.17,
-      "final_answer": "全库 8110 名用户统计结果如下：\n\n| 指标 | 数值 |\n|---|---|\n| 平均年龄 | **41.62 岁** |\n| 平均累计订单数 | **2.59 单** |\n\nSQL 依据：`SELECT ROUND(AVG(age),2), ROUND(AVG(order_count),2), COUNT(*) FROM user_profile_vectors`，返回 avg_age=41.62、avg_order_count=2.59、user_count=8110。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 2.61,
+      "final_answer": "基于对 `user_profile_vectors` 全表的统计，结果如下：\n\n| 指标 | 数值 |\n|---|---|\n| 用户数 | 8110 |\n| 平均年龄 | **41.62 岁** |\n| 平均订单数 | **2.59 单** |\n\nSQL 依据：\n```sql\nSELECT ROUND(AVG(age), 2) AS avg_age,\n       ROUND(AVG(order_count), 2) AS avg_order_count,\n       COUNT(*) AS user_cnt\nFROM user_profile_vectors\nLIMIT 10\n```\n\n说明：本次统计覆盖全库 8110 条用户画像记录，没有做任何筛选或分组。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_005",
@@ -320,11 +318,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "运动"
@@ -355,17 +361,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 5.09,
-      "final_answer": "**结论：按偏好品类统计，平均客单价最低的是「运动」品类，约 1,501.62 元。**\n\n依据 SQL（在 `user_profile_vectors` 表中按 `top_category` 分组）：\n\n```\nSELECT top_category, COUNT(*) AS user_cnt, ROUND(AVG(avg_amount),2) AS avg_amt\nFROM user_profile_vectors GROUP BY top_category ORDER BY avg_amt ASC LIMIT 20\n```\n\n| 排名 | 偏好品类 | 用户数 | 平均客单价（元） |\n|---|---|---|---|\n| 1（最低） | 运动 | 797 | 1,501.62 |\n| 2 | 服装 | 800 | 1,509.43 |\n| 3 | 美妆 | 792 | 1,533.72 |\n| 4 | 书籍 | 854 | 1,559.26 |\n| 5 | 玩具 | 838 | 1,574.04 |\n| 6 | 家居 | 1,794 | 5,244.71 |\n| 7（最高） | 电子产品 | 2,235 | 8,978.73 |\n\n补充观察：\n- 这些品类的平均客单价明显呈分层分布：运动、服装、美妆、书籍、玩具这 5 个品类都在 1,500~1,580 元区间内，彼此差距不足 5%，属于本库客单价分位中 P25（1,326 元）附近的低客单价群体；家居（5,245 元）和电子产品（8,979 元）则高出一个数量级，接近 P50 向 P75 过渡的水平。\n- 电子产品的用户数和客单价都是最高，家居次之；而运动品类虽然客单价最低，但这类用户数量为 797 人，与服装、美妆基本持平。\n- 「运动」与「服装」只相差约 7.8 元，两者在统计上几乎等同，因此实际运营分层可以合并，视为一个低客单价群体。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 3.31,
+      "final_answer": "按偏好品类统计的平均客单价如下（`GROUP BY top_category`，AVG(avg_amount)，升序）：\n\n| 排名 | 品类 | 用户数 | 平均客单价（元） |\n|---|---|---|---|\n| 1（最低） | 运动 | 797 | 1501.62 |\n| 2 | 服装 | 800 | 1509.43 |\n| 3 | 美妆 | 792 | 1533.72 |\n| 4 | 书籍 | 854 | 1559.26 |\n| 5 | 玩具 | 838 | 1574.04 |\n| 6 | 家居 | 1794 | 5244.71 |\n| 7 | 电子产品 | 2235 | 8978.73 |\n\n**结论：平均客单价最低的品类是「运动」，为 1501.62 元**，服装（1509.43 元）几乎与之持平，两者仅差约 8 元。\n\n补充说明：本库客单价分位为 P25=1326 / P50=2496 / P75=5474 元。运动、服装、美妆、书籍、玩具这五个品类的均值都在 P25~P50 之间，属于偏低客单人群；家居接近 P75；电子产品均值 8978.73 元明显偏离，因为该品类头部用户拉高了平均值，若要看典型水平建议看中位数。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_006",
@@ -379,11 +377,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "西安",
@@ -415,17 +421,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 3.23,
-      "final_answer": "在 demo 数据集中，按城市统计后，人均累计消费金额最低的是**西安**，约为**10222.56 元/人**。\n\n统计依据（SQL 按 `city` 分组）：\n\n| 城市 | 用户数 | 累计总消费（元） | 人均累计消费（元） |\n|---|---|---|---|\n| 西安 | 639 | 6,532,215.88 | **10,222.56** |\n| 广州 | 671 | 7,254,481.30 | 10,811.45 |\n| 天津 | 672 | 7,342,004.91 | 10,925.60 |\n| …… | …… | …… | …… |\n| 成都 | 639 | 7,658,313.49 | 11,984.84（最高） |\n\n计算口径：`SUM(total_amount) / COUNT(*)`，按城市分组并按人均升序排列，12 个城市全部纳入。西安与成都的用户数相同（各为 639），但西安的累计消费总额更低，因此人均消费最低。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 3.67,
+      "final_answer": "**人均累计消费最低的是：西安，约 10,222.56 元**（639 位用户）。\n\n计算口径：使用 `AVG(total_amount)`，即累计总消费 ÷ 用户数，按城市分组排序。\n\n各城市人均累计消费（由低到高）：\n\n| 城市 | 用户数 | 人均累计消费(元) |\n|---|---|---|\n| 西安 | 639 | 10,222.56 |\n| 广州 | 671 | 10,811.45 |\n| 天津 | 672 | 10,925.60 |\n| 上海 | 686 | 11,292.13 |\n| 武汉 | 663 | 11,334.61 |\n| 重庆 | 665 | 11,346.17 |\n| 苏州 | 672 | 11,356.74 |\n| 南京 | 694 | 11,413.69 |\n| 深圳 | 673 | 11,601.04 |\n| 杭州 | 714 | 11,792.65 |\n| 北京 | 722 | 11,841.94 |\n| 成都 | 639 | 11,984.84 |\n\n补充：西安与成都的用户数都是 639，是 12 个城市中最少的；西安人均消费在 12 个城市中最低，但 12 个城市的人均累计消费差距不大，最高值成都约为最低值西安的 1.17 倍。\n\n依据：`SELECT city, COUNT(*), ROUND(AVG(total_amount),2) FROM user_profile_vectors GROUP BY city ORDER BY 3 ASC LIMIT 20`（返回 12 行）。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_007",
@@ -439,11 +437,20 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
+        "execute_sql",
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "北京"
@@ -456,7 +463,7 @@
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
       "observed_fact_numbers": [
-        "3"
+        "383"
       ],
       "approx_numbers": [],
       "result_claim_numbers": [],
@@ -471,24 +478,21 @@
           "name": "execute_sql",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
       "steps": 2,
-      "tool_call_count": 1,
-      "elapsed_s": 2.58,
-      "final_answer": "**黑卡会员城市分布**\n\n| 城市 | 黑卡会员人数 |\n|---|---|\n| 北京 | 3 |\n\n- 全库黑卡会员共 3 人，且全部集中在北京（其余 11 个城市均为 0 人）。\n- 依据：`SELECT city, COUNT(*) FROM user_profile_vectors WHERE member_level='黑卡' GROUP BY city`，结果仅返回 1 行（北京 3）。\n\n说明：黑卡样本极小（占 8110 名用户的约 0.04%），因此按城市分析时统计意义有限；建议结合消费额、订单数等指标，与钻石或黄金会员一起观察。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_call_count": 2,
+      "elapsed_s": 3.67,
+      "final_answer": "**黑卡会员全部集中在北京，共 3 人，其他 11 个城市没有黑卡会员。**\n\n| 城市 | 黑卡人数 |\n|---|---|\n| 北京 | 3 |\n\n3 位黑卡会员明细：\n\n| user_id | 城市 | 订单数 | 累计消费(元) | 客单价(元) | 偏好品类 | 距最近购买(天) |\n|---|---|---|---|---|---|---|\n| U6103 | 北京 | 2 | 67,237.99 | 33,619.00 | 电子产品 | 16 |\n| U8785 | 北京 | 1 | 47,924.35 | 47,924.35 | 电子产品 | 252 |\n| U8290 | 北京 | 1 | 31,451.64 | 31,451.64 | 电子产品 | 45 |\n\n补充洞察：\n- 3 人客单价均远超全库 P90（10,383 元），是典型超高价值客户，但订单数仅 1~2 笔，人数已到零散级；\n- 均偏好电子产品，可做电子新品的一对一优先体验/客服；\n- U8785 已 252 天未购买，属高价值流失预警，建议优先唤醒。\n\n依据：`user_profile_vectors` 按 `member_level='黑卡'` 分组统计与明细查询（全库黑卡总数 3，与表结构说明一致）。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_008",
@@ -502,11 +506,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "白银",
@@ -539,16 +551,8 @@
       "steps": 2,
       "tool_call_count": 1,
       "elapsed_s": 1.97,
-      "final_answer": "活跃平台包含“淘宝”的用户中，白银会员共有 **338 人**。\n\n依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE platforms LIKE '%淘宝%' AND member_level='白银'`，结果为 338。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "final_answer": "**338 人**\n\n依据 SQL（表 user_profile_vectors）：\n```sql\nSELECT COUNT(*) AS cnt FROM user_profile_vectors\nWHERE platforms LIKE '%淘宝%' AND member_level = '白银'\n```\n结果：cnt = 338，即活跃平台包含“淘宝”且会员等级为白银的用户共 338 人。\n\n（说明：`platforms` 为逗号分隔字段，此处用模糊匹配判定“包含淘宝”；库里“淘宝”标注共 937 人，白银占比约 36%。）",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_009",
@@ -562,11 +566,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "46"
@@ -597,17 +609,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.66,
-      "final_answer": "南京用户中，钻石会员有 **46 名**。\n\n依据 SQL（表 user_profile_vectors）：\n\n```sql\nSELECT COUNT(*) AS cnt FROM user_profile_vectors\nWHERE city = '南京' AND member_level = '钻石';\n```\n\n查询结果为 46。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 1.58,
+      "final_answer": "南京用户中有 **46 名钻石会员**。\n\nSQL 依据（表 user_profile_vectors）：\n\n```sql\nSELECT COUNT(*) AS cnt\nFROM user_profile_vectors\nWHERE city = '南京' AND member_level = '钻石'\n```\n\n结果 cnt = 46。",
+      "run_error": null
     },
     {
       "task_id": "bench_sql_010",
@@ -621,13 +625,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
-        "execute_sql",
-        "calculator",
-        "calculator"
+        "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "黄金"
@@ -639,9 +649,7 @@
       "allowed_numbers": [],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [
-        "9192.36"
-      ],
+      "observed_fact_numbers": [],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": false,
@@ -653,34 +661,16 @@
           "name": "execute_sql",
           "ok": true,
           "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 3,
-      "tool_call_count": 3,
-      "elapsed_s": 5.97,
-      "final_answer": "**黄金会员的累计消费总额最高，为 3336.87 万元，占全库总消费 9192.36 万元的 36.3%。**\n\n各会员等级汇总（SQL：`GROUP BY member_level` 后对 `SUM(total_amount)` 降序排序）：\n\n| 排名 | 会员等级 | 人数 | 累计消费总额（元） | 人均累计（元） | 占比 |\n|---|---|---|---|---|---|\n| 1 | 黄金 | 1217 | 33,368,665.28 | 27,418.79 | 36.3% |\n| 2 | 白银 | 2434 | 30,210,859.90 | 12,412.02 | 32.9% |\n| 3 | 钻石 | 403 | 14,586,711.70 | 36,195.31 | 15.9% |\n| 4 | 普通 | 4053 | 13,610,777.06 | 3,358.20 | 14.8% |\n| 5 | 黑卡 | 3 | 146,613.98 | 48,871.33 | 0.2% |\n\n几点值得注意：\n- **黄金 + 白银合计占比约 69%**，是中坚消费力量；黄金人数（1217）只有白银（2434）的一半，却实现了更高总额，说明其人均贡献更高。\n- **人均值来看，黑卡（4.89 万）> 钻石（3.62 万）> 黄金（2.74 万）**，高等级人少但客单重，黑卡仅 3 人，属极小样本，不宜单独做策略推断。\n- **普通会员人数最多（4053，占 50%），但人均仅 3358 元**，总额排第 4，是典型的“长尾规模、低贡献”群体，适合作为升级培育池。\n\n口径说明：`total_amount` 为累计总消费（元），已是用户级汇总值，按等级求和即得该等级累计消费总额；库内无绝对时间列，无法做同期对比。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 3.64,
+      "final_answer": "**按会员等级统计累计消费总额（total_amount 求和）**\n\n| 排名 | 会员等级 | 人数 | 累计消费总额（元） | 人均消费（元） |\n|---|---|---|---|---|\n| 1 | 黄金 | 1217 | 33,368,665.28 | 27,418.79 |\n| 2 | 白银 | 2434 | 30,210,859.90 | 12,412.02 |\n| 3 | 钻石 | 403 | 14,586,711.70 | 36,195.31 |\n| 4 | 普通 | 4053 | 13,610,777.06 | 3,358.20 |\n| 5 | 黑卡 | 3 | 146,613.98 | 48,871.33 |\n\n**结论：黄金会员的累计消费总额最高，约 3336.87 万元**，占全部等级消费总额的大部分，并略高于白银约 315.8 万元。\n\n补充观察：\n- 从总量看，黄金 > 白银 > 钻石 > 普通 > 黑卡；\n- 从人均消费看，顺序完全不同，黑卡（4.89 万）> 钻石（3.62 万）> 黄金（2.74 万）> 白银（1.24 万）> 普通（0.34 万）。黄金之所以总额第一，主要靠 1217 人的规模；黑卡仅有 3 人，所以总量垫底。这与库内客单价分位（P75=5474、P90=10383）对照可见，高等级用户人均贡献显著越高。\n\n依据：对 user_profile_vectors 按 member_level 分组执行 SUM(total_amount)、COUNT(*)、AVG(total_amount) 的只读查询（SQL 见工具返回结果）。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_001",
@@ -694,11 +684,19 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "99",
@@ -730,17 +728,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 4.76,
-      "final_answer": "**黄金会员免运费门槛：单笔订单满 99 元可免运费。**\n\n依据：《会员权益说明》的「黄金会员权益」部分（member_benefits.md）：\n- 免运费：单笔订单满 **99 元** 免运费。\n\n补充对比：\n- 钻石会员：全场免运费，不限订单金额、不限次数。\n- 白银会员：权益中没有免运费这一项，只列了生日券、退换货和积分加速。\n\n注：该数据是会员权益规则原文，无需再统计用户数据。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 4.44,
+      "final_answer": "**黄金会员的免运费门槛是：单笔订单满 99 元免运费。**\n\n依据：`member_benefits.md` 的「黄金会员权益」第 2 条原文写明：“免运费：单笔订单满 99 元免运费。”\n\n作为对比（同文档）：\n- 钻石会员：全场免运费，不限订单金额、不限次数\n- 白银会员权益中未列出免运费条目\n\n另外，黄金会员的其他权益包括：专属客服优先接入、生日当月赠 100 元无门槛券、当月消费双倍积分、新品提前 24 小时购买、15 天无理由退换、消费积分 1.5 倍累计。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_002",
@@ -754,12 +744,19 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
-        "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "200",
@@ -784,29 +781,16 @@
           "name": "rag_search",
           "ok": true,
           "error": null
-        },
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
       "steps": 2,
-      "tool_call_count": 2,
-      "elapsed_s": 3.78,
-      "final_answer": "**钻石会员生日当月专属礼遇**（依据：知识库 `member_benefits.md`「钻石会员权益」第4条）：\n\n- **生日礼遇**：生日当月赠 **200 元无门槛券**\n- **当月消费双倍积分**\n\n作为对比：\n- 黄金会员：生日当月 100 元无门槛券 + 双倍积分\n- 白银会员：生日当月 50 元无门槛券（无积分加倍说明）\n\n补充说明：钻石会员的「2 倍积分累计」为全年常驻权益，生日当月消费即为双倍积分；同时钻石会员还享 7×24 专属客服、全场免运费、9 折专属折扣、新品提前 48 小时购、30 天无理由退换等其他权益。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_call_count": 1,
+      "elapsed_s": 3.02,
+      "final_answer": "根据知识库《会员权益说明》（member_benefits.md）中「钻石会员权益」条款，钻石会员生日当月可享受的专属礼遇是：\n\n- **生日礼遇**：生日当月赠 **200 元无门槛券**，且**当月消费双倍积分**。\n\n补充：该 200 元无门槛券在生日礼遇上为钻石会员的最高档（白银 50 元、黄金 100 元，且仅黄金及以上有双倍积分）。其余钻石权益（专属客服 7×24、全场免运费、全场 9 折、新品提前 48 小时优先购、30 天无理由退换、积分 2 倍累计）属于常驻权益，并非生日专属。\n\n注：知识库中未说明生日券的领取方式与有效期细则，如需操作流程建议进一步查阅营销/客服 SOP。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_003",
@@ -820,12 +804,20 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "T+1",
@@ -862,17 +854,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 3.91,
-      "final_answer": "**结论（依据《会员权益说明 · 会员升级与保级》，member_benefits.md）：**\n\n1. **升级生效时间**：当用户的累计平均客单价达到上一等级门槛后，系统会在 **T+1 自动升级，权益于次日生效**。会员等级同样按「累计平均客单价」划分，以 T+1 频率更新。\n\n2. **保级考核期**：**没有固定的保级考核期**。会员等级会**随累计平均客单价的变动实时调整**，因此不是按季度或按年度考核，也没有“保级任务期”。\n\n补充等级门槛如下，方便判断“还差多少”：\n- 钻石：累计平均客单价 ≥ 14555 元\n- 黄金：6680–14555 元\n- 白银：2495–6680 元\n- 普通：< 2495 元\n\n客服侧对应 SOP（cs_sop.md 场景三 / member_benefits.md 权益咨询流程）：先查用户当前等级与权益有效期，再逐条解释当前权益；若接近升级，就提示还差多少金额，并推荐续费或升级礼包，最后记录工单。\n\n注：因无固定考核期，所以无法告知“多久内需再消费多少才能保级”这类固定期限承诺；如用户问“权益有效期”具体到个人，需按其当前等级查询实际记录。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 3.51,
+      "final_answer": "**结论（依据：`member_benefits.md`「会员升级与保级」）**\n\n- **生效时间：次日生效。** 当累计平均客单价达到上一等级门槛后，系统会在 T+1 自动升级，权益次日生效；等级门槛的判定本身就是 T+1 更新的。\n- **保级考核期：没有固定的考核期。** 资料原文写明「无固定保级考核期，等级随累计平均客单价的变动实时调整」，也就是说，不存在“一年内需消费满多少才能保级”这种定期考核，等级会随累计平均客单价的变动实时上调或下调。\n\n**补充：等级门槛（累计平均客单价，T+1 更新）**\n| 等级 | 累计平均客单价 |\n|---|---|\n| 钻石 | ≥ 14555 元（约前 5%） |\n| 黄金 | 6680–14555 元 |\n| 白银 | 2495–6680 元 |\n| 普通 | < 2495 元 |\n\n客服处理这类咨询时，可参考 `cs_sop.md`「场景三：会员权益咨询」：先查询用户等级与权益有效期，再解释对应的权益；如果用户接近升级，提示还差多少金额，并推荐续费或升级礼包，最后记录工单并标记「会员咨询」。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_004",
@@ -886,12 +870,19 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
-        "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "物流延迟",
@@ -916,29 +907,16 @@
           "name": "rag_search",
           "ok": true,
           "error": null
-        },
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
       "steps": 2,
-      "tool_call_count": 2,
-      "elapsed_s": 4.02,
-      "final_answer": "依据知识库 **《客服标准作业流程（SOP）— 场景一：物流延迟投诉》**（来源：cs_sop.md），标准处理步骤如下：\n\n1. **查询订单状态**，先确认订单是否已发货。\n2. **已发货且超过 7 天物流未更新**：向用户**主动致歉**。\n3. **提供补偿方案**：二选一，**10 元无门槛券** 或 **积分补偿**。\n4. **若用户坚持退款**：引导用户至**自助退款入口**办理。\n5. **记录工单**，标记为 **「物流延迟」**。\n\n小结要点：先核实发货与超 7 天未更新的事实 → 主动致歉 → 给出「10 元无门槛券或积分」补偿 → 坚持退款则引导自助退款 → 工单标记“物流延迟”。\n\n补充说明：SOP 原文只给出这一档补偿（10 元无门槛券或积分），未按会员等级或客单价另行分级；如需更细的补偿分级口径，知识库中暂无对应条款。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_call_count": 1,
+      "elapsed_s": 3.5,
+      "final_answer": "依据知识库《客服标准作业流程（SOP）》场景一“物流延迟投诉”（来源：cs_sop.md），建议如下处理：\n\n**处理步骤**\n1. 查询订单状态，确认是否已发货。\n2. 若已发货且超过 7 天未更新：**主动向用户致歉**。\n3. 向用户提供补偿方案：**10 元无门槛券，或积分补偿**（两种方案任选其一）。\n4. 若用户坚持退款：**引导至自助退款入口**。\n5. **记录工单，标记“物流延迟”**。\n\n**要点提示**\n- 处理顺序是先核实订单，再致歉，然后给出补偿方案，接着在用户不接受时引导自助退款，最后记录工单并打标，不要跳步。\n- 补偿不用固定的绝对金额，SOP 只给了两个标准选项：10 元无门槛券或积分补偿。\n- “超过 7 天未更新”是指物流轨迹超过 7 天没有更新，并不等于商品质量问题；后者属于场景二，处理方式是让用户提供证据并确认签收后 7 天退换货期，两者不要混淆。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_005",
@@ -952,12 +930,20 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "50",
@@ -994,17 +980,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 3.72,
-      "final_answer": "根据营销手册《marketing_playbook.md》「二、高价值沉默客召回」原文：\n\n**券面额**\n- 大额无门槛券 **50 元**；配套内容为「新品优先体验」。\n\n**触达渠道**\n- **电话回访、专属客服企微、短信**（这三个渠道）。\n\n**同章节的配套执行规则**\n- 时机：沉默第 31 天、第 60 天各触达一次；\n- 频控：每月最多 1 次电话、2 次短信；\n- 通用频控（第五节）：同一用户每日最多 3 条营销消息、同一活动同一用户最多触达 2 次、退订后立即停止所有触达。\n\n补充区分：分群文档《segmentation.md》对该群只说“一对一召回、大额优惠券、电话回访”，未给具体金额；**100 元券 + 短信/邮件** 是「流失用户挽回」（>90 天无行为）的方案，不要与高价值沉默客混淆。\n\n依据：rag_search 命中 marketing_playbook.md（score 0.77）与 segmentation.md。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 3.55,
+      "final_answer": "根据知识库《营销策略手册》中「二、高价值沉默客召回」内容（来源：marketing_playbook.md）：\n\n**券面额**\n- 大额**无门槛券 50 元**\n\n**触达渠道**\n1. 电话回访\n2. 专属客服企微\n3. 短信\n\n**配套要点**\n- 目标人群：高价值 + 沉默客（segmentation.md 也建议一对一召回 + 大额优惠券 + 电话回访）\n- 附加内容：新品优先体验\n- 时机：沉默第 31 天、第 60 天\n- 频控：每月最多 1 次电话、2 次短信（通用规则：同一用户每日最多 3 条营销消息，同一活动最多触达 2 次，退订即停）\n\n⚠️ 注意区分：**流失客**（>90 天无行为）走的是「回归礼包 100 元券、7 天有效、短信+邮件、第 91/120 天」，不要与高价值沉默客的 50 元券混用。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_006",
@@ -1018,11 +996,19 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "有效期",
@@ -1054,17 +1040,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 3.17,
-      "final_answer": "**客服「会员权益咨询」标准处理流程（共 5 步）**\n\n依据知识库两份文档，内容一致：\n\n| 步骤 | 操作内容 |\n|---|---|\n| 1 | 查询用户当前的**会员等级**和**权益有效期** |\n| 2 | 按当前等级**逐条解释**该等级对应的权益 |\n| 3 | 如果用户**接近升级**，提示用户还差多少消费额，以及升级后可获得的权益 |\n| 4 | 推荐**续费或升级礼包** |\n| 5 | **记录工单**并做标记：cs_sop.md 记为「会员咨询」，member_benefits.md 记为「会员权益」 |\n\n资料来源：`cs_sop.md`（场景三：会员权益咨询）、`member_benefits.md`（权益咨询处理流程）。\n\n提示：两份文档只在工单标记文案上不同，都表示「会员咨询」「会员权益」。实际执行时建议按团队统一的工单标签规范二选一，以免同一场景的标签出现不一致。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 3.31,
+      "final_answer": "客服接到「会员权益咨询」的标准处理流程共 5 步，依据知识库中两个文档的口径一致：\n\n1. **查询用户当前会员等级与权益有效期**（先核对身份与权益状态）\n2. **按当前等级逐条解释对应权益**\n3. **若用户接近升级**，提示还差多少消费额，以及升级后可获得的权益\n4. **推荐续费或升级礼包**\n5. **记录工单**并打标签（`cs_sop.md` 标记为“会员咨询”，`member_benefits.md` 标记为「会员权益」）\n\n依据来源：\n- `cs_sop.md` →「客服标准作业流程（SOP）· 场景三：会员权益咨询」\n- `member_benefits.md` →「权益咨询处理流程」\n\n补充说明：两个文档仅在第 5 步的工单标签命名上略有差异（“会员咨询” / 「会员权益」），实际执行建议按团队统一的标签体系二选一。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_007",
@@ -1078,12 +1056,19 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
-        "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "31",
@@ -1108,29 +1093,16 @@
           "name": "rag_search",
           "ok": true,
           "error": null
-        },
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
       "steps": 2,
-      "tool_call_count": 2,
-      "elapsed_s": 3.81,
-      "final_answer": "依据知识库 `segmentation.md` 的“用户分群策略 · 分群维度 · 生命周期”规则：\n\n- **沉默客：31–90 天无行为**\n- **流失客：> 90 天无行为**\n\n作为参照的相邻分群：活跃客 = 近 30 天有行为；新客 = 注册 ≤ 30 天。\n\n补充说明（知识库中的其他相关内容）：\n- `marketing_playbook.md` 的挽回策略与上述定义一致：流失客为“> 90 天无行为”，挽回时机选在流失第 91 天和第 120 天；高价值沉默客的触达时机选在沉默第 31 天和第 60 天。\n- 请注意，知识库中的“**流失预警用户**”（`tag_definitions.md`）采用的是另一套口径：近 30 天未活跃 + 历史客单价 > 500 元 + 累计购买次数 ≥ 3 次；它与生命周期分群中的“沉默客/流失客”并不相同，不要混用。\n\n本库只有相对天数 `days_since_last_buy`（0–364），若要统计各分群人数，可按 31–90 与 > 90 划分；需要的话，我可以再跑一次统计。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_call_count": 1,
+      "elapsed_s": 2.92,
+      "final_answer": "根据知识库《用户分群策略》（segmentation.md）的生命周期维度定义：\n\n- **沉默客**：**31–90 天**无行为\n- **流失客**：**> 90 天**无行为\n\n同一分群维度下的其他生命周期分群是：新客（注册 ≤ 30 天）、活跃客（近 30 天有行为）。\n\n补充：营销手册（marketing_playbook.md）中“流失用户挽回”也按同一判定标准执行，即目标人群为“流失客（> 90 天无行为）”，触达时机为流失第 91 天和第 120 天。\n\n⚠️ 注意：知识库里的分群判定标准使用“无行为天数”，而本库表 user_profile_vectors 只有 `days_since_last_buy`（距最后一次购买天数），缺少登录、浏览等行为时间字段，因此用库内数据统计时只能近似按“距最后购买天数”归类，并且要注意这两类定义的差别。",
+      "run_error": null
     },
     {
       "task_id": "bench_rag_008",
@@ -1144,12 +1116,20 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "20",
@@ -1186,17 +1166,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 3.84,
-      "final_answer": "**首单立减金额：20 元**（新人专享礼包可同时叠加）\n\n依据知识库《营销策略手册 · 一、新客转化》（marketing_playbook.md）：\n\n- **目标人群**：注册 ≤ 30 天，且未下单\n- **触达时机（建议 3 个节点）**：\n  1. **注册后 24 小时内**\n  2. **注册后第 3 天**\n  3. **注册后第 7 天**\n- **渠道**：短信、App 推送、企微\n- **内容**：首单立减 20 元 + 新人专享礼包\n- **频控**：每周最多 2 次\n\n补充口径：\n- 对「新客高潜」人群（新客 + 近 7 天浏览 ≥ 3 次）可加配**首单立减 + 新人礼包 + 7 天复购券**（segmentation.md）。\n- 通用频控叠加约束：同一用户每日最多接收 3 条营销消息；同一活动同一用户最多触达 2 次；退订后立即停止所有触达（marketing_playbook.md·五）。\n\n注：这是资料中固定的营销规则，非基于库内数据测算；本库除 days_since_last_buy 外无注册时间字段，如需按上述人群规模统计，需确认是否有注册时间数据可用。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 4.78,
+      "final_answer": "**首单立减金额是 20 元**，触达时机也已明确，以下内容均来自知识库原文。\n\n## 一、首单立减金额\n> 内容：首单立减 **20 元**，新人专享礼包。——《营销策略手册》一、新客转化（marketing_playbook.md）\n\n## 二、建议触达时机\n> 时机：**注册后 24 小时内、第 3 天、第 7 天**。——同上（marketing_playbook.md）\n\n也就是说，新客转化节奏共有 3 个触点：\n1. **注册后 24 小时内**：这是黄金窗口，应立即告知首单立减和新人礼包；\n2. **注册后第 3 天**：如果仍未下单，就再次提醒；\n3. **注册后第 7 天**：进行最后一次促单，可配合分群策略中的「7 天复购券」承接后续行为。\n\n## 三、配套执行要点\n- **目标人群**：注册 ≤ 30 天且未下单（marketing_playbook.md）\n- **渠道**：短信、App 推送、企微\n- **频控**：新客转化活动每周最多 2 次；同时按通用频控规则，同一用户每日最多接收 3 条营销消息，同一活动同一用户最多触达 2 次，退订后立即停止所有触达（marketing_playbook.md 五、通用频控规则）\n- **人群细化**：若属于「新客高潜」（新客 + 近 7 天浏览 ≥ 3 次），策略为首单立减、新人礼包和 7 天复购券（segmentation.md）\n\n注：库内无注册时间字段，只有相对天数 days_since_last_buy，因此在 SQL 侧无法直接圈出「注册 ≤ 30 天未下单」人群；上述口径需借助标签体系（标签 T+1 更新）落地。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_001",
@@ -1204,7 +1176,7 @@
       "question": "“高客单用户”的标签口径是什么？按该口径统计 demo 数据集中高客单用户的数量及其占全库用户的比例（百分比保留两位小数）。",
       "status": "COMPLETED",
       "status_ok": true,
-      "task_success": true,
+      "task_success": false,
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [
@@ -1212,14 +1184,28 @@
         "execute_sql",
         "calculator"
       ],
-      "actual_tools": [
+      "required_tools": [
         "rag_search",
-        "execute_sql",
+        "execute_sql"
+      ],
+      "optional_tools": [
         "calculator"
       ],
-      "missing_tools": [],
-      "tool_selection_ok": true,
-      "tool_recall": 1.0,
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "rag_search",
+        "execute_sql",
+        "execute_sql"
+      ],
+      "missing_tools": [
+        "calculator"
+      ],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": false,
+      "tool_policy_ok": true,
+      "tool_recall": 0.6666666666666666,
       "expected_keywords": [
         "1000",
         "82.7"
@@ -1231,9 +1217,7 @@
       "allowed_numbers": [],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [
-        "110"
-      ],
+      "observed_fact_numbers": [],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": false,
@@ -1247,12 +1231,17 @@
           "error": null
         },
         {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
           "name": "execute_sql",
           "ok": true,
           "error": null
         },
         {
-          "name": "calculator",
+          "name": "execute_sql",
           "ok": true,
           "error": null
         }
@@ -1260,21 +1249,11 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 4,
-      "tool_call_count": 3,
-      "elapsed_s": 5.94,
-      "final_answer": "**标签口径（资料依据：tag_definitions.md）**\n- 高客单用户：**累计平均客单价 ≥ 1000 元**（注：当前画像数据为累计口径，T+1 更新；负责人：数据部-用户价值组）。\n\n**统计结果（依据 user_profile_vectors 表）**\nSQL：`SELECT COUNT(*) AS total, SUM(CASE WHEN avg_amount >= 1000 THEN 1 ELSE 0 END) AS high_cnt FROM user_profile_vectors LIMIT 10`\n- 全库用户：8,110 人\n- 高客单用户（avg_amount ≥ 1000）：**6,708 人**\n- 占比：6708 / 8110 = **82.71%**\n\n补充说明：该口径的阈值是 1000 元，而本库的客单价分位为 P25=1326、P50=2496、P75=5474 元；也就是说，阈值 1000 元低于 P25，因此按此口径统计的高客单用户会覆盖绝大多数用户，这一标签的区分度较弱。如果要细分人群，建议改用分位口径（如 P75 以上为高客单）。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search",
-        "execute_sql",
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "steps": 3,
+      "tool_call_count": 4,
+      "elapsed_s": 7.27,
+      "final_answer": "## 一、口径（来自 rag_search，来源 tag_definitions.md）\n\n> **高客单用户：累计平均客单价 ≥ 1000 元**（注：按当前画像数据采用累计口径，T+1 更新；负责人：数据部-用户价值组）\n\n同一文档中，另外两档客单口径可以对照：中客单为近 90 天平均客单价 500–1000 元，低客单为近 90 天平均客单价 < 500 元。\n\n## 二、按该口径统计（对应字段 avg_amount ≥ 1000）\n\n| 指标 | 数值 |\n|---|---|\n| 全库用户数 | 8110 |\n| 高客单用户数（avg_amount ≥ 1000） | **6708** |\n| 占比 | **82.71%** |\n\n分布校验结果（用于确认同一口径）：<500 元 492 人、500–1000 元 910 人、≥1000 元 6708 人，三者合计 8110。\n\nSQL 依据：\n```sql\nSELECT COUNT(*) AS total_users,\n       SUM(CASE WHEN avg_amount >= 1000 THEN 1 ELSE 0 END) AS high_avg_users,\n       ROUND(100.0*SUM(CASE WHEN avg_amount >= 1000 THEN 1 ELSE 0 END)/COUNT(*),2) AS pct\nFROM user_profile_vectors;\n```\n\n## 三、需要注意的口径提示\n\n知识库中高客单、中客单和低客单三档的定义彼此不统一：**高客单采用“累计口径”（累计平均客单价）**，而中、低客单明确采用“近 90 天口径”，并且使用的阈值并不连续（<500、500–1000、≥1000）。本库没有可用于按绝对时间回溯的字段（只有 days_since_last_buy），因此无法按“近 90 天”重新计算。所以本回答按文档原文的**累计口径**统计。\n\n另外，该库客单价分布偏高（P25 已达 1326 元），因此 1000 元阈值只切出约 17% 的尾部用户，82.71% 的用户都被判为“高客单”；如果业务上希望“高客单”代表头部用户，建议改用内部实测分位（如 P75=5474 或 P90=10383）作为阈值，并与数据部-用户价值组确认口径更新。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_002",
@@ -1287,17 +1266,30 @@
       "tool_policy_compliance": true,
       "expected_tools": [
         "rag_search",
-        "execute_sql",
+        "execute_sql"
+      ],
+      "required_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "optional_tools": [
         "calculator"
       ],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
+        "rag_search",
+        "execute_sql",
+        "execute_sql",
         "execute_sql",
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "500",
@@ -1311,7 +1303,7 @@
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
       "observed_fact_numbers": [
-        "110"
+        "32.26"
       ],
       "approx_numbers": [],
       "result_claim_numbers": [],
@@ -1324,6 +1316,27 @@
           "name": "rag_search",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
+        },
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
         },
         {
           "name": "execute_sql",
@@ -1341,24 +1354,31 @@
           "error": null
         }
       ],
-      "tool_execution_ok": 1.0,
-      "tool_errors": [],
-      "error_recovered": false,
-      "steps": 4,
-      "tool_call_count": 4,
-      "elapsed_s": 5.59,
-      "final_answer": "**判定标准**（来源：知识库 `tag_definitions.md`「用户标签口径说明 / 流失预警用户」）\n> 流失预警用户 = 近 30 天未活跃 **且** 历史客单价 > 500 元 **且** 累计购买次数 ≥ 3 次；更新频率 T+1，负责人为数据部-用户留存组，用于召回活动与定向优惠券发放。\n\n**统计结果**（库内映射：近 30 天未活跃 → `days_since_last_buy > 30`；历史客单价 → `avg_amount > 500`；累计购买次数 → `order_count >= 3`）\n\n| 指标 | 数值 |\n|---|---|\n| 符合条件人数 | 2,616 人 |\n| 全库用户数 | 8,110 人 |\n| 占比 | **32.26%**（2616 / 8110 × 100 = 32.2565%，保留两位小数） |\n\nSQL 依据：\n```sql\nSELECT COUNT(*) FROM user_profile_vectors\nWHERE days_since_last_buy > 30 AND avg_amount > 500 AND order_count >= 3;   -- 2616\nSELECT COUNT(*) FROM user_profile_vectors;                                  -- 8110\n```\n\n口径提示：本库无绝对时间列，故“近 30 天未活跃”只能以相对天数 `days_since_last_buy > 30` 近似，且“历史客单价”用表内 `avg_amount` 字段承接；若业务口径要求用成交总额/订单数重算客单价，结果会略有差异。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search",
-        "execute_sql",
-        "calculator"
+      "tool_execution_ok": 0.7142857142857143,
+      "tool_errors": [
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
+        },
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
+        }
       ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "error_recovered": true,
+      "steps": 5,
+      "tool_call_count": 7,
+      "elapsed_s": 8.89,
+      "final_answer": "## 一、判定标准（来源：知识库 tag_definitions.md）\n\n**流失预警用户**（负责人：数据部-用户留存组，更新频率 T+1，用途：召回活动、定向优惠券发放）需同时满足三个条件：\n\n1. 近 30 天未活跃\n2. 历史客单价 > 500 元\n3. 累计购买次数 ≥ 3 次\n\n映射到本库字段：`days_since_last_buy > 30`（30天以上未购买，即“近30天未活跃”）且 `avg_amount > 500` 且 `order_count >= 3`。\n\n> ⚠️ 口径提示：该标准为「近 30 天未活跃 + 客单价 > 500 元」，与 `segmentation.md` 中“流失客（> 90 天无行为）”不是同一口径，也不同于 marketing_playbook 的“流失客（>90天）”挽回策略人群；本库客单价 P25=1326 元，故“>500 元”门槛在本库几乎不构成约束，实际主要筛的是“30 天以上未活跃 且 订单数≥3”。\n\n## 二、统计结果（SQL 实测）\n\n| 指标 | 数值 |\n|---|---|\n| 符合条件人数 | **2,616** |\n| 全库总人数 | 8,110 |\n| 占全库比例 | **32.26%** |\n\nSQL 依据：\n```sql\nSELECT COUNT(*) AS total,\n       SUM(CASE WHEN days_since_last_buy > 30 AND avg_amount > 500 AND order_count >= 3 THEN 1 ELSE 0 END) AS warn_cnt\nFROM user_profile_vectors LIMIT 10;   -- total=8110, warn_cnt=2616\n```\n占比 = 2616 / 8110 × 100 = 32.2564…% ≈ **32.26%**（保留两位小数）。\n\n补充：若把“近 30 天未活跃”按 `>= 30` 天理解，人数为 2,656 人（差异 40 人），比例约 32.75%，结论量级不变。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_003",
@@ -1373,9 +1393,15 @@
         "rag_search",
         "execute_sql"
       ],
+      "required_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
-        "rag_search",
+        "execute_sql",
         "execute_sql",
         "execute_sql",
         "execute_sql",
@@ -1384,7 +1410,10 @@
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "14555",
@@ -1411,7 +1440,7 @@
           "error": null
         },
         {
-          "name": "rag_search",
+          "name": "execute_sql",
           "ok": true,
           "error": null
         },
@@ -1461,20 +1490,11 @@
         }
       ],
       "error_recovered": true,
-      "steps": 5,
+      "steps": 6,
       "tool_call_count": 8,
-      "elapsed_s": 17.8,
-      "final_answer": "## 一、会员等级划分标准（原文口径）\n\n来源：`member_benefits.md` —「等级划分标准」：会员等级按**累计平均客单价**划分，按 T+1 更新：\n\n| 等级 | 累计平均客单价门槛 |\n|---|---|\n| 钻石 | ≥ 14555 元（约前 5%） |\n| 黄金 | 6680 – 14555 元 |\n| 白银 | 2495 – 6680 元 |\n| 普通 | < 2495 元 |\n\n升级与保级规则参见同一文档「会员升级与保级」：达到上一等级门槛后 **T+1 自动升级**，权益次日生效；**无固定保级考核期**，等级随累计平均客单价变动实时调整。\n\n## 二、统计与对比\n\n**按门槛统计（`avg_amount >= 14555`）** 与 **库内实际等级**：\n\n| 指标 | 人数 | 占比 |\n|---|---|---|\n| 累计平均客单价 ≥ 14555（达到钻石门槛） | **406** | 5.01% |\n| 库内实际 `member_level='钻石'` | **403** | 4.97% |\n| 两者差 | **3** | — |\n\n交叉校验（单条 SQL 同时算出）：同时满足两者 = 403；达标但非钻石 = 3；钻石但未达标 = **0**。\n\n库内等级分布：普通 4053 / 白银 2434 / 黄金 1217 / 钻石 403 / 黑卡 3，合计 8110。\n\n## 三、差异解释：差 3 人，原因是黑卡等级\n\n这 3 位“达标但非钻石”的用户全部是**黑卡**，等级高于钻石，因此不计入钻石人数：\n\n- U8785：黑卡，客单价 47924.35 元\n- U6103：黑卡，客单价 33619.00 元\n- U8290：黑卡，客单价 31451.64 元\n\n因此差异**不是**数据延迟或口径错位：\n\n1. **口径一致**：钻石会员 min(avg_amount)=14555.44，全部落在门槛之上；黄金 max=14551.01，恰好卡在 14555 之下，门槛边界无重叠或越界。`diamond_but_below = 0`，说明没有钻石会员低于门槛，等级列与门槛严格对齐。\n2. **3 人差来自更高等级覆盖**：黑卡 3 人客单价 31451–47924 元，全部满足钻石门槛，但被标为更高档，所以「按金额阈值统计 406」= 钻石 403 + 黑卡 3。\n3. **占比校验**：403/8110 = 4.97%，与文档「约前 5%」吻合（406/8110 = 5.01%）；库内 P90 = 10383 元，14555 高于 P90，量级也与“前 5%”一致。\n\n## 四、需提示的口径缺口\n\n`member_benefits.md` 的等级划分标准只定义了普通/白银/黄金/钻石四档，**未包含黑卡**；而库内实际存在 3 名黑卡用户（客单价 31451 元以上）。建议在文档中补充黑卡门槛，否则任何「按门槛反推等级」的统计都会与 `member_level` 列相差这 3 人。\n\n（依据：`member_benefits.md` 等级划分标准与升级保级条款；`user_profile_vectors` 全量 8110 条的分级计数、`avg_amount` 边界值及 3 名达标非钻石用户明细。）",
-      "run_error": null,
-      "required_tools": [
-        "rag_search",
-        "execute_sql"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 10.97,
+      "final_answer": "## 一、会员等级划分标准（依据 `member_benefits.md`｜等级划分标准）\n\n会员等级按 **累计平均客单价** 划分，T+1 更新：\n\n| 等级 | 门槛（累计平均客单价） |\n|---|---|\n| 钻石 | ≥ 14,555 元（约前 5%） |\n| 黄金 | 6,680 – 14,555 元 |\n| 白银 | 2,495 – 6,680 元 |\n| 普通 | < 2,495 元 |\n\n升级为自动升级（达到上一等级门槛后，T+1 生效），无固定保级期，等级随累计平均客单价变动实时调整。\n⚠️ 注意：知识库原文只定义了 4 个等级，**未给出「黑卡」的门槛规则**；库内却存在 3 个黑卡用户，属文档未覆盖的部分。\n\n## 二、按「累计平均客单价 ≥ 14,555 元（钻石门槛）」统计\n\nSQL：`SELECT COUNT(*) ... WHERE avg_amount >= 14555`\n\n- 命中用户数：**406 人**（占 8110 人的 **5.01%**，与文档“约前 5%”一致）\n- 交叉验证：用 `total_amount / order_count >= 14555` 重新计算，同样得到 **406 人**，口径一致\n\n## 三、与库内实际钻石等级人数对比\n\n| 项 | 人数 |\n|---|---|\n| 钻石门槛达标（avg_amount ≥ 14,555） | 406 |\n| 实际 member_level = 钻石 | 403 |\n| **差异** | **3** |\n\n库内等级分布（`GROUP BY member_level`）：普通 4053 / 白银 2434 / 黄金 1217 / 钻石 403 / 黑卡 3。\n\n## 四、差异解释（403 vs 406）\n\n对达标人群按等级拆分（`WHERE avg_amount >= 14555 GROUP BY member_level`）后，结果恰好为：\n\n- 钻石 403 人（avg_amount 区间 14,555.44 – 49,304.5）\n- 黑卡 3 人（avg_amount 区间 31,451.64 – 47,924.35）\n\n**结论：这 3 人全部是黑卡会员，并非统计口径出现偏差。** 这 3 人的累计平均客单价（3.1 万 – 4.8 万）远超 14,555 元门槛，按规则本应满足钻石条件，但他们的实际等级被标为更高的「黑卡」，因此在 `member_level = '钻石'` 的计数中不计入，形成了 406 − 403 = 3 的差额。\n\n也就是说：\n1. 差异完全由**黑卡这一更高等级人群**吸收，不存在“达标但等级偏低”的漏算；\n2. 钻石门槛的判定规则与库内数据**完全自洽**（钻石用户最低 avg_amount 为 14,555.44，紧贴门槛，无一例越界）；\n3. 唯一需要用文档补充的是**黑卡的门槛与权益定义**（当前 `member_benefits.md` 未定义），建议向数据部-用户价值组确认后补录知识库，否则答“钻石门槛达标人数”时容易被误读为钻石等级人数。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_004",
@@ -1482,7 +1502,7 @@
       "question": "按用户分群文档中的“沉默客”定义统计 demo 数据集中沉默客的数量及占全库比例（百分比保留两位小数）。",
       "status": "COMPLETED",
       "status_ok": true,
-      "task_success": false,
+      "task_success": true,
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [
@@ -1490,16 +1510,26 @@
         "execute_sql",
         "calculator"
       ],
-      "actual_tools": [
-        "rag_search",
+      "required_tools": [
         "rag_search",
         "execute_sql"
       ],
-      "missing_tools": [
+      "optional_tools": [
         "calculator"
       ],
-      "tool_selection_ok": false,
-      "tool_recall": 0.6666666666666666,
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
       "expected_keywords": [
         "31",
         "29.3"
@@ -1512,7 +1542,8 @@
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
       "observed_fact_numbers": [
-        "110"
+        "110",
+        "29.38"
       ],
       "approx_numbers": [],
       "result_claim_numbers": [],
@@ -1535,27 +1566,21 @@
           "name": "execute_sql",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 4,
-      "tool_call_count": 3,
-      "elapsed_s": 6.89,
-      "final_answer": "**结论：沉默客 2,383 人，占全库 8,110 人的 29.38%。**\n\n口径依据\n- 《用户分群策略》（segmentation.md）分群维度-生命周期：新客（注册 ≤ 30 天）、活跃客（近 30 天有行为）、**沉默客（31–90 天无行为）**、流失客（> 90 天无行为）。\n- 本库无绝对时间列，只有相对天数 `days_since_last_buy`（0 表示最近一次购买），因此以 `days_since_last_buy BETWEEN 31 AND 90` 落地“31–90 天无行为”。\n\n统计 SQL\n```sql\nSELECT COUNT(*) AS silent_cnt,\n       (SELECT COUNT(*) FROM user_profile_vectors) AS total_cnt,\n       ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM user_profile_vectors), 2) AS pct\nFROM user_profile_vectors\nWHERE days_since_last_buy BETWEEN 31 AND 90 LIMIT 10;\n```\n结果：silent_cnt = 2383，total_cnt = 8110，pct = 29.38。\n\n补充说明（口径提示）：文档该分群是基于“近 30 天行为”的生命周期划分，知识库未定义“行为”是否等于“购买”；这里按库内可用的购买距今天数近似实现。另外 `days_since_last_buy` 最大 364 天，>90 天的流失客在库内亦可统计，如需一并核对可继续查询。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search",
-        "execute_sql"
-      ],
-      "optional_tools": [
-        "calculator"
-      ],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "steps": 5,
+      "tool_call_count": 4,
+      "elapsed_s": 7.47,
+      "final_answer": "根据 `segmentation.md`，**沉默客**定义为：**31–90 天无行为**（与活跃客“近 30 天有行为”、流失客“>90 天无行为”相区分）。\n\n本次统计使用 `days_since_last_buy`（距最后一次购买天数）作为“无行为”的可用口径：\n\n- 沉默客数量：**2,383 人**\n- 全库用户数：**8,110 人**\n- 占全库比例：**29.38%**（2,383 ÷ 8,110 × 100，保留两位小数）\n\n依据：`user_profile_vectors` 统计查询；分群口径来自 `segmentation.md`。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_005",
@@ -1571,6 +1596,13 @@
         "execute_sql",
         "calculator"
       ],
+      "required_tools": [
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "rag_search",
@@ -1578,7 +1610,10 @@
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "40.57"
@@ -1590,7 +1625,9 @@
       "allowed_numbers": [],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [],
+      "observed_fact_numbers": [
+        "8110"
+      ],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": false,
@@ -1624,19 +1661,9 @@
       "error_recovered": false,
       "steps": 4,
       "tool_call_count": 4,
-      "elapsed_s": 6.14,
-      "final_answer": "**预计预算：40.57 万元**\n\n依据：\n- 礼包标准（marketing_playbook.md「四、流失用户挽回」）：目标人群为流失客（> 90 天无行为），内容为**回归礼包（100 元券）**，7 天有效，渠道为短信、邮件，时机为第 91 天、第 120 天，频控每月最多 1 次。\n- 流失客口径（segmentation.md 分群维度）：流失客 = > 90 天无行为，对应 `days_since_last_buy > 90`。\n- 人数统计（SQL）：`SELECT COUNT(*) FROM user_profile_vectors WHERE days_since_last_buy > 90` → **4057 人**。\n- 预算：4057 × 100 元 = 405,700 元 ≈ **40.57 万元**（按每人一次发放计）。\n\n提示：手册中挽回节奏是第 91 天、第 120 天两次触达，若两次都发券，预算需翻倍（约 81.14 万元）；若按“每月最多 1 次”频控且每轮只发 1 张，则仍为 40.57 万元。另外「流失预警用户」是另一套口径（近 30 天未活跃 + 客单价 > 500 元 + 累计 ≥ 3 单），与礼包目标人群不同，未用于本次测算。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search",
-        "execute_sql",
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 7.36,
+      "final_answer": "## 结论：预计预算 40.57 万元\n\n**依据**\n\n1. **礼包标准**（`marketing_playbook.md`「四、流失用户挽回」原文）：\n   - 目标人群：流失客（**> 90 天无行为**）\n   - 内容：回归礼包（**100 元券**），限 7 天有效\n   - 时机：流失第 91 天、第 120 天；频控每月最多 1 次\n\n2. **流失客规模**（SQL）：\n```sql\nSELECT COUNT(*) FROM user_profile_vectors WHERE days_since_last_buy > 90;\n-- 结果：4057 人（占全库 8110 人的 50.0%）\n```\n\n3. **测算**：4057 人 × 100 元 = 405,700 元 = **40.57 万元**\n\n**两点须提请注意（会影响实际预算）**\n\n- **本测算按“每人发一次券”计算**。手册里流失挽回设了“第 91 天、第 120 天”两个触达时点，若两轮都发券，且按“同一活动同一用户最多触达 2 次”的通用频控，券成本可能翻倍到约 **81.14 万元**；这里按一次礼包估算，请确认业务口径。\n- **未计入短信和邮件触达成本**（手册指定这两条渠道），仅含券面成本；且 100 元券是面额不是实际核销成本，实际支出应按预估核销率折算。\n- 另需注意口径区分：`tag_definitions.md` 中的“流失预警用户”（近 30 天未活跃 + 客单 >500 元 + 购买 ≥3 次）与本次的“流失客（>90 天无行为）”不是同一标签，本次严格按营销手册的 >90 天口径计算。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_006",
@@ -1651,13 +1678,21 @@
         "execute_sql",
         "calculator"
       ],
-      "actual_tools": [
+      "required_tools": [
         "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "普通",
@@ -1671,82 +1706,8 @@
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
       "observed_fact_numbers": [
+        "8110",
         "45.19"
-      ],
-      "approx_numbers": [],
-      "result_claim_numbers": [],
-      "must_not_contain_approx_numbers": false,
-      "forbidden_result_units": [],
-      "final_ok": true,
-      "manual_review": [],
-      "tool_results": [
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "calculator",
-          "ok": true,
-          "error": null
-        }
-      ],
-      "tool_execution_ok": 1.0,
-      "tool_errors": [],
-      "error_recovered": false,
-      "steps": 3,
-      "tool_call_count": 3,
-      "elapsed_s": 5.72,
-      "final_answer": "**各会员等级的累计订单数贡献（user_profile_vectors，按 member_level 对 order_count 求和）**\n\n| 会员等级 | 用户数 | 累计订单数 | 订单占比 |\n|---|---|---|---|\n| 普通 | 4053 | 9,490 | 45.19% |\n| 白银 | 2434 | 7,254 | 34.54% |\n| 黄金 | 1217 | 3,525 | 16.79% |\n| 钻石 | 403 | 727 | 3.46% |\n| 黑卡 | 3 | 4 | 0.02% |\n| **合计** | **8110** | **21,000** | 100% |\n\n**结论：普通会员贡献的累计订单数最多，为 9,490 单，占全库累计订单数（21,000）的 45.19%。**\n\n依据：SQL 分组聚合结果为 `普通 9490 / 白银 7254 / 黄金 3525 / 钻石 727 / 黑卡 4`，全库合计 21,000；比例由 9490 ÷ 21000 × 100 = 45.19% 计算得出。\n\n说明：会员等级越高，单个用户的订单贡献越大（平均订单数：普通 ≈2.34、白银 ≈2.98、黄金 ≈2.90、钻石 ≈1.80、黑卡 ≈1.33），但低等级用户基数大，因此普通会员总量最大。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
-    },
-    {
-      "task_id": "bench_multi_007",
-      "category": "multi_tool",
-      "question": "黄金、钻石、黑卡三个等级合计贡献的累计消费金额占全库比例是多少（百分比保留两位小数）？",
-      "status": "COMPLETED",
-      "status_ok": true,
-      "task_success": true,
-      "business_correctness": true,
-      "tool_policy_compliance": true,
-      "expected_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "actual_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "missing_tools": [],
-      "tool_selection_ok": true,
-      "tool_recall": 1.0,
-      "expected_keywords": [
-        "52.3"
-      ],
-      "expected_keywords_any": [],
-      "missing_keywords": [],
-      "missing_keywords_any": [],
-      "must_not_contain_numbers": false,
-      "allowed_numbers": [],
-      "disallowed_numbers": [],
-      "business_disallowed_numbers": [],
-      "observed_fact_numbers": [
-        "52.33",
-        "627.92"
       ],
       "approx_numbers": [],
       "result_claim_numbers": [],
@@ -1771,43 +1732,42 @@
       "error_recovered": false,
       "steps": 3,
       "tool_call_count": 2,
-      "elapsed_s": 3.76,
-      "final_answer": "**结论：黄金 + 钻石 + 黑卡三档会员的累计消费合计占全库约 52.33%。**\n\n明细（来自 `user_profile_vectors` 按 member_level 聚合）：\n\n| 会员等级 | 用户数 | 累计消费（元） |\n|---|---|---|\n| 黄金 | 1217 | 33,368,665.28 |\n| 钻石 | 403 | 14,586,711.70 |\n| 黑卡 | 3 | 146,613.98 |\n| **三档合计** | **1623** | **48,101,990.96** |\n\n全库累计消费合计 = 91,923,627.92 元（另含普通 13,610,777.06、白银 30,210,859.90）。\n\n计算：48,101,990.96 ÷ 91,923,627.92 × 100 = **52.33%**\n\n说明：这三个等级仅占 1623/8110 ≈ 20% 的用户，却贡献了过半累计消费，属于高价值分层，可作为重点运营对象。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 4.58,
+      "final_answer": "**各会员等级累计订单数贡献（user_profile_vectors 全库 8110 位用户，累计订单数合计 21,000 单）**\n\n| 会员等级 | 用户数 | 累计订单数 | 占全库订单数 |\n|---|---|---|---|\n| 普通 | 4053 | 9490 | 45.19% |\n| 白银 | 2434 | 7254 | 34.54% |\n| 黄金 | 1217 | 3525 | 16.79% |\n| 钻石 | 403 | 727 | 3.46% |\n| 黑卡 | 3 | 4 | 0.02% |\n\n**结论：普通会员贡献最多，累计 9490 单，占全库累计订单数的 45.19%。**\n\n依据：`SELECT member_level, SUM(order_count), COUNT(*) ... GROUP BY member_level`，并用子查询取得全库 `SUM(order_count)=21000`；占比由 calculator 计算（9490/21000×100 = 45.1905%，保留两位小数为 45.19%）。注意：普通会员人数占比也最高（4053/8110 ≈ 49.98%），说明订单数多主要来自人数基数，人均订单约 2.34 单，并不高于其他等级。",
+      "run_error": null
     },
     {
-      "task_id": "bench_multi_008",
+      "task_id": "bench_multi_007",
       "category": "multi_tool",
-      "question": "如果要给全部黄金会员每人发放一张生日券，按会员权益标准预计总预算是多少万元（保留两位小数）？",
+      "question": "黄金、钻石、黑卡三个等级合计贡献的累计消费金额占全库比例是多少（百分比保留两位小数）？",
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [
-        "rag_search",
         "execute_sql",
         "calculator"
       ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
-        "rag_search",
+        "execute_sql",
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
-        "12.17"
+        "52.3"
       ],
       "expected_keywords_any": [],
       "missing_keywords": [],
@@ -1817,7 +1777,7 @@
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
       "observed_fact_numbers": [
-        "1217"
+        "627.92"
       ],
       "approx_numbers": [],
       "result_claim_numbers": [],
@@ -1827,7 +1787,7 @@
       "manual_review": [],
       "tool_results": [
         {
-          "name": "rag_search",
+          "name": "execute_sql",
           "ok": true,
           "error": null
         },
@@ -1847,9 +1807,24 @@
       "error_recovered": false,
       "steps": 3,
       "tool_call_count": 3,
-      "elapsed_s": 4.99,
-      "final_answer": "**结论：预计总预算约 12.17 万元。**\n\n计算依据：\n- 黄金会员生日礼遇标准：生日当月赠 **100 元无门槛券**（并享当月双倍积分）——来源 `member_benefits.md` 黄金会员权益第 3 条。\n- 黄金会员人数：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level='黄金'` → **1217 人**。\n- 预算：1217 × 100 = 121,700 元 = **12.17 万元**。\n\n需要说明的边界：\n- 这里只按黄金会员当前的 1217 人静态计数估算，未考虑统计期内会员升级或降级、重复发放以及券实际核销率；\n- 该券是“无门槛”券，因此 100 元×人数即等于理论上限成本（若用核销率折算，实际成本会更低）。",
-      "run_error": null,
+      "elapsed_s": 4.33,
+      "final_answer": "**结论：黄金 + 钻石 + 黑卡三个等级合计贡献累计消费 48,101,990.96 元，占全库 91,923,627.92 元的 52.33%。**\n\n依据（本次查询 user_profile_vectors 全表）：\n\n| 会员等级 | 用户数 | 累计消费（元） |\n|---|---|---|\n| 黄金 | 1,217 | 33,368,665.28 |\n| 钻石 | 403 | 14,586,711.70 |\n| 黑卡 | 3 | 146,613.98 |\n| **三档合计** | **1,623** | **48,101,990.96** |\n| 白银 | 2,434 | 30,210,859.90 |\n| 普通 | 4,053 | 13,610,777.06 |\n| **全库** | **8,110** | **91,923,627.92** |\n\n计算：48,101,990.96 ÷ 91,923,627.92 × 100 = **52.33%**\n\n补充观察：这三档仅占用户数约 20%（1,623/8,110 = 20.01%），却贡献了超过一半的累计消费金额，是典型的高价值客群；而用户占比最高的普通等级（4,053 人，占 50%）仅贡献约 14.81% 的消费额。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_008",
+      "category": "multi_tool",
+      "question": "如果要给全部黄金会员每人发放一张生日券，按会员权益标准预计总预算是多少万元（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": false,
+      "business_correctness": true,
+      "tool_policy_compliance": false,
+      "expected_tools": [
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
       "required_tools": [
         "rag_search",
         "execute_sql",
@@ -1857,34 +1832,22 @@
       ],
       "optional_tools": [],
       "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
-    },
-    {
-      "task_id": "bench_multi_009",
-      "category": "multi_tool",
-      "question": "统计上海各会员等级的人数，并说明人数最多等级占上海用户的比例（百分比保留两位小数）。",
-      "status": "COMPLETED",
-      "status_ok": true,
-      "task_success": true,
-      "business_correctness": true,
-      "tool_policy_compliance": true,
-      "expected_tools": [
-        "execute_sql",
-        "calculator"
-      ],
       "actual_tools": [
-        "execute_sql",
-        "execute_sql",
+        "rag_search",
+        "execute_sql"
+      ],
+      "missing_tools": [
         "calculator"
       ],
-      "missing_tools": [],
-      "tool_selection_ok": true,
-      "tool_recall": 1.0,
+      "missing_required_tools": [
+        "calculator"
+      ],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": false,
+      "tool_policy_ok": false,
+      "tool_recall": 0.6666666666666666,
       "expected_keywords": [
-        "334",
-        "48.69"
+        "12.17"
       ],
       "expected_keywords_any": [],
       "missing_keywords": [],
@@ -1902,6 +1865,77 @@
       "manual_review": [],
       "tool_results": [
         {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 2,
+      "elapsed_s": 3.67,
+      "final_answer": "## 结论：预计总预算 **12.17 万元**\n\n**计算依据：**\n\n| 项目 | 数值 | 来源 |\n|---|---|---|\n| 黄金会员权益中生日礼遇的券面额 | 100 元无门槛券 | 知识库 `member_benefits.md`：「黄金会员权益…3. 生日礼遇：生日当月赠 100 元无门槛券，当月消费双倍积分。」 |\n| 黄金会员人数 | 1217 人 | SQL：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level='黄金'` 返回 1217 |\n| 合计 | 1217 × 100 = 121,700 元 | = **12.17 万元** |\n\n**口径说明：** 这里按照「每人发放 1 张 100 元无门槛券」来计算面额成本，尚未考虑券的实际核销率；如果按核销率折算实际支出，预算会低于上述数值，需要以核销率假设另行测算。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_009",
+      "category": "multi_tool",
+      "question": "统计上海各会员等级的人数，并说明人数最多等级占上海用户的比例（百分比保留两位小数）。",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql",
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "334",
+        "48.69"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [
+        "3"
+      ],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
           "name": "execute_sql",
           "ok": true,
           "error": null
@@ -1922,18 +1956,9 @@
       "error_recovered": false,
       "steps": 3,
       "tool_call_count": 3,
-      "elapsed_s": 3.03,
-      "final_answer": "**上海各会员等级人数分布**（数据源：user_profile_vectors，city='上海'）\n\n| 会员等级 | 人数 | 占上海用户比例 |\n|---|---|---|\n| 普通 | 334 | 48.69% |\n| 白银 | 206 | 30.03% |\n| 黄金 | 114 | 16.62% |\n| 钻石 | 32 | 4.66% |\n| **合计** | **686** | 100% |\n\n- 人数最多的等级是**普通会员，共 334 人**，占上海用户（686 人）的 **48.69%**（334 ÷ 686 × 100 = 48.688…，保留两位小数为 48.69%）。\n- 上海样本中**没有黑卡会员**（四个等级合计 686，与城市总人数一致）。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 3.92,
+      "final_answer": "**上海用户各会员等级人数（共 686 人）**\n\n| 会员等级 | 人数 | 占上海用户比例 |\n|---|---|---|\n| 普通 | 334 | 48.69% |\n| 白银 | 206 | 30.03% |\n| 黄金 | 114 | 16.62% |\n| 钻石 | 32 | 4.66% |\n\n- 上海用户总数为 **686 人**。需要注意的是，上海没有黑卡用户，黑卡用户在全库仅 3 人。\n- 人数最多的是**普通等级**，共 334 人，占上海用户的 **48.69%**（计算为 334 / 686 × 100 = 48.688…）。\n\n依据：`SELECT member_level, COUNT(*) FROM user_profile_vectors WHERE city='上海' GROUP BY member_level`（返回 4 行：334/206/114/32）与 `SELECT COUNT(*) WHERE city='上海'`（686），占比使用 calculator 计算。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_010",
@@ -1949,13 +1974,23 @@
         "execute_sql",
         "calculator"
       ],
+      "required_tools": [
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "175.89"
@@ -1996,19 +2031,9 @@
       "error_recovered": false,
       "steps": 3,
       "tool_call_count": 3,
-      "elapsed_s": 5.67,
-      "final_answer": "普通会员的平均客单价为 **1319.11 元**；比它高一档的会员等级是白银会员，入档门槛为 **2495 元**。\n\n相差：**2495 − 1319.11 = 1175.89 元**。\n\n依据：\n- 数据查询：普通会员共 4053 人，`avg_amount` 均值为 1319.11 元。\n- 知识库 `member_benefits.md`：会员等级按“累计平均客单价”划分，白银会员区间为 2495–6680 元。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search",
-        "execute_sql",
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 4.69,
+      "final_answer": "普通会员的平均客单价为 **1319.11 元**（基于 4053 名普通会员的 `avg_amount` 均值）。\n\n比普通会员高一档的是 **白银会员**；根据会员权益说明，其入档门槛为 **累计平均客单价 2495 元**。\n\n因此差额为：\n\n**2495 − 1319.11 = 1175.89 元**\n\n也就是说，普通会员的平均客单价比白银会员的入档门槛 **低 1175.89 元**。\n\n依据：`user_profile_vectors` 表统计；`member_benefits.md` 等级划分标准。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_011",
@@ -2023,12 +2048,23 @@
         "execute_sql",
         "calculator"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": [],
       "actual_tools": [
+        "execute_sql",
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "1.7"
@@ -2040,7 +2076,9 @@
       "allowed_numbers": [],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [],
+      "observed_fact_numbers": [
+        "383"
+      ],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": false,
@@ -2052,6 +2090,14 @@
       "tool_results": [
         {
           "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
+        },
+        {
+          "name": "execute_sql",
           "ok": true,
           "error": null
         },
@@ -2061,24 +2107,23 @@
           "error": null
         }
       ],
-      "tool_execution_ok": 1.0,
-      "tool_errors": [],
-      "error_recovered": false,
-      "steps": 3,
-      "tool_call_count": 2,
-      "elapsed_s": 3.01,
-      "final_answer": "**结论：黑卡会员的平均客单价约为钻石会员的 1.76 倍。**\n\n依据如下（SQL 对 `user_profile_vectors` 按会员等级统计）：\n\n| 会员等级 | 人数 | 平均客单价（元） |\n|---|---|---|\n| 黑卡 | 3 | 37,665.00 |\n| 钻石 | 403 | 21,416.52 |\n\n计算：37,665.00 ÷ 21,416.52 = 1.7587 ≈ **1.76**\n\n需要注意：\n- 黑卡样本仅 3 人，均值波动大，只能作为参考，不能直接推广到黑卡整体。\n- 这两个等级都远远高于本库客单价 P90 分位（10,383 元），属于极端高客单群体。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql"
+      "tool_execution_ok": 0.6666666666666666,
+      "tool_errors": [
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
+        }
       ],
-      "optional_tools": [
-        "calculator"
-      ],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "error_recovered": true,
+      "steps": 4,
+      "tool_call_count": 3,
+      "elapsed_s": 4.45,
+      "final_answer": "**约 1.76 倍**\n\n依据（SQL 查询 user_profile_vectors，按会员等级聚合 avg_amount）：\n\n| 会员等级 | 人数 | 平均客单价（元） |\n|---|---|---|\n| 黑卡 | 3 | 37,665.00 |\n| 钻石 | 403 | 21,416.52 |\n\n计算：37,665.00 ÷ 21,416.52 ≈ **1.76**\n\n提示：黑卡仅 3 人，样本极小，该倍数的统计稳定性较低，建议仅作参考；另外，两档会员的平均客单价都远超全库 P90（10,383 元），属于典型的高客单群体。",
+      "run_error": null
     },
     {
       "task_id": "bench_multi_012",
@@ -2090,15 +2135,25 @@
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [
-        "execute_sql",
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [
         "calculator"
       ],
+      "forbidden_tools": [],
       "actual_tools": [
+        "execute_sql",
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "57.5"
@@ -2112,7 +2167,6 @@
       "business_disallowed_numbers": [],
       "observed_fact_numbers": [
         "57.54",
-        "627.92",
         "110"
       ],
       "approx_numbers": [],
@@ -2128,6 +2182,11 @@
           "error": null
         },
         {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
           "name": "calculator",
           "ok": true,
           "error": null
@@ -2137,19 +2196,10 @@
       "tool_errors": [],
       "error_recovered": false,
       "steps": 3,
-      "tool_call_count": 2,
-      "elapsed_s": 4.22,
-      "final_answer": "**结论：电子产品品类的累计消费金额占全库的 57.54%。**\n\n依据：\n- SQL 汇总（`user_profile_vectors`，按 `top_category = '电子产品'`）：\n  - 电子产品累计消费金额 = 52,896,748.83 元\n  - 全库累计消费金额 = 91,923,627.92 元\n  - 电子产品用户数 = 2,235 人（全库 8,110 人，占约 27.6%）\n- 计算：52,896,748.83 ÷ 91,923,627.92 × 100 = **57.54%**\n\n说明：该比例是按「用户主偏好品类 = 电子产品」的口径，把该组用户全部累计消费金额汇总起来，并非只统计电子产品订单金额（库内没有分品类订单明细，无法拆分单笔品类金额）。因此，电子产品品类以约 27.6% 的用户数贡献了约 57.5% 的消费金额，是高价值核心人群。",
-      "run_error": null,
-      "required_tools": [
-        "execute_sql",
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_call_count": 3,
+      "elapsed_s": 3.64,
+      "final_answer": "**电子产品的累计消费金额占全库比例为 57.54%。**\n\n计算依据（SQL 实测）：\n\n| 指标 | 数值 |\n|---|---|\n| 电子产品用户数（top_category='电子产品'） | 2,235 人 |\n| 电子产品累计消费金额 | 52,896,748.83 元 |\n| 全库累计消费金额（8,110 人） | 91,923,627.92 元 |\n| 金额占比 | 52,896,748.83 ÷ 91,923,627.92 = **57.54%** |\n\n说明：\n- 指标定义：按 `total_amount`（累计总消费）汇总，分子限定 `top_category = '电子产品'`，即“偏好品类为电子产品”的用户群，与知识库中“品类偏好”标签的定义一致；分母为全库全部用户。\n- 电子产品在用户数上仅占 2,235/8,110 ≈ 27.56%，却贡献了 57.54% 的消费金额，金额贡献集中度明显高于用户数占比，是核心营收品类。",
+      "run_error": null
     },
     {
       "task_id": "bench_neg_001",
@@ -2161,14 +2211,19 @@
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [],
+      "required_tools": [],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
-        "execute_sql",
-        "execute_sql",
+        "rag_search",
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "营销"
@@ -2222,25 +2277,20 @@
           "error": null
         },
         {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
           "name": "execute_sql",
           "ok": false,
           "error": {
             "code": "SQL_VALIDATION_ERROR",
             "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
           }
-        },
-        {
-          "name": "execute_sql",
-          "ok": false,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
-          "ok": true,
-          "error": null
         }
       ],
-      "tool_execution_ok": 0.5,
+      "tool_execution_ok": 0.6666666666666666,
       "tool_errors": [
         {
           "name": "execute_sql",
@@ -2249,25 +2299,14 @@
             "code": "SQL_VALIDATION_ERROR",
             "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
           }
-        },
-        {
-          "name": "execute_sql",
-          "ok": false,
-          "error": null
         }
       ],
       "error_recovered": true,
-      "steps": 4,
-      "tool_call_count": 4,
-      "elapsed_s": 9.3,
-      "final_answer": "**结论：现有数据不支持该统计，无法给出「被营销活动触达过的用户数」。**\n\n依据（已核查）：\n\n1. **表结构里没有任何触达/活动相关字段。** 实际字段为：`id, user_id, profile_text, embedding, dept, sensitivity, update_time, metadata, age, gender, city, member_level, order_count, total_amount, avg_amount, top_category, days_since_last_buy, platforms`（`SELECT * FROM user_profile_vectors LIMIT 1`）。其中没有任何营销活动ID、触达渠道、触达时间、触达次数、退订状态等列。\n2. **画像文本与 metadata 中也没有触达痕迹。** 对 `profile_text` 和 `metadata` 做「触达 / 营销活动 / 活动」关键词匹配，命中行数 = 0（`SELECT COUNT(*) ... = 0`）。画像内容只包含年龄性别城市、会员等级、订单数、消费额、偏好品类、最近购买天数、活跃平台。\n3. **知识库只在「策略」层面提到触达，没有对应的数据表。** `marketing_playbook.md` 的通用频控规则写的是「同一用户每日最多接收 3 条营销消息、同一活动同一用户最多触达 2 次、退订后立即停止触达」——这是执行规则，不是可按用户统计的触达记录；知识库中也没有定义「触达」的统计口径或数据来源表。\n\n**缺少的数据（要统计需补齐）：**\n- 一张营销触达明细表，至少包含：`user_id`、`campaign_id`（活动标识）、`channel`（短信/App推送/企微等）、`send_time`（触达时间）、`touch_status`（成功/失败/退订拦截）、`touch_seq`（同活动第几次触达）。\n- 统计口径约定：去重维度（按用户 / 按用户×活动）、是否口径含发送失败、是否含退订用户、时间窗口。\n- 另外本库只有相对天数 `days_since_last_buy`（0–364），没有绝对日期，因此即使补了触达表，也需要绝对时间字段才能按活动周期筛选。\n\n**可替代的近似思路（需你确认口径）**：现有数据只能按规则「圈选潜在目标人群」（如 `days_since_last_buy`、`member_level`、`total_amount` 等），这只是**名单口径**，不能等同于「已触达」。若你确认要用某个规则圈人，我可以按指定条件出数，并明确标注为「预估可触达人群」而非「实际触达」。",
-      "run_error": null,
-      "required_tools": [],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "steps": 3,
+      "tool_call_count": 3,
+      "elapsed_s": 10.53,
+      "final_answer": "## 结论：现有数据不支持「被营销活动触达过的用户数量」统计，无法给出该数字\n\n### 依据\n1. **表结构层面**：库内只有两张表：\n   - `user_profile_vectors`（8110 条用户画像）：字段为 user_id、profile_text、age、gender、city、member_level、order_count、total_amount、avg_amount、top_category、days_since_last_buy、platforms，**没有任何触达/活动相关字段**；\n   - `wiki_vectors`（36 条知识库文档）：是文档分块，不是业务事件数据。\n2. **元数据核验**：尝试查询 `information_schema.columns` 检索 `touch/campaign/activity/reach/event/msg` 等字段名，被平台只读白名单拦截（`SQL_VALIDATION_ERROR：仅白名单表`），因此只能以声明的两张白名单表字段为准 —— 其中确无触达字段。\n3. **知识库层面**：`marketing_playbook.md` 只给出了触达的**频控规则**（同一用户每日最多 3 条营销消息、同一活动同一用户最多触达 2 次、退订后立即停止触达），`tag_definitions.md` 只定义人群标签（高价值、流失预警、高潜等）。**这些是规则与人群口径，不构成任何用户的实际触达记录**，不能据此推算触达人数。\n\n### 具体缺少什么\n要完成该统计，至少需要以下数据：\n\n| 缺失项 | 说明 |\n|---|---|\n| 触达事件表 | 一行一次触达：`user_id`、`campaign_id`、触达渠道（短信/企微/站内信等）、触达时间、触达状态（成功/失败） |\n| 活动维表 | `campaign_id`、活动名称、起止时间、目标人群 |\n| 退订/频控状态 | 用户退订标记、当日已发条数（用于按频控规则去重计数） |\n| 时间维度 | 当前只有相对的 `days_since_last_buy`（0~364 天），无绝对日期，无法按「某次活动期间」筛选 |\n\n### 可以做的替代分析\n- 若你的真实目标是「本次可触达的人群规模」，可基于画像给出候选人群（如按 `member_level`、`top_category`、`days_since_last_buy` 圈定流失预警/高潜人群），但这是**目标人群预估**，不等于「已被触达人数」，需你确认口径后我再跑数。\n- 若要落地该指标，建议在数据侧新增触达事件表并按 `user_id + campaign_id` 去重计数。",
+      "run_error": null
     },
     {
       "task_id": "bench_neg_002",
@@ -2279,14 +2318,19 @@
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [],
+      "required_tools": [],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
-        "execute_sql",
         "execute_sql",
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "退货率"
@@ -2349,16 +2393,11 @@
         },
         {
           "name": "execute_sql",
-          "ok": true,
-          "error": null
-        },
-        {
-          "name": "execute_sql",
           "ok": false,
           "error": null
         }
       ],
-      "tool_execution_ok": 0.5,
+      "tool_execution_ok": 0.3333333333333333,
       "tool_errors": [
         {
           "name": "execute_sql",
@@ -2376,16 +2415,10 @@
       ],
       "error_recovered": true,
       "steps": 3,
-      "tool_call_count": 4,
-      "elapsed_s": 11.76,
-      "final_answer": "## 结论：现有 demo 数据无法计算退货率\n\n**检索与验证过程**\n\n1. 全表字段核对（`SELECT * FROM user_profile_vectors LIMIT 1`）：实际字段为\n   `id, user_id, profile_text, embedding, dept, sensitivity, update_time, metadata, age, gender, city, member_level, order_count, total_amount, avg_amount, top_category, days_since_last_buy, platforms`\n   → 没有任何与退货、退款、售后相关的字段（如 return_flag / return_count / refund_amount）。\n\n2. 知识库检索（`rag_search` 退货率口径 + `wiki_vectors` 中 LIKE '%退货%' OR '%退款%'）：\n   仅命中 `cs_sop.md` 中的两条客服流程（物流延迟投诉引导自助退款入口、质量问题在签收后 7 天退换货期内处理），\n   **没有**任何“退货率”指标定义或口径说明；`tag_definitions.md` 只定义了客单价/流失/品类偏好类标签。\n\n**为什么算不出来（3 个硬性缺口）**\n\n| 需要的数据 | 现状 |\n|---|---|\n| 订单级明细（订单号 + 订单状态/是否退货） | 无。库里只有 8110 行**用户级累计汇总**（`user_profile_vectors`），`order_count` 只是“累计订单数”一个数字，无法拆分到单笔订单 |\n| 退货标记或退货订单数 | 无此列；`profile_text`、`metadata` 中也不含退货信息 |\n| 总订单数的可加性口径 | `SUM(order_count)` 可得到订单笔数合计，但没有分子（退货订单数），比值无意义 |\n\n另外两点：本库没有时间序列表，只有一个相对天数 `days_since_last_buy`，“某期间退货率”也无法做时间切片。\n\n**因此不输出任何数字**——任何“退货率 x%”都会是编造。\n\n**要支持该指标，需要补充的数据**\n- 订单明细表：`order_id, user_id, order_time, order_status(已签收/已退货/退款中…), return_flag, return_time, amount`\n- 或至少在用户画像中增加 `return_order_count`，并与 `order_count` 同口径（同时间窗、是否含取消单）\n- 知识库补一条“退货率”口径定义（分子分母是否含换货、是否含拒收、统计窗口）\n\n补齐后即可用 `SUM(return_flag) / COUNT(order_id)`（或按 `user_id` 汇总到用户级）直接计算。",
-      "run_error": null,
-      "required_tools": [],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_call_count": 3,
+      "elapsed_s": 9.31,
+      "final_answer": "## 结论：现有数据无法计算退货率，我不提供任何数字\n\n**核查依据**\n\n1. **表结构里没有任何退货或退款字段**\n   对 `user_profile_vectors` 执行 `SELECT * ... LIMIT 1`，返回的字段为：\n   `id, user_id, profile_text, embedding, dept, sensitivity, update_time, metadata, age, gender, city, member_level, order_count, total_amount, avg_amount, top_category, days_since_last_buy, platforms`\n   其中**没有**退货单数、退款状态、订单状态等字段。知识库仅有 `wiki_vectors`，共有 36 条，包括分析报告模板、会员权益、标签口径、用户分层、运营 SOP 和客服 SOP，且没有退货率口径定义。\n\n2. **库中不存在订单明细表**\n   尝试查询 `information_schema.columns`、筛选 `%return%`、`%refund%`、`order` 等相关列时，被 SQL 白名单拦截（`SQL_VALIDATION_ERROR`：仅白名单表）。当前可以查询的只有 `user_profile_vectors` 和 `wiki_vectors` 两张表，**没有订单粒度数据**。\n\n3. **现有字段只能表示“累计订单数”，无法区分订单状态**\n   `order_count` 是用户累计下单笔数，属于用户级汇总值，既不是订单明细，也不包含“是否退货”标记。若用 `order_count` 当分母，会缺少分子；因此无法组成 `退货订单数 ÷ 总订单数`。\n\n4. **画像文本不能作为计算依据**\n   `profile_text` 是自然语言摘要（如“累计订单5笔，总消费12432元…”），没有结构化的退货信息；从文本中提取等于凭空构造口径，违反不编造原则。\n\n**要计算退货率，需要补充的数据**\n\n- 订单明细表（order 级）：`order_id`、`user_id`、下单时间、金额、**订单状态或退货标记**（如 is_returned、refund_status、return_time）；\n- 若按品类或平台拆分，还需在订单明细中带上 `top_category` 对应品类或 `platform`；\n- 退货率口径确认：按订单数（退货单数 ÷ 总单数），还是按金额（退货金额 ÷ GMV），以及是否剔除取消单、是否含仅退款。\n\n补齐上述订单级退货字段后，即可一次性给出整体与分品类、分平台的退货率。",
+      "run_error": null
     },
     {
       "task_id": "bench_neg_003",
@@ -2397,13 +2430,19 @@
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [],
+      "required_tools": [],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql",
-        "execute_sql",
-        "rag_search"
+        "rag_search",
+        "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "母婴"
@@ -2457,12 +2496,12 @@
           "error": null
         },
         {
-          "name": "execute_sql",
+          "name": "rag_search",
           "ok": true,
           "error": null
         },
         {
-          "name": "rag_search",
+          "name": "execute_sql",
           "ok": true,
           "error": null
         }
@@ -2472,15 +2511,9 @@
       "error_recovered": false,
       "steps": 3,
       "tool_call_count": 3,
-      "elapsed_s": 5.41,
-      "final_answer": "**结论：现有 demo 数据不支持统计“母婴偏好”用户数量，无法给出数字（不编造）。**\n\n原因有三点：\n\n1. **画像表没有母婴品类**：`user_profile_vectors.top_category` 的全部取值只有 7 个：电子产品 2235、家居 1794、书籍 854、玩具 838、服装 800、运动 797、美妆 792（合计 8110，与表总量一致）。品类枚举中不存在“母婴”。\n2. **文本中也没有命中**：`WHERE top_category LIKE '%母婴%' OR profile_text LIKE '%母婴%'` 的命中数为 **0**，即连画像摘要文本里也没有出现母婴相关描述。\n3. **口径所需字段缺失**：据知识库 `tag_definitions.md`，“母婴偏好用户”的定义是「近 90 天购买母婴品类商品 ≥ 2 次，或浏览母婴品类 ≥ 10 次」。本数据既没有品类级购买次数、也没有浏览行为明细，且只有相对天数 `days_since_last_buy`（无绝对时间），因此无法按“近 90 天”窗口核算。\n\n可行的替代口径（如需继续）：\n- 用最接近的**玩具**品类（838 人）作为“育儿相关消费”的粗代理，但它≠母婴偏好，仅能作参考；\n- 或按 `segmentation.md` 的“母婴偏好 + 活跃客”策略，在补充品类明细/行为数据后再落地。",
-      "run_error": null,
-      "required_tools": [],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 7.03,
+      "final_answer": "**结论：无法统计“母婴偏好”用户数量，现有 demo 数据不支持该口径，因此不给数字。**\n\n原因（基于工具返回的事实）：\n\n1. **口径存在，但依赖的数据不存在**\n   知识库 `tag_definitions.md` 明确给出“母婴偏好用户”的定义：**近 90 天购买母婴品类商品 ≥ 2 次，或浏览母婴品类 ≥ 10 次**（T+1 更新，负责人：数据部-品类运营组）。\n   但本库只有用户画像的**汇总快照**，没有订单流水、商品品类和浏览行为表，无法判定“近 90 天购买次数/浏览次数”。而且库内既无绝对时间列，只有 `days_since_last_buy` 相对天数，也没有可用于“近90天”筛选的行为时间轴。\n\n2. **品类维度里根本没有“母婴”这个取值**\n   对 `user_profile_vectors.top_category` 全量分组的结果仅 7 类：\n   电子产品 2235、家居 1794、书籍 854、玩具 838、服装 800、运动 797、美妆 792（合计 8110）。\n   其中没有“母婴”，因此无法按 `top_category` 直接计数。\n\n3. **画像文本中也没有任何“母婴”痕迹**\n   `SELECT COUNT(*) ... WHERE profile_text LIKE '%母婴%'` 返回 **0**，说明连近似替代口径都取不到样本。\n\n因此任何“母婴偏好用户数”都会是编造值。可行的替代：若你的目标是母婴人群，可用**“玩具”品类偏好 838 人**作为最接近的代理信号，但这只能视作近似而非该标签口径，需明确标注口径差异；要得到真实数字，需接入订单明细（含品类、下单时间）与浏览行为日志。",
+      "run_error": null
     },
     {
       "task_id": "bench_neg_004",
@@ -2492,12 +2525,18 @@
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [],
+      "required_tools": [],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
-        "execute_sql",
+        "rag_search",
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [],
       "expected_keywords_any": [
@@ -2530,17 +2569,15 @@
         "21000",
         "16"
       ],
-      "disallowed_numbers": [
-        "403"
-      ],
+      "disallowed_numbers": [],
       "business_disallowed_numbers": [],
       "observed_fact_numbers": [
-        "403"
+        "403",
+        "4.97",
+        "8110"
       ],
       "approx_numbers": [],
-      "result_claim_numbers": [
-        "403"
-      ],
+      "result_claim_numbers": [],
       "must_not_contain_approx_numbers": true,
       "forbidden_result_units": [
         "人"
@@ -2551,7 +2588,7 @@
       ],
       "tool_results": [
         {
-          "name": "execute_sql",
+          "name": "rag_search",
           "ok": true,
           "error": null
         },
@@ -2566,15 +2603,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 5.61,
-      "final_answer": "无法预测，现有数据不支持该问题。原因如下：\n\n**1. 缺少绝对时间轴**\n`user_profile_vectors` 只有相对天数 `days_since_last_buy`（实测 0~364 天，SQL 验证：min=0，max=364，n=8110），它表示“距最后一次购买多少天”，以某个未标注的基准日为起点。表中没有任何日期、月份或年份字段，既无法确定基准日是哪一天，也无法生成历史时间序列。\n\n**2. 缺少可用于时间外推的序列**\n预测 2026 年 11 月的会员数，至少需要“按月的钻石会员存量序列”或“升级、降级、流失事件表”。本库是 8110 条用户画像静态快照，每条记录一行，没有会员等级变更历史的表，因此无法拟合趋势；任何数字都只能是编造。\n\n**3. 可如实给出的只有当前快照**\n当前钻石会员为 403 人（SQL：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level='钻石'`）。这是快照值，不是 2026-11 的预测值，二者不能等同。\n\n**建议**：若要支持此类预测，需补充带时间戳的会员等级快照表（例如每月末的等级存量），或等级变更事件日志；有了按月序列，才能做趋势或留存模型。\n\n若你需要，我可以基于现有快照做**静态结构分析**（例如钻石会员、黑卡会员的画像特征：城市、品类、客单分布），但这属于现状描述，并非对未来的预测。",
-      "run_error": null,
-      "required_tools": [],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 5.95,
+      "final_answer": "**结论：无法预测 2026 年 11 月的钻石会员数量，现有数据不支持，因此我不给出任何预测数字。**\n\n原因（基于库内实际结构与文档）：\n\n1. **没有时间序列**。`user_profile_vectors` 只有相对天数 `days_since_last_buy`（0~364），没有任何绝对日期列，更没有会员等级的历史快照或按月的等级变动记录。因此无法构建趋势、做季节性外推或拟合增长曲线。\n2. **只有一个当前状态截面**。库内是每个用户的最新画像，共 8110 条；等级字段只反映查询当期的结果，不是时序观测，所以无法回答“某个未来时点会有多少人”这类问题。\n3. **等级由规则实时驱动，而非可预测的存量**。据 `member_benefits.md`：「会员等级按累计平均客单价划分，T+1 更新」「无固定保级考核期，等级随累计平均客单价的变动实时调整」；钻石门槛为累计平均客单价 ≥ 14555 元。等级取决于未来每位用户的消费行为，而本库没有消费流水或时间戳，无法建模。\n4. **知识库无预测口径**。检索未返回任何会员数量预测方法或时间序列 SOP，只有等级划分、升级保级、客服 SOP 等规则说明。\n\n可提供的**事实性现状**（供参考，不是预测）：\n\n| 会员等级 | 用户数 |\n|---|---|\n| 普通 | 4053 |\n| 白银 | 2434 |\n| 黄金 | 1217 |\n| 钻石 | 403 |\n| 黑卡 | 3 |\n\n依据：`SELECT member_level, COUNT(*) FROM user_profile_vectors GROUP BY member_level`（row_count=5）。\n\n如果确实要做该预测，需要补充：①带日期（月粒度）的会员等级快照或快照表；②订单流水的时间序列；③等级变动的历史记录。当前数据集不具备这些字段，因此 2026 年 11 月的钻石会员数量我不能给出。",
+      "run_error": null
     },
     {
       "task_id": "bench_neg_005",
@@ -2586,12 +2617,19 @@
       "business_correctness": true,
       "tool_policy_compliance": true,
       "expected_tools": [],
+      "required_tools": [],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
+        "execute_sql",
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "注册"
@@ -2649,9 +2687,14 @@
             "code": "SQL_VALIDATION_ERROR",
             "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
           }
+        },
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": null
         }
       ],
-      "tool_execution_ok": 0.5,
+      "tool_execution_ok": 0.3333333333333333,
       "tool_errors": [
         {
           "name": "execute_sql",
@@ -2660,20 +2703,19 @@
             "code": "SQL_VALIDATION_ERROR",
             "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
           }
+        },
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": null
         }
       ],
       "error_recovered": true,
-      "steps": 2,
-      "tool_call_count": 2,
-      "elapsed_s": 7.36,
-      "final_answer": "## 结论：现有数据不支持该统计，无法计算\n\n**原因（数据层面）**\n\n1. **没有注册时间字段**：`user_profile_vectors` 只有 `days_since_last_buy`（距最后一次购买的天数，相对基准日 0–364），没有任何注册日期或注册天数。\n2. **没有首单时间字段**：表中只有累计订单数 `order_count`（1–10）和累计消费 `total_amount`、`avg_amount`。这些字段只表示“累计结果”，没有首单发生的时间点，因此无法定位“首单 vs 注册”的时间差。\n3. **没有单条订单明细表**：可访问的白名单表只有 `user_profile_vectors`（用户画像快照，8110 条）和 `wiki_vectors`（知识库分块，36 条）。没有订单流水表，也没有事件日志表。尝试查询 `information_schema` 以核对表结构时被安全校验拦截（`SQL_VALIDATION_ERROR`，仅白名单表），当前可用的数据源就是这两张表。\n4. **时间口径限制**：本库只有一个相对天数字段，没有绝对日期或时间序列，因此任何“A 事件到 B 事件间隔天数”的指标都无法构造。\n\n**资料中的相关内容（只是标签定义，无法用于计算）**\n\n- `tag_definitions.md`：高潜用户 = “近 30 天浏览 ≥ 5 次，加购 ≥ 2 次，但未下单；**或注册 ≤ 30 天且完成首单**”。这里把“注册 ≤ 30 天”当作判定条件，但库里没有注册天数字段，所以这条规则在本数据上无法执行，也无法由此反推平均转化天数。\n- `marketing_playbook.md`：新客转化人群为“注册 ≤ 30 天，未下单”，触达时机为“注册后 24 小时内、第 3 天、第 7 天”。这是策略设定，不是观测值。\n\n**要支持该指标，需要补充的数据**：用户注册时间戳（`register_time`）、首单时间戳（或首单订单号+下单时间）、订单级流水的日期粒度（最好到日期或小时），并明确基准日与“首单”口径（是否含取消、退款的订单）。\n\n**当前数据能做哪些替代分析**（如需，我可以立即执行 SQL）：按 `days_since_last_buy` 分桶统计活跃/沉睡用户分布；按注册相关标签无法做，但可按 `member_level`、`top_category`、`order_count` 与近因的交叉分布来做新客/复购结构分析。",
-      "run_error": null,
-      "required_tools": [],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "steps": 3,
+      "tool_call_count": 3,
+      "elapsed_s": 9.11,
+      "final_answer": "## 结论：现有数据不支持该统计，无法给出数字\n\n**原因（基于实际字段核验）**\n\n我用 `SELECT * FROM user_profile_vectors LIMIT 1` 核验了全部可用字段：\n\n`id, user_id, profile_text, embedding, dept, sensitivity, update_time, age, gender, city, member_level, order_count, total_amount, avg_amount, top_category, days_since_last_buy, platforms`\n\n其中：\n1. **没有注册时间字段**，例如 register_time、create_time 都不存在，因此无法得到“注册日期”这个起点。\n2. **没有首单时间字段**，也没有订单流水表，只有聚合后的 `order_count`（累计订单数）和 `days_since_last_buy`（距**最后一次**购买的天数）。这是相对“最后一次购买”的天数，不是首单，两者方向相反，也不能反推首单日期。\n3. 唯一的时间类字段 `update_time`（如 `2026-10-16T11:33:26`）是画像记录的更新时间，不是用户行为时点，不能当作注册或下单时间。\n\n因此，“注册→首单平均转化天数”这一指标的分子（首单时点）和分母（注册时点）在库内都不存在，任何计算结果都只能是编造，我不做估算。\n\n**口径层面也印证了这一点**\n\n知识库中确实有相关概念，但都只是**策略规则**，不是可计算字段：\n- `tag_definitions.md`：高潜用户 = “近 30 天浏览 ≥ 5 次，加购 ≥ 2 次，但未下单；或注册 ≤ 30 天且完成首单”；\n- `marketing_playbook.md`：新客转化触达时机为“注册后 24 小时内、第 3 天、第 7 天”；\n- `segmentation.md`：新客 = 注册 ≤ 30 天。\n\n这些文档描述了“注册”“注册后第 N 天”的业务定义，但当前 demo 数据集中并未落地对应的注册时间字段。\n\n**若需要该指标，所需补充的数据**\n- `register_time`（注册时间）\n- 首单时间：可来自订单明细表的 `MIN(order_time)`，或用户表冗余的 `first_order_time`\n\n补齐后计算方式即为：`AVG(first_order_time - register_time)`，并可进一步按年龄段、城市、偏好品类、会员等级分组，以排除极值。\n\n**当前数据下可以替代的近似分析（需你确认）**\n- 累计订单数分布与首单渗透：`order_count >= 1` 的比例（几乎全量，因为实测 order_count 最小为 1）\n- 复购间隔的粗略代理：按 `days_since_last_buy` 分桶，观察“最近 30 天有购买”的活跃客占比，但这衡量的是**末次购买**的新鲜度，不等价于首单转化周期。\n\n如果你需要，我可以先给出 `days_since_last_buy` 的分桶分布，作为活跃度参考，但不会把它冒充为注册首单转化天数。",
+      "run_error": null
     },
     {
       "task_id": "bench_neg_006",
@@ -2687,12 +2729,19 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
-        "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "90"
@@ -2728,7 +2777,9 @@
       ],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [],
+      "observed_fact_numbers": [
+        "5"
+      ],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": true,
@@ -2744,29 +2795,16 @@
           "name": "rag_search",
           "ok": true,
           "error": null
-        },
-        {
-          "name": "rag_search",
-          "ok": true,
-          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
       "steps": 2,
-      "tool_call_count": 2,
-      "elapsed_s": 8.84,
-      "final_answer": "## 一、「高价值用户」的标签定义（原文引用）\n\n依据知识库 `tag_definitions.md`：\n\n> **高价值用户**\n> 定义：近 90 天消费金额排名前 20%，且近 30 天有活跃行为（登录、浏览、下单任一）。\n> 更新频率：T+1。\n> 负责人：数据部-用户增长组。\n> 用途：营销优先级排序、专属客服分配。\n\n⚠️ 需要与另一个容易混淆的标签区分：「高客单用户」= 累计平均客单价 ≥ 1000 元（数据部-用户价值组），两者口径不同。\n\n## 二、demo 数据集**无法**精确统计高价值用户数量\n\n我核对了库内两张表（`user_profile_vectors` 用户画像、`wiki_vectors` 知识库文档分块）的字段，定义所需的两个条件都缺少可支撑字段：\n\n**1. 「近 90 天消费金额」—— 无法还原**\n- 画像表只有 `total_amount`（累计总消费）、`avg_amount`（累计平均客单价）、`order_count`（累计订单数），**全部是累计口径**，知识库也注明「当前画像数据为累计口径」。\n- 库内没有任何订单流水、订单时间戳，唯一的时间类字段是 `days_since_last_buy`（距最后一次购买的天数，0–364）。它只能说明“最后买过是多久前”，不能把历史消费拆分到“近 90 天”窗口内，因此无法算出近 90 天消费金额，也就无法做“前 20%”排名。\n\n**2. 「近 30 天有活跃行为（登录、浏览、下单任一）」—— 行为数据缺失**\n- 库内没有任何登录、浏览行为表或字段；`platforms` 只是活跃平台标注，不含行为频次/时点。\n- 只能通过 `days_since_last_buy <= 30` 判断“近 30 天有下单”，无法覆盖“登录、浏览”这两类活跃，会系统性漏掉只登录/浏览未下单的用户。\n\n**3. 时间口径限制**\n系统口径明确：无绝对时间列、无时间序列，无法按年/月/日筛选。而该标签本质是双时间窗口（90 天 + 30 天）动态标签，与现有数据能力不匹配。\n\n## 三、结论\n\n- **不能**给出高价值用户数量，任何具体数字都会是编造。\n- 如确实需要方向性参考，只能做**近似替代口径**（示例，需明确标注为非官方口径）：以 `total_amount` 取 P80 分位替代“前 20%”，以 `days_since_last_buy <= 30` 替代“近 30 天活跃”。结果会与官方定义存在偏差（累计 vs 90 天窗口、仅下单 vs 含登录浏览）。\n- 精确落地的数据前提：需要**订单流水（含订单时间、金额）+ 用户行为日志（登录/浏览时间戳）**，才能按定义计算。\n\n如果你需要，我可以先按“近似替代口径”跑一个参考值并清楚标注口径差异，或者统计另一个可精确计算的标签（如「高客单用户」，`avg_amount >= 1000`）。",
-      "run_error": null,
-      "required_tools": [
-        "rag_search"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_call_count": 1,
+      "elapsed_s": 4.58,
+      "final_answer": "**“高价值用户”标签定义**（来源：`tag_definitions.md`）\n\n> 定义：近 90 天消费金额排名前 20%，且近 30 天有活跃行为（登录、浏览、下单任一）。\n> 更新频率：T+1。\n> 负责人：数据部-用户增长组。\n> 用途：营销优先级排序、专属客服分配。\n\n注：同一文档中的“高客单用户”是另一条独立标签，定义为累计平均客单价 ≥ 1000 元；它与“高价值用户”的判定规则不同，不能混用。\n\n**能否在 demo 数据集中精确统计高价值用户数量：不能，我不会给出数字。**\n\n原因在于，定义所需的两项字段在本库中都不存在：\n\n1. **“近 90 天消费金额”无法计算。** 表 `user_profile_vectors` 只有 `days_since_last_buy`（距最后一次购买的天数，0–364）这一个相对时间字段，没有任何绝对时间列或订单流水明细。`total_amount` 和 `avg_amount` 是**累计**统计值，不一定是近 90 天窗口内的金额；因此，按“近 90 天消费金额排名前 20%”这一条件做筛选，在现有表结构下不可实现。\n2. **“近 30 天活跃行为（登录、浏览、下单任一）”无法判断。** 库内没有登录记录、浏览记录或加购记录。`days_since_last_buy ≤ 30` 只能说明该用户最近一次**购买**发生在 30 天内，不能等同于活跃，因为它会漏掉“仅登录或仅浏览但未下单”的用户，并且无法覆盖“登录、浏览、下单任一”这一或条件。\n\n因此，任何基于现有字段的替代算法（例如用 `total_amount` 前 20%，再用 `days_since_last_buy ≤ 30` 近似）都只是近似测算，并不等于该标签的真实口径。如果业务上确实需要一个可执行的近似办法，建议先与数据部-用户增长组确认近似口径或替代标签，再据此统计，并明确标注为近似值。",
+      "run_error": null
     },
     {
       "task_id": "bench_calc_001",
@@ -2780,11 +2818,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "580"
@@ -2815,17 +2861,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.98,
-      "final_answer": "该订单总价为 **580 元**。\n\n计算依据：158 + 236 + 186 = 580（由 calculator 工具计算得出）。",
-      "run_error": null,
-      "required_tools": [
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 1.67,
+      "final_answer": "该订单总价 = 158 + 236 + 186 = **580 元**（依据：calculator 计算结果 580）。",
+      "run_error": null
     },
     {
       "task_id": "bench_calc_002",
@@ -2839,11 +2877,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "170.02"
@@ -2874,17 +2920,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.19,
-      "final_answer": "P50 与 P25 的差额为 **1170.02 元**（2496.24 − 1326.22 = 1170.02，依据 calculator 计算结果）。",
-      "run_error": null,
-      "required_tools": [
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 2.48,
+      "final_answer": "P50 与 P25 的差额为 **1170.02 元**。\n\n计算依据：2496.24 − 1326.22 = 1170.02（calculator 结果 1170.0199999999998，按分位金额保留两位小数）。\n\n也就是说，中位客单价比 P25 门槛高出约 1170 元（P50 约为 P25 的 1.88 倍），说明本库客单价分布右偏明显，高客单用户拉长了上尾。",
+      "run_error": null
     },
     {
       "task_id": "bench_calc_003",
@@ -2898,11 +2936,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "890.01"
@@ -2933,17 +2979,9 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.69,
-      "final_answer": "**最终价格：890.01 元**\n\n计算过程：\n- 原价 899 元\n- 涨价 10%：899 × 1.1 = 988.9 元\n- 再降价 10%：988.9 × 0.9 = **890.01 元**\n\n结论：因为先涨价后降价的基准不同，涨跌幅同为 10% 并不会回到原价，实际比原价低 8.99 元（相当于原价的 1 − 1.1×0.9 = 1% 折损）。",
-      "run_error": null,
-      "required_tools": [
-        "calculator"
-      ],
-      "optional_tools": [],
-      "forbidden_tools": [],
-      "missing_required_tools": [],
-      "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "elapsed_s": 2.28,
+      "final_answer": "**最终价格：890.01 元**\n\n计算过程：\n- 涨价 10% 后：899 × 1.1 = 988.9 元\n- 再降价 10%：988.9 × 0.9 = 890.01 元\n\n依据：calculator 计算结果 `899 * 1.1 * 0.9 = 890.01`。\n\n提示：先涨 10% 再降 10% 相当于原价 × 0.99，因此比原价便宜 8.99 元（约 1%），并非回到原价。",
+      "run_error": null
     },
     {
       "task_id": "bench_calc_004",
@@ -2957,14 +2995,1305 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "8.9"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [
+        "8.90",
+        "8110"
+      ],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 1.78,
+      "final_answer": "北京用户占全库用户的比例为 **8.90%**。\n\n- 计算依据：722 ÷ 8110 × 100 = 8.9026%\n- 保留两位小数：8.90%\n- 数据来源：user_profile_vectors 表，其中北京 722 人、全库 8110 人。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_sql_011",
+      "category": "execute_sql",
+      "question": "统计 demo 数据集中北京用户的平均累计消费金额（保留两位小数）。",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [],
+      "expected_keywords_any": [
+        "11,841.94",
+        "11841.94"
+      ],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 2.02,
+      "final_answer": "北京用户平均累计消费金额为 **11841.94 元**（共 722 位北京用户）。\n\n依据 SQL：\n```sql\nSELECT COUNT(*) AS user_cnt, ROUND(AVG(total_amount), 2) AS avg_total_amount\nFROM user_profile_vectors WHERE city = '北京' LIMIT 10;\n```\n结果：user_cnt = 722，avg_total_amount = 11841.94。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_sql_012",
+      "category": "execute_sql",
+      "question": "按会员等级统计累计消费总额，哪个等级的累计消费总额最高？金额是多少元（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "33,368,665"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 3.61,
+      "final_answer": "**结论：黄金等级的累计消费总额最高，为 33,368,665.28 元。**\n\n以下是按会员等级统计的完整结果（表 `user_profile_vectors`，统计方式：SUM(total_amount) 分组求和，并按总额降序排列）：\n\n| 排名 | 会员等级 | 用户数 | 累计消费总额（元） | 人均客单价均值（元） |\n|---|---|---|---|---|\n| 1 | 黄金 | 1,217 | **33,368,665.28** | 9,627.98 |\n| 2 | 白银 | 2,434 | 30,210,859.90 | 4,083.28 |\n| 3 | 钻石 | 403 | 14,586,711.70 | 21,416.52 |\n| 4 | 普通 | 4,053 | 13,610,777.06 | 1,319.11 |\n| 5 | 黑卡 | 3 | 146,613.98 | 37,665.00 |\n\n补充观察：\n- 黄金等级的累计消费总额最高，白银紧随其后。两者合计占五个等级总额（92,083,628 元）的约 69%。\n- 若按人均消费看，结果与累计消费总额相反：黑卡（平均客单价 37,665 元）和钻石（21,416.52 元）明显高于黄金、白银，但这两类用户人数少，因此累计消费总额低。普通等级人数最多（4,053 人），但客单价最低（1,319.11 元），累计消费总额排第 4。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_sql_013",
+      "category": "execute_sql",
+      "question": "哪个品类的累计订单数最多？累计订单数是多少（保留整数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": false,
+      "business_correctness": false,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "电子产品",
+        "6864"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [
+        "6864"
+      ],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": false,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 2.61,
+      "final_answer": "**结论：偏好品类为「电子产品」的用户群体，累计订单数最多，合计 6,864 单（保留整数）。**\n\nSQL 依据（按 top_category 汇总 order_count 并降序排列）：\n| 品类 | 累计订单数 | 用户数 |\n|---|---|---|\n| 电子产品 | 6,864 | 2,235 |\n| 家居 | 5,299 | 1,794 |\n| 书籍 | 1,889 | 854 |\n| 玩具 | 1,811 | 838 |\n| 运动 | 1,744 | 797 |\n\n说明：这里的“品类累计订单数”是按用户画像表中的偏好品类（top_category）分组，再对每位用户的累计订单数（order_count）求和得到的；它表示该品类偏好人群的订单总量，而不是该品类商品自身的订单明细。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_sql_014",
+      "category": "execute_sql",
+      "question": "累计消费金额最高的用户所在城市及金额是多少（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [],
+      "expected_keywords_any": [
+        "93,859.78",
+        "93859.78"
+      ],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 2.3,
+      "final_answer": "累计消费金额最高的用户信息如下：\n\n- **用户 ID**：U9325\n- **所在城市**：天津\n- **累计消费金额**：**93859.78 元**\n- 会员等级：钻石\n\n依据 SQL：`SELECT user_id, city, member_level, total_amount FROM user_profile_vectors ORDER BY total_amount DESC LIMIT 1`，返回唯一 1 条记录（总额 93859.78，保留两位小数，与库内实测区间上限 93859.8 一致）。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_sql_015",
+      "category": "execute_sql",
+      "question": "钻石会员的平均客单价是多少元（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [],
+      "expected_keywords_any": [
+        "21,416.52",
+        "21416.52"
+      ],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 1.78,
+      "final_answer": "钻石会员的平均客单价为 **21416.52 元**（共 403 位钻石会员）。\n\n依据：`SELECT COUNT(*), ROUND(AVG(avg_amount),2) FROM user_profile_vectors WHERE member_level='钻石'` → cnt=403，avg_of_avg_amount=21416.52。该值为各用户「平均客单价」字段的算术平均，非总消费/总订单加权结果。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_rag_009",
+      "category": "rag_search",
+      "question": "钻石会员的专属折扣权益是什么？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "rag_search"
+      ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "9 折",
+        "钻石"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 2.42,
+      "final_answer": "**钻石会员专属折扣权益：全场商品 9 折，不与平台活动价叠加**（来源：member_benefits.md「钻石会员权益」第 3 条）。\n\n同一等级下的其他权益如下，可一并说明：\n1. 专属客服：7×24 小时一对一专属顾问，平均响应 1 分钟内\n2. 全场免运费：不限订单金额、不限次数\n3. 专属折扣：全场商品 9 折（不与平台活动价叠加）\n4. 生日礼遇：生日当月赠 200 元无门槛券，当月消费双倍积分\n5. 新品优先购：新品发布可提前 48 小时购买\n6. 退换货延长：30 天无理由退换，质量问题来回运费全免\n7. 积分加速：消费积分 2 倍累计\n\n如需，可按 cs_sop.md「场景三：会员权益咨询」流程处理：先查用户等级与权益有效期，再逐条解释，接近升级时提示差额并推荐升级礼包。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_rag_010",
+      "category": "rag_search",
+      "question": "流失用户挽回的触达时机和频控规则是什么？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "rag_search"
+      ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "rag_search"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "91",
+        "120"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 2,
+      "elapsed_s": 3.97,
+      "final_answer": "**流失用户挽回：触达时机与频控**（来源：`marketing_playbook.md` 第四节「流失用户挽回」和第五节「通用频控规则」）\n\n**策略专属规则**\n- 目标人群：流失客，即超过 90 天无行为（> 90 天无行为）\n- 渠道：短信、邮件\n- 内容：回归礼包 100 元券，限 7 天有效\n- 触达时机：**流失第 91 天、第 120 天**\n- 频控：**每月最多 1 次**\n\n**叠加的通用频控（所有营销活动都要遵守）**\n- 同一用户每日最多接收 3 条营销消息\n- 同一活动同一用户最多触达 2 次\n- 用户退订后立即停止所有营销触达\n\n**执行提示**\n- 实际投放时，要同时满足策略自身的频控规则和通用频控规则，两者取更严格的那个：第 91 天为第一次触达，第 120 天为第二次触达，也正好符合「同一活动同一用户最多触达 2 次」的上限。\n- 注意区分两个相似定义：策略中的「流失客」指的是超过 90 天无行为；而标签体系中的「流失预警用户」指的是近 30 天未活跃，且历史客单价 > 500 元，且累计购买次数 ≥ 3 次（`tag_definitions.md`），后者用于提前预警召回，前者用于已流失后的挽回，不要混用人群名单。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_rag_011",
+      "category": "rag_search",
+      "question": "商品质量问题在签收后多少天内可以退换？客服处理时需要用户提供什么？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "rag_search"
+      ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "rag_search"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "7 天",
+        "照片"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 2,
+      "elapsed_s": 3.83,
+      "final_answer": "## 结论\n\n**退换时限：签收后 7 天内**；**客服需让用户提供照片或视频证据**。\n\n### 依据一：商品质量问题的客服 SOP（来源：`cs_sop.md` · 场景二：商品质量问题）\n1. 请用户提供**照片或视频证据**。\n2. 确认在退换货期内（**签收后 7 天**）。\n3. 提供换货或退款选项，**优先换货**。\n4. 若用户不满，升级至客服主管。\n5. 记录工单，标记“质量问题”。\n\n### 依据二：会员等级会影响退换货时限（来源：`member_benefits.md`）\n7 天是基础口径，部分会员等级有延长权益：\n| 会员等级 | 退换货权益 |\n|---|---|\n| 普通 | 7 天无理由退换 |\n| 白银 | 退换货延长至 **10 天** 无理由退换 |\n| 钻石 | 延长至 **30 天** 无理由退换，且**质量问题来回运费全免** |\n\n> 注：知识库中未提供黄金、黑卡等级的退换货条款，如需精确口径需另行确认。处理工单时建议先查用户会员等级：白银、钻石用户按延长后的时限判断，不必一律按 7 天拒绝。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_rag_012",
+      "category": "rag_search",
+      "question": "“高潜用户”的定义是什么？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "rag_search"
+      ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "rag_search"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "浏览",
+        "加购"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 2,
+      "elapsed_s": 4.16,
+      "final_answer": "**「高潜用户」定义（来源：tag_definitions.md · 用户标签口径说明）**\n\n> **定义：近 30 天浏览 ≥ 5 次，加购 ≥ 2 次，但未下单；或注册 ≤ 30 天且完成首单。**\n>\n> - 更新频率：T+1\n> - 负责人：数据部-用户增长组\n> - 用途：新客转化、首单激励\n\n也就是说，满足下列任意一条即可：\n1. **意向未转化**：近 30 天浏览 ≥ 5 次且加购 ≥ 2 次，但该期间未下单；\n2. **新客首单**：注册 ≤ 30 天且已完成首单。\n\n补充说明：\n- 这一分群与「新客高潜」不同（segmentation.md）：新客高潜的条件是“新客 + 近 7 天浏览 ≥ 3 次”，对应策略为首单立减、新人礼包、7 天复购券。\n- 也请勿与「高价值用户」（近 90 天消费额前 20% 且近 30 天活跃）、「高客单用户」（累计平均客单价 ≥ 1000 元）混淆，它们分别是不同的标签。\n\n⚠️ 数据可用性提示：本库 `user_profile_vectors` 表没有浏览次数、加购次数字段，也没有注册时间字段，因此无法按该口径在本库中实际圈选出高潜用户；若要统计人数或占比，需要补充相应行为数据。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_013",
+      "category": "multi_tool",
+      "question": "按用户分群文档中“流失客”的定义，统计 demo 数据集中流失客人数及占全库比例（百分比保留两位小数）。",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
+      "required_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "50.02",
+        "90"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [
+        "110"
+      ],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 5,
+      "tool_call_count": 4,
+      "elapsed_s": 7.73,
+      "final_answer": "## 结论\n\n**流失客（> 90 天无行为）共 4,057 人，占全库 8,110 人的 50.02%。**\n\n## 依据\n\n**1. 定义来源（segmentation.md「用户分群策略 – 分群维度」原文）**\n> 生命周期：新客（注册 ≤ 30 天）、活跃客（近 30 天有行为）、沉默客（31–90 天无行为）、**流失客（> 90 天无行为）**。\n\n（marketing_playbook.md 中「流失客（> 90 天无行为）」与其一致；注意不要混淆 tag_definitions.md 的「流失预警用户」＝近 30 天未活跃 + 客单价 > 500 + 订单数 ≥ 3，这是另一个标签口径。）\n\n**2. 统计 SQL**\n```sql\nSELECT COUNT(*) FILTER (WHERE days_since_last_buy > 90) AS churn_users,\n       COUNT(*) AS total_users\nFROM user_profile_vectors LIMIT 10;\n```\n结果：churn_users = 4057，total_users = 8110。\n\n**3. 占比计算**：4057 / 8110 × 100 = 50.0247% 取两位小数后为 **50.02%**。\n\n说明：全库没有绝对时间列，只能用相对天数 days_since_last_buy（0–364）判定「> 90 天无行为」，无法按自然年月筛选。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_014",
+      "category": "multi_tool",
+      "question": "北京用户中钻石会员占北京用户的比例是多少（百分比保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "4.57"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 3.5,
+      "final_answer": "北京用户共 **722** 人，其中钻石会员 **33** 人，占比为：\n\n**33 ÷ 722 × 100% = 4.57%**\n\n依据：对 `user_profile_vectors` 表按 `city='北京'` 聚合统计。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_015",
+      "category": "multi_tool",
+      "question": "美妆偏好用户的平均订单数是多少（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "2.11"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 1.81,
+      "final_answer": "美妆偏好用户（`top_category = '美妆'`，共 792 人）的平均订单数为 **2.11 单**。\n\n依据：`SELECT ROUND(AVG(order_count),2), COUNT(*) FROM user_profile_vectors WHERE top_category='美妆'` → avg_order_count = 2.11，user_cnt = 792。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_016",
+      "category": "multi_tool",
+      "question": "黑卡会员有哪些专属权益？黑卡会员占全库比例是多少（百分比保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "rag_search",
+        "execute_sql",
+        "calculator"
+      ],
+      "required_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "execute_sql",
+        "rag_search",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "黑卡",
+        "0.04"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [
+        "8110"
+      ],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [
+        "黑卡仅 3 人，占比样本极小，需人工确认结论可用性"
+      ],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 4,
+      "elapsed_s": 7.97,
+      "final_answer": "## 一、黑卡会员专属权益：知识库中**没有**相关条目\n\n我检索了知识库中 `member_benefits.md`（会员权益说明）和 `cs_sop.md`（客服 SOP），这两处都只写了**四档**会员的权益和等级标准，没有任何「黑卡」权益说明：\n\n- **等级划分标准**（`member_benefits.md`）：钻石（平均客单价 ≥14555 元，约前 5%）、黄金（6680–14555）、白银（2495–6680）、普通（<2495），按「累计平均客单价」T+1 更新。\n- 各档权益原文只有：普通（基础客服、7 天无理由、1 倍积分）、白银（生日 50 元券、10 天无理由、1.2 倍积分）、黄金（优先接入、99 元免运费、生日 100 元券、提前 24h 新品、15 天无理由、1.5 倍积分）、钻石（7×24 专属顾问、全场免运费、9 折、生日 200 元券、提前 48h 新品、30 天无理由、2 倍积分）。\n\n也就是说：**知识库没有黑卡权益的明确规定，也没有黑卡的等级门槛**，属于文档缺口。现有资料中最高的完整档位是钻石会员。另外，黑卡的实际人数（3 人）远低于文档「前 5%」对应的钻石档（403 人），说明黑卡可能是文档外的特殊或内部等级，建议向数据部-用户价值组（权益文档负责人）确认。\n\n## 二、黑卡会员占比\n\nSQL：`SELECT member_level, COUNT(*) FROM user_profile_vectors GROUP BY member_level`\n\n| 等级 | 人数 |\n|---|---|\n| 普通 | 4053 |\n| 白银 | 2434 |\n| 黄金 | 1217 |\n| 钻石 | 403 |\n| **黑卡** | **3** |\n\n- 黑卡 3 人 / 全库 8110 人 = **0.04%**（0.036991%，保留两位小数）\n\n依据：`member_benefits.md`、`cs_sop.md` 检索原文；`user_profile_vectors` 分组统计（合计 8110，与表总量一致）；占比由 calculator 计算。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_017",
+      "category": "multi_tool",
+      "question": "各会员等级平均订单数最高与最低相差多少（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql"
+      ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql",
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "1.65"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 3.75,
+      "final_answer": "各会员等级的平均订单数如下（SQL 聚合 user_profile_vectors）：\n\n| 会员等级 | 人数 | 平均订单数 |\n|---|---|---|\n| 白银 | 2434 | 2.9803 |\n| 黄金 | 1217 | 2.8965 |\n| 普通 | 4053 | 2.3415 |\n| 钻石 | 403 | 1.8040 |\n| 黑卡 | 3 | 1.3333 |\n\n平均订单数最高的是白银，为 2.98；最低的是黑卡，为 1.33。两者相差 **1.65**，计算方式为 2.9803 减 1.3333。\n\n注：黑卡仅有 3 人，该组的平均值代表性较弱，解释时请留意样本量。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_018",
+      "category": "multi_tool",
+      "question": "上海用户中钻石会员占上海用户的比例是多少（百分比保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "4.66"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 3.06,
+      "final_answer": "上海用户中，钻石会员占 **4.66%**。\n\n依据：`user_profile_vectors` 中上海用户共 **686 人**，其中钻石会员 **32 人**，即 32 ÷ 686 × 100% = 4.6647%，保留两位小数为 **4.66%**。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_multi_019",
+      "category": "multi_tool",
+      "question": "黑卡会员的平均客单价是普通会员的多少倍（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "28.55"
+      ],
+      "expected_keywords_any": [],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [
+        "黑卡仅 3 人，倍数样本不稳定，需人工确认"
+      ],
+      "tool_results": [
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 2.92,
+      "final_answer": "**黑卡会员的平均客单价约为普通会员的 28.55 倍。**\n\n依据（SQL：按 member_level 分组统计 avg_amount 均值）：\n\n| 会员等级 | 人数 | 平均客单价（元） |\n|---|---|---|\n| 黑卡 | 3 | 37,665.00 |\n| 普通 | 4,053 | 1,319.11 |\n\n- 比值：37665.00 ÷ 1319.11 ≈ **28.55**（保留了两位小数）\n- 需要注意：黑卡会员只有 3 人，样本量极小，因此这个倍数只能作为参考，不宜直接作为业务结论外推。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_neg_007",
+      "category": "negative",
+      "question": "统计 demo 数据集中用户近 7 天的登录次数。如果现有数据不支持，请说明缺少什么；不要编造数字。",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": false,
+      "business_correctness": false,
+      "tool_policy_compliance": true,
+      "expected_tools": [],
+      "required_tools": [],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "rag_search",
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [],
+      "expected_keywords_any": [
+        "无法",
+        "没有",
+        "不存在",
+        "未提供",
+        "缺少",
+        "不支持"
+      ],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [
+        "7",
+        "5.1"
+      ],
+      "business_disallowed_numbers": [
+        "5.1"
+      ],
+      "observed_fact_numbers": [
+        "7",
+        "7"
+      ],
+      "approx_numbers": [
+        "7",
+        "5.1"
+      ],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": true,
+      "forbidden_result_units": [
+        "次"
+      ],
+      "final_ok": false,
+      "manual_review": [
+        "必须人工确认未给出编造结果"
+      ],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 3,
+      "tool_call_count": 3,
+      "elapsed_s": 8.55,
+      "final_answer": "## 结论：现有数据无法统计「近 7 天登录次数」\n\n### 不支持的原因（缺少哪些数据）\n库内只有两张表，都不包含登录行为数据：\n\n| 表 | 是否包含登录信息 | 说明 |\n|---|---|---|\n| `user_profile_vectors`（8110 条） | ❌ | 只有标签型快照字段：`age/gender/city/member_level/order_count/total_amount/avg_amount/top_category/days_since_last_buy/platforms`；没有登录次数、登录时间这类明细 |\n| `wiki_vectors`（36 条） | ❌ | 知识库文档，并非行为数据 |\n\n具体缺少 3 项：\n1. **登录事件明细表**（用户 ID + 登录时间戳 + 次数）；当前没有任何行为明细日志（登录、浏览、加购均无）。\n2. **绝对日期字段**：目前只有相对天数 `days_since_last_buy`（0–364 天）；即使有登录数据，也无法按“近 7 天”这一自然日窗口切分，因为没有绝对时间列。\n3. **7 天窗口内的多次计数能力**：现有字段都是累计值或当前状态值（如 `order_count` 累计订单数），无法还原区间内的重复发生次数。\n\n### 参考：口径说明\n知识库中的「活跃」定义，其行为项包含登录，但标签仅保存派生结果。例如，高价值用户指“近 90 天消费前 20%，且近 30 天有活跃行为（登录、浏览、下单任一）”（来源：`tag_definitions.md`）；它的数据源是 T+1 更新的标签宽表，不提供 7 天登录次数。\n\n### 可交付的近似替代（已实算，非登录口径）\n用现有字段能回答的最接近问题是“近 7 天有购买的用户数”：\n\n```sql\nSELECT COUNT(*) AS users_last7d_buy,\n       (SELECT COUNT(*) FROM user_profile_vectors) AS total_users\nFROM user_profile_vectors\nWHERE days_since_last_buy <= 6\nLIMIT 10\n```\n结果：**414 人 / 8110 人**（约占 5.1%）。注意这是“近 7 天有下单”，并不等于“登录”，不能代替登录次数指标。\n\n### 如需真正计算登录次数，需要补齐\n- 登录或活跃事件表：`user_id, event_type, event_time`（或按天的聚合表 `user_id, dt, login_cnt`）；\n- 明确的统计基准日，以便定义“近 7 天”窗口；\n- 数据接入后我可以直接给出：7 天登录总次数、登录人数、人均登录次数、按会员等级、城市拆分的分布。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_neg_008",
+      "category": "negative",
+      "question": "统计 demo 数据集中商品退货原因分布。如果现有数据不支持，请说明原因；不要编造数字。",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [],
+      "required_tools": [],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [],
+      "expected_keywords_any": [
+        "无法",
+        "没有",
+        "不存在",
+        "未提供",
+        "缺少",
+        "不支持"
+      ],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": true,
+      "forbidden_result_units": [
+        "笔",
+        "单",
+        "%"
+      ],
+      "final_ok": true,
+      "manual_review": [
+        "必须人工确认未给出编造结果"
+      ],
+      "tool_results": [
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "execute_sql",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 2,
+      "elapsed_s": 5.78,
+      "final_answer": "## 结论：现有数据不支持统计「商品退货原因分布」，无法给出任何分布数字\n\n**依据**\n\n1. **现有数据中没有退货或退款表**\n - 可用的数据只有两张：用户画像表 `user_profile_vectors` 共 8110 条记录（已用 `SELECT COUNT(*)` 核实），以及知识库文档表 `wiki_vectors` 共 36 块。\n - 用户画像表的字段只有：用户ID、画像摘要、年龄、性别、城市、会员等级、累计订单数、总消费、平均客单价、偏好品类、距最后购买天数、活跃平台。**没有任何订单级明细，也没有退货单或退款单，更没有退货原因字段**；知识库表是文档分块，本身不含统计数据。\n\n2. **知识库里也没有可用的退货原因口径或分类枚举**\n - 用「退货原因分布」检索后，只命中客服 SOP 中的两个工单标记示例：「物流延迟」「质量问题」（`cs_sop.md`）；这属于客服处理动作的标注，并不是统计口径，也没有覆盖全部退货原因的完整分类，更没有对应数值，因此不能用它反推分布。\n\n3. **时间维度也不足以支撑**\n - 库内没有绝对时间列，只有相对天数 `days_since_last_buy`（0~364），因此无法按期间切片统计退货。\n\n**要支持这个分析需要补充的数据**\n- 订单表或售后单明细：订单ID、商品ID、下单时间、退货时间、退货原因（建议使用受控枚举，如 7天无理由、质量问题、尺寸不符、物流破损、错发漏发、不喜欢等）、退货金额、是否退款成功。\n- 明确的统计口径：按订单件数还是退货单数计算、退货率的分母（发货件数或签收件数）、是否包含仅退款不退货、时间窗口。\n\n后续如果您能提供上述售后退货明细表，或者开放对应的数据源告诉我，我就可以直接给出退货原因的数量、占比和 Top N 排名（SQL 会使用 `GROUP BY reason ORDER BY cnt DESC` 加占比计算）。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_calc_005",
+      "category": "calculator",
+      "question": "某活动预算为 40.57 万元，其中 60% 用于优惠券，优惠券预算是多少万元（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "calculator"
+      ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "calculator"
+      ],
+      "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [
+        "24.34"
       ],
       "expected_keywords_any": [],
       "missing_keywords": [],
@@ -2992,18 +4321,69 @@
       "error_recovered": false,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.14,
-      "final_answer": "北京用户占全库用户的百分比为：\n\n**722 ÷ 8110 × 100 ≈ 8.90%**\n\n依据：calculator 计算 722/8110×100 = 8.9026，保留两位小数为 8.90%；人数口径取自库内城市分布（北京 722 人）与用户总数（8110 人）。",
-      "run_error": null,
+      "elapsed_s": 2.05,
+      "final_answer": "优惠券预算 = 40.57 × 60% = 24.342 万元，保留两位小数为 **24.34 万元**，剩余 16.23 万元用于其他部分。\n\n依据：calculator 计算 40.57 × 0.60 = 24.342。",
+      "run_error": null
+    },
+    {
+      "task_id": "bench_calc_006",
+      "category": "calculator",
+      "question": "某用户累计消费 33368665.28 元，按 0.6% 返现，返现金额是多少元（保留两位小数）？",
+      "status": "COMPLETED",
+      "status_ok": true,
+      "task_success": true,
+      "business_correctness": true,
+      "tool_policy_compliance": true,
+      "expected_tools": [
+        "calculator"
+      ],
       "required_tools": [
         "calculator"
       ],
       "optional_tools": [],
       "forbidden_tools": [],
+      "actual_tools": [
+        "calculator"
+      ],
+      "missing_tools": [],
       "missing_required_tools": [],
       "forbidden_tools_hit": [],
-      "tool_policy_ok": true
+      "tool_selection_ok": true,
+      "tool_policy_ok": true,
+      "tool_recall": 1.0,
+      "expected_keywords": [],
+      "expected_keywords_any": [
+        "200,211.99",
+        "200211.99"
+      ],
+      "missing_keywords": [],
+      "missing_keywords_any": [],
+      "must_not_contain_numbers": false,
+      "allowed_numbers": [],
+      "disallowed_numbers": [],
+      "business_disallowed_numbers": [],
+      "observed_fact_numbers": [],
+      "approx_numbers": [],
+      "result_claim_numbers": [],
+      "must_not_contain_approx_numbers": false,
+      "forbidden_result_units": [],
+      "final_ok": true,
+      "manual_review": [],
+      "tool_results": [
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        }
+      ],
+      "tool_execution_ok": 1.0,
+      "tool_errors": [],
+      "error_recovered": false,
+      "steps": 2,
+      "tool_call_count": 1,
+      "elapsed_s": 2.58,
+      "final_answer": "按 0.6% 返现计算：\n\n33368665.28 × 0.6% = 200211.99168 ≈ **200211.99 元**\n\n依据：calculator 返回结果 200211.99168，四舍五入保留两位小数为 200211.99。\n\n提示：该用户累计消费 3336.87 万元，远超库内 `total_amount` 实测范围（20.38 ~ 93859.8 元），若这是实测数据建议先核对金额口径是否有误；若仅为假设测算，则上述结果有效。",
+      "run_error": null
     }
-  ],
-  "dataset_version": "agent-benchmark-v1.7-demo"
+  ]
 }
