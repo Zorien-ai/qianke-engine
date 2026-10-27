@@ -1142,7 +1142,14 @@
       "acceptance": "SQL：北京 722 人，其中钻石 33 人；33/722=4.57%。",
       "difficulty": "medium",
       "dataset": "demo",
-      "dataset_version": "demo@2026-10-16"
+      "dataset_version": "demo@2026-10-16",
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [
+        "calculator"
+      ],
+      "forbidden_tools": []
     },
     {
       "task_id": "bench_multi_015",

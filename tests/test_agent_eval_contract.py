@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 AGENT_EVAL_DIR = Path(__file__).parent / "evals" / "agent"
 if str(AGENT_EVAL_DIR) not in sys.path:
@@ -295,3 +295,23 @@ def test_tool_policy_can_mark_calculator_optional():
     assert scored["tool_policy_compliance"] is True
     assert scored["missing_tools"] == ["calculator"]
     assert scored["missing_required_tools"] == []
+
+
+def test_token_usage_aggregates_langchain_messages():
+    messages = [
+        AIMessage(
+            content="",
+            usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+        ),
+        AIMessage(
+            content="完成",
+            response_metadata={"token_usage": {"prompt_tokens": 30, "completion_tokens": 5}},
+        ),
+    ]
+    usage = evaluator.token_usage(messages)
+    assert usage == {
+        "input_tokens": 130,
+        "output_tokens": 25,
+        "total_tokens": 155,
+        "token_usage_found": True,
+    }

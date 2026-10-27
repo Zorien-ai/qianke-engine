@@ -1,6 +1,6 @@
 # Qianke Agent
 
-> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.8.1  
+> **Status:** Active · **Agent Runtime:** v0.1 · **Agent Eval:** v1.8.2  
 > 本文描述 Agent 的实现、边界、评测与当前限制。项目工作协议见 [`AGENTS.md`](../AGENTS.md)。
 
 ## 1. 它是什么
@@ -253,7 +253,7 @@ v1.6 新增两个独立指标：
 
 ### 7.3 当前基线
 
-v1.8.1 基线（当前）：
+v1.8.2 基线（当前）：
 
 ```text
 Regression 20
@@ -263,12 +263,22 @@ Regression 20
   Tool Execution          100.0%
 
 Benchmark 60
-  Task Success（v1）       93.3%
+  Task Success（v1）       95.0%
   Business Correctness    100.0%
-  Tool Policy Compliance  98.3%
-  Tool Selection          93.3%
-  Tool Execution          95.0%
+  Tool Policy Compliance  100.0%
+  Tool Selection          95.0%
+  Tool Execution          97.2%
   Error Recovery          100.0%
+  Input Tokens            353,534
+  Output Tokens            28,524
+  Total Tokens             382,058
+  平均 Tokens / 任务       6,368
+```
+
+v1.8.1 基线（保留对比）：
+
+```text
+Benchmark 60    Task Success 93.3% / Business 100.0% / Tool Policy 98.3%
 ```
 
 v1.8 基线（保留对比）：
@@ -315,6 +325,7 @@ tests/evals/agent/baselines/v1.6.1.json
 tests/evals/agent/baselines/v1.7.json
 tests/evals/agent/baselines/v1.8.json
 tests/evals/agent/baselines/v1.8.1.json
+tests/evals/agent/baselines/v1.8.2.json
 ```
 
 ### 7.4 运行
@@ -397,4 +408,5 @@ Agent Runtime
 - v1.7 工具策略：[`tests/evals/agent/benchmark/baseline_v1.7.md`](../tests/evals/agent/benchmark/baseline_v1.7.md)
 - v1.8 60 题扩展：[`tests/evals/agent/benchmark/baseline_v1.8.md`](../tests/evals/agent/benchmark/baseline_v1.8.md)
 - v1.8.1 收口：[`tests/evals/agent/benchmark/baseline_v1.8.1.md`](../tests/evals/agent/benchmark/baseline_v1.8.1.md)
+- v1.8.2 Token 指标：[`tests/evals/agent/benchmark/baseline_v1.8.2.md`](../tests/evals/agent/benchmark/baseline_v1.8.2.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)

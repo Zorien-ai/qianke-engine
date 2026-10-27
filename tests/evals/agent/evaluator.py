@@ -82,6 +82,29 @@ def tool_observations(messages: list[Any]) -> list[dict[str, Any]]:
     return observations
 
 
+def token_usage(messages: list[Any]) -> dict[str, int | bool]:
+    """汇总 LangChain 消息中的 token usage（优先 usage_metadata）。"""
+    input_tokens = 0
+    output_tokens = 0
+    found = False
+    for message in messages or []:
+        usage = getattr(message, "usage_metadata", None)
+        if not isinstance(usage, dict):
+            meta = getattr(message, "response_metadata", None) or {}
+            usage = meta.get("token_usage") if isinstance(meta, dict) else None
+        if not isinstance(usage, dict):
+            continue
+        input_tokens += int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+        output_tokens += int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+        found = True
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "token_usage_found": found,
+    }
+
+
 def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     """评价单个任务。"""
     expected = [str(x) for x in (task.get("expected_tools") or [])]
@@ -147,6 +170,7 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
     business_final_ok = not missing_keywords and not missing_any and not business_disallowed
 
     observations = tool_observations(result.get("messages") or [])
+    usage = token_usage(result.get("messages") or [])
     executed = [item for item in observations if item.get("ok") is not None]
     executed_ok = [item for item in observations if item.get("ok")]
     tool_errors = [item for item in observations if not item.get("ok")]
@@ -209,6 +233,10 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
         "tool_execution_ok": tool_execution_ok,
         "tool_errors": tool_errors,
         "error_recovered": error_recovered,
+        "input_tokens": usage["input_tokens"],
+        "output_tokens": usage["output_tokens"],
+        "total_tokens": usage["total_tokens"],
+        "token_usage_found": usage["token_usage_found"],
         "steps": result.get("steps"),
         "tool_call_count": result.get("tool_call_count"),
         "elapsed_s": result.get("elapsed_s"),
@@ -239,6 +267,9 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     steps = [r.get("steps") for r in results if isinstance(r.get("steps"), int)]
     calls = [r.get("tool_call_count") for r in results if isinstance(r.get("tool_call_count"), int)]
     elapsed = [r.get("elapsed_s") for r in results if isinstance(r.get("elapsed_s"), (int, float))]
+    input_tokens = sum(int(r.get("input_tokens") or 0) for r in results)
+    output_tokens = sum(int(r.get("output_tokens") or 0) for r in results)
+    token_tasks = sum(1 for r in results if r.get("token_usage_found"))
 
     modules: dict[str, dict[str, Any]] = {}
     for r in results:
@@ -270,6 +301,11 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "avg_steps": sum(steps) / len(steps) if steps else 0.0,
         "avg_tool_calls": sum(calls) / len(calls) if calls else 0.0,
         "avg_elapsed_s": sum(elapsed) / len(elapsed) if elapsed else 0.0,
+        "total_input_tokens": input_tokens,
+        "total_output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "avg_tokens_per_task": (input_tokens + output_tokens) / total if total else 0.0,
+        "token_usage_tasks": token_tasks,
         "modules": {
             name: {
                 **row,
