@@ -138,7 +138,33 @@ POST /api/c/agent/resume
 - 确认绑定 prepare 返回的 draft/token
 - Agent 不能自行跳过确认创建订单
 
-## 6. 当前买家身份
+## 6. C 端页面
+
+Vue 页面：
+
+```text
+/v2/#/c
+```
+
+功能：
+
+- 商品目录
+- 输入购物需求
+- 导购 Agent 回复
+- 订单草稿确认/取消
+- 确认后展示模拟订单
+
+页面源码：
+
+```text
+web/src/views/CShop.vue
+```
+
+截图：
+
+![C 端商城](screenshots/c-end-shop.png)
+
+## 7. 当前买家身份
 
 当前复用登录账号：
 
