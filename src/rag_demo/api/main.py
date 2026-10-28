@@ -1204,6 +1204,7 @@ def agent_run(req: AgentRunIn) -> dict:
             detail="当前账号的数据空间还没有完成构建，暂时无法运行 Agent",
         )
 
+    from rag_demo.agent.checkpoint import get_checkpointer
     from rag_demo.agent.policy import ToolPolicy
     from rag_demo.agent.service import (
         AgentRequestFailed,
@@ -1236,6 +1237,7 @@ def agent_run(req: AgentRunIn) -> dict:
             parent_execution_id=req.parent_execution_id,
             allowed_tools=allowed_tools,
             wall_timeout_seconds=max(1.0, wall_timeout),
+            checkpointer=get_checkpointer(),
             runner_kwargs={"max_retries": max(0, min(req.max_retries, 3))},
         )
     except AgentRequestInProgress as exc:

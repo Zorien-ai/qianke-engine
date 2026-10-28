@@ -219,6 +219,30 @@ guest / demo / disabled
 
 `execute_sql` 不暴露给 `cs`；角色级策略仍可在后续权限评审中调整。
 
+### 3.8 LangGraph checkpointer 与 interrupt 原语
+
+已接入 SQLite checkpointer：
+
+```text
+QIANKE_AGENT_CHECKPOINT_PATH=var/agent_checkpoints.sqlite
+```
+
+- `run_agent(..., checkpointer=..., thread_id=...)` 会把 state 写入 checkpoint
+- `build_graph(..., interrupt_before_tools=True)` 可在 ToolNode 前挂起
+- 挂起时 `graph.get_state(config).next == ("tools",)`
+- 恢复时再次 `graph.invoke(None, config)` 即可继续
+
+当前状态：
+
+```text
+checkpointer：已接入
+interrupt 原语：已实现并有测试
+HITL API / C 端确认流程：尚未接入
+```
+
+C 端模拟下单需要订单确认节点和商品/订单数据；在数据模型确认前，不把
+`interrupt_before_tools` 直接暴露给普通 B 端请求。
+
 ## 4. API
 
 ### `POST /api/agent/run`

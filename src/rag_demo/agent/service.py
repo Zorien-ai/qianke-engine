@@ -93,6 +93,7 @@ def execute_agent(
     runner_kwargs: dict[str, Any] | None = None,
     allowed_tools: tuple[str, ...] | None = None,
     wall_timeout_seconds: float | None = None,
+    checkpointer: Any | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """执行一次 Agent 请求。
 
@@ -107,6 +108,8 @@ def execute_agent(
     runner_kwargs = dict(runner_kwargs or {})
     if allowed_tools is not None:
         runner_kwargs.setdefault("allowed_tools", tuple(allowed_tools))
+    if checkpointer is not None:
+        runner_kwargs.setdefault("checkpointer", checkpointer)
 
     claim: ClaimResult = store.claim(request_id, scope, fingerprint)
     if claim.state == "completed":

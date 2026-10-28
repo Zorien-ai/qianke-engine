@@ -275,6 +275,8 @@ def build_graph(
     tracer: TraceCallbackHandler | None = None,
     cancel_event: Any = None,
     allowed_tools: Sequence[str] | None = None,
+    checkpointer: Any = None,
+    interrupt_before_tools: bool = False,
 ):
     """构建并编译 LangGraph；运行时可传不同 AgentConfig。"""
     config = config or AgentConfig()
@@ -299,7 +301,12 @@ def build_graph(
         {"tools": "tools", END: END},
     )
     graph.add_edge("tools", "chatbot")
-    return graph.compile()
+    compile_kwargs: dict[str, Any] = {}
+    if checkpointer is not None:
+        compile_kwargs["checkpointer"] = checkpointer
+    if interrupt_before_tools:
+        compile_kwargs["interrupt_before"] = ["tools"]
+    return graph.compile(**compile_kwargs)
 
 
 def run_agent(
@@ -311,6 +318,8 @@ def run_agent(
     parent_execution_id: str | None = None,
     cancel_event: Any = None,
     allowed_tools: Sequence[str] | None = None,
+    checkpointer: Any = None,
+    thread_id: str | None = None,
 ) -> dict[str, Any]:
     """执行一轮 Agent，返回最终答案、状态、执行身份与事件轨迹。"""
     config = config or AgentConfig()
@@ -329,6 +338,7 @@ def run_agent(
         tracer=tracer,
         cancel_event=cancel_event,
         allowed_tools=allowed_tools,
+        checkpointer=checkpointer,
     )
     initial: AgentState = {
         "messages": [
@@ -346,7 +356,10 @@ def run_agent(
     }
 
     try:
-        state = graph.invoke(initial, config={"callbacks": [tracer]})
+        invoke_config: dict[str, Any] = {"callbacks": [tracer]}
+        if checkpointer is not None:
+            invoke_config["configurable"] = {"thread_id": thread_id or execution_id}
+        state = graph.invoke(initial, config=invoke_config)
     except Exception as exc:  # noqa: BLE001 - Runtime 不把异常裸抛给 API
         logger.exception("Agent 执行失败")
         tracer.events.append({
@@ -433,6 +446,7 @@ def run_agent_with_retry(
     checkpoint_dir: str | Path | None = None,
     cancel_event: Any = None,
     allowed_tools: Sequence[str] | None = None,
+    checkpointer: Any = None,
 ) -> dict[str, Any]:
     """在同一 request_id 下执行；每次 retry 使用新的 execution_id。
 
@@ -456,6 +470,8 @@ def run_agent_with_retry(
         }
         if allowed_tools is not None:
             run_kwargs["allowed_tools"] = allowed_tools
+        if checkpointer is not None:
+            run_kwargs["checkpointer"] = checkpointer
         result = run_agent(question, **run_kwargs)
         attempt_row = {
             "attempt": attempt + 1,
