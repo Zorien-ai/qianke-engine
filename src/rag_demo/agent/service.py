@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 import uuid
 from typing import Any, Callable
 
@@ -26,6 +27,41 @@ class AgentRequestInProgress(RuntimeError):
 
 class AgentRequestFailed(RuntimeError):
     pass
+
+
+class AgentRunTimedOut(RuntimeError):
+    """请求层 wall-clock deadline 到期。"""
+
+
+def _run_with_deadline(fn: Callable[[], dict[str, Any]], timeout_seconds: float) -> dict[str, Any]:
+    """在调用方等待上限内执行 runner。
+
+    注意：Python 线程不能安全强杀，超时后 worker 仍可能在后台收尾；
+    因此该 deadline 保证“调用方不再等待”，不保证 worker 立即停止。
+    当前 Agent Tool 为只读，超时后遗弃 worker 可接受；写 Tool 上线前必须换成进程隔离。
+    """
+    if timeout_seconds <= 0:
+        raise ValueError("wall_timeout_seconds 必须 > 0")
+
+    box: dict[str, Any] = {}
+    done = threading.Event()
+
+    def target() -> None:
+        try:
+            box["result"] = fn()
+        except BaseException as exc:  # 保留 runner 原始异常给调用方
+            box["error"] = exc
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=target, name="agent-run-deadline", daemon=True)
+    worker.start()
+    if not done.wait(timeout_seconds):
+        raise AgentRunTimedOut(f"Agent 执行超过请求上限（{timeout_seconds:.1f}s）")
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
+
 
 
 def normalize_request_id(value: str | None) -> str:
@@ -56,6 +92,7 @@ def execute_agent(
     runner: Callable[..., dict[str, Any]] | None = None,
     runner_kwargs: dict[str, Any] | None = None,
     allowed_tools: tuple[str, ...] | None = None,
+    wall_timeout_seconds: float | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """执行一次 Agent 请求。
 
@@ -83,14 +120,20 @@ def execute_agent(
     if claim.state == "failed":
         raise AgentRequestFailed(claim.error or "该 request_id 已执行失败，请更换 request_id 重试")
 
-    try:
+    def invoke() -> dict[str, Any]:
         with dataset_scope(dataset):
-            result = runner(
+            return runner(
                 query,
                 request_id=request_id,
                 parent_execution_id=parent_execution_id,
                 **runner_kwargs,
             )
+
+    try:
+        if wall_timeout_seconds is None:
+            result = invoke()
+        else:
+            result = _run_with_deadline(invoke, wall_timeout_seconds)
     except Exception as exc:
         store.fail(request_id, scope, f"{type(exc).__name__}: {exc}")
         raise

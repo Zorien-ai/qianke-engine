@@ -1208,6 +1208,7 @@ def agent_run(req: AgentRunIn) -> dict:
     from rag_demo.agent.service import (
         AgentRequestFailed,
         AgentRequestInProgress,
+        AgentRunTimedOut,
         execute_agent,
         normalize_request_id,
     )
@@ -1222,6 +1223,11 @@ def agent_run(req: AgentRunIn) -> dict:
         raise HTTPException(status_code=403, detail="当前账号没有可用的 Agent Tool")
 
     try:
+        wall_timeout = float(os.environ.get("QIANKE_AGENT_WALL_TIMEOUT_SECONDS", "70"))
+    except ValueError:
+        wall_timeout = 70.0
+
+    try:
         result, replay = execute_agent(
             query=query,
             dataset=dataset,
@@ -1229,6 +1235,7 @@ def agent_run(req: AgentRunIn) -> dict:
             request_id=request_id,
             parent_execution_id=req.parent_execution_id,
             allowed_tools=allowed_tools,
+            wall_timeout_seconds=max(1.0, wall_timeout),
             runner_kwargs={"max_retries": max(0, min(req.max_retries, 3))},
         )
     except AgentRequestInProgress as exc:
@@ -1236,6 +1243,8 @@ def agent_run(req: AgentRunIn) -> dict:
         if exc.execution_id:
             detail = f"{detail}（execution_id={exc.execution_id}）"
         raise HTTPException(status_code=409, detail=detail) from exc
+    except AgentRunTimedOut as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
     except AgentRequestFailed as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - 给前端一句可读错误，不暴露栈

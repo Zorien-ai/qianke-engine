@@ -1,6 +1,7 @@
 """Agent 租户绑定与请求幂等的基础安全测试。"""
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -11,6 +12,7 @@ from rag_demo.agent.policy import ToolPolicy
 from rag_demo.agent.registry import get_tools
 from rag_demo.agent.service import (
     AgentRequestFailed,
+    AgentRunTimedOut,
     execute_agent,
     request_fingerprint,
 )
@@ -154,6 +156,37 @@ def test_runner_exception_marks_request_failed_and_restores_context():
         "req_runner_fail_001",
         "test:101",
         request_fingerprint("统计用户数"),
+    )
+    assert claim.state == "failed"
+
+
+def test_wall_deadline_returns_timeout_and_marks_failed():
+    store = InMemoryExecutionStore()
+    initial = current_dataset()
+
+    def slow_runner(query: str, **kwargs):
+        time.sleep(0.3)
+        return _result(kwargs["request_id"])
+
+    started = time.monotonic()
+    with pytest.raises(AgentRunTimedOut):
+        execute_agent(
+            query="慢请求",
+            dataset="test",
+            account={"id": 101},
+            request_id="req_deadline_001",
+            store=store,
+            runner=slow_runner,
+            wall_timeout_seconds=0.05,
+        )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.3
+    assert current_dataset() == initial
+    claim = store.claim(
+        "req_deadline_001",
+        "test:101",
+        request_fingerprint("慢请求"),
     )
     assert claim.state == "failed"
 

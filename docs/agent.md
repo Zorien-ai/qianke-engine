@@ -136,6 +136,29 @@ result = run_agent_with_retry(
 
 终态会明确返回，不会把“超限”伪装成普通 AI 回答。
 
+### 3.5.1 请求层 wall-clock deadline
+
+`/api/agent/run` 额外有一层请求级等待上限：
+
+```text
+QIANKE_AGENT_WALL_TIMEOUT_SECONDS=70   # 默认 70 秒
+```
+
+超时：
+
+- API 返回 504
+- 幂等记录标记为 FAILED
+- 调用方不会继续等待
+
+限制：
+
+```text
+Python 线程不能安全强杀
+超时后 worker 仍可能在后台收尾
+```
+
+因此该 deadline 是“调用方硬等待上限”，不是“执行线程硬终止”。当前 Agent Tool 只读，遗留 worker 可接受；C 端写 Tool 上线前必须改成进程隔离或可取消执行器。
+
 ### 3.6 租户上下文与 request_id 幂等
 
 `/api/agent/run` 在进入 Graph 前必须把执行固定到可信 dataset：
