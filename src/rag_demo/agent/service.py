@@ -55,6 +55,7 @@ def execute_agent(
     store: ExecutionStore | None = None,
     runner: Callable[..., dict[str, Any]] | None = None,
     runner_kwargs: dict[str, Any] | None = None,
+    allowed_tools: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """执行一次 Agent 请求。
 
@@ -67,6 +68,8 @@ def execute_agent(
     store = store or get_execution_store()
     runner = runner or run_agent_with_retry
     runner_kwargs = dict(runner_kwargs or {})
+    if allowed_tools is not None:
+        runner_kwargs.setdefault("allowed_tools", tuple(allowed_tools))
 
     claim: ClaimResult = store.claim(request_id, scope, fingerprint)
     if claim.state == "completed":

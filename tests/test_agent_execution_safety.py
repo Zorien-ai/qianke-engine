@@ -7,6 +7,8 @@ import pytest
 
 from rag_demo.agent.context import dataset_scope
 from rag_demo.agent.execution_store import InMemoryExecutionStore
+from rag_demo.agent.policy import ToolPolicy
+from rag_demo.agent.registry import get_tools
 from rag_demo.agent.service import (
     AgentRequestFailed,
     execute_agent,
@@ -168,3 +170,45 @@ def test_memory_claim_is_atomic_under_concurrency():
 
     assert states.count("claimed") == 1
     assert states.count("in_progress") == 7
+
+
+def test_tool_policy_filters_exposed_tools():
+    policy = ToolPolicy(allowed={"calculator"})
+    tools = get_tools(policy.allowed_tools({"id": 101, "status": "active"}))
+
+    assert [tool.name for tool in tools] == ["calculator"]
+    assert policy.authorize("calculator", {"id": 101, "status": "active"})
+    assert not policy.authorize("execute_sql", {"id": 101, "status": "active"})
+
+
+def test_policy_denies_demo_and_disabled_accounts():
+    policy = ToolPolicy()
+
+    assert policy.allowed_tools({"id": 1, "is_demo": True}) == ()
+    assert policy.allowed_tools({"id": 1, "status": "disabled"}) == ()
+    assert policy.allowed_tools({"id": 1, "status": "active"}) == (
+        "rag_search",
+        "execute_sql",
+        "calculator",
+    )
+
+
+def test_execute_agent_passes_allowed_tools_to_runner():
+    store = InMemoryExecutionStore()
+    seen: list[tuple[str, ...]] = []
+
+    def runner(query: str, **kwargs):
+        seen.append(tuple(kwargs["allowed_tools"]))
+        return _result(kwargs["request_id"])
+
+    execute_agent(
+        query="只允许计算器",
+        dataset="test",
+        account={"id": 101},
+        request_id="req_policy_001",
+        store=store,
+        runner=runner,
+        allowed_tools=("calculator",),
+    )
+
+    assert seen == [("calculator",)]

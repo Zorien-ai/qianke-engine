@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -100,6 +100,7 @@ _TERMINAL_STATUSES = {
     AgentStatus.TIMEOUT.value,
     AgentStatus.CANCELLED.value,
     AgentStatus.BUDGET_EXCEEDED.value,
+    AgentStatus.TOOL_NOT_ALLOWED.value,
     AgentStatus.FAILED.value,
 }
 
@@ -126,14 +127,16 @@ SYSTEM_PROMPT = SYSTEM_PROMPT_TEMPLATE.format(
     max_tool_calls=AgentConfig().max_tool_calls,
 )
 
-_llm_cache = None
+_llm_cache: dict[tuple[str, ...], Any] = {}
 
 
-def get_llm():
-    """懒加载 DeepSeek（OpenAI 兼容协议），避免 import 阶段因 Key 缺失失败。"""
-    global _llm_cache
-    if _llm_cache is not None:
-        return _llm_cache
+def get_llm(allowed_tools: Sequence[str] | None = None):
+    """懒加载 DeepSeek；按允许的 Tool 集合缓存绑定结果。"""
+    from rag_demo.agent.registry import get_tools
+
+    key = tuple(sorted(allowed_tools)) if allowed_tools is not None else ("__all__",)
+    if key in _llm_cache:
+        return _llm_cache[key]
 
     from rag_demo.generation.generator import API_KEY, BASE_URL, MODEL
 
@@ -151,8 +154,10 @@ def get_llm():
         timeout=60,
         max_retries=2,
     )
-    _llm_cache = llm.bind_tools(get_tools())
-    return _llm_cache
+    tools = get_tools(allowed_tools)
+    bound = llm.bind_tools(tools) if tools else llm
+    _llm_cache[key] = bound
+    return bound
 
 
 def _terminate(state: AgentState, status: AgentStatus, message: str) -> dict[str, Any]:
@@ -188,6 +193,7 @@ def make_chatbot_node(
     config: AgentConfig,
     tracer: TraceCallbackHandler | None = None,
     cancel_event: Any = None,
+    allowed_tools: Sequence[str] | None = None,
 ):
     """按 Runtime Config 生成 chatbot 节点。"""
 
@@ -217,8 +223,18 @@ def make_chatbot_node(
                 f"已达到最大工具调用次数（{config.max_tool_calls}），未能完成回答。",
             )
 
-        response = get_llm().invoke(state["messages"])
+        response = (get_llm() if allowed_tools is None else get_llm(allowed_tools)).invoke(
+            state["messages"]
+        )
         calls = getattr(response, "tool_calls", None) or []
+        allowed = set(allowed_tools) if allowed_tools is not None else {t.name for t in get_tools()}
+        denied = [call.get("name") for call in calls if call.get("name") not in allowed]
+        if denied:
+            return _terminate(
+                state,
+                AgentStatus.TOOL_NOT_ALLOWED,
+                f"模型请求了未授权的 Tool：{', '.join(str(x) for x in denied)}",
+            )
         next_tool_count = tool_count + len(calls)
         status = AgentStatus.RUNNING.value if calls else AgentStatus.COMPLETED.value
         error = None
@@ -258,12 +274,23 @@ def build_graph(
     config: AgentConfig | None = None,
     tracer: TraceCallbackHandler | None = None,
     cancel_event: Any = None,
+    allowed_tools: Sequence[str] | None = None,
 ):
     """构建并编译 LangGraph；运行时可传不同 AgentConfig。"""
     config = config or AgentConfig()
+    if allowed_tools is not None and not allowed_tools:
+        raise ValueError("allowed_tools 不能为空")
     graph = StateGraph(AgentState)
-    graph.add_node("chatbot", make_chatbot_node(config, tracer=tracer, cancel_event=cancel_event))
-    graph.add_node("tools", ToolNode(get_tools()))
+    graph.add_node(
+        "chatbot",
+        make_chatbot_node(
+            config,
+            tracer=tracer,
+            cancel_event=cancel_event,
+            allowed_tools=allowed_tools,
+        ),
+    )
+    graph.add_node("tools", ToolNode(get_tools(allowed_tools)))
 
     graph.add_edge(START, "chatbot")
     graph.add_conditional_edges(
@@ -283,6 +310,7 @@ def run_agent(
     execution_id: str | None = None,
     parent_execution_id: str | None = None,
     cancel_event: Any = None,
+    allowed_tools: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """执行一轮 Agent，返回最终答案、状态、执行身份与事件轨迹。"""
     config = config or AgentConfig()
@@ -296,7 +324,12 @@ def run_agent(
         "execution_id": execution_id,
         "parent_execution_id": parent_execution_id,
     })
-    graph = build_graph(config, tracer=tracer, cancel_event=cancel_event)
+    graph = build_graph(
+        config,
+        tracer=tracer,
+        cancel_event=cancel_event,
+        allowed_tools=allowed_tools,
+    )
     initial: AgentState = {
         "messages": [
             SystemMessage(content=build_system_prompt(config)),
@@ -399,6 +432,7 @@ def run_agent_with_retry(
     parent_execution_id: str | None = None,
     checkpoint_dir: str | Path | None = None,
     cancel_event: Any = None,
+    allowed_tools: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """在同一 request_id 下执行；每次 retry 使用新的 execution_id。
 
@@ -413,14 +447,16 @@ def run_agent_with_retry(
 
     for attempt in range(max_retries + 1):
         execution_id = f"exec_{uuid.uuid4().hex[:16]}"
-        result = run_agent(
-            question,
-            config=config,
-            request_id=request_id,
-            execution_id=execution_id,
-            parent_execution_id=parent_execution_id,
-            cancel_event=cancel_event,
-        )
+        run_kwargs: dict[str, Any] = {
+            "config": config,
+            "request_id": request_id,
+            "execution_id": execution_id,
+            "parent_execution_id": parent_execution_id,
+            "cancel_event": cancel_event,
+        }
+        if allowed_tools is not None:
+            run_kwargs["allowed_tools"] = allowed_tools
+        result = run_agent(question, **run_kwargs)
         attempt_row = {
             "attempt": attempt + 1,
             "execution_id": execution_id,

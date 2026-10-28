@@ -131,6 +131,7 @@ result = run_agent_with_retry(
 | `TIMEOUT` | 超时 |
 | `CANCELLED` | 调用方取消 |
 | `BUDGET_EXCEEDED` | 超过 token 预算 |
+| `TOOL_NOT_ALLOWED` | 模型请求了当前身份未授权的 Tool |
 | `FAILED` | 执行异常或没有有效最终回答 |
 
 终态会明确返回，不会把“超限”伪装成普通 AI 回答。
@@ -166,6 +167,22 @@ request_id + scope(dataset:account_id) + request_hash
 
 - 进程崩溃后 `RUNNING` 记录不会自动回收，当前需要人工清理或后续加 stale TTL
 - 失败请求要用新的 `request_id` 重试
+
+### 3.7 Tool 授权
+
+执行前按身份生成允许的 Tool 集合：
+
+```text
+account → ToolPolicy.allowed_tools()
+→ LLM bind_tools
+→ ToolNode
+```
+
+执行时再复核：chatbot 节点收到模型响应后，如果出现未授权 Tool call，
+直接进入 `TOOL_NOT_ALLOWED` 终态，不执行任何 Tool。
+
+第一版默认：已登录、非 demo、非 disabled 的账号可使用全部 B 端 Tool。
+按角色细分 Tool 权限（例如 `execute_sql` 只给特定角色）仍需业务确认。
 
 ## 4. API
 

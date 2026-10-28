@@ -1,0 +1,47 @@
+"""Agent Tool 权限策略。
+
+第一版先建立“暴露前过滤 + 执行时复核”的机制：
+- 只把当前身份允许的 Tool 绑定给 LLM / ToolNode；
+- LLM 若仍产出未授权 Tool 调用，chatbot 节点在执行前拒绝。
+
+默认策略暂不按角色削减 B 端业务 Tool，避免在未完成权限矩阵评审前破坏现有分析能力；
+后续可把 allowed_tools 映射到企业/角色配置，而不用改 Graph。
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Iterable
+
+B_AGENT_TOOL_NAMES: tuple[str, ...] = ("rag_search", "execute_sql", "calculator")
+
+
+@dataclass(frozen=True)
+class ToolPolicy:
+    allowed: frozenset[str]
+
+    def __init__(self, allowed: Iterable[str] | None = None) -> None:
+        object.__setattr__(
+            self,
+            "allowed",
+            frozenset(allowed if allowed is not None else B_AGENT_TOOL_NAMES),
+        )
+
+    def authorize(self, tool_name: str, account: dict[str, Any] | None = None) -> bool:
+        if tool_name not in self.allowed:
+            return False
+        if account is None:
+            return True
+        if account.get("is_demo"):
+            return False
+        return account.get("status") != "disabled"
+
+    def allowed_tools(self, account: dict[str, Any] | None = None) -> tuple[str, ...]:
+        if account is not None:
+            if account.get("is_demo") or account.get("status") == "disabled":
+                return ()
+        return tuple(name for name in B_AGENT_TOOL_NAMES if name in self.allowed)
+
+    @classmethod
+    def for_account(cls, account: dict[str, Any] | None = None) -> "ToolPolicy":
+        """当前 B 端默认：已登录的非 demo 账号可用全部 B 工具。"""
+        return cls()

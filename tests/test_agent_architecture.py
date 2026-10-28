@@ -350,3 +350,19 @@ def test_run_agent_max_tool_calls_status(monkeypatch):
     assert "最大工具调用次数" in result["final_answer"]
     assert fake.calls == 1
 
+
+def test_run_agent_rejects_unallowed_tool(monkeypatch):
+    fake = _FakeLLM([_tool_call_message()])
+    monkeypatch.setattr(loop, "get_llm", lambda allowed_tools=None: fake)
+    monkeypatch.setattr(loop, "build_system_prompt", lambda config=None: "sys")
+
+    result = loop.run_agent(
+        "只允许 RAG",
+        config=AgentConfig(max_steps=2),
+        allowed_tools=("rag_search",),
+    )
+
+    assert result["status"] == AgentStatus.TOOL_NOT_ALLOWED.value
+    assert "未授权" in result["final_answer"]
+    assert result["tool_call_count"] == 0
+

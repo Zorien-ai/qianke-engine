@@ -1204,6 +1204,7 @@ def agent_run(req: AgentRunIn) -> dict:
             detail="当前账号的数据空间还没有完成构建，暂时无法运行 Agent",
         )
 
+    from rag_demo.agent.policy import ToolPolicy
     from rag_demo.agent.service import (
         AgentRequestFailed,
         AgentRequestInProgress,
@@ -1216,6 +1217,10 @@ def agent_run(req: AgentRunIn) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    allowed_tools = ToolPolicy.for_account(account).allowed_tools(account)
+    if not allowed_tools:
+        raise HTTPException(status_code=403, detail="当前账号没有可用的 Agent Tool")
+
     try:
         result, replay = execute_agent(
             query=query,
@@ -1223,6 +1228,7 @@ def agent_run(req: AgentRunIn) -> dict:
             account=account,
             request_id=request_id,
             parent_execution_id=req.parent_execution_id,
+            allowed_tools=allowed_tools,
             runner_kwargs={"max_retries": max(0, min(req.max_retries, 3))},
         )
     except AgentRequestInProgress as exc:
