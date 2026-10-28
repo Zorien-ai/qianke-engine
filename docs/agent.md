@@ -135,6 +135,38 @@ result = run_agent_with_retry(
 
 终态会明确返回，不会把“超限”伪装成普通 AI 回答。
 
+### 3.6 租户上下文与 request_id 幂等
+
+`/api/agent/run` 在进入 Graph 前必须把执行固定到可信 dataset：
+
+```text
+登录账号 → _agent_dataset(account) → dataset_scope(dataset)
+→ Agent / SQL Tool / RAG Tool
+```
+
+只把 dataset 写进响应体是不够的；SQL / RAG 的 `get_conn()` 依赖 contextvar，必须在 finally 中恢复。
+
+幂等层：
+
+```text
+request_id + scope(dataset:account_id) + request_hash
+→ agent_execution 表
+```
+
+规则：
+
+- 同一个 `request_id` 第一次请求：`RUNNING`
+- 相同请求重复提交且已完成：回放原结果（`idempotent_replay: true`）
+- 相同请求正在执行：409，不重复执行
+- 相同 `request_id` 但 query 不同：409
+- 执行失败：记录 `FAILED`，同 request_id 不再自动重跑
+- 不同 dataset / account 使用相同 `request_id`：互不冲突
+
+限制：
+
+- 进程崩溃后 `RUNNING` 记录不会自动回收，当前需要人工清理或后续加 stale TTL
+- 失败请求要用新的 `request_id` 重试
+
 ## 4. API
 
 ### `POST /api/agent/run`
@@ -153,6 +185,10 @@ result = run_agent_with_retry(
 
 - `query` 不能为空
 - `query` 最长 500 字
+- `request_id` 可选；不传则服务端生成
+- `request_id` 只允许 1–128 位字母、数字、下划线或短横线
+- 相同 `request_id` 重复提交：已完成回放；执行中或已完成不同 query 返回 409
+- 执行前必须确认当前账号 dataset 已构建，否则返回 403
 
 响应：
 
@@ -466,29 +502,31 @@ export EVAL_OUTPUT_COST_PER_1M=...
 4. 第一阶段不做自动业务执行，只做分析与建议。
 5. 评测依赖本地 demo 数据库和模型 API；环境不可用时不能伪造跑分。
 
-## 11. Runtime v0.2 方向
+## 11. Runtime v0.2.2 已实现能力与后续方向
+
+已实现：
 
 ```text
 Agent Runtime
 ├── State
 ├── Request ID
 ├── Execution ID
-├── Timeout
+├── Timeout（协作式）
 ├── Budget
 ├── Event Trace
 ├── Retry
 ├── Checkpoint
-└── Observability
+├── Observability（LangSmith）
+└── request_id 幂等 / 租户 dataset 绑定
 ```
 
-重点：
+仍需补齐：
 
-- `request_id` 幂等
-- `execution_id` 执行身份
-- retry 使用新的 `execution_id`
-- `parent_execution_id`
-- timeout / budget / cancellation
-- checkpoint / event trace
+- 硬超时与执行中取消
+- 进程崩溃后的 stale RUNNING 回收
+- LangGraph checkpointer / interrupt
+- Tool 级权限检查
+- 三端独立 Graph
 
 ## 12. 相关文档
 

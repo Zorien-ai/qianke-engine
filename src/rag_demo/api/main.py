@@ -568,9 +568,13 @@ class AgentRunIn(BaseModel):
     max_retries: int = 0
 
 
-def _agent_dataset() -> str:
-    """Agent 入口的数据集：管理员调试库 / 企业库；离线模式用环境变量。"""
-    account = _require_login()
+def _agent_dataset(account: dict | None = None) -> str:
+    """Agent 入口的数据集：管理员调试库 / 企业库；离线模式用环境变量。
+
+    account 由调用方传入，避免一次请求内重复解析登录态。
+    """
+    if account is None:
+        account = _require_login()
     if account is None:
         return os.environ.get("QIANKE_AGENT_DATASET", "test")
     if account.get("is_demo"):
@@ -1148,32 +1152,8 @@ def marketing_copy(
     return {"dataset": dataset, **data}
 
 
-@app.post("/api/agent/run")
-def agent_run(req: AgentRunIn) -> dict:
-    """LangGraph Agent Runtime：chatbot ↔ tools（RAG / SQL / Calculator）。
-
-    只保留一套 Agent 实现：`rag_demo.agent`。旧 Supervisor 实现已移除。
-    """
-    query = (req.query or "").strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="请输入要分析的运营需求")
-    if len(query) > 500:
-        raise HTTPException(status_code=400, detail="需求太长了（超过 500 字），请精简后再试")
-
-    dataset = _agent_dataset()
-    from rag_demo.agent.loop import run_agent_with_retry
-
-    try:
-        result = run_agent_with_retry(
-            query,
-            max_retries=max(0, min(req.max_retries, 3)),
-            request_id=req.request_id,
-            parent_execution_id=req.parent_execution_id,
-        )
-    except Exception as exc:  # noqa: BLE001 - 给前端一句可读错误，不暴露栈
-        logger.exception("Agent 运行失败 dataset=%s", dataset)
-        raise HTTPException(status_code=502, detail=f"Agent 运行失败：{exc}") from exc
-
+def _build_agent_response(result: dict, dataset: str, query: str) -> dict:
+    """把 Runtime 结果映射成前端/API 响应；幂等回放也走同一映射。"""
     steps = []
     for call in result.get("tool_calls", []):
         steps.append({
@@ -1202,6 +1182,64 @@ def agent_run(req: AgentRunIn) -> dict:
         "sop": {},
         "user_cards": [],
     }
+
+
+@app.post("/api/agent/run")
+def agent_run(req: AgentRunIn) -> dict:
+    """LangGraph Agent Runtime：chatbot ↔ tools（RAG / SQL / Calculator）。
+
+    只保留一套 Agent 实现：`rag_demo.agent`。旧 Supervisor 实现已移除。
+    """
+    query = (req.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="请输入要分析的运营需求")
+    if len(query) > 500:
+        raise HTTPException(status_code=400, detail="需求太长了（超过 500 字），请精简后再试")
+
+    account = _require_login()
+    dataset = _agent_dataset(account)
+    if not _tenant_ready(dataset):
+        raise HTTPException(
+            status_code=403,
+            detail="当前账号的数据空间还没有完成构建，暂时无法运行 Agent",
+        )
+
+    from rag_demo.agent.service import (
+        AgentRequestFailed,
+        AgentRequestInProgress,
+        execute_agent,
+        normalize_request_id,
+    )
+
+    try:
+        request_id = normalize_request_id(req.request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        result, replay = execute_agent(
+            query=query,
+            dataset=dataset,
+            account=account,
+            request_id=request_id,
+            parent_execution_id=req.parent_execution_id,
+            runner_kwargs={"max_retries": max(0, min(req.max_retries, 3))},
+        )
+    except AgentRequestInProgress as exc:
+        detail = "同一个 request_id 正在执行中，请勿重复提交"
+        if exc.execution_id:
+            detail = f"{detail}（execution_id={exc.execution_id}）"
+        raise HTTPException(status_code=409, detail=detail) from exc
+    except AgentRequestFailed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - 给前端一句可读错误，不暴露栈
+        logger.exception("Agent 运行失败 dataset=%s", dataset)
+        raise HTTPException(status_code=502, detail=f"Agent 运行失败：{exc}") from exc
+
+    response = _build_agent_response(result, dataset, query)
+    if replay:
+        response["idempotent_replay"] = True
+    return response
 
 
 @app.post("/search")
