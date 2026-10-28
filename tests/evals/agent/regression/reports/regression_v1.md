@@ -12,11 +12,15 @@
 | Business Correctness | **100.0%** |
 | Tool Policy Compliance | **100.0%** |
 | Tool Selection Accuracy | **100.0%** |
-| Tool Execution Success | **100.0%** |
-| Error Recovery | N/A |
-| 平均 Steps | 2.15 |
-| 平均 Tool Calls | 1.35 |
-| 平均耗时 | 3.5s |
+| Tool Execution Success | **97.1%** |
+| Error Recovery | 100.0% |
+| 平均 Steps | 2.30 |
+| 平均 Tool Calls | 1.75 |
+| 平均耗时 | 4.0s |
+| Input Tokens | 94,787 |
+| Output Tokens | 5,577 |
+| 平均 Tokens / 任务 | 5018 |
+| Estimated Cost | N/A（未配置 EVAL_*_COST_PER_1M） |
 
 ## 分类结果
 

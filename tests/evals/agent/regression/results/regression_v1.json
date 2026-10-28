@@ -9,13 +9,20 @@
     "business_correctness_rate": 1.0,
     "tool_policy_compliance_rate": 1.0,
     "tool_selection_accuracy": 1.0,
-    "tool_execution_success": 1.0,
-    "error_recovery": null,
-    "error_cases": 0,
-    "tool_error_count": 0,
-    "avg_steps": 2.15,
-    "avg_tool_calls": 1.35,
-    "avg_elapsed_s": 3.4875,
+    "tool_execution_success": 0.9714285714285714,
+    "error_recovery": 1.0,
+    "error_cases": 1,
+    "tool_error_count": 1,
+    "avg_steps": 2.3,
+    "avg_tool_calls": 1.75,
+    "avg_elapsed_s": 3.9829999999999997,
+    "total_input_tokens": 94787,
+    "total_output_tokens": 5577,
+    "total_tokens": 100364,
+    "avg_tokens_per_task": 5018.2,
+    "token_usage_tasks": 20,
+    "estimated_cost": null,
+    "cost_configured": false,
     "modules": {
       "calculator": {
         "total": 5,
@@ -60,6 +67,71 @@
       "task_id": "calc_001",
       "category": "calculator",
       "question": "计算 (156000 - 128000) / 128000 * 100",
+      "request_id": "req_7a7333d62f6a4a65",
+      "execution_id": "exec_08884d84f8ca47de",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169706.830844,
+          "request_id": "req_7a7333d62f6a4a65",
+          "execution_id": "exec_08884d84f8ca47de",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169708.035857,
+          "run_id": "01a1813e-5404-7481-aa0a-2da7fde94e97",
+          "name": "chat_model",
+          "prompt_chars": 2137
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169709.079283,
+          "run_id": "01a1813e-5404-7481-aa0a-2da7fde94e97",
+          "name": "chat_model",
+          "duration_ms": 1031.0,
+          "total_tokens": 1628
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169709.093867,
+          "run_id": "01a1813e-5825-7c72-b6b4-aba6ce968726",
+          "name": "calculator",
+          "input_preview": "{'expression': '(156000 - 128000) / 128000 * 100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169709.097889,
+          "run_id": "01a1813e-5825-7c72-b6b4-aba6ce968726",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"(156000 - 128000) / 128000 * 100\", \"result\": 21.875}, \"expression\": \"(156000 - 128000) / 128000 * 100\", \"result\": 21.875}' name='calculator' tool_call_id='call_00_AD8GvqLbluO9xvG1jEp88698'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169709.10089,
+          "run_id": "01a1813e-582d-74c1-b591-5fbee9870144",
+          "name": "chat_model",
+          "prompt_chars": 2454
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169710.28291,
+          "run_id": "01a1813e-582d-74c1-b591-5fbee9870144",
+          "name": "chat_model",
+          "duration_ms": 1171.0,
+          "total_tokens": 3380
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169710.291963,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3380
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -68,11 +140,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "21"
@@ -101,16 +181,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3275,
+      "output_tokens": 105,
+      "total_tokens": 3380,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.45,
-      "final_answer": "计算结果为 **21.875**，即增长 21.875%。\n\n计算依据：calculator 返回 `(156000 - 128000) / 128000 * 100 = 21.875`。\n计算过程：156000 − 128000 = 28000；28000 / 128000 = 0.21875；×100 得 21.875（约 21.88%）。",
+      "elapsed_s": 3.47,
+      "final_answer": "计算结果：(156000 − 128000) / 128000 × 100 = **21.875**\n\n即增长率为 21.875%（约 21.88%）。依据：calculator 工具返回结果 result=21.875。",
       "run_error": null
     },
     {
       "task_id": "calc_002",
       "category": "calculator",
       "question": "1280 的 15% 是多少？",
+      "request_id": "req_0c9f7b08d5894bb9",
+      "execution_id": "exec_8f145487fdcb4401",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169710.292964,
+          "request_id": "req_0c9f7b08d5894bb9",
+          "execution_id": "exec_8f145487fdcb4401",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169710.305154,
+          "run_id": "01a1813e-5ce1-7122-b0f3-e7fe5e4dfd94",
+          "name": "chat_model",
+          "prompt_chars": 2117
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169711.001609,
+          "run_id": "01a1813e-5ce1-7122-b0f3-e7fe5e4dfd94",
+          "name": "chat_model",
+          "duration_ms": 687.0,
+          "total_tokens": 1614
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169711.014173,
+          "run_id": "01a1813e-5fa6-7731-aefb-8363a1c6174c",
+          "name": "calculator",
+          "input_preview": "{'expression': '1280 * 0.15'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169711.018855,
+          "run_id": "01a1813e-5fa6-7731-aefb-8363a1c6174c",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"1280 * 0.15\", \"result\": 192.0}, \"expression\": \"1280 * 0.15\", \"result\": 192.0}' name='calculator' tool_call_id='call_00_a7bHsBze8mRmoyyPgIY42716'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169711.025624,
+          "run_id": "01a1813e-5fb1-7fb0-ab2a-2f8a54c1fa51",
+          "name": "chat_model",
+          "prompt_chars": 2369
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169711.884803,
+          "run_id": "01a1813e-5fb1-7fb0-ab2a-2f8a54c1fa51",
+          "name": "chat_model",
+          "duration_ms": 860.0,
+          "total_tokens": 3317
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169711.89664,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3317
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -119,11 +268,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "192"
@@ -152,16 +309,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3241,
+      "output_tokens": 76,
+      "total_tokens": 3317,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.64,
-      "final_answer": "1280 × 15% = **192**（依据 calculator：1280*0.15 = 192.0）",
+      "elapsed_s": 1.61,
+      "final_answer": "1280 × 15% = **192**（由 calculator 计算：1280 * 0.15 = 192.0）。",
       "run_error": null
     },
     {
       "task_id": "calc_003",
       "category": "calculator",
       "question": "计算 3478.5 除以 3",
+      "request_id": "req_d01a74a9cfb448f0",
+      "execution_id": "exec_a1a8e60807874864",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169711.897165,
+          "request_id": "req_d01a74a9cfb448f0",
+          "execution_id": "exec_a1a8e60807874864",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169711.908272,
+          "run_id": "01a1813e-6324-7e32-a0f9-e896e436223f",
+          "name": "chat_model",
+          "prompt_chars": 2116
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169712.512318,
+          "run_id": "01a1813e-6324-7e32-a0f9-e896e436223f",
+          "name": "chat_model",
+          "duration_ms": 610.0,
+          "total_tokens": 1614
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169712.519856,
+          "run_id": "01a1813e-6588-7a00-9ca8-97a0e804e8c1",
+          "name": "calculator",
+          "input_preview": "{'expression': '3478.5 / 3'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169712.522193,
+          "run_id": "01a1813e-6588-7a00-9ca8-97a0e804e8c1",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"3478.5 / 3\", \"result\": 1159.5}, \"expression\": \"3478.5 / 3\", \"result\": 1159.5}' name='calculator' tool_call_id='call_00_HDGnF0wCTcggKrp49svz0190'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169712.526684,
+          "run_id": "01a1813e-658e-71d2-a0ca-038ed38bd5c7",
+          "name": "chat_model",
+          "prompt_chars": 2367
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169713.430996,
+          "run_id": "01a1813e-658e-71d2-a0ca-038ed38bd5c7",
+          "name": "chat_model",
+          "duration_ms": 907.0,
+          "total_tokens": 3314
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169713.437025,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3314
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -170,11 +396,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "1159.5"
@@ -203,16 +437,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3243,
+      "output_tokens": 71,
+      "total_tokens": 3314,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.92,
-      "final_answer": "3478.5 ÷ 3 = **1159.5**\n\n（计算依据：calculator 工具，表达式 `3478.5 / 3`）",
+      "elapsed_s": 1.53,
+      "final_answer": "3478.5 ÷ 3 = **1159.5**，该结果由 calculator 工具计算得出。",
       "run_error": null
     },
     {
       "task_id": "calc_004",
       "category": "calculator",
       "question": "计算 1200 乘以 0.8，再减去 200",
+      "request_id": "req_4be1d5c16ad9435e",
+      "execution_id": "exec_7b766cfa13c44c7b",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169713.437025,
+          "request_id": "req_4be1d5c16ad9435e",
+          "execution_id": "exec_7b766cfa13c44c7b",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169713.447552,
+          "run_id": "01a1813e-6928-7fd3-8b06-aacb1919a6a1",
+          "name": "chat_model",
+          "prompt_chars": 2124
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169714.242384,
+          "run_id": "01a1813e-6928-7fd3-8b06-aacb1919a6a1",
+          "name": "chat_model",
+          "duration_ms": 797.0,
+          "total_tokens": 1622
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169714.248936,
+          "run_id": "01a1813e-6c49-7233-bb19-a7393dbcb47a",
+          "name": "calculator",
+          "input_preview": "{'expression': '1200 * 0.8 - 200'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169714.250935,
+          "run_id": "01a1813e-6c49-7233-bb19-a7393dbcb47a",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"1200 * 0.8 - 200\", \"result\": 760.0}, \"expression\": \"1200 * 0.8 - 200\", \"result\": 760.0}' name='calculator' tool_call_id='call_00_8qe6v82bBLnQXPoEV6vN0641'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169714.254445,
+          "run_id": "01a1813e-6c4f-73f2-b0a6-98dcd20e6afe",
+          "name": "chat_model",
+          "prompt_chars": 2391
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169714.837959,
+          "run_id": "01a1813e-6c4f-73f2-b0a6-98dcd20e6afe",
+          "name": "chat_model",
+          "duration_ms": 578.0,
+          "total_tokens": 3341
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169714.8415,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3341
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -221,11 +524,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "760"
@@ -254,16 +565,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3260,
+      "output_tokens": 81,
+      "total_tokens": 3341,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.36,
-      "final_answer": "计算结果：1200 × 0.8 = 960，960 − 200 = **760**。",
+      "elapsed_s": 1.41,
+      "final_answer": "计算结果：**1200 × 0.8 − 200 = 760**\n\n（依据：calculator 工具返回 result = 760.0）",
       "run_error": null
     },
     {
       "task_id": "calc_005",
       "category": "calculator",
       "question": "10000 到 15600 的增长率是多少？请用百分比表示",
+      "request_id": "req_4f9abaa013cd4327",
+      "execution_id": "exec_2252900b4ac346f9",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169714.8415,
+          "request_id": "req_4f9abaa013cd4327",
+          "execution_id": "exec_2252900b4ac346f9",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169714.850532,
+          "run_id": "01a1813e-6ea2-7f61-a88a-88e94c292c54",
+          "name": "chat_model",
+          "prompt_chars": 2131
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169715.657505,
+          "run_id": "01a1813e-6ea2-7f61-a88a-88e94c292c54",
+          "name": "chat_model",
+          "duration_ms": 796.0,
+          "total_tokens": 1637
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169715.662506,
+          "run_id": "01a1813e-71cf-7211-8c46-442e96f3b260",
+          "name": "calculator",
+          "input_preview": "{'expression': '(15600-10000)/10000*100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169715.665025,
+          "run_id": "01a1813e-71cf-7211-8c46-442e96f3b260",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"(15600-10000)/10000*100\", \"result\": 56.00000000000001}, \"expression\": \"(15600-10000)/10000*100\", \"result\": 56.00000000000001}' name='calculator' tool_call_id='call_00_GCxTS7Emoz5KDlHTatXC2626'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169715.667034,
+          "run_id": "01a1813e-71d3-7192-ad26-4234c632b696",
+          "name": "chat_model",
+          "prompt_chars": 2443
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169716.794573,
+          "run_id": "01a1813e-71d3-7192-ad26-4234c632b696",
+          "name": "chat_model",
+          "duration_ms": 1125.0,
+          "total_tokens": 3395
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169716.79759,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3395
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -272,11 +652,19 @@
       "expected_tools": [
         "calculator"
       ],
+      "required_tools": [
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "56"
@@ -305,16 +693,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3284,
+      "output_tokens": 111,
+      "total_tokens": 3395,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.8,
-      "final_answer": "10000 → 15600 的增长率约为 **56%**（计算式：(15600 − 10000) ÷ 10000 × 100% ≈ 56.0%）。",
+      "elapsed_s": 1.95,
+      "final_answer": "从 10000 到 15600 的**增长率为 56%**。\n\n计算依据：(15600 − 10000) / 10000 × 100 = 56%（由 calculator 工具计算得出）。",
       "run_error": null
     },
     {
       "task_id": "sql_001",
       "category": "execute_sql",
       "question": "统计当前数据集里的用户总数",
+      "request_id": "req_eabe8cb7c2e04b05",
+      "execution_id": "exec_77c495eb94de482b",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169716.79859,
+          "request_id": "req_eabe8cb7c2e04b05",
+          "execution_id": "exec_77c495eb94de482b",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169716.806611,
+          "run_id": "01a1813e-7647-7d90-950b-e7686368d5bc",
+          "name": "chat_model",
+          "prompt_chars": 2115
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169717.588881,
+          "run_id": "01a1813e-7647-7d90-950b-e7686368d5bc",
+          "name": "chat_model",
+          "duration_ms": 781.0,
+          "total_tokens": 1634
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169717.594894,
+          "run_id": "01a1813e-795b-7b52-b015-e2947f9144f9",
+          "name": "execute_sql",
+          "input_preview": "{'sql': 'SELECT COUNT(*) AS user_count, COUNT(DISTINCT user_id) AS distinct_users FROM user_profile_vectors LIMIT 1'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169717.813125,
+          "run_id": "01a1813e-795b-7b52-b015-e2947f9144f9",
+          "name": "execute_sql",
+          "duration_ms": 219.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS user_count, COUNT(DISTINCT user_id) AS distinct_users FROM user_profile_vectors LIMIT 1\", \"columns\": [\"user_count\", \"distinct_users\"], \"rows\": [{\"user_count\": 8110, \"distinct_users\": 8110}], \"row_count\": 1}, \"sql\": \"SELECT COUNT(*) AS user_co"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169717.816643,
+          "run_id": "01a1813e-7a38-7351-8eee-ee5217f31c09",
+          "name": "chat_model",
+          "prompt_chars": 2832
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169719.141395,
+          "run_id": "01a1813e-7a38-7351-8eee-ee5217f31c09",
+          "name": "chat_model",
+          "duration_ms": 1313.0,
+          "total_tokens": 3494
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169719.145858,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3494
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -323,11 +780,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "811"
@@ -356,16 +821,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3361,
+      "output_tokens": 133,
+      "total_tokens": 3494,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 1.98,
-      "final_answer": "当前数据集 user_profile_vectors 中的用户总数为 **8110 人**。\n\n依据：`SELECT COUNT(*) AS user_count FROM user_profile_vectors` 返回 user_count = 8110（与该表 8110 个不同 user_id 一致）。",
+      "elapsed_s": 2.36,
+      "final_answer": "当前数据集共有 **8110** 名用户。\n\n依据：`SELECT COUNT(*) , COUNT(DISTINCT user_id) FROM user_profile_vectors` → 总行数 8110，去重 user_id 也是 8110，说明无重复记录，用户总数即 8110。",
       "run_error": null
     },
     {
       "task_id": "sql_002",
       "category": "execute_sql",
       "question": "统计黑卡用户数量",
+      "request_id": "req_5fe72f5189f547b4",
+      "execution_id": "exec_899439e21b7e4f5e",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169719.145858,
+          "request_id": "req_5fe72f5189f547b4",
+          "execution_id": "exec_899439e21b7e4f5e",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169719.154372,
+          "run_id": "01a1813e-7f72-72c3-bbb6-2e9bcb6b0d2e",
+          "name": "chat_model",
+          "prompt_chars": 2110
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169719.97229,
+          "run_id": "01a1813e-7f72-72c3-bbb6-2e9bcb6b0d2e",
+          "name": "chat_model",
+          "duration_ms": 813.0,
+          "total_tokens": 1634
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169719.977832,
+          "run_id": "01a1813e-82aa-7113-89b1-654b6a16f4a8",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS black_card_users FROM user_profile_vectors WHERE member_level = '黑卡' LIMIT 10\"}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169719.993916,
+          "run_id": "01a1813e-82aa-7113-89b1-654b6a16f4a8",
+          "name": "execute_sql",
+          "duration_ms": 15.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS black_card_users FROM user_profile_vectors WHERE member_level = \\'黑卡\\' LIMIT 10\", \"columns\": [\"black_card_users\"], \"rows\": [{\"black_card_users\": 3}], \"row_count\": 1}, \"sql\": \"SELECT COUNT(*) AS black_card_users FROM user_profile_vectors WHERE"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169719.997467,
+          "run_id": "01a1813e-82bd-75e1-970e-922bf8493715",
+          "name": "chat_model",
+          "prompt_chars": 2731
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169720.809694,
+          "run_id": "01a1813e-82bd-75e1-970e-922bf8493715",
+          "name": "chat_model",
+          "duration_ms": 813.0,
+          "total_tokens": 3453
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169720.812781,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3453
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -374,11 +908,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "黑卡",
@@ -391,7 +933,9 @@
       "allowed_numbers": [],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [],
+      "observed_fact_numbers": [
+        "8110"
+      ],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": false,
@@ -408,16 +952,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3330,
+      "output_tokens": 123,
+      "total_tokens": 3453,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.39,
-      "final_answer": "黑卡用户共 **3 人**。\n\n依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '黑卡'` → 3 人（占全部 8110 名用户的约 0.04%，属于极少数高价值人群，建议单独精细化维护）。",
+      "elapsed_s": 1.66,
+      "final_answer": "黑卡用户数量为 **3 人**。\n\n依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '黑卡'` 返回 3；全库共有 8110 个用户，本次只做计数。",
       "run_error": null
     },
     {
       "task_id": "sql_003",
       "category": "execute_sql",
       "question": "统计钻石用户数量",
+      "request_id": "req_1c1a6f713a2b4d56",
+      "execution_id": "exec_b50f02afe5da4a1d",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169720.814293,
+          "request_id": "req_1c1a6f713a2b4d56",
+          "execution_id": "exec_b50f02afe5da4a1d",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169720.824612,
+          "run_id": "01a1813e-85f9-7121-aa1c-5ccf28b317a0",
+          "name": "chat_model",
+          "prompt_chars": 2110
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169721.534945,
+          "run_id": "01a1813e-85f9-7121-aa1c-5ccf28b317a0",
+          "name": "chat_model",
+          "duration_ms": 719.0,
+          "total_tokens": 1632
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169721.539955,
+          "run_id": "01a1813e-88c3-7db1-b5f0-cf16a3ccfd31",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS diamond_users FROM user_profile_vectors WHERE member_level = '钻石' LIMIT 10\"}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169721.546961,
+          "run_id": "01a1813e-88c3-7db1-b5f0-cf16a3ccfd31",
+          "name": "execute_sql",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS diamond_users FROM user_profile_vectors WHERE member_level = \\'钻石\\' LIMIT 10\", \"columns\": [\"diamond_users\"], \"rows\": [{\"diamond_users\": 403}], \"row_count\": 1}, \"sql\": \"SELECT COUNT(*) AS diamond_users FROM user_profile_vectors WHERE member_le"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169721.548979,
+          "run_id": "01a1813e-88cd-7ac0-8011-4bae814839f4",
+          "name": "chat_model",
+          "prompt_chars": 2714
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169723.478633,
+          "run_id": "01a1813e-88cd-7ac0-8011-4bae814839f4",
+          "name": "chat_model",
+          "duration_ms": 1938.0,
+          "total_tokens": 3482
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169723.489115,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 3482
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -426,11 +1039,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "403"
@@ -459,16 +1080,175 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3323,
+      "output_tokens": 159,
+      "total_tokens": 3482,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.48,
-      "final_answer": "钻石用户数量为 **403 人**。\n\n依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '钻石'` → 403（占全部 8110 用户的约 4.97%）。",
+      "elapsed_s": 2.69,
+      "final_answer": "**钻石用户数量：403 人**\n\n依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '钻石'` → 403。\n\n在全部 8110 名用户中占比约 4.97%（钻石 403、黄金 1217、白银 2434、普通 4053、黑卡 3）。如果需要，我可以继续分析钻石用户的品类偏好、城市分布或消费特征。",
       "run_error": null
     },
     {
       "task_id": "sql_004",
       "category": "execute_sql",
       "question": "按会员等级统计用户数量",
+      "request_id": "req_a7ec97b5bfd94e83",
+      "execution_id": "exec_7f6bd58561aa4a1d",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169723.489115,
+          "request_id": "req_a7ec97b5bfd94e83",
+          "execution_id": "exec_7f6bd58561aa4a1d",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169723.499721,
+          "run_id": "01a1813e-906b-7b02-b6fd-78efbc79c3f4",
+          "name": "chat_model",
+          "prompt_chars": 2113
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169724.478204,
+          "run_id": "01a1813e-906b-7b02-b6fd-78efbc79c3f4",
+          "name": "chat_model",
+          "duration_ms": 985.0,
+          "total_tokens": 1632
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169724.491288,
+          "run_id": "01a1813e-944b-7630-a20c-c9a354e54f29",
+          "name": "execute_sql",
+          "input_preview": "{'sql': 'SELECT member_level, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY member_level ORDER BY user_count DESC LIMIT 20'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169724.507388,
+          "run_id": "01a1813e-944b-7630-a20c-c9a354e54f29",
+          "name": "execute_sql",
+          "duration_ms": 16.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT member_level, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY member_level ORDER BY user_count DESC LIMIT 20\", \"columns\": [\"member_level\", \"user_count\"], \"rows\": [{\"member_level\": \"普通\", \"user_count\": 4053}, {\"member_level\": \"白银\", \"user_count\": "
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169724.512439,
+          "run_id": "01a1813e-9460-7b20-9b4e-410cb037352f",
+          "name": "chat_model",
+          "prompt_chars": 3223
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169725.830438,
+          "run_id": "01a1813e-9460-7b20-9b4e-410cb037352f",
+          "name": "chat_model",
+          "duration_ms": 1312.0,
+          "total_tokens": 3730
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169725.836974,
+          "run_id": "01a1813e-998d-7673-9703-a4d17c0a2e84",
+          "name": "calculator",
+          "input_preview": "{'expression': '4053/8110*100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169725.837973,
+          "run_id": "01a1813e-998d-7673-9703-a4d17c0a2e84",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"4053/8110*100\", \"result\": 49.97533908754624}, \"expression\": \"4053/8110*100\", \"result\": 49.97533908754624}' name='calculator' tool_call_id='call_00_SFx71zXe7U2qwefnwDYh7242'"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169725.838974,
+          "run_id": "01a1813e-998f-7fe3-bb38-1b38bd91d54a",
+          "name": "calculator",
+          "input_preview": "{'expression': '2434/8110*100'}"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169725.840497,
+          "run_id": "01a1813e-9990-7fd3-8a62-61657e3552a5",
+          "name": "calculator",
+          "input_preview": "{'expression': '1217/8110*100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169725.841495,
+          "run_id": "01a1813e-998f-7fe3-bb38-1b38bd91d54a",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"2434/8110*100\", \"result\": 30.01233045622688}, \"expression\": \"2434/8110*100\", \"result\": 30.01233045622688}' name='calculator' tool_call_id='call_01_TkD4vUYlEv5cpnXbcUYM5715'"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169725.842496,
+          "run_id": "01a1813e-9990-7fd3-8a62-61657e3552a5",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"1217/8110*100\", \"result\": 15.00616522811344}, \"expression\": \"1217/8110*100\", \"result\": 15.00616522811344}' name='calculator' tool_call_id='call_02_YubEDPabJ4fleW1cyvIz7829'"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169725.842496,
+          "run_id": "01a1813e-9993-79f1-854f-a99263bd8a9f",
+          "name": "calculator",
+          "input_preview": "{'expression': '403/8110*100'}"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169725.851534,
+          "run_id": "01a1813e-999b-72e2-94df-5d5eddce48f4",
+          "name": "calculator",
+          "input_preview": "{'expression': '3/8110*100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169725.852536,
+          "run_id": "01a1813e-9993-79f1-854f-a99263bd8a9f",
+          "name": "calculator",
+          "duration_ms": 16.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"403/8110*100\", \"result\": 4.969173859432799}, \"expression\": \"403/8110*100\", \"result\": 4.969173859432799}' name='calculator' tool_call_id='call_03_jP9I6XM2F8ypoHsjiB603401'"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169725.852536,
+          "run_id": "01a1813e-999b-72e2-94df-5d5eddce48f4",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"3/8110*100\", \"result\": 0.036991368680641186}, \"expression\": \"3/8110*100\", \"result\": 0.036991368680641186}' name='calculator' tool_call_id='call_04_9z1CXMjHrUeAY2j19lu65539'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169725.856515,
+          "run_id": "01a1813e-99a0-7481-84f2-90a31f9ed754",
+          "name": "chat_model",
+          "prompt_chars": 4607
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169727.15916,
+          "run_id": "01a1813e-99a0-7481-84f2-90a31f9ed754",
+          "name": "chat_model",
+          "duration_ms": 1296.0,
+          "total_tokens": 6356
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169727.167196,
+          "status": "COMPLETED",
+          "steps": 3,
+          "tool_call_count": 6,
+          "total_tokens": 6356
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -477,11 +1257,24 @@
       "expected_tools": [
         "execute_sql"
       ],
-      "actual_tools": [
+      "required_tools": [
         "execute_sql"
       ],
+      "optional_tools": [],
+      "forbidden_tools": [],
+      "actual_tools": [
+        "execute_sql",
+        "calculator",
+        "calculator",
+        "calculator",
+        "calculator",
+        "calculator"
+      ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "普通",
@@ -494,7 +1287,9 @@
       "allowed_numbers": [],
       "disallowed_numbers": [],
       "business_disallowed_numbers": [],
-      "observed_fact_numbers": [],
+      "observed_fact_numbers": [
+        "8110"
+      ],
       "approx_numbers": [],
       "result_claim_numbers": [],
       "must_not_contain_approx_numbers": false,
@@ -506,21 +1301,115 @@
           "name": "execute_sql",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
+        },
+        {
+          "name": "calculator",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 2,
-      "tool_call_count": 1,
-      "elapsed_s": 3.2,
-      "final_answer": "按会员等级统计的用户数量（共 8110 人）：\n\n| 会员等级 | 用户数 | 占比 |\n|---|---|---|\n| 普通 | 4053 | 49.98% |\n| 白银 | 2434 | 30.01% |\n| 黄金 | 1217 | 15.01% |\n| 钻石 | 403 | 4.97% |\n| 黑卡 | 3 | 0.04% |\n\n说明：占比按各等级人数除以总人数 8110 计算（如 4053/8110=49.98%）。\n\n依据 SQL：\n```sql\nSELECT member_level, COUNT(*) AS user_count\nFROM user_profile_vectors\nGROUP BY member_level\nORDER BY user_count DESC LIMIT 20\n```\n\n分布呈明显金字塔形：普通+白银合计约 80%，黄金及以上高等级会员仅约 20%（1623 人），黑卡用户仅 3 人（0.04%），属于极小基数群体，单独分析时样本量不足，建议与钻石合并观察。",
+      "input_tokens": 5888,
+      "output_tokens": 468,
+      "total_tokens": 6356,
+      "token_usage_found": true,
+      "steps": 3,
+      "tool_call_count": 6,
+      "elapsed_s": 3.67,
+      "final_answer": "按会员等级统计的用户数量（全库共 8110 人）：\n\n| 会员等级 | 用户数 | 占比 |\n|---|---|---|\n| 普通 | 4053 | 49.98% |\n| 白银 | 2434 | 30.01% |\n| 黄金 | 1217 | 15.01% |\n| 钻石 | 403 | 4.97% |\n| 黑卡 | 3 | 0.04% |\n| 合计 | 8110 | 100% |\n\n依据：`SELECT member_level, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY member_level ORDER BY user_count DESC`（execute_sql），占比由 calculator 按 8110 总数计算。\n\n结论要点：等级分布呈明显金字塔结构，普通+白银合计约 80%，黄金及以上高等级用户仅约 20%（1623 人），其中黑卡仅 3 人，属于极少数核心用户，适合单独做一对一维护。",
       "run_error": null
     },
     {
       "task_id": "sql_005",
       "category": "execute_sql",
       "question": "按城市统计用户数量，哪个城市用户最多？",
+      "request_id": "req_f8d6e64d07334632",
+      "execution_id": "exec_05b972e739c04966",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169727.168195,
+          "request_id": "req_f8d6e64d07334632",
+          "execution_id": "exec_05b972e739c04966",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169727.178736,
+          "run_id": "01a1813e-9ecb-74f0-9e0b-609325ff6ee2",
+          "name": "chat_model",
+          "prompt_chars": 2121
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169728.024328,
+          "run_id": "01a1813e-9ecb-74f0-9e0b-609325ff6ee2",
+          "name": "chat_model",
+          "duration_ms": 843.0,
+          "total_tokens": 1661
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169728.030348,
+          "run_id": "01a1813e-a21e-7312-b39f-7ffc855976b1",
+          "name": "execute_sql",
+          "input_preview": "{'sql': 'SELECT city, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY city ORDER BY user_count DESC, city ASC LIMIT 20'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169728.042414,
+          "run_id": "01a1813e-a21e-7312-b39f-7ffc855976b1",
+          "name": "execute_sql",
+          "duration_ms": 16.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT city, COUNT(*) AS user_count FROM user_profile_vectors GROUP BY city ORDER BY user_count DESC, city ASC LIMIT 20\", \"columns\": [\"city\", \"user_count\"], \"rows\": [{\"city\": \"北京\", \"user_count\": 722}, {\"city\": \"杭州\", \"user_count\": 714}, {\"city\": \"南京\", \"user_coun"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169728.045928,
+          "run_id": "01a1813e-a22e-7ed1-92e6-dc0dd8a7e751",
+          "name": "chat_model",
+          "prompt_chars": 3607
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169729.606274,
+          "run_id": "01a1813e-a22e-7ed1-92e6-dc0dd8a7e751",
+          "name": "chat_model",
+          "duration_ms": 1563.0,
+          "total_tokens": 4006
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169729.612804,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 4006
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -529,11 +1418,19 @@
       "expected_tools": [
         "execute_sql"
       ],
+      "required_tools": [
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "北京"
@@ -562,16 +1459,100 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 3671,
+      "output_tokens": 335,
+      "total_tokens": 4006,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 2.72,
-      "final_answer": "**按城市统计的用户数量（共 12 个城市、8110 人）：**\n\n| 排名 | 城市 | 用户数 |\n|---|---|---|\n| 1 | 北京 | 722 |\n| 2 | 杭州 | 714 |\n| 3 | 南京 | 694 |\n| 4 | 上海 | 686 |\n| 5 | 深圳 | 673 |\n| 6 | 苏州 | 672 |\n| 6 | 天津 | 672 |\n| 8 | 广州 | 671 |\n| 9 | 重庆 | 665 |\n| 10 | 武汉 | 663 |\n| 11 | 成都 | 639 |\n| 11 | 西安 | 639 |\n\n**结论：北京用户最多，共 722 人**，其后是杭州 714 人、南京 694 人。整体分布较为均衡，各城市用户数均在 639~722 人之间，最高与最低仅相差 83 人（约 13%）。\n\n依据：对 `user_profile_vectors` 按 `city` 分组计数（`GROUP BY city ORDER BY COUNT(*) DESC`）。",
+      "elapsed_s": 2.44,
+      "final_answer": "按城市统计后，用户数量最多的是 **北京**，共有 **722 位用户**。\n\n| 排名 | 城市 | 用户数 |\n|---|---|---:|\n| 1 | 北京 | 722 |\n| 2 | 杭州 | 714 |\n| 3 | 南京 | 694 |\n| 4 | 上海 | 686 |\n| 5 | 深圳 | 673 |\n| 6 | 天津 | 672 |\n| 7 | 苏州 | 672 |\n| 8 | 广州 | 671 |\n| 9 | 重庆 | 665 |\n| 10 | 武汉 | 663 |\n| 11 | 成都 | 639 |\n| 12 | 西安 | 639 |\n\n依据：通过对 `user_profile_vectors` 按 `city` 分组并统计用户数，再按用户数降序排列得到。",
       "run_error": null
     },
     {
       "task_id": "rag_001",
       "category": "rag_search",
       "question": "高价值用户怎么定义？",
+      "request_id": "req_3c30c127e4454d48",
+      "execution_id": "exec_85ac3cb337fe4ec3",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169729.612804,
+          "request_id": "req_3c30c127e4454d48",
+          "execution_id": "exec_85ac3cb337fe4ec3",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169729.622323,
+          "run_id": "01a1813e-a856-75f3-94d8-11acbe67a074",
+          "name": "chat_model",
+          "prompt_chars": 2112
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169730.80798,
+          "run_id": "01a1813e-a856-75f3-94d8-11acbe67a074",
+          "name": "chat_model",
+          "duration_ms": 1188.0,
+          "total_tokens": 1704
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169730.824532,
+          "run_id": "01a1813e-ad08-7b23-a4d6-861a9474a0ec",
+          "name": "rag_search",
+          "input_preview": "{'query': '高价值用户定义 标准', 'top_k': 5}"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169730.832265,
+          "run_id": "01a1813e-ad10-78f3-bf30-b3f29d080833",
+          "name": "rag_search",
+          "input_preview": "{'query': '用户分层 分群 高价值人群 RFM 会员等级', 'top_k': 5}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169751.553216,
+          "run_id": "01a1813e-ad08-7b23-a4d6-861a9474a0ec",
+          "name": "rag_search",
+          "duration_ms": 20735.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"高价值用户定义 标准\", \"results\": [{\"content\": \"h1: 用户标签口径说明 h2: 高客单用户\\\\n定义：累计平均客单价 ≥ 1000 元。\\\\n（注：当前画像数据为累计口径，T+1 更新）\\\\n负责人：数据部-用户价值组。\\\\n用途：高客单价商品推荐、VIP 服务分配、利润分析。\", \"score\": 0.6448170168080763, \"source\": \"tag_definitions.md\"}, {\"content\": \"h1: 用户标签口径说明 h2: 高价值用户\\\\n定义"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169751.555732,
+          "run_id": "01a1813e-ad10-78f3-bf30-b3f29d080833",
+          "name": "rag_search",
+          "duration_ms": 20719.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"用户分层 分群 高价值人群 RFM 会员等级\", \"results\": [{\"content\": \"h1: 用户分群策略 h2: 分群维度\\\\n- 生命周期：新客（注册 ≤ 30 天）、活跃客（近 30 天有行为）、沉默客（31–90 天无行为）、流失客（> 90 天无行为）。\\\\n- 价值分层：高价值（近 90 天消费前 20%）、中价值（20%–70%）、低价值（后 30%）。\\\\n- 品类偏好：美妆、数码、母婴、家电、零食等。\", \"score\": 0.6602542270338726, \"source\":"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169751.558739,
+          "run_id": "01a1813e-fe07-7453-9d81-43cc7afe7596",
+          "name": "chat_model",
+          "prompt_chars": 6531
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169754.280942,
+          "run_id": "01a1813e-fe07-7453-9d81-43cc7afe7596",
+          "name": "chat_model",
+          "duration_ms": 2718.0,
+          "total_tokens": 6163
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169754.285445,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 2,
+          "total_tokens": 6163
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -580,12 +1561,20 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "90"
@@ -619,16 +1608,100 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 5568,
+      "output_tokens": 595,
+      "total_tokens": 6163,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 8.62,
-      "final_answer": "## 高价值用户定义（库内口径）\n\n**标准定义**（来源：`tag_definitions.md` → 高价值用户）：\n> 近 90 天消费金额排名**前 20%**，**且**近 30 天有活跃行为（登录、浏览、下单任一）；更新频率 T+1；负责人：数据部-用户增长组；用途：营销优先级排序、专属客服分配。\n\n**相关分层口径**（来源：`segmentation.md` → 用户分群策略）\n- 价值分层：高价值（近 90 天消费前 20%）、中价值（20%–70%）、低价值（后 30%）\n- 注意它与「高客单用户」不是同一标签：高客单 = 累计平均客单价 ≥ 1000 元（`tag_definitions.md`），按客单价划分，不是按消费排名或活跃程度划分。\n- 会员等级也按「累计平均客单价」划：钻石 ≥14555 元、黄金 6680–14555、白银 2495–6680、普通 <2495（`member_benefits.md`）。\n\n## ⚠️ 本库落地限制（数据事实）\n当前 `user_profile_vectors` 表**没有**「近 90 天消费金额」和「近 30 天登录/浏览/加购行为」字段，只有：\n- `total_amount`（累计总消费）、`avg_amount`（累计平均客单价）、`order_count`（累计订单数）\n- `days_since_last_buy`（距最后一次购买天数，0–364）\n\n所以标准定义**无法在本库精确计算**。若要用现有字段做近似替代，可用如下条件组合（属近似口径，非官方定义）：\n- `days_since_last_buy <= 30` 近似「近 30 天活跃」\n- `total_amount` 排序前 20% 近似「消费金额前 20%」（累计口径，非近 90 天）\n\n是否需要我按这个近似口径跑一版高价值用户规模与画像（人数/占比/城市/品类分布）？也可以直接改用「钻石/黄金会员」或「高客单（avg_amount ≥ 1000 元，库内实测 P25 已约 1326 元，需注意分布偏差）」作为可稳定计算的替代分层。",
+      "elapsed_s": 24.69,
+      "final_answer": "**「高价值用户」官方口径（来源：知识库 `tag_definitions.md`）**\n\n> **定义：近 90 天消费金额排名前 20%，且近 30 天有活跃行为（登录、浏览、下单任一）。**\n> 更新频率：T+1；负责人：数据部-用户增长组；用途：营销优先级排序、专属客服分配。\n\n配套的辅助口径（`segmentation.md`）：\n- **价值分层**：高价值 = 近 90 天消费前 20%；中价值 = 20%–70%；低价值 = 后 30%。\n- **生命周期**：新客（注册 ≤ 30 天）、活跃客（近 30 天有行为）、沉默客（31–90 天无行为）、流失客（> 90 天无行为）。\n- **核心分群**：高价值活跃客（专属客服、新品优先体验、生日礼遇）、高价值沉默客（一对一召回、大额优惠券、电话回访）。\n\n⚠️ 两点重要提醒：\n\n1. **不要与「高客单用户」混淆**：那是另一个标签，定义是「累计平均客单价 ≥ 1000 元」，归属数据部-用户价值组；而会员等级（钻石、黄金、白银、普通）也是按累计平均客单价划分的。二者都不是「高价值用户」。\n2. **本库数据无法严格复现该口径**：库里没有绝对时间字段，只有 `days_since_last_buy`（0–364 天）和累计口径的 `order_count / total_amount / avg_amount`，因此「近 90 天消费金额」无法计算。若要在这份数据上做近似筛选，只能用「频次 + 金额分位」这类可操作替代标准（例如 `avg_amount` 达 P90 以上，即 ≥ 10383 元，并且 `days_since_last_buy` 较近），但请明确标注这是**代理口径**，不能等同于官方的「高价值用户」标签。是否需要我按这个代理口径帮你统计一版人群规模与特征？",
       "run_error": null
     },
     {
       "task_id": "rag_002",
       "category": "rag_search",
       "question": "流失预警用户的判定标准是什么？",
+      "request_id": "req_7ecb74cbcb1c4eec",
+      "execution_id": "exec_53b0e69836a240af",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169754.286449,
+          "request_id": "req_7ecb74cbcb1c4eec",
+          "execution_id": "exec_53b0e69836a240af",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169754.293959,
+          "run_id": "01a1813f-08b6-73d2-997f-cefe3ea0e9e2",
+          "name": "chat_model",
+          "prompt_chars": 2117
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169755.623609,
+          "run_id": "01a1813f-08b6-73d2-997f-cefe3ea0e9e2",
+          "name": "chat_model",
+          "duration_ms": 1328.0,
+          "total_tokens": 1700
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169755.63014,
+          "run_id": "01a1813f-0dee-7250-812c-bf8d43540c83",
+          "name": "rag_search",
+          "input_preview": "{'query': '流失预警用户 判定标准 定义', 'top_k': 5}"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169755.631136,
+          "run_id": "01a1813f-0df0-7b40-b77f-d8e1ad06140a",
+          "name": "rag_search",
+          "input_preview": "{'query': '用户分层 segmentation 流失 沉睡 天数阈值', 'top_k': 5}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169756.522878,
+          "run_id": "01a1813f-0dee-7250-812c-bf8d43540c83",
+          "name": "rag_search",
+          "duration_ms": 890.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"流失预警用户 判定标准 定义\", \"results\": [{\"content\": \"h1: 用户标签口径说明 h2: 流失预警用户\\\\n定义：近 30 天未活跃，且历史客单价 > 500 元，且累计购买次数 ≥ 3 次。\\\\n更新频率：T+1。\\\\n负责人：数据部-用户留存组。\\\\n用途：召回活动、定向优惠券发放。\", \"score\": 0.6637969426642419, \"source\": \"tag_definitions.md\"}, {\"content\": \"h1: 营销策略手册 h2: 四、流失用户挽回"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169756.526927,
+          "run_id": "01a1813f-0df0-7b40-b77f-d8e1ad06140a",
+          "name": "rag_search",
+          "duration_ms": 890.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"用户分层 segmentation 流失 沉睡 天数阈值\", \"results\": [{\"content\": \"h1: 用户分群策略 h2: 分群维度\\\\n- 生命周期：新客（注册 ≤ 30 天）、活跃客（近 30 天有行为）、沉默客（31–90 天无行为）、流失客（> 90 天无行为）。\\\\n- 价值分层：高价值（近 90 天消费前 20%）、中价值（20%–70%）、低价值（后 30%）。\\\\n- 品类偏好：美妆、数码、母婴、家电、零食等。\", \"score\": 0.5963433885484205, \"so"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169756.528935,
+          "run_id": "01a1813f-1171-7cf2-ac0d-1cfb056a9f97",
+          "name": "chat_model",
+          "prompt_chars": 6288
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169758.99358,
+          "run_id": "01a1813f-1171-7cf2-ac0d-1cfb056a9f97",
+          "name": "chat_model",
+          "duration_ms": 2469.0,
+          "total_tokens": 5909
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169758.998091,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 2,
+          "total_tokens": 5909
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -637,12 +1710,20 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "30"
@@ -676,16 +1757,85 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 5401,
+      "output_tokens": 508,
+      "total_tokens": 5909,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 6.25,
-      "final_answer": "## 流失预警用户判定标准（来源：`tag_definitions.md`，由数据部-用户留存组维护）\n\n满足以下全部三个条件：\n\n| 条件 | 阈值 |\n|---|---|\n| 活跃度 | 近 30 天未活跃 |\n| 历史客单价 | > 500 元 |\n| 累计购买次数 | ≥ 3 次 |\n\n- 更新频率：T+1\n- 用途：召回活动、定向优惠券发放\n\n### 与相邻概念的区分（`segmentation.md`、`marketing_playbook.md`）\n- **流失预警**基于“≥30 天未活跃、高客单价、复购客户”这三重条件，目的是在用户真正流失前进行干预。\n- **沉默客**：31–90 天无行为（生命周期分层）。\n- **流失客**：> 90 天无行为；挽回动作在流失第 91、120 天触发，渠道为短信或邮件，发放 100 元回归礼包，限 7 天有效，频控每月最多 1 次。\n\n### 在本库实施时需要注意的口径差异\n1. 本库没有绝对时间列，只有 `days_since_last_buy`，“近 30 天未活跃”只能近似映射为 `days_since_last_buy > 30`。\n2. 本库客单价实测分位为 P25=1326、P50=2496，**“客单价 > 500 元”这个阈值几乎无筛选力**，也就是在本库中的用户基本都会满足这个条件；实际筛出的主要是“≥30 天未购买且订单数 ≥ 3 的复购客户”。若要做差异化召回，建议改用相对分位（如客单价 ≥ P50/P75）作为附加分层维度，但这样得到的就不是文档中的原始定义，需与数据部确认。\n\n如需我按上述口径统计库内流失预警用户人数及分层分布，可以再告诉我。",
+      "elapsed_s": 4.7,
+      "final_answer": "**流失预警用户判定标准**（来源：知识库 `tag_definitions.md`「用户标签口径说明 / 流失预警用户」）：\n\n需同时满足以下三个条件：\n1. **近 30 天未活跃**；\n2. **历史客单价 > 500 元**；\n3. **累计购买次数 ≥ 3 次**。\n\n补充口径：\n- 更新频率：T+1；\n- 负责人：数据部-用户留存组；\n- 用途：召回活动、定向优惠券发放。\n\n⚠️ 注意区分两个容易混淆的口径：\n- **流失预警用户**（本标签，3 个条件同时满足，面向高价值人群的提前干预）；\n- **流失客**（`segmentation.md` 的生命周期分层：> 90 天无行为）；营销手册 `marketing_playbook.md` 的挽回策略（100 元回归礼包、第 91/120 天触达、每月最多 1 次）针对的是这一人群，而不是流失预警标签。\n\n另需说明：本库无行为日志表，「近 30 天未活跃」在实际取数时可用 `user_profile_vectors.days_since_last_buy >= 30` 近似，客单价与购买次数分别对应 `avg_amount`、`order_count` 字段。如需我按此口径统计该标签下的人数或特征分布，可以继续告诉我。",
       "run_error": null
     },
     {
       "task_id": "rag_003",
       "category": "rag_search",
       "question": "钻石会员有哪些专属折扣权益？",
+      "request_id": "req_5493b8afb98f415b",
+      "execution_id": "exec_2fe92ae310f64aa6",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169758.998091,
+          "request_id": "req_5493b8afb98f415b",
+          "execution_id": "exec_2fe92ae310f64aa6",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169759.006613,
+          "run_id": "01a1813f-1b1e-7bb1-9dbd-3d924b2d12c3",
+          "name": "chat_model",
+          "prompt_chars": 2116
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169759.953622,
+          "run_id": "01a1813f-1b1e-7bb1-9dbd-3d924b2d12c3",
+          "name": "chat_model",
+          "duration_ms": 937.0,
+          "total_tokens": 1637
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169759.961152,
+          "run_id": "01a1813f-1ed9-7a91-988a-72ae429a8fd5",
+          "name": "rag_search",
+          "input_preview": "{'query': '钻石会员专属折扣权益', 'top_k': 5}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169760.246367,
+          "run_id": "01a1813f-1ed9-7a91-988a-72ae429a8fd5",
+          "name": "rag_search",
+          "duration_ms": 281.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"钻石会员专属折扣权益\", \"results\": [{\"content\": \"h1: 会员权益说明 h2: 钻石会员权益\\\\n1. 专属客服：7×24 小时一对一专属顾问，平均响应 1 分钟内。\\\\n2. 全场免运费：不限订单金额、不限次数。\\\\n3. 专属折扣：全场商品 9 折（不与平台活动价叠加）。\\\\n4. 生日礼遇：生日当月赠 200 元无门槛券，当月消费双倍积分。\\\\n5. 新品优先购：新品发布可提前 48 小时购买。\\\\n6. 退换货延长：30 天无理由退换，质量问题来回运费全免。\\\\n7. 积分加速："
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169760.249375,
+          "run_id": "01a1813f-1ffa-7621-8b15-f311b5f2c710",
+          "name": "chat_model",
+          "prompt_chars": 4530
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169761.944827,
+          "run_id": "01a1813f-1ffa-7621-8b15-f311b5f2c710",
+          "name": "chat_model",
+          "duration_ms": 1703.0,
+          "total_tokens": 4834
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169761.948349,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 1,
+          "total_tokens": 4834
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -694,11 +1844,19 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "9"
@@ -727,16 +1885,115 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 4545,
+      "output_tokens": 289,
+      "total_tokens": 4834,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 1,
-      "elapsed_s": 3.89,
-      "final_answer": "**钻石会员专属折扣权益（来源：`member_benefits.md` · 钻石会员权益）**\n\n- **专属折扣：全场商品 9 折**（不与平台活动价叠加）。\n- 另有一项相关的运费权益：**全场免运费**，不限订单金额、不限次数，但这不是折扣。\n\n**钻石会员完整权益清单（共 7 项）**\n1. 专属客服：7×24 小时一对一专属顾问，平均响应 1 分钟内\n2. 全场免运费：不限金额、不限次数\n3. 专属折扣：全场商品 9 折（不与平台活动价叠加）\n4. 生日礼遇：生日当月赠 200 元无门槛券，当月消费双倍积分\n5. 新品优先购：可提前 48 小时购买\n6. 退换货延长：30 天无理由退换，质量问题来回运费全免\n7. 积分加速：消费积分 2 倍累计\n\n**补充口径**\n- 等级门槛：钻石会员 = 累计平均客单价 ≥ 14555 元（约前 5%），按「累计平均客单价」划分，T+1 更新；升级后权益次日生效。\n- 咨询时按 `cs_sop.md` 流程：先核对用户当前等级与权益有效期，再逐条解释可用权益（如用户接近升级，可提示差额与升级后权益）。\n\nnote：各等级权益文本未写明“权益有效期”的具体时长，只写了生日礼遇限生日当月；如需有效期细节，建议以会员系统实际字段为准。",
+      "elapsed_s": 2.95,
+      "final_answer": "**钻石会员的专属折扣权益**（来源：知识库 `member_benefits.md`「钻石会员权益」）：\n\n- **专属折扣：全场商品 9 折**（不与平台活动价叠加）\n\n钻石会员的其他权益如下：\n\n1. 专属客服：7×24 小时一对一顾问，平均响应 1 分钟内\n2. 全场免运费：不限金额、不限次数\n3. 生日礼遇：生日当月赠 200 元无门槛券，当月消费双倍积分\n4. 新品优先购：可提前 48 小时购买\n5. 退换货延长：30 天无理由退换，质量问题来回运费全免\n6. 积分加速：消费积分 2 倍累计\n\n补充说明：在库内会员权益文档中，9 折是钻石等级独有的折扣条款，黄金及以下等级未列出专属折扣。若需核对某位用户是否仍是钻石等级，我可以按 `user_profile_vectors.member_level` 再查。",
       "run_error": null
     },
     {
       "task_id": "rag_004",
       "category": "rag_search",
       "question": "钻石会员的累计平均客单价门槛是多少？",
+      "request_id": "req_2cf900a919f34d06",
+      "execution_id": "exec_d7f262089a7145d6",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169761.948349,
+          "request_id": "req_2cf900a919f34d06",
+          "execution_id": "exec_d7f262089a7145d6",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169761.954854,
+          "run_id": "01a1813f-26a2-7240-9d36-f7fd51bd1fe0",
+          "name": "chat_model",
+          "prompt_chars": 2120
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169763.150938,
+          "run_id": "01a1813f-26a2-7240-9d36-f7fd51bd1fe0",
+          "name": "chat_model",
+          "duration_ms": 1203.0,
+          "total_tokens": 1670
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169763.154945,
+          "run_id": "01a1813f-2b53-7073-b9e0-abdd443a97c4",
+          "name": "rag_search",
+          "input_preview": "{'query': '钻石会员 权益 门槛 累计消费 平均客单价', 'top_k': 5}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169763.319376,
+          "run_id": "01a1813f-2b53-7073-b9e0-abdd443a97c4",
+          "name": "rag_search",
+          "duration_ms": 172.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"钻石会员 权益 门槛 累计消费 平均客单价\", \"results\": [{\"content\": \"h1: 会员权益说明 h2: 会员升级与保级\\\\n- 升级：累计平均客单价达到上一等级门槛后，T+1 自动升级，权益次日生效。\\\\n- 保级：无固定保级考核期，等级随累计平均客单价的变动实时调整。\", \"score\": 0.6801621561631875, \"source\": \"member_benefits.md\"}, {\"content\": \"h1: 会员权益说明 h2: 白银会员权益\\\\n1. 生日礼遇：生日"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169763.322385,
+          "run_id": "01a1813f-2bfa-7683-9515-45e6758bb079",
+          "name": "chat_model",
+          "prompt_chars": 4419
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169764.83433,
+          "run_id": "01a1813f-2bfa-7683-9515-45e6758bb079",
+          "name": "chat_model",
+          "duration_ms": 1516.0,
+          "total_tokens": 4715
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169764.841345,
+          "run_id": "01a1813f-31e9-7eb2-95cf-a93d3fcc83d0",
+          "name": "rag_search",
+          "input_preview": "{'query': '会员等级划分 门槛 普通 白银 黄金 钻石 黑卡 平均客单价 元', 'top_k': 8}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169765.099742,
+          "run_id": "01a1813f-31e9-7eb2-95cf-a93d3fcc83d0",
+          "name": "rag_search",
+          "duration_ms": 266.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"会员等级划分 门槛 普通 白银 黄金 钻石 黑卡 平均客单价 元\", \"results\": [{\"content\": \"h1: 会员权益说明 h2: 等级划分标准\\\\n会员等级按「累计平均客单价」划分，T+1 更新：\\\\n- 钻石会员：累计平均客单价 ≥ 14555 元（约前 5%）\\\\n- 黄金会员：累计平均客单价 6680–14555 元\\\\n- 白银会员：累计平均客单价 2495–6680 元\\\\n- 普通会员：累计平均客单价 < 2495 元  \\\\n负责人：数据部-用户价值组。\", \"score\": 0"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169765.103263,
+          "run_id": "01a1813f-32ef-7403-9132-bfd5c5a12a48",
+          "name": "chat_model",
+          "prompt_chars": 7973
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169766.66384,
+          "run_id": "01a1813f-32ef-7403-9132-bfd5c5a12a48",
+          "name": "chat_model",
+          "duration_ms": 1562.0,
+          "total_tokens": 9890
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169766.671358,
+          "status": "COMPLETED",
+          "steps": 3,
+          "tool_call_count": 2,
+          "total_tokens": 9890
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -745,11 +2002,20 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
+        "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "14555"
@@ -773,21 +2039,110 @@
           "name": "rag_search",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
-      "steps": 2,
-      "tool_call_count": 1,
-      "elapsed_s": 3.88,
-      "final_answer": "**钻石会员门槛：累计平均客单价 ≥ 14555 元（约前 5%）**\n\n依据是知识库文档 `member_benefits.md` 中的「等级划分标准」：会员等级按「累计平均客单价」划分，T+1 更新。\n\n| 等级 | 累计平均客单价区间 |\n|---|---|\n| 钻石 | ≥ 14555 元（约前 5%） |\n| 黄金 | 6680 – 14555 元 |\n| 白银 | 2495 – 6680 元 |\n| 普通 | < 2495 元 |\n\n相关配套规则（同一文档「会员升级与保级」）：\n- 升级：累计平均客单价达到上一等级门槛后，T+1 自动升级，权益次日生效；\n- 保级：无固定保级考核期，等级随累计平均客单价的变动实时调整。\n\n说明：该门槛是文档定义的业务口径值。库内实测客单价 P90≈10383 元，与 14555 元这一阈值不完全对齐，因此统计「钻石人数/占比」时应以 member_level 字段为准，不要按 avg_amount 反推等级。",
+      "input_tokens": 9443,
+      "output_tokens": 447,
+      "total_tokens": 9890,
+      "token_usage_found": true,
+      "steps": 3,
+      "tool_call_count": 2,
+      "elapsed_s": 4.72,
+      "final_answer": "**钻石会员的门槛：累计平均客单价 ≥ 14555 元（约前 5%）**\n\n依据《会员权益说明 · 等级划分标准》（member_benefits.md）：\n\n| 会员等级 | 累计平均客单价区间 |\n|---|---|\n| 钻石会员 | ≥ 14555 元（约前 5%） |\n| 黄金会员 | 6680～14555 元 |\n| 白银会员 | 2495～6680 元 |\n| 普通会员 | < 2495 元 |\n\n补充口径：\n- 等级按「累计平均客单价」划分，T+1 更新；达到上一等级门槛后，T+1 自动升级，权益次日生效。\n- 无固定保级考核期，等级随累计平均客单价的变动实时调整。\n- 负责部门：数据部-用户价值组。\n\n注：知识库中未单列「黑卡」等级的客单价门槛；数据库中黑卡仅 3 人。",
       "run_error": null
     },
     {
       "task_id": "rag_005",
       "category": "rag_search",
       "question": "商品质量问题在签收后多少天内可以退换？",
+      "request_id": "req_09a078f3ab584210",
+      "execution_id": "exec_98afb0e4db174ade",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169766.671358,
+          "request_id": "req_09a078f3ab584210",
+          "execution_id": "exec_98afb0e4db174ade",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169766.680373,
+          "run_id": "01a1813f-3918-7040-8af7-135d04d7de76",
+          "name": "chat_model",
+          "prompt_chars": 2121
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169767.637552,
+          "run_id": "01a1813f-3918-7040-8af7-135d04d7de76",
+          "name": "chat_model",
+          "duration_ms": 953.0,
+          "total_tokens": 1728
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169767.645055,
+          "run_id": "01a1813f-3cdd-7073-acd5-621f0ca20b0c",
+          "name": "rag_search",
+          "input_preview": "{'query': '商品质量问题 签收后多少天内可以退换 售后政策', 'top_k': 5}"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169767.646064,
+          "run_id": "01a1813f-3cde-7ed1-b78a-2331de2d3d93",
+          "name": "rag_search",
+          "input_preview": "{'query': '退换货时限 签收 质量问题 客服SOP', 'top_k': 5}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169768.448321,
+          "run_id": "01a1813f-3cde-7ed1-b78a-2331de2d3d93",
+          "name": "rag_search",
+          "duration_ms": 797.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"退换货时限 签收 质量问题 客服SOP\", \"results\": [{\"content\": \"h1: 客服标准作业流程（SOP） h2: 场景二：商品质量问题\\\\n1. 请用户提供照片或视频证据。\\\\n2. 确认在退换货期内（签收后 7 天）。\\\\n3. 提供换货或退款选项，优先换货。\\\\n4. 若用户不满，升级至客服主管。\\\\n5. 记录工单，标记“质量问题”。\", \"score\": 0.7940873253599381, \"source\": \"cs_sop.md\"}, {\"content\": \"h1: 客服标"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169768.448321,
+          "run_id": "01a1813f-3cdd-7073-acd5-621f0ca20b0c",
+          "name": "rag_search",
+          "duration_ms": 797.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"商品质量问题 签收后多少天内可以退换 售后政策\", \"results\": [{\"content\": \"h1: 客服标准作业流程（SOP） h2: 场景二：商品质量问题\\\\n1. 请用户提供照片或视频证据。\\\\n2. 确认在退换货期内（签收后 7 天）。\\\\n3. 提供换货或退款选项，优先换货。\\\\n4. 若用户不满，升级至客服主管。\\\\n5. 记录工单，标记“质量问题”。\", \"score\": 0.7042824011152135, \"source\": \"cs_sop.md\"}, {\"content\": \"h1:"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169768.450321,
+          "run_id": "01a1813f-4003-7c50-9790-330f6a4ff330",
+          "name": "chat_model",
+          "prompt_chars": 6824
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169770.079222,
+          "run_id": "01a1813f-4003-7c50-9790-330f6a4ff330",
+          "name": "chat_model",
+          "duration_ms": 1625.0,
+          "total_tokens": 6324
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169770.08375,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 2,
+          "total_tokens": 6324
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -796,11 +2151,20 @@
       "expected_tools": [
         "rag_search"
       ],
+      "required_tools": [
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
+        "rag_search",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "7"
@@ -824,21 +2188,155 @@
           "name": "rag_search",
           "ok": true,
           "error": null
+        },
+        {
+          "name": "rag_search",
+          "ok": true,
+          "error": null
         }
       ],
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 5942,
+      "output_tokens": 382,
+      "total_tokens": 6324,
+      "token_usage_found": true,
       "steps": 2,
-      "tool_call_count": 1,
-      "elapsed_s": 3.26,
-      "final_answer": "**商品质量问题：签收后 7 天内可以退换。**\n\n依据《客服标准作业流程（SOP）》场景二「商品质量问题」（来源：cs_sop.md）：\n1. 请用户提供照片或视频证据；\n2. **确认是否在退换货期内（签收后 7 天）**；\n3. 提供换货或退款选项，**优先换货**；\n4. 如果用户不满意，升级至客服主管；\n5. 记录工单，并标记为“质量问题”。\n\n补充信息：7 天是无理由退换的基准期限（普通会员同样是 7 天）；等级更高的会员享有延长期（来源：member_benefits.md）：\n- 白银：10 天无理由退换\n- 黄金：15 天无理由退换\n- 钻石：30 天无理由退换，且**质量问题来回运费全免**\n\n因此，对钻石会员等享有延长期的高等级会员，实际可执行的退换货窗口会按该会员权益延长。",
+      "tool_call_count": 2,
+      "elapsed_s": 3.42,
+      "final_answer": "**商品质量问题：签收后 7 天内可退换。**\n\n依据《客服标准作业流程（SOP）》场景二「商品质量问题」（cs_sop.md）：\n1. 请用户提供照片或视频证据；\n2. **确认是否在退换货期内（签收后 7 天）**；\n3. 提供换货或退款选项，**优先换货**；\n4. 若用户不满，升级至客服主管；\n5. 记录工单，并标记“质量问题”。\n\n补充说明（会员权益，member_benefits.md）：\n- 普通会员：7 天无理由退换（与上述 7 天一致）；\n- 白银会员：退换货时限延长至 **10 天**无理由退换；\n- 钻石会员：退换货时限延长至 **30 天**无理由退换，且质量问题的**来回运费全免**。\n\n因此，基础规则是 7 天；如果用户是白银或钻石会员，则按对应会员等级适用的更长时限执行。",
       "run_error": null
     },
     {
       "task_id": "multi_001",
       "category": "multi_tool",
       "question": "统计黑卡用户数量，并计算黑卡用户占总用户的比例",
+      "request_id": "req_e41e38ee47784abc",
+      "execution_id": "exec_280c2fc0e0de48fb",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169770.08375,
+          "request_id": "req_e41e38ee47784abc",
+          "execution_id": "exec_280c2fc0e0de48fb",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169770.090275,
+          "run_id": "01a1813f-466a-7993-9bfb-059dc04fb06f",
+          "name": "chat_model",
+          "prompt_chars": 2125
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169771.520978,
+          "run_id": "01a1813f-466a-7993-9bfb-059dc04fb06f",
+          "name": "chat_model",
+          "duration_ms": 1437.0,
+          "total_tokens": 1728
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169771.527013,
+          "run_id": "01a1813f-4c07-7ff0-910d-c5b84e5111cc",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS total_users, SUM(CASE WHEN member_level = '黑卡' THEN 1 ELSE 0 END) AS black_card_users FROM user_profile_vectors\"}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169771.528018,
+          "run_id": "01a1813f-4c07-7ff0-910d-c5b84e5111cc",
+          "name": "execute_sql",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": false, \"data\": {\"sql\": \"SELECT COUNT(*) AS total_users, SUM(CASE WHEN member_level = \\'黑卡\\' THEN 1 ELSE 0 END) AS black_card_users FROM user_profile_vectors\", \"columns\": [], \"rows\": [], \"row_count\": 0}, \"error\": {\"code\": \"SQL_VALIDATION_ERROR\", \"message\": \"SQL 校验失败：仅允许 SELECT/WITH、必须"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169771.530018,
+          "run_id": "01a1813f-4c0a-7353-b672-6a3a9af0cfec",
+          "name": "chat_model",
+          "prompt_chars": 2681
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169772.488338,
+          "run_id": "01a1813f-4c0a-7353-b672-6a3a9af0cfec",
+          "name": "chat_model",
+          "duration_ms": 969.0,
+          "total_tokens": 3657
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169772.496939,
+          "run_id": "01a1813f-4fd1-7461-a2f2-4df64f6301be",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS total_users, SUM(CASE WHEN member_level = '黑卡' THEN 1 ELSE 0 END) AS black_card_users FROM user_profile_vectors LIMIT 1\"}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169772.510731,
+          "run_id": "01a1813f-4fd1-7461-a2f2-4df64f6301be",
+          "name": "execute_sql",
+          "duration_ms": 16.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS total_users, SUM(CASE WHEN member_level = \\'黑卡\\' THEN 1 ELSE 0 END) AS black_card_users FROM user_profile_vectors LIMIT 1\", \"columns\": [\"total_users\", \"black_card_users\"], \"rows\": [{\"total_users\": 8110, \"black_card_users\": 3}], \"row_count\": 1"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169772.514011,
+          "run_id": "01a1813f-4fe1-7f80-b57b-69a6651122bb",
+          "name": "chat_model",
+          "prompt_chars": 3500
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169773.324495,
+          "run_id": "01a1813f-4fe1-7f80-b57b-69a6651122bb",
+          "name": "chat_model",
+          "duration_ms": 812.0,
+          "total_tokens": 5817
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169773.331012,
+          "run_id": "01a1813f-5312-7f32-9c17-ec21bddfde03",
+          "name": "calculator",
+          "input_preview": "{'expression': '3 / 8110 * 100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169773.332218,
+          "run_id": "01a1813f-5312-7f32-9c17-ec21bddfde03",
+          "name": "calculator",
+          "duration_ms": 16.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"3 / 8110 * 100\", \"result\": 0.036991368680641186}, \"expression\": \"3 / 8110 * 100\", \"result\": 0.036991368680641186}' name='calculator' tool_call_id='call_00_ET_svvNQOlo3UNsTsSKYXQd6536'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169773.333928,
+          "run_id": "01a1813f-5316-7053-829b-51dc364ff33c",
+          "name": "chat_model",
+          "prompt_chars": 3794
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169774.52178,
+          "run_id": "01a1813f-5316-7053-829b-51dc364ff33c",
+          "name": "chat_model",
+          "duration_ms": 1187.0,
+          "total_tokens": 8193
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169774.528798,
+          "status": "COMPLETED",
+          "steps": 4,
+          "tool_call_count": 3,
+          "total_tokens": 8193
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -848,12 +2346,22 @@
         "execute_sql",
         "calculator"
       ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
+        "execute_sql",
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "3",
@@ -876,6 +2384,14 @@
       "tool_results": [
         {
           "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
+        },
+        {
+          "name": "execute_sql",
           "ok": true,
           "error": null
         },
@@ -885,19 +2401,112 @@
           "error": null
         }
       ],
-      "tool_execution_ok": 1.0,
-      "tool_errors": [],
-      "error_recovered": false,
-      "steps": 3,
-      "tool_call_count": 2,
-      "elapsed_s": 3.94,
-      "final_answer": "统计结果（来源：`user_profile_vectors` 表，按 `member_level = '黑卡'` 统计）：\n\n| 指标 | 数值 |\n|---|---|\n| 黑卡用户数 | 3 人 |\n| 总用户数 | 8,110 人 |\n| 黑卡用户占总用户比例 | 约 **0.037%** |\n\n依据：执行 `SELECT COUNT(*), SUM(CASE WHEN member_level='黑卡' THEN 1 ELSE 0 END) FROM user_profile_vectors` 得到 8110 / 3，再由 `3 ÷ 8110 × 100 ≈ 0.037%` 计算得出。黑卡属于极少数用户群体，占比不足万分之四。",
+      "tool_execution_ok": 0.6666666666666666,
+      "tool_errors": [
+        {
+          "name": "execute_sql",
+          "ok": false,
+          "error": {
+            "code": "SQL_VALIDATION_ERROR",
+            "message": "SQL 校验失败：仅允许 SELECT/WITH、必须带 LIMIT、仅白名单表"
+          }
+        }
+      ],
+      "error_recovered": true,
+      "input_tokens": 7761,
+      "output_tokens": 432,
+      "total_tokens": 8193,
+      "token_usage_found": true,
+      "steps": 4,
+      "tool_call_count": 3,
+      "elapsed_s": 4.44,
+      "final_answer": "统计结果如下：\n\n- **黑卡用户数：3 人**\n- **总用户数：8,110 人**\n- **黑卡用户占总用户比例：3 / 8110 ≈ 0.037%**\n\n依据：`execute_sql` 对 `user_profile_vectors` 按 `member_level = '黑卡'` 计数（黑卡 3 条、总行数 8,110 条），占比由 `calculator` 计算。\n\n补充提醒：黑卡样本仅 3 人（占比不足 0.04%），做人群特征分析时代表性极弱，建议合并到钻石及以上等级或将样本量说明一并给出。",
       "run_error": null
     },
     {
       "task_id": "multi_002",
       "category": "multi_tool",
       "question": "流失预警用户的定义是什么？同时统计黑卡用户数量",
+      "request_id": "req_bf626381945c4d23",
+      "execution_id": "exec_bcec4aef56b446d2",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169774.528798,
+          "request_id": "req_bf626381945c4d23",
+          "execution_id": "exec_bcec4aef56b446d2",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169774.536007,
+          "run_id": "01a1813f-57c8-7c01-8df1-7fcd39ab9705",
+          "name": "chat_model",
+          "prompt_chars": 2125
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169775.670312,
+          "run_id": "01a1813f-57c8-7c01-8df1-7fcd39ab9705",
+          "name": "chat_model",
+          "duration_ms": 1125.0,
+          "total_tokens": 1725
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169775.677347,
+          "run_id": "01a1813f-5c3d-7070-b285-ae2884732027",
+          "name": "rag_search",
+          "input_preview": "{'query': '流失预警用户 定义 口径', 'top_k': 5}"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169775.681354,
+          "run_id": "01a1813f-5c41-7da3-8105-cf2f675246fe",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS black_card_users FROM user_profile_vectors WHERE member_level = '黑卡' LIMIT 10\"}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169775.696692,
+          "run_id": "01a1813f-5c41-7da3-8105-cf2f675246fe",
+          "name": "execute_sql",
+          "duration_ms": 15.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS black_card_users FROM user_profile_vectors WHERE member_level = \\'黑卡\\' LIMIT 10\", \"columns\": [\"black_card_users\"], \"rows\": [{\"black_card_users\": 3}], \"row_count\": 1}, \"sql\": \"SELECT COUNT(*) AS black_card_users FROM user_profile_vectors WHERE"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169775.855177,
+          "run_id": "01a1813f-5c3d-7070-b285-ae2884732027",
+          "name": "rag_search",
+          "duration_ms": 172.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"流失预警用户 定义 口径\", \"results\": [{\"content\": \"h1: 用户标签口径说明 h2: 流失预警用户\\\\n定义：近 30 天未活跃，且历史客单价 > 500 元，且累计购买次数 ≥ 3 次。\\\\n更新频率：T+1。\\\\n负责人：数据部-用户留存组。\\\\n用途：召回活动、定向优惠券发放。\", \"score\": 0.6724359967047753, \"source\": \"tag_definitions.md\"}, {\"content\": \"h1: 用户标签口径说明 h2: 低客单用户\\\\n"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169775.860202,
+          "run_id": "01a1813f-5cf4-7492-8fed-9a8545aaacd8",
+          "name": "chat_model",
+          "prompt_chars": 4811
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169777.813851,
+          "run_id": "01a1813f-5cf4-7492-8fed-9a8545aaacd8",
+          "name": "chat_model",
+          "duration_ms": 1953.0,
+          "total_tokens": 4860
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169777.821374,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 2,
+          "total_tokens": 4860
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -907,12 +2516,21 @@
         "rag_search",
         "execute_sql"
       ],
+      "required_tools": [
+        "rag_search",
+        "execute_sql"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "rag_search",
         "execute_sql"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "30",
@@ -947,16 +2565,115 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 4493,
+      "output_tokens": 367,
+      "total_tokens": 4860,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 4.39,
-      "final_answer": "已完成两项查询。\n\n## 一、流失预警用户的定义\n\n依据知识库 `tag_definitions.md` 原文：\n\n> **流失预警用户**：近 30 天未活跃，**且**历史客单价 > 500 元，**且**累计购买次数 ≥ 3 次。\n> 更新频率：T+1；负责人：数据部-用户留存组。\n> 用途：召回活动、定向优惠券发放。\n\n三个条件需同时满足。补充区分：这与营销手册中的“**流失客**”不是同一个口径。流失客只按 > 90 天无行为来判定，是营销挽回动作（回归礼包 100 元券，在第 91/120 天触达，每月最多 1 次）的目标人群。\n\n## 二、黑卡用户数量\n\n```sql\nSELECT member_level, COUNT(*) AS user_cnt\nFROM user_profile_vectors\nWHERE member_level = '黑卡'\nGROUP BY member_level LIMIT 10\n```\n\n结果：**黑卡用户 3 人**，占全量 8110 人的比例约 0.04%，属最高等级会员中的极稀少群体。\n\n注：本库中用于衡量活跃度的字段只有相对天数 `days_since_last_buy`，且不含浏览和加购数据；因此，“流失预警用户”中“近 30 天未活跃”只能近似用 `days_since_last_buy > 30` 替代，无法严格复刻原始口径。如需精确统计人数，建议直接取数据部的标签表。",
+      "elapsed_s": 3.3,
+      "final_answer": "**1. 流失预警用户定义**（来源：`tag_definitions.md`）\n需要同时满足以下三个条件：\n- 近 30 天未活跃（按库内可用的 `days_since_last_buy` 来理解，即距离上次购买的天数 > 30 天）；\n- 历史客单价 > 500 元；\n- 累计购买次数 ≥ 3 次。\n\n补充：该标签每天更新一次（T+1），由数据部-用户留存组负责，用于召回活动、定向优惠券发放。注意它与「流失客」（> 90 天无行为，见 `marketing_playbook.md`）是不同口径：流失预警用户是流失前阶段的预警标签。\n\n**2. 黑卡用户数量**\n`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level='黑卡'` → **3 人**，占全部 8110 位用户的约 0.04%，是会员等级中人数最少的一档。",
       "run_error": null
     },
     {
       "task_id": "multi_003",
       "category": "multi_tool",
       "question": "统计普通用户数量，并计算普通用户占总用户的比例",
+      "request_id": "req_ff4e2d457afd4a79",
+      "execution_id": "exec_965dd54cf93f44da",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169777.821374,
+          "request_id": "req_ff4e2d457afd4a79",
+          "execution_id": "exec_965dd54cf93f44da",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169777.831409,
+          "run_id": "01a1813f-64a7-7b12-bddf-027912c798db",
+          "name": "chat_model",
+          "prompt_chars": 2125
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169778.725938,
+          "run_id": "01a1813f-64a7-7b12-bddf-027912c798db",
+          "name": "chat_model",
+          "duration_ms": 907.0,
+          "total_tokens": 1647
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169778.732946,
+          "run_id": "01a1813f-682d-70e0-93eb-9d205af81f21",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS normal_cnt, (SELECT COUNT(*) FROM user_profile_vectors) AS total_cnt FROM user_profile_vectors WHERE member_level = '普通' LIMIT 10\"}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169778.743076,
+          "run_id": "01a1813f-682d-70e0-93eb-9d205af81f21",
+          "name": "execute_sql",
+          "duration_ms": 15.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS normal_cnt, (SELECT COUNT(*) FROM user_profile_vectors) AS total_cnt FROM user_profile_vectors WHERE member_level = \\'普通\\' LIMIT 10\", \"columns\": [\"normal_cnt\", \"total_cnt\"], \"rows\": [{\"normal_cnt\": 4053, \"total_cnt\": 8110}], \"row_count\": 1}, "
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169778.745589,
+          "run_id": "01a1813f-683a-76f1-bb51-fcb37d468ea4",
+          "name": "chat_model",
+          "prompt_chars": 2948
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169779.466638,
+          "run_id": "01a1813f-683a-76f1-bb51-fcb37d468ea4",
+          "name": "chat_model",
+          "duration_ms": 719.0,
+          "total_tokens": 3516
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169779.474646,
+          "run_id": "01a1813f-6b12-7f61-8ee2-bd6dbb9d7f67",
+          "name": "calculator",
+          "input_preview": "{'expression': '4053/8110*100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169779.476146,
+          "run_id": "01a1813f-6b12-7f61-8ee2-bd6dbb9d7f67",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"4053/8110*100\", \"result\": 49.97533908754624}, \"expression\": \"4053/8110*100\", \"result\": 49.97533908754624}' name='calculator' tool_call_id='call_00_ET_IeoJV41ubP8Jxjptq5uz6187'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169779.479156,
+          "run_id": "01a1813f-6b17-71d2-a212-dec9681f2462",
+          "name": "chat_model",
+          "prompt_chars": 3233
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169780.877261,
+          "run_id": "01a1813f-6b17-71d2-a212-dec9681f2462",
+          "name": "chat_model",
+          "duration_ms": 1390.0,
+          "total_tokens": 5595
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169780.892283,
+          "status": "COMPLETED",
+          "steps": 3,
+          "tool_call_count": 2,
+          "total_tokens": 5595
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -966,12 +2683,21 @@
         "execute_sql",
         "calculator"
       ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "4053",
@@ -1006,16 +2732,115 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 5332,
+      "output_tokens": 263,
+      "total_tokens": 5595,
+      "token_usage_found": true,
       "steps": 3,
       "tool_call_count": 2,
-      "elapsed_s": 3.97,
-      "final_answer": "统计结果（数据源：user_profile_vectors 表）：\n\n| 指标 | 数值 |\n|---|---|\n| 普通用户数 | 4,053 人 |\n| 总用户数 | 8,110 人 |\n| 普通用户占比 | 约 49.98%（≈50%） |\n\nSQL 依据：\n```sql\nSELECT COUNT(*) AS total_users,\n       SUM(CASE WHEN member_level = '普通' THEN 1 ELSE 0 END) AS normal_users\nFROM user_profile_vectors LIMIT 100;\n```\n占比计算：4053 ÷ 8110 × 100 = 49.9753%。\n\n补充：普通用户是规模最大的会员层级，但几乎正好占据一半用户；其余一半分布在白银（2434）、黄金（1217）、钻石（403）、黑卡（3）。也就是说，约 50% 的用户已有等级升级，运营上可重点对普通用户做首单/复购引导。",
+      "elapsed_s": 3.06,
+      "final_answer": "统计结果（依据 SQL 与 calculator）：\n\n- 普通用户数量：**4,053 人**\n- 总用户数：**8,110 人**\n- 普通用户占比：**49.98%**（4053 ÷ 8110 ≈ 49.98%）\n\nSQL 依据：`SELECT COUNT(*) AS normal_cnt, (SELECT COUNT(*) FROM user_profile_vectors) AS total_cnt FROM user_profile_vectors WHERE member_level = '普通'`\n\n结论：普通用户接近全部用户的一半（约五成），是当前会员结构中的主体人群；付费/高等级（白银及以上）用户合计约 50.02%，两者基本各占一半。",
       "run_error": null
     },
     {
       "task_id": "multi_004",
       "category": "multi_tool",
       "question": "统计上海用户中钻石用户的数量，并计算其占上海用户的比例",
+      "request_id": "req_068a2c19b6ba4abb",
+      "execution_id": "exec_20ebbeca35344098",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169780.893285,
+          "request_id": "req_068a2c19b6ba4abb",
+          "execution_id": "exec_20ebbeca35344098",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169780.901805,
+          "run_id": "01a1813f-70a6-7b52-81e0-216c31cdbfd5",
+          "name": "chat_model",
+          "prompt_chars": 2129
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169781.526816,
+          "run_id": "01a1813f-70a6-7b52-81e0-216c31cdbfd5",
+          "name": "chat_model",
+          "duration_ms": 625.0,
+          "total_tokens": 1658
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169781.536345,
+          "run_id": "01a1813f-7321-7a03-9250-ce065a6f428b",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS total_sh, SUM(CASE WHEN member_level = '钻石' THEN 1 ELSE 0 END) AS diamond_sh FROM user_profile_vectors WHERE city = '上海' LIMIT 10\"}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169781.5509,
+          "run_id": "01a1813f-7321-7a03-9250-ce065a6f428b",
+          "name": "execute_sql",
+          "duration_ms": 16.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS total_sh, SUM(CASE WHEN member_level = \\'钻石\\' THEN 1 ELSE 0 END) AS diamond_sh FROM user_profile_vectors WHERE city = \\'上海\\' LIMIT 10\", \"columns\": [\"total_sh\", \"diamond_sh\"], \"rows\": [{\"total_sh\": 686, \"diamond_sh\": 32}], \"row_count\": 1}, \"sq"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169781.555403,
+          "run_id": "01a1813f-7333-7e23-8e83-ba1974567c11",
+          "name": "chat_model",
+          "prompt_chars": 2942
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169782.220584,
+          "run_id": "01a1813f-7333-7e23-8e83-ba1974567c11",
+          "name": "chat_model",
+          "duration_ms": 656.0,
+          "total_tokens": 3552
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169782.229648,
+          "run_id": "01a1813f-75d6-7f92-824d-352e41cb1305",
+          "name": "calculator",
+          "input_preview": "{'expression': '32 / 686 * 100'}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169782.232649,
+          "run_id": "01a1813f-75d6-7f92-824d-352e41cb1305",
+          "name": "calculator",
+          "duration_ms": 0.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"expression\": \"32 / 686 * 100\", \"result\": 4.664723032069971}, \"expression\": \"32 / 686 * 100\", \"result\": 4.664723032069971}' name='calculator' tool_call_id='call_00_ET_AykfqWrolDqNPhHB2FzK4124'"
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169782.235649,
+          "run_id": "01a1813f-75db-7873-8aae-ffa3eb64c07b",
+          "name": "chat_model",
+          "prompt_chars": 3230
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169783.844402,
+          "run_id": "01a1813f-75db-7873-8aae-ffa3eb64c07b",
+          "name": "chat_model",
+          "duration_ms": 1609.0,
+          "total_tokens": 5668
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169783.853924,
+          "status": "COMPLETED",
+          "steps": 3,
+          "tool_call_count": 2,
+          "total_tokens": 5668
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -1025,12 +2850,21 @@
         "execute_sql",
         "calculator"
       ],
+      "required_tools": [
+        "execute_sql",
+        "calculator"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql",
         "calculator"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "32",
@@ -1067,16 +2901,100 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 5385,
+      "output_tokens": 283,
+      "total_tokens": 5668,
+      "token_usage_found": true,
       "steps": 3,
       "tool_call_count": 2,
-      "elapsed_s": 3.92,
-      "final_answer": "**结果（上海用户中的钻石会员）**\n\n| 指标 | 数值 |\n|---|---|\n| 上海用户总数 | 686 人 |\n| 其中钻石会员 | 32 人 |\n| 钻石会员占上海用户比例 | 约 **4.66%**（32 ÷ 686） |\n\n**依据**\n- SQL：`SELECT COUNT(*) AS total_sh, SUM(CASE WHEN member_level = '钻石' THEN 1 ELSE 0 END) AS diamond_sh FROM user_profile_vectors WHERE city = '上海' LIMIT 10` → total_sh=686，diamond_sh=32\n- 占比计算：32 / 686 × 100 ≈ 4.665%\n\n参考：全库钻石会员共 403 人，占全部 8110 人的约 4.97%；上海钻石会员占比（4.66%）与全库整体水平接近，略低一些。",
+      "elapsed_s": 2.97,
+      "final_answer": "**结论（上海用户中的钻石会员）**\n\n- 上海用户总数：**686 人**\n- 其中钻石会员：**32 人**\n- 占上海用户比例：**32 / 686 ≈ 4.66%**\n\n依据：`SELECT COUNT(*) , SUM(CASE WHEN member_level='钻石' ...) FROM user_profile_vectors WHERE city='上海'` 返回 total_sh=686、diamond_sh=32；占比由 calculator 计算为 4.6647%。\n\n补充参考：全库钻石会员共 403 人，占 8110 人的约 4.97%，上海钻石占比与整体水平基本持平。如需按其它城市或会员等级做同类对比，可继续查询。",
       "run_error": null
     },
     {
       "task_id": "multi_005",
       "category": "multi_tool",
       "question": "统计钻石用户数量，并告诉我钻石会员的专属折扣权益",
+      "request_id": "req_385f655fe6a24ff1",
+      "execution_id": "exec_ac5f5c71f2fd4a6e",
+      "parent_execution_id": null,
+      "event_trace": [
+        {
+          "event": "run_started",
+          "timestamp": 1793169783.853924,
+          "request_id": "req_385f655fe6a24ff1",
+          "execution_id": "exec_ac5f5c71f2fd4a6e",
+          "parent_execution_id": null
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169783.870477,
+          "run_id": "01a1813f-7c3e-71a3-8232-2a0b9318f6eb",
+          "name": "chat_model",
+          "prompt_chars": 2126
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169785.00448,
+          "run_id": "01a1813f-7c3e-71a3-8232-2a0b9318f6eb",
+          "name": "chat_model",
+          "duration_ms": 1141.0,
+          "total_tokens": 1706
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169785.011014,
+          "run_id": "01a1813f-80b3-7a53-b85f-c614b6c614c4",
+          "name": "execute_sql",
+          "input_preview": "{'sql': \"SELECT COUNT(*) AS diamond_cnt FROM user_profile_vectors WHERE member_level = '钻石' LIMIT 10\"}"
+        },
+        {
+          "event": "tool_started",
+          "timestamp": 1793169785.014014,
+          "run_id": "01a1813f-80b6-7c41-93e3-7aab21e693bb",
+          "name": "rag_search",
+          "input_preview": "{'query': '钻石会员专属折扣权益', 'top_k': 6}"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169785.024038,
+          "run_id": "01a1813f-80b3-7a53-b85f-c614b6c614c4",
+          "name": "execute_sql",
+          "duration_ms": 15.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"sql\": \"SELECT COUNT(*) AS diamond_cnt FROM user_profile_vectors WHERE member_level = \\'钻石\\' LIMIT 10\", \"columns\": [\"diamond_cnt\"], \"rows\": [{\"diamond_cnt\": 403}], \"row_count\": 1}, \"sql\": \"SELECT COUNT(*) AS diamond_cnt FROM user_profile_vectors WHERE member_level = \\'"
+        },
+        {
+          "event": "tool_finished",
+          "timestamp": 1793169785.118416,
+          "run_id": "01a1813f-80b6-7c41-93e3-7aab21e693bb",
+          "name": "rag_search",
+          "duration_ms": 109.0,
+          "output_preview": "content='{\"ok\": true, \"data\": {\"query\": \"钻石会员专属折扣权益\", \"results\": [{\"content\": \"h1: 会员权益说明 h2: 钻石会员权益\\\\n1. 专属客服：7×24 小时一对一专属顾问，平均响应 1 分钟内。\\\\n2. 全场免运费：不限订单金额、不限次数。\\\\n3. 专属折扣：全场商品 9 折（不与平台活动价叠加）。\\\\n4. 生日礼遇：生日当月赠 200 元无门槛券，当月消费双倍积分。\\\\n5. 新品优先购：新品发布可提前 48 小时购买。\\\\n6. 退换货延长：30 天无理由退换，质量问题来回运费全免。\\\\n7. 积分加速："
+        },
+        {
+          "event": "llm_started",
+          "timestamp": 1793169785.122424,
+          "run_id": "01a1813f-8122-7180-932c-81844fc339c6",
+          "name": "chat_model",
+          "prompt_chars": 5641
+        },
+        {
+          "event": "llm_finished",
+          "timestamp": 1793169786.475873,
+          "run_id": "01a1813f-8122-7180-932c-81844fc339c6",
+          "name": "chat_model",
+          "duration_ms": 1360.0,
+          "total_tokens": 5390
+        },
+        {
+          "event": "run_finished",
+          "timestamp": 1793169786.481889,
+          "status": "COMPLETED",
+          "steps": 2,
+          "tool_call_count": 2,
+          "total_tokens": 5390
+        }
+      ],
       "status": "COMPLETED",
       "status_ok": true,
       "task_success": true,
@@ -1086,12 +3004,21 @@
         "execute_sql",
         "rag_search"
       ],
+      "required_tools": [
+        "execute_sql",
+        "rag_search"
+      ],
+      "optional_tools": [],
+      "forbidden_tools": [],
       "actual_tools": [
         "execute_sql",
         "rag_search"
       ],
       "missing_tools": [],
+      "missing_required_tools": [],
+      "forbidden_tools_hit": [],
       "tool_selection_ok": true,
+      "tool_policy_ok": true,
       "tool_recall": 1.0,
       "expected_keywords": [
         "403",
@@ -1126,10 +3053,14 @@
       "tool_execution_ok": 1.0,
       "tool_errors": [],
       "error_recovered": false,
+      "input_tokens": 5041,
+      "output_tokens": 349,
+      "total_tokens": 5390,
+      "token_usage_found": true,
       "steps": 2,
       "tool_call_count": 2,
-      "elapsed_s": 5.69,
-      "final_answer": "## 一、钻石用户数量\n\n**403 人**（数据表 `user_profile_vectors`，筛选条件 `member_level = '钻石'`）。\n\n## 二、钻石会员专属折扣权益\n\n公司权益文档原文（来源：`member_benefits.md`）：\n\n> **钻石会员权益**\n> 3. **专属折扣：全场商品 9 折（不与平台活动价叠加）。**\n\n也就是说，钻石会员享受全场 9 折，但不能与平台活动价叠加使用，按较优价格执行。\n\n## 三、钻石会员其他配套权益（可一并说明）\n\n1. **专属客服**：7×24 小时一对一专属顾问，平均响应 1 分钟内\n2. **全场免运费**：不限订单金额、不限次数\n3. **生日礼遇**：生日当月赠 200 元无门槛券，当月消费双倍积分\n4. **新品优先购**：新品发布可提前 48 小时购买\n5. **退换货延长**：30 天无理由退换，质量问题来回运费全免\n6. **积分加速**：消费积分 2 倍累计\n\n**依据**：`execute_sql`（COUNT 查询返回 403）＋ `rag_search`（`member_benefits.md` 会员权益说明）。\n\n补充提示：如果要对这批钻石用户开展运营触达，需要注意本库没有绝对时间字段，只能用 `days_since_last_buy` 等相对指标筛选活跃度；如果需要按这部分用户做分层或触达名单统计，可以继续告诉我。",
+      "elapsed_s": 2.62,
+      "final_answer": "**钻石用户数量：403 人**\n\n依据：`SELECT COUNT(*) FROM user_profile_vectors WHERE member_level = '钻石'` 返回 403。\n\n**钻石会员专属折扣权益**（来源：member_benefits.md）\n- **专属折扣：全场商品 9 折**；该折扣不与平台活动价叠加。\n\n钻石会员的其他权益：\n1. 专属客服：7×24 小时一对一专属顾问，平均 1 分钟内响应\n2. 全场免运费：不限金额、不限次数\n3. 生日礼遇：生日当月赠 200 元无门槛券，当月消费双倍积分\n4. 新品优先购：提前 48 小时\n5. 退换货延长：30 天无理由退换，质量问题来回运费全免\n6. 积分加速：消费积分 2 倍累计\n\n补充标准：钻石会员指累计平均客单价 ≥ 14555 元（约前 5%），等级 T+1 更新。",
       "run_error": null
     }
   ]
