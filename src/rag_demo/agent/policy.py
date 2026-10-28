@@ -1,11 +1,13 @@
 """Agent Tool 权限策略。
 
-第一版先建立“暴露前过滤 + 执行时复核”的机制：
+建立“暴露前过滤 + 执行时复核”的机制：
 - 只把当前身份允许的 Tool 绑定给 LLM / ToolNode；
 - LLM 若仍产出未授权 Tool 调用，chatbot 节点在执行前拒绝。
 
-默认策略暂不按角色削减 B 端业务 Tool，避免在未完成权限矩阵评审前破坏现有分析能力；
-后续可把 allowed_tools 映射到企业/角色配置，而不用改 Graph。
+B 端默认矩阵（未完成正式权限评审前的最小安全默认）：
+    admin / ent_admin / exec / analyst / ops -> rag_search + execute_sql + calculator
+    cs                                         -> rag_search + calculator
+    guest                                      -> 无
 """
 from __future__ import annotations
 
@@ -13,6 +15,20 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 B_AGENT_TOOL_NAMES: tuple[str, ...] = ("rag_search", "execute_sql", "calculator")
+
+_ANALYTICS_ROLES = frozenset({"admin", "ent_admin", "exec", "analyst", "ops"})
+_CS_ROLE = "cs"
+_GUEST_ROLE = "guest"
+
+
+def _account_role(account: dict[str, Any] | None) -> str:
+    if account is None:
+        return "offline"
+    if account.get("is_system_admin"):
+        return "admin"
+    if account.get("is_enterprise_admin"):
+        return "ent_admin"
+    return str(account.get("role") or _GUEST_ROLE)
 
 
 @dataclass(frozen=True)
@@ -43,5 +59,11 @@ class ToolPolicy:
 
     @classmethod
     def for_account(cls, account: dict[str, Any] | None = None) -> "ToolPolicy":
-        """当前 B 端默认：已登录的非 demo 账号可用全部 B 工具。"""
-        return cls()
+        if account is None:
+            return cls()
+        role = _account_role(account)
+        if role in _ANALYTICS_ROLES:
+            return cls(B_AGENT_TOOL_NAMES)
+        if role == _CS_ROLE:
+            return cls(("rag_search", "calculator"))
+        return cls(())

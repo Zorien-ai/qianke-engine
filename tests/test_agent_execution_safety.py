@@ -186,11 +186,25 @@ def test_policy_denies_demo_and_disabled_accounts():
 
     assert policy.allowed_tools({"id": 1, "is_demo": True}) == ()
     assert policy.allowed_tools({"id": 1, "status": "disabled"}) == ()
-    assert policy.allowed_tools({"id": 1, "status": "active"}) == (
+    assert policy.allowed_tools({"id": 1, "status": "active", "role": "analyst"}) == (
         "rag_search",
         "execute_sql",
         "calculator",
     )
+
+
+def test_policy_role_matrix_for_b_tools():
+    analyst = {"id": 1, "status": "active", "role": "analyst"}
+    cs = {"id": 2, "status": "active", "role": "cs"}
+    guest = {"id": 3, "status": "active", "role": "guest"}
+
+    assert ToolPolicy.for_account(analyst).allowed_tools(analyst) == (
+        "rag_search",
+        "execute_sql",
+        "calculator",
+    )
+    assert ToolPolicy.for_account(cs).allowed_tools(cs) == ("rag_search", "calculator")
+    assert ToolPolicy.for_account(guest).allowed_tools(guest) == ()
 
 
 def test_execute_agent_passes_allowed_tools_to_runner():

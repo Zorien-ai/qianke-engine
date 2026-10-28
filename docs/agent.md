@@ -181,8 +181,20 @@ account → ToolPolicy.allowed_tools()
 执行时再复核：chatbot 节点收到模型响应后，如果出现未授权 Tool call，
 直接进入 `TOOL_NOT_ALLOWED` 终态，不执行任何 Tool。
 
-第一版默认：已登录、非 demo、非 disabled 的账号可使用全部 B 端 Tool。
-按角色细分 Tool 权限（例如 `execute_sql` 只给特定角色）仍需业务确认。
+第一版默认 B 端矩阵：
+
+```text
+admin / ent_admin / exec / analyst / ops
+  → rag_search + execute_sql + calculator
+
+cs
+  → rag_search + calculator
+
+guest / demo / disabled
+  → 无
+```
+
+`execute_sql` 不暴露给 `cs`；角色级策略仍可在后续权限评审中调整。
 
 ## 4. API
 
