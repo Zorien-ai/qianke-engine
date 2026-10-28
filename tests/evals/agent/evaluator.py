@@ -128,6 +128,11 @@ def estimate_cost(input_tokens: int, output_tokens: int) -> float | None:
     )
 
 
+def _keyword_text(text: str) -> str:
+    """关键词比较前去掉数字千分位逗号，避免 14555 与 14,555 误判。"""
+    return text.replace(",", "").replace("，", "")
+
+
 def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     """评价单个任务。"""
     expected = [str(x) for x in (task.get("expected_tools") or [])]
@@ -152,10 +157,13 @@ def evaluate_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any
     tool_recall = len(expected_set & actual_set) / len(expected_set) if expected_set else 1.0
 
     final = str(result.get("final_answer") or "")
+    final_keyword_text = _keyword_text(final)
     keywords = [str(x) for x in (task.get("expected_keywords") or [])]
-    missing_keywords = [word for word in keywords if word not in final]
+    missing_keywords = [
+        word for word in keywords if _keyword_text(word) not in final_keyword_text
+    ]
     keywords_any = [str(x) for x in (task.get("expected_keywords_any") or [])]
-    hit_any = [word for word in keywords_any if word in final]
+    hit_any = [word for word in keywords_any if _keyword_text(word) in final_keyword_text]
     missing_any = [] if not keywords_any or hit_any else keywords_any
     disallowed_numbers: list[str] = []
     if task.get("must_not_contain_numbers"):

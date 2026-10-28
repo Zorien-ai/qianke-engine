@@ -83,6 +83,28 @@ def test_evaluate_task_success_and_tool_metrics():
     assert scored["final_ok"] is True
 
 
+def test_evaluate_task_accepts_thousands_separator_in_keyword():
+    task = {
+        "task_id": "t_sep",
+        "category": "rag_search",
+        "question": "q",
+        "expected_tools": ["rag_search"],
+        "expected_keywords": ["14555"],
+        "expected_success": True,
+    }
+    result = {
+        "status": "COMPLETED",
+        "tool_calls": [{"name": "rag_search", "args": {}}],
+        "messages": [_tool_message("rag_search", True)],
+        "final_answer": "钻石会员门槛为 14,555 元",
+        "steps": 2,
+        "tool_call_count": 1,
+    }
+    scored = evaluator.evaluate_task(task, result)
+    assert scored["task_success"] is True
+    assert scored["missing_keywords"] == []
+
+
 def test_evaluate_task_fails_when_required_tool_missing():
     task = {
         "task_id": "t2",
