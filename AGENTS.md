@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.1.0 · **Status:** Active · **Product:** Qianke Agent  
+> **Version:** 1.2.0 · **Status:** Active · **Product:** Qianke Agent  
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -343,11 +343,68 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 
 ---
 
-## 18. 版本状态
+## 18. 最新目标方向（2026-10-28）
+
+> 本节是**目标态与演进规划**，不代表当前代码已全部实现。  
+> 当前实现状态以 `docs/agent.md`、代码和 Eval 基线为准。
+
+### 18.1 核心设计哲学
+
+- **Tool 是手脚，Agent 是大脑**：Tool 内禁止包含“总结 / 分析 / 生成回答”的 LLM 调用；Tool 只负责确定性的数据获取与执行。
+- **按需演进**：当前阶段单体 ReAct Agent 能解决的，不拆多智能体；只有工具超过约 10 个且出现路由混乱，才考虑 Supervisor。
+- **防御性设计**：幻觉与越权由确定性代码兜底；写操作和敏感查询必须有 Python 级硬拦截（Constraint Filter / 只读账号 / 人工确认）。
+
+### 18.2 Tool 契约目标
+
+所有 Tool 应逐步统一为 OpenAPI 风格描述 + 结构化 JSON 返回：
+
+| Tool | 目标边界 |
+|---|---|
+| `rag_search(query)` | 只返回原文片段与来源，不生成答案；建议结构 `context / sources / need_sql` |
+| `execute_sql(query)` | Text2SQL → 安全校验 → 只读账号执行；SQL 错误结构化返回，让 Agent 自我修正 |
+| `calculator(expression)` | 安全 AST 解析，禁止 `eval()`；返回结构化结果 |
+
+当前代码仍使用 `execute_sql(sql=...)` 和 `ToolResult` dict；参数命名与 JSON 字符串化属于后续迁移项，不在文档更新时直接改代码。
+
+### 18.3 三端 Agent 矩阵
+
+三端共享原子 Tool 库，但各自拥有独立 StateGraph：
+
+| 端 | 职责 | 当前状态 |
+|---|---|---|
+| 用户端（C） | 聊天导购、商品推荐、模拟下单 | 待开发 |
+| 商户端（B） | 洞察分析、千人千面文案、SOP 客服 | 开发中，当前主线 |
+| 管理端（A） | Agent 运行监控、高危调用审计、算力消耗 | 待开发 |
+
+用户端目标工作流：
+
+```text
+聊天 → rag_search 查商品库 → calculator 算预算
+→ simulate_create_order（模拟写，需人工确认）→ 推荐卡片
+```
+
+### 18.4 LangGraph 编排约束
+
+- State 只保留 `messages` 和必要的流转状态。
+- 必须有 `step_count` 上限；目标默认最多 5 轮。
+- 金额、数据库写入等高风险动作必须使用 `interrupt` 挂起，等待前端 / 人工审批。
+- 当前 Runtime 已有 step / tool-call / timeout / token budget / retry / checkpoint；`interrupt` 与三端 StateGraph 尚未实现。
+
+### 18.5 演进路线
+
+```text
+阶段一（当前）：商户端单体 ReAct Agent + 3 个原子 Tool
+阶段二：用户端极简购物对话流
+阶段三：工具 > 10 且路由混乱时，再评估 Supervisor 多智能体
+```
+
+---
+
+## 19. 版本状态
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.1.0 |
+| AGENTS.md | v1.2.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Business Analysis & Strategy Decision Agent |
 | Primary | 运营活动策略助手 |
@@ -356,6 +413,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 | Agent | Runtime v0.2.2 |
 | Evaluation | Regression 20 / Benchmark 80（development set） / Eval v2.2 |
 | Next | 重建 private holdout / 读 KNOWN_ISSUES.md |
+| Agent Matrix | B 端开发中；C/A 端待开发 |
 
 ## 变更记录
 
@@ -363,3 +421,4 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 |---|---|---|
 | 1.0 | - | 初版，29 节 |
 | 1.1.0 | 2026-10-26 | 合并重复章节；统一标题/列表/代码块；压缩流程图；拆分“工作协议”与“产品设计”；更新 Eval 版本状态 |
+| 1.2.0 | 2026-10-28 | 增加最新目标方向：设计哲学、Tool 契约、三端 Agent 矩阵、LangGraph 编排与演进路线；明确目标态与当前实现差异 |
