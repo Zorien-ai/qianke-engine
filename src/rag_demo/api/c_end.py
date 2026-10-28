@@ -1,15 +1,19 @@
 """C 端商品浏览与模拟订单 HTTP API。"""
 from __future__ import annotations
 
+import re
 import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
+from rag_demo.agent.checkpoint import get_checkpointer
+from rag_demo.c_end import agent as c_agent
 from rag_demo.c_end import store
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
+_THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 def _buyer() -> tuple[str, dict]:
@@ -33,6 +37,23 @@ class PrepareOrderIn(BaseModel):
 class ConfirmOrderIn(BaseModel):
     confirmation_token: str = Field(..., min_length=8, max_length=200)
     request_id: str | None = Field(default=None, max_length=128)
+
+
+class CAgentRunIn(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500)
+    thread_id: str | None = Field(default=None, max_length=128)
+
+
+class CAgentResumeIn(BaseModel):
+    thread_id: str = Field(..., min_length=1, max_length=128)
+    approved: bool
+
+
+def _last_ai_text(messages: list) -> str:
+    for msg in reversed(messages or []):
+        if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
+            return str(msg.content)
+    return ""
 
 
 def _http_error(exc: store.CStoreError) -> HTTPException:
@@ -86,6 +107,62 @@ def get_order(order_id: str) -> dict:
     if order["buyer_id"] != buyer_id:
         raise HTTPException(status_code=403, detail="不能查看其他用户的订单")
     return order
+
+
+@router.post("/agent/run")
+def c_agent_run(req: CAgentRunIn) -> dict:
+    buyer_id, _ = _buyer()
+    thread_id = (req.thread_id or "").strip() or f"c_thread_{uuid.uuid4().hex[:16]}"
+    if not _THREAD_RE.fullmatch(thread_id):
+        raise HTTPException(status_code=400, detail="thread_id 格式不合法")
+    try:
+        result = c_agent.run_c_agent(
+            req.message.strip(),
+            buyer_id=buyer_id,
+            thread_id=thread_id,
+            checkpointer=get_checkpointer(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"C 端 Agent 运行失败：{exc}") from exc
+    return {
+        "thread_id": thread_id,
+        "status": result["status"],
+        "interrupted": result["interrupted"],
+        "requires_confirmation": result["interrupted"],
+        "draft": result["draft"],
+        "order": result["order"],
+        "reply": _last_ai_text(result["messages"]),
+    }
+
+
+@router.post("/agent/resume")
+def c_agent_resume(req: CAgentResumeIn) -> dict:
+    buyer_id, _ = _buyer()
+    thread_id = req.thread_id.strip()
+    if not _THREAD_RE.fullmatch(thread_id):
+        raise HTTPException(status_code=400, detail="thread_id 格式不合法")
+    try:
+        result = c_agent.resume_c_agent(
+            buyer_id=buyer_id,
+            thread_id=thread_id,
+            approved=req.approved,
+            checkpointer=get_checkpointer(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"C 端 Agent 恢复失败：{exc}") from exc
+    return {
+        "thread_id": thread_id,
+        "status": result["status"],
+        "interrupted": result["interrupted"],
+        "order": result["order"],
+        "reply": _last_ai_text(result["messages"]),
+    }
 
 
 def register_c_end(app) -> None:

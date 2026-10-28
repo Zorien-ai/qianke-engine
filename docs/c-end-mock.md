@@ -105,7 +105,40 @@ GET  /api/c/orders/{order_id}
 }
 ```
 
-## 5. 当前买家身份
+## 5. C 端 Agent 与 HITL
+
+C 端 Agent Graph：
+
+```text
+用户消息
+  → recommend_products（真实商品库）
+  → prepare_order（只生成 DRAFT）
+  → interrupt（返回草稿，等待用户确认）
+  → approved=true  → confirm_order（扣库存，生成正式模拟订单）
+  → approved=false → CANCELLED
+```
+
+API：
+
+```text
+POST /api/c/agent/run
+  → 首次一般返回 200 + status=AWAITING_CONFIRMATION + draft
+  → 也可能直接返回推荐结果
+
+POST /api/c/agent/resume
+  → thread_id + approved
+  → approved=true 创建模拟订单
+  → approved=false 取消
+```
+
+关键点：
+
+- `prepare_order` 不扣库存
+- 用户在 interrupt 后确认
+- 确认绑定 prepare 返回的 draft/token
+- Agent 不能自行跳过确认创建订单
+
+## 6. 当前买家身份
 
 当前复用登录账号：
 
