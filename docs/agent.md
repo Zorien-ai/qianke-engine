@@ -509,4 +509,5 @@ Agent Runtime
 - v2.1 RAG Fallback：[`tests/evals/agent/benchmark/baseline_v2.1.md`](../tests/evals/agent/benchmark/baseline_v2.1.md)
 - v2.2 Benchmark 80：[`tests/evals/agent/benchmark/baseline_v2.2.md`](../tests/evals/agent/benchmark/baseline_v2.2.md)
 - 已知问题与可信度说明：[`tests/evals/agent/KNOWN_ISSUES.md`](../tests/evals/agent/KNOWN_ISSUES.md)
+- LangSmith tracing：[`docs/langsmith.md`](langsmith.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)

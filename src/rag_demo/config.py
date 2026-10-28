@@ -18,6 +18,33 @@ except ImportError:  # Docker 轻量 API 镜像的正常路径
 # 项目根目录：src/rag_demo/config.py -> rag_demo -> src -> 根
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
+def _load_local_env(path: str) -> None:
+    """加载项目根目录 .env；不覆盖显式传入的进程环境变量。"""
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key:
+                    os.environ.setdefault(key, value)
+    except OSError:
+        # .env 只是本地便利配置；读不到时继续使用进程环境变量。
+        pass
+
+
+_load_local_env(os.path.join(BASE_DIR, ".env"))
+# 只有填了 key 才自动打开 tracing，避免本地测试/无 key 环境产生无效上报。
+if os.environ.get("LANGSMITH_API_KEY"):
+    os.environ.setdefault("LANGSMITH_TRACING", "true")
+    os.environ.setdefault("LANGSMITH_PROJECT", "qianke-agent")
+
 # ---------- 数据与模型路径 ----------
 DATA_DIR = os.path.join(BASE_DIR, "data", "dianshuang")
 DOCS_DIR = os.path.join(BASE_DIR, "data", "docs")
