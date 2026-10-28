@@ -625,4 +625,5 @@ Agent Runtime
 - 已知问题与可信度说明：[`tests/evals/agent/KNOWN_ISSUES.md`](../tests/evals/agent/KNOWN_ISSUES.md)
 - 三端平台架构决策基线：[`docs/decisions/three_agent_platform_architecture_decisions_v0.1.md`](decisions/three_agent_platform_architecture_decisions_v0.1.md)
 - LangSmith tracing：[`docs/langsmith.md`](langsmith.md)
+- C 端 mock 商品/模拟订单：[`docs/c-end-mock.md`](c-end-mock.md)
 - Agent 实现：[`src/rag_demo/agent/`](../src/rag_demo/agent/)

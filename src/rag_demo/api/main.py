@@ -56,6 +56,7 @@ from rag_demo.api.demo_showcase import (
     clamp_limit as clamp_demo_limit,
     serialize_user as serialize_demo_user,
 )
+from rag_demo.api.c_end import register_c_end
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
 from rag_demo.api.wizard import register_wizard
@@ -651,6 +652,9 @@ register_wizard(app)
 # 实现见 rag_demo/api/kb.py；这里只注册路由（不挂静态），与向导一起排在
 # 既有静态挂载之前，保持「先特殊、后通用」的注册顺序。
 register_kb(app)
+
+# C 端 mock 商品/模拟订单：/api/c/products、/api/c/orders/*
+register_c_end(app)
 
 # AI 监控 / Token 账单控制面（VIP）：/api/monitor/*、/api/billing/*、/api/admin/*。
 # 采集/账本在 rag_demo/ai_monitor.py，接口在 rag_demo/api/monitor.py。
