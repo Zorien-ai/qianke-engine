@@ -346,7 +346,8 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 ## 18. 最新目标方向（2026-10-28）
 
 > 本节是**目标态与演进规划**，不代表当前代码已全部实现。  
-> 当前实现状态以 `docs/agent.md`、代码和 Eval 基线为准。
+> 当前实现状态以 `docs/agent.md`、代码和 Eval 基线为准。  
+> 完整架构决策基线见 `docs/decisions/three_agent_platform_architecture_decisions_v0.1.md`。
 
 ### 18.1 核心设计哲学
 
