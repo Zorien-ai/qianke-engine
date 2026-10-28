@@ -103,6 +103,13 @@ def _extract_draft(messages: list[Any]) -> dict[str, Any] | None:
     return None
 
 
+def _last_ai_text(messages: list[Any]) -> str:
+    for msg in reversed(messages or []):
+        if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
+            return str(msg.content)
+    return ""
+
+
 def build_c_graph(buyer_id: str, checkpointer: Any, llm: Any | None = None):
     tools = _tools(buyer_id)
     llm = llm or _make_llm()
@@ -198,10 +205,16 @@ def run_c_agent(
     snapshot = graph.get_state(config)
     interrupted = bool(snapshot.next)
     draft = _extract_draft(state.get("messages") or [])
+    if interrupted:
+        status = "AWAITING_CONFIRMATION"
+    elif _last_ai_text(state.get("messages") or []):
+        status = "COMPLETED"
+    else:
+        status = state.get("status") or "FAILED"
     return {
         "thread_id": thread_id,
         "interrupted": interrupted,
-        "status": state.get("status") or ("AWAITING_CONFIRMATION" if interrupted else "COMPLETED"),
+        "status": status,
         "draft": draft,
         "order": state.get("order"),
         "messages": state.get("messages") or [],

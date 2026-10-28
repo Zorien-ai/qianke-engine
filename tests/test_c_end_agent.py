@@ -55,6 +55,7 @@ def test_c_agent_interrupts_before_order_and_resumes(c_store, tmp_path):
     )
 
     assert result["interrupted"] is True
+    assert result["status"] == "AWAITING_CONFIRMATION"
     assert result["draft"]["order_id"]
     assert result["draft"]["confirmation_token"]
 
@@ -97,3 +98,53 @@ def test_c_agent_rejects_confirmation(c_store, tmp_path):
     )
     assert resumed["status"] == "CANCELLED"
     assert resumed["order"] is None
+
+
+def test_c_agent_recommend_without_order(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_recommend.sqlite")
+    fake = _FakeLLM([
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "recommend_products",
+                "args": {"need": "跑鞋", "budget": 300},
+                "id": "call_rec_1",
+                "type": "tool_call",
+            }],
+        ),
+        AIMessage(content="推荐 P001 轻量跑鞋"),
+    ])
+    result = c_agent.run_c_agent(
+        "500 以内推荐一双跑鞋",
+        buyer_id="buyer_1",
+        thread_id="c_thread_recommend_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    assert result["interrupted"] is False
+    assert result["status"] == "COMPLETED"
+    assert result["draft"] is None
+
+
+def test_c_agent_cannot_resume_other_buyer(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_owner.sqlite")
+    fake = _FakeLLM([_prepare_call()])
+    c_agent.run_c_agent(
+        "买一双跑鞋",
+        buyer_id="buyer_1",
+        thread_id="c_thread_owner_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    with pytest.raises(PermissionError):
+        c_agent.resume_c_agent(
+            buyer_id="buyer_2",
+            thread_id="c_thread_owner_1",
+            approved=True,
+            checkpointer=saver,
+            llm=fake,
+        )
