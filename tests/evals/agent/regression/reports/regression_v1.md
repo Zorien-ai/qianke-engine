@@ -15,11 +15,11 @@
 | Tool Execution Success | **100.0%** |
 | Error Recovery | N/A |
 | 平均 Steps | 2.15 |
-| 平均 Tool Calls | 1.40 |
-| 平均耗时 | 3.0s |
-| Input Tokens | 85,489 |
-| Output Tokens | 5,418 |
-| 平均 Tokens / 任务 | 4545 |
+| 平均 Tool Calls | 1.45 |
+| 平均耗时 | 2.8s |
+| Input Tokens | 88,129 |
+| Output Tokens | 5,522 |
+| 平均 Tokens / 任务 | 4683 |
 | Estimated Cost | N/A（未配置 EVAL_*_COST_PER_1M） |
 
 ## 分类结果
