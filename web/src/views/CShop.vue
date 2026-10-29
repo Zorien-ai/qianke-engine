@@ -5,6 +5,8 @@ import { getJson, postJson } from "../api";
 const products = ref([]);
 const productsLoading = ref(true);
 const productsError = ref("");
+const companion = ref(null);
+const companionError = ref("");
 const message = ref("我想买一双轻量跑鞋，预算 500 元以内");
 const running = ref(false);
 const agentError = ref("");
@@ -27,6 +29,26 @@ function money(value) {
 
 function productHint(product) {
   return product.stock > 0 ? `库存 ${product.stock}` : "暂时缺货";
+}
+
+function speciesLabel(species) {
+  const labels = {
+    digital_companion: "数字伙伴",
+    cat: "猫",
+    fish: "鱼",
+    robot: "机器人",
+    brand_mascot: "品牌吉祥物",
+  };
+  return labels[species] || species || "伙伴";
+}
+
+async function loadCompanion() {
+  companionError.value = "";
+  try {
+    companion.value = await getJson("/api/c/companion");
+  } catch (e) {
+    companionError.value = e?.detail || e?.message || "伙伴状态加载失败";
+  }
 }
 
 async function loadProducts() {
@@ -85,6 +107,7 @@ async function decide(approved) {
     }
     draft.value = null;
     threadId.value = "";
+    if (approved) await loadCompanion();
   } catch (e) {
     agentError.value = e?.detail || e?.message || "订单确认失败";
   } finally {
@@ -96,7 +119,10 @@ function useProduct(product) {
   message.value = `我想买 ${product.title}，预算 ${Math.ceil(product.price)} 元`;
 }
 
-onMounted(loadProducts);
+onMounted(() => {
+  loadProducts();
+  loadCompanion();
+});
 </script>
 
 <template>
@@ -157,6 +183,30 @@ onMounted(loadProducts);
           </div>
           <span class="agent-badge">LangGraph</span>
         </div>
+
+        <div v-if="companion" class="companion-box">
+          <div class="companion-mark" aria-hidden="true">{{ companion.name.slice(0, 1) }}</div>
+          <div class="companion-main">
+            <span class="companion-label">我的伙伴</span>
+            <strong>{{ companion.name }}</strong>
+            <p>{{ speciesLabel(companion.species) }} · Lv.{{ companion.level }}</p>
+          </div>
+          <div class="companion-stats">
+            <span>饱食度</span>
+            <div
+              class="satiety-track"
+              role="progressbar"
+              :aria-valuenow="companion.satiety"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-label="`${companion.name} 饱食度`"
+            >
+              <span :style="{ width: `${companion.satiety}%` }" />
+            </div>
+            <small>{{ companion.satiety }}/100</small>
+          </div>
+        </div>
+        <p v-if="companionError" class="state-line state-error" role="alert">{{ companionError }}</p>
 
         <label class="field-label" for="shop-message">你想买什么？</label>
         <textarea
@@ -330,6 +380,82 @@ onMounted(loadProducts);
   font-family: var(--mono);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.companion-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.companion-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.companion-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.companion-label {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.companion-main strong {
+  display: block;
+  font-size: 13px;
+}
+
+.companion-main p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.companion-stats {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 86px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.satiety-track {
+  width: 86px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.satiety-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.companion-stats small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
 }
 
 .product-list {

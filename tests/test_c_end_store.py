@@ -90,3 +90,44 @@ def test_other_buyer_cannot_confirm(c_store):
     with pytest.raises(c_store.CStoreError) as exc:
         c_store.confirm_order("buyer_2", draft["order_id"], draft["confirmation_token"])
     assert exc.value.code == "ORDER_FORBIDDEN"
+
+
+def test_companion_is_configurable_not_hardcoded_fish(c_store):
+    companion = c_store.get_companion("buyer_1")
+    assert companion["species"] == "digital_companion"
+    assert companion["name"] == "小伴"
+
+    updated = c_store.update_companion(
+        "buyer_1",
+        name="阿团",
+        species="cat",
+        persona="calm",
+        appearance="cat-v1",
+    )
+    assert updated["name"] == "阿团"
+    assert updated["species"] == "cat"
+    assert c_store.get_companion("buyer_1")["appearance"] == "cat-v1"
+
+
+def test_confirm_rewards_companion_once(c_store):
+    before = c_store.get_companion("buyer_1")
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_companion_reward_1",
+    )
+    after = c_store.get_companion("buyer_1")
+    assert after["exp"] == before["exp"] + 10
+    assert after["satiety"] == min(100, before["satiety"] + 5)
+
+    c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_companion_reward_1",
+    )
+    repeated = c_store.get_companion("buyer_1")
+    assert repeated["exp"] == after["exp"]
+    assert repeated["satiety"] == after["satiety"]

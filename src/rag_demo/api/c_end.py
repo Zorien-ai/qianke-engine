@@ -49,6 +49,13 @@ class CAgentResumeIn(BaseModel):
     approved: bool
 
 
+class CompanionPatchIn(BaseModel):
+    name: str | None = Field(default=None, max_length=20)
+    species: str | None = Field(default=None, max_length=60)
+    persona: str | None = Field(default=None, max_length=60)
+    appearance: str | None = Field(default=None, max_length=60)
+
+
 def _last_ai_text(messages: list) -> str:
     for msg in reversed(messages or []):
         if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
@@ -71,6 +78,27 @@ def _http_error(exc: store.CStoreError) -> HTTPException:
 @router.get("/products")
 def list_products(category: str | None = None, keyword: str | None = None, limit: int = 20) -> dict:
     return {"products": store.list_products(category=category, keyword=keyword, limit=limit)}
+
+
+@router.get("/companion")
+def get_companion() -> dict:
+    buyer_id, _ = _buyer()
+    return store.get_companion(buyer_id)
+
+
+@router.patch("/companion")
+def update_companion(req: CompanionPatchIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.update_companion(
+            buyer_id,
+            name=req.name,
+            species=req.species,
+            persona=req.persona,
+            appearance=req.appearance,
+        )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
 
 
 @router.post("/orders/prepare")

@@ -30,6 +30,25 @@ c_order
 
 c_order_item
   order_id / product_id / quantity / unit_price
+
+c_companion
+  owner_id / name / species / persona / appearance
+  level / exp / satiety / updated_at
+```
+
+伙伴字段是抽象表现层，不把“锦鲤”写死：
+
+```text
+species: digital_companion / cat / fish / robot / brand_mascot / custom
+```
+
+默认伙伴为“小伴 / digital_companion”；可通过 PATCH 改名、换 species/persona/appearance。
+买家的伙伴只在确认订单后获得成长值/饱食度奖励。
+
+```text
+GET   /api/c/companion
+PATCH /api/c/companion
+{"name":"阿团","species":"cat","persona":"calm","appearance":"cat-v1"}
 ```
 
 内置 6 个 mock 商品：

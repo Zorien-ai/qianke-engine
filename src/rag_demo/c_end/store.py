@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS c_order_item (
     unit_price REAL NOT NULL,
     PRIMARY KEY (order_id, product_id)
 );
+
+CREATE TABLE IF NOT EXISTS c_companion (
+    owner_id   TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    species    TEXT NOT NULL DEFAULT 'digital_companion',
+    persona    TEXT NOT NULL DEFAULT 'warm',
+    appearance TEXT NOT NULL DEFAULT '',
+    level      INTEGER NOT NULL DEFAULT 1,
+    exp        INTEGER NOT NULL DEFAULT 0,
+    satiety    INTEGER NOT NULL DEFAULT 60,
+    updated_at TEXT NOT NULL
+);
 """
 
 _SEED = (
@@ -298,6 +310,7 @@ def confirm_order(
             "UPDATE c_order SET status = 'CONFIRMED' WHERE order_id = ?",
             (draft_id,),
         )
+        _reward_companion_conn(conn, buyer_id)
         conn.commit()
         order = conn.execute("SELECT * FROM c_order WHERE order_id = ?", (order_id,)).fetchone()
         return _order_payload(conn, order)
@@ -340,6 +353,118 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         "created_at": order["created_at"],
         "confirmed_at": order["confirmed_at"],
     }
+
+
+def _companion_payload(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "owner_id": row["owner_id"],
+        "name": row["name"],
+        "species": row["species"],
+        "persona": row["persona"],
+        "appearance": row["appearance"],
+        "level": int(row["level"]),
+        "exp": int(row["exp"]),
+        "satiety": int(row["satiety"]),
+        "updated_at": row["updated_at"],
+    }
+
+
+def _ensure_companion(conn: sqlite3.Connection, owner_id: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM c_companion WHERE owner_id = ?", (owner_id,)).fetchone()
+    if row is not None:
+        return row
+    conn.execute(
+        "INSERT INTO c_companion(owner_id, name, species, persona, appearance, updated_at) "
+        "VALUES (?, '小伴', 'digital_companion', 'warm', '', ?)",
+        (owner_id, _now()),
+    )
+    return conn.execute("SELECT * FROM c_companion WHERE owner_id = ?", (owner_id,)).fetchone()
+
+
+def get_companion(owner_id: str) -> dict[str, Any]:
+    """获取/初始化伙伴；species 是抽象字段，不硬编码为鱼。"""
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _ensure_companion(conn, owner_id)
+        conn.commit()
+        return _companion_payload(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def update_companion(
+    owner_id: str,
+    *,
+    name: str | None = None,
+    species: str | None = None,
+    persona: str | None = None,
+    appearance: str | None = None,
+) -> dict[str, Any]:
+    """更新伙伴表现层字段；不改变 Agent 权限。"""
+    fields: list[tuple[str, str]] = []
+    for key, value in (("name", name), ("species", species), ("persona", persona), ("appearance", appearance)):
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            raise CStoreError("INVALID_COMPANION", f"{key} 不能为空")
+        limit = 20 if key == "name" else 60
+        if len(text) > limit:
+            raise CStoreError("INVALID_COMPANION", f"{key} 太长")
+        fields.append((key, text))
+    if not fields:
+        return get_companion(owner_id)
+
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        _ensure_companion(conn, owner_id)
+        assignments = ", ".join(f"{key} = ?" for key, _ in fields)
+        conn.execute(
+            f"UPDATE c_companion SET {assignments}, updated_at = ? WHERE owner_id = ?",
+            [value for _, value in fields] + [_now(), owner_id],
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM c_companion WHERE owner_id = ?", (owner_id,)).fetchone()
+        return _companion_payload(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _reward_companion_conn(conn: sqlite3.Connection, owner_id: str, *, exp: int = 10, satiety: int = 5) -> None:
+    row = _ensure_companion(conn, owner_id)
+    new_exp = int(row["exp"]) + max(0, int(exp))
+    new_satiety = min(100, int(row["satiety"]) + max(0, int(satiety)))
+    new_level = 1 + new_exp // 100
+    conn.execute(
+        "UPDATE c_companion SET exp = ?, satiety = ?, level = ?, updated_at = ? WHERE owner_id = ?",
+        (new_exp, new_satiety, new_level, _now(), owner_id),
+    )
+
+
+def reward_companion(owner_id: str, *, exp: int = 10, satiety: int = 5) -> dict[str, Any]:
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        _reward_companion_conn(conn, owner_id, exp=exp, satiety=satiety)
+        conn.commit()
+        row = conn.execute("SELECT * FROM c_companion WHERE owner_id = ?", (owner_id,)).fetchone()
+        return _companion_payload(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_order(order_id: str) -> dict[str, Any] | None:
