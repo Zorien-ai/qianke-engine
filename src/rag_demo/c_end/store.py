@@ -606,29 +606,83 @@ def cancel_quote(quote_id: str, buyer_id: str) -> dict[str, Any]:
         conn.close()
 
 
-def list_all_orders(limit: int = 50) -> list[dict[str, Any]]:
-    """管理端审计：所有买家的已确认订单。"""
+def _audit_time(value: str | None, *, end: bool = False) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) == 10:
+        return f"{text}T{'23:59:59' if end else '00:00:00'}"
+    return text
+
+
+def list_all_orders(
+    limit: int = 50,
+    *,
+    buyer_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict[str, Any]]:
+    """管理端审计：所有买家的已确认订单，支持买家/时间过滤。"""
     init()
+    where = ["status = 'CONFIRMED'", "order_id LIKE 'order_%'"]
+    params: list[Any] = []
+    if buyer_id:
+        where.append("buyer_id = ?")
+        params.append(str(buyer_id).strip())
+    start = _audit_time(date_from)
+    end = _audit_time(date_to, end=True)
+    if start:
+        where.append("confirmed_at >= ?")
+        params.append(start)
+    if end:
+        where.append("confirmed_at <= ?")
+        params.append(end)
+    params.append(max(1, min(int(limit), 200)))
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM c_order WHERE status = 'CONFIRMED' "
-            "AND order_id LIKE 'order_%' ORDER BY confirmed_at DESC LIMIT ?",
-            (max(1, min(int(limit), 200)),),
+            f"SELECT * FROM c_order WHERE {' AND '.join(where)} "
+            "ORDER BY confirmed_at DESC LIMIT ?",
+            params,
         ).fetchall()
         return [_order_payload(conn, row) for row in rows]
     finally:
         conn.close()
 
 
-def list_all_quotes(limit: int = 50) -> list[dict[str, Any]]:
-    """管理端审计：所有买家报价及其状态。"""
+def list_all_quotes(
+    limit: int = 50,
+    *,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict[str, Any]]:
+    """管理端审计：所有买家报价及其状态，支持买家/状态/时间过滤。"""
     init()
+    where = ["1 = 1"]
+    params: list[Any] = []
+    if buyer_id:
+        where.append("buyer_id = ?")
+        params.append(str(buyer_id).strip())
+    if status:
+        where.append("status = ?")
+        params.append(str(status).strip().upper())
+    start = _audit_time(date_from)
+    end = _audit_time(date_to, end=True)
+    if start:
+        where.append("created_at >= ?")
+        params.append(start)
+    if end:
+        where.append("created_at <= ?")
+        params.append(end)
+    params.append(max(1, min(int(limit), 200)))
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM c_quote ORDER BY created_at DESC LIMIT ?",
-            (max(1, min(int(limit), 200)),),
+            f"SELECT * FROM c_quote WHERE {' AND '.join(where)} "
+            "ORDER BY created_at DESC LIMIT ?",
+            params,
         ).fetchall()
         result = []
         for row in rows:

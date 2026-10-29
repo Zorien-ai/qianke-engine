@@ -273,6 +273,16 @@ API：
 
 ```text
 GET /api/c/admin/audit?limit=50
+GET /api/c/admin/audit?limit=50&buyer_id=buyer_1&status=PENDING
+GET /api/c/admin/audit?limit=50&date_from=2026-10-29&date_to=2026-10-29
+```
+
+筛选：
+
+```text
+buyer_id
+status = PENDING / CONSUMED / CANCELLED
+date_from / date_to（按自然日）
 ```
 
 权限：

@@ -264,10 +264,27 @@ def test_admin_audit_lists_cross_buyer_orders_and_quotes(c_store):
         request_id="req_admin_audit_1",
     )
     c_store.save_app_message("buyer_2", "companion", "user", "另一买家的消息")
+    c_store.create_quote(
+        "buyer_2",
+        "store_demo",
+        {
+            "quote_id": "quote_admin_2",
+            "product_refs": [{"product_id": "P002", "quantity": 1}],
+            "policy_refs": [],
+        },
+    )
 
     orders = c_store.list_all_orders()
     quotes = c_store.list_all_quotes()
     assert orders[0]["quote_id"] == "quote_admin_1"
     assert orders[0]["policy_ids"] == ["platform_full_reduce"]
-    assert any(item["buyer_id"] == "buyer_2" for item in quotes) is False
     assert all(order["order_id"].startswith("order_") for order in orders)
+
+    buyer_2_orders = c_store.list_all_orders(buyer_id="buyer_2")
+    buyer_2_quotes = c_store.list_all_quotes(buyer_id="buyer_2")
+    assert buyer_2_orders == []
+    assert [quote["quote_id"] for quote in buyer_2_quotes] == ["quote_admin_2"]
+
+    pending = c_store.list_all_quotes(status="PENDING")
+    assert [quote["quote_id"] for quote in pending] == ["quote_admin_2"]
+

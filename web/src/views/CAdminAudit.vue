@@ -8,6 +8,10 @@ const quotes = ref([]);
 const summary = ref({});
 const loading = ref(true);
 const error = ref("");
+const buyerId = ref("");
+const quoteStatus = ref("");
+const dateFrom = ref("");
+const dateTo = ref("");
 
 function money(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
@@ -23,13 +27,18 @@ function productLabel(product) {
 }
 
 const pendingQuotes = computed(() => summary.value.pending_quotes || 0);
-const quoteStatus = computed(() => summary.value.quote_status || {});
+const quoteStatusCounts = computed(() => summary.value.quote_status || {});
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const data = await getJson("/api/c/admin/audit?limit=50");
+    const params = new URLSearchParams({ limit: "50" });
+    if (buyerId.value.trim()) params.set("buyer_id", buyerId.value.trim());
+    if (quoteStatus.value) params.set("status", quoteStatus.value);
+    if (dateFrom.value) params.set("date_from", dateFrom.value);
+    if (dateTo.value) params.set("date_to", dateTo.value);
+    const data = await getJson(`/api/c/admin/audit?${params.toString()}`);
     orders.value = data?.orders || [];
     quotes.value = data?.quotes || [];
     summary.value = data?.summary || {};
@@ -39,6 +48,14 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+function resetFilters() {
+  buyerId.value = "";
+  quoteStatus.value = "";
+  dateFrom.value = "";
+  dateTo.value = "";
+  load();
 }
 
 onMounted(load);
@@ -59,6 +76,34 @@ onMounted(load);
       </div>
       <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">刷新</button>
     </div>
+
+    <section class="audit-filters" aria-label="审计筛选">
+      <label>
+        <span>买家</span>
+        <input v-model="buyerId" type="text" placeholder="buyer_1" />
+      </label>
+      <label>
+        <span>报价状态</span>
+        <select v-model="quoteStatus">
+          <option value="">全部</option>
+          <option value="PENDING">PENDING</option>
+          <option value="CONSUMED">CONSUMED</option>
+          <option value="CANCELLED">CANCELLED</option>
+        </select>
+      </label>
+      <label>
+        <span>开始日期</span>
+        <input v-model="dateFrom" type="date" />
+      </label>
+      <label>
+        <span>结束日期</span>
+        <input v-model="dateTo" type="date" />
+      </label>
+      <div class="audit-filter-actions">
+        <button type="button" class="btn btn-primary" :disabled="loading" @click="load">应用</button>
+        <button type="button" class="btn btn-ghost" :disabled="loading" @click="resetFilters">重置</button>
+      </div>
+    </section>
 
     <div v-if="loading" class="card"><div class="skeleton" style="height:100px"></div></div>
     <div v-else-if="error" class="card">
@@ -137,7 +182,7 @@ onMounted(load);
         <div class="admin-section-head">
           <strong>结构化报价</strong>
           <span class="field-hint">
-            {{ quoteStatus.PENDING || 0 }} pending · {{ quoteStatus.CONSUMED || 0 }} consumed · {{ quoteStatus.CANCELLED || 0 }} cancelled
+            {{ quoteStatusCounts.PENDING || 0 }} pending · {{ quoteStatusCounts.CONSUMED || 0 }} consumed · {{ quoteStatusCounts.CANCELLED || 0 }} cancelled
           </span>
         </div>
         <div class="table-wrap">
@@ -188,6 +233,44 @@ onMounted(load);
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.audit-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.audit-filters label {
+  display: flex;
+  min-width: 140px;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.audit-filters input,
+.audit-filters select {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.audit-filter-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .audit-stat {

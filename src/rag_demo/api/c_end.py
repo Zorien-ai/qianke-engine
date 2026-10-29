@@ -161,14 +161,33 @@ def save_app_message(req: AppMessageIn) -> dict:
 
 
 @router.get("/admin/audit")
-def c_end_admin_audit(limit: int = 50) -> dict:
+def c_end_admin_audit(
+    limit: int = 50,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict:
     _require_admin()
-    orders = store.list_all_orders(limit=limit)
-    quotes = store.list_all_quotes(limit=limit)
+    if status and status.upper() not in {"PENDING", "CONSUMED", "CANCELLED"}:
+        raise HTTPException(status_code=400, detail="报价状态不合法")
+    orders = store.list_all_orders(
+        limit=limit,
+        buyer_id=buyer_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    quotes = store.list_all_quotes(
+        limit=limit,
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
     status_counts: dict[str, int] = {}
     for quote in quotes:
-        status = str(quote.get("status") or "UNKNOWN")
-        status_counts[status] = status_counts.get(status, 0) + 1
+        quote_status = str(quote.get("status") or "UNKNOWN")
+        status_counts[quote_status] = status_counts.get(quote_status, 0) + 1
     return {
         "orders": orders,
         "quotes": quotes,
