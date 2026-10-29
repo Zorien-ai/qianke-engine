@@ -400,9 +400,116 @@ def test_audit_csv_export_reuses_audit_filters(c_store):
     ]
     assert len(limited_rows) == 1
 
-    # status 是报价状态筛选：订单 CSV 无该列，行数与列表保持一致（不丢订单）。
-    _, status_rows = _parse_audit_csv(c_store.export_audit_orders_csv(limit=50, status="PENDING"))
-    assert len(status_rows) == 2
+    # status 按订单关联的报价状态过滤：first 的报价确认后是 CONSUMED，second 无 quote_id 被排除。
+    _, consumed_rows = _parse_audit_csv(
+        c_store.export_audit_orders_csv(limit=50, status="CONSUMED")
+    )
+    consumed_orders = c_store.list_all_orders(limit=50, status="CONSUMED")
+    assert [row[0] for row in consumed_rows] == [first["order_id"]]
+    assert [row[0] for row in consumed_rows] == [order["order_id"] for order in consumed_orders]
+    # 没有关联 PENDING 报价的订单 → 导出只有表头，与列表同口径。
+    _, pending_rows = _parse_audit_csv(c_store.export_audit_orders_csv(limit=50, status="PENDING"))
+    assert pending_rows == []
+    assert c_store.list_all_orders(limit=50, status="PENDING") == []
+
+
+def _set_quote_status(c_store, quote_id: str, status: str) -> None:
+    conn = sqlite3.connect(str(c_store._db_path()))
+    try:
+        conn.execute("UPDATE c_quote SET status = ? WHERE quote_id = ?", (status, quote_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_audit_status_filters_orders_by_linked_quote_status(c_store):
+    """选 PENDING/CONSUMED 时订单按关联报价状态过滤；无 quote_id 订单被排除。"""
+    # 订单 A：buyer_1 关联报价 quote_status_1（确认后 CONSUMED）。
+    c_store.create_quote(
+        "buyer_1",
+        "store_demo",
+        {
+            "quote_id": "quote_status_1",
+            "product_refs": [{"product_id": "P001", "quantity": 1}],
+            "policy_refs": [{"policy_id": "platform_full_reduce"}],
+        },
+    )
+    draft_a = c_store.prepare_order("buyer_1", [], quote_id="quote_status_1")
+    order_a = c_store.confirm_order(
+        "buyer_1", draft_a["order_id"], draft_a["confirmation_token"], request_id="req_status_a"
+    )
+
+    # 订单 B：buyer_2 直购，没有 quote_id，任何 status 过滤都不应返回它。
+    draft_b = c_store.prepare_order("buyer_2", [{"product_id": "P002", "quantity": 1}])
+    order_b = c_store.confirm_order(
+        "buyer_2", draft_b["order_id"], draft_b["confirmation_token"], request_id="req_status_b"
+    )
+
+    # 订单 C：buyer_1 关联报价 quote_status_2。
+    c_store.create_quote(
+        "buyer_1",
+        "store_demo",
+        {
+            "quote_id": "quote_status_2",
+            "product_refs": [{"product_id": "P005", "quantity": 1}],
+            "policy_refs": [],
+        },
+    )
+    draft_c = c_store.prepare_order("buyer_1", [], quote_id="quote_status_2")
+    order_c = c_store.confirm_order(
+        "buyer_1", draft_c["order_id"], draft_c["confirmation_token"], request_id="req_status_c"
+    )
+    _set_confirmed_at(c_store, order_a["order_id"], "2026-10-29T10:00:00+00:00")
+    _set_confirmed_at(c_store, order_b["order_id"], "2026-10-29T11:00:00+00:00")
+    _set_confirmed_at(c_store, order_c["order_id"], "2026-10-28T09:00:00+00:00")
+
+    def order_ids(**kwargs) -> list[str]:
+        return [order["order_id"] for order in c_store.list_all_orders(**kwargs)]
+
+    # 不传 status：三笔都返回（无 quote 的 B 也在）。
+    assert order_ids() == [order_b["order_id"], order_a["order_id"], order_c["order_id"]]
+
+    # 选 CONSUMED：只返回关联 CONSUMED 报价的 A/C，无 quote_id 的 B 被排除。
+    assert order_ids(status="CONSUMED") == [order_a["order_id"], order_c["order_id"]]
+    # limit 在 status 过滤之后截断（按 confirmed_at DESC）。
+    assert order_ids(status="CONSUMED", limit=1) == [order_a["order_id"]]
+    assert order_ids(status="PENDING") == []
+    assert order_ids(status="CANCELLED") == []
+
+    # 把 C 的关联报价改成 PENDING：PENDING 只返回 C，CONSUMED 只剩 A。
+    _set_quote_status(c_store, "quote_status_2", "PENDING")
+    assert order_ids(status="PENDING") == [order_c["order_id"]]
+    assert order_ids(status="CONSUMED") == [order_a["order_id"]]
+    assert order_ids(status="CANCELLED") == []
+    # store 侧对大小写保持健壮（API 层另有严格校验）。
+    assert order_ids(status="pending") == [order_c["order_id"]]
+
+    # buyer / 日期过滤与 status 组合仍生效。
+    assert order_ids(status="CONSUMED", buyer_id="buyer_1") == [order_a["order_id"]]
+    assert order_ids(status="PENDING", buyer_id="buyer_1") == [order_c["order_id"]]
+    assert order_ids(status="CONSUMED", buyer_id="buyer_2") == []
+    assert order_ids(
+        status="CONSUMED", date_from="2026-10-29", date_to="2026-10-29"
+    ) == [order_a["order_id"]]
+    assert order_ids(
+        status="PENDING", date_from="2026-10-28", date_to="2026-10-28"
+    ) == [order_c["order_id"]]
+    assert order_ids(status="PENDING", date_from="2026-10-29", date_to="2026-10-29") == []
+
+    # 导出与列表同口径：PENDING 只导 C，CONSUMED 只导 A。
+    _, pending_csv = _parse_audit_csv(c_store.export_audit_orders_csv(status="PENDING"))
+    assert [row[0] for row in pending_csv] == [order_c["order_id"]]
+    assert [row[5] for row in pending_csv] == ["quote_status_2"]
+    _, consumed_csv = _parse_audit_csv(c_store.export_audit_orders_csv(status="CONSUMED"))
+    assert [row[0] for row in consumed_csv] == [order_a["order_id"]]
+    # 无 quote 订单被排除：buyer_2 只有直购订单 B，带 status 导出为空。
+    _, buyer_2_csv = _parse_audit_csv(
+        c_store.export_audit_orders_csv(status="CANCELLED", buyer_id="buyer_2")
+    )
+    assert buyer_2_csv == []
+    # 不传 status 的导出仍包含直购订单 B。
+    _, all_csv = _parse_audit_csv(c_store.export_audit_orders_csv())
+    assert len(all_csv) == 3
 
 
 def test_audit_csv_export_empty_result_keeps_header(c_store):

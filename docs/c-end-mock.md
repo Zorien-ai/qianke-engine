@@ -285,7 +285,7 @@ UTF-8 BOM
 字段：order_id,buyer_id,total_amount,original_amount,discount_amount,quote_id,policy_ids,confirmed_at
 ```
 
-说明：`status` 是报价状态筛选；订单 CSV 没有报价状态列，因此 `status` 只做合法性校验，不参与订单行过滤。订单导出与审计列表使用相同的 buyer/日期/limit 口径。
+说明：`status` 同时作用于订单列表与报价列表。订单通过 `quote_id` 关联 `c_quote.status` 过滤；无 `quote_id` 的直购订单在 status 非空时不返回。订单 CSV 与审计列表使用相同的 buyer/status/日期/limit 口径。
 
 筛选：
 

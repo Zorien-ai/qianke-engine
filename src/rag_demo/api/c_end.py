@@ -170,12 +170,18 @@ def c_end_admin_audit(
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> dict:
+    """C 端交易审计：跨买家订单/报价，支持买家/报价状态/自然日筛选。
+
+    status 是报价状态，同时作用于两张表：报价列表按 status 过滤，
+    订单列表按订单关联的 c_quote.status 过滤；summary 只统计过滤后的订单。
+    """
     _require_admin()
     if status and status.upper() not in {"PENDING", "CONSUMED", "CANCELLED"}:
         raise HTTPException(status_code=400, detail="报价状态不合法")
     orders = store.list_all_orders(
         limit=limit,
         buyer_id=buyer_id,
+        status=status,
         date_from=date_from,
         date_to=date_to,
     )
@@ -214,7 +220,7 @@ def c_end_admin_audit_export(
     """C 端审计订单 CSV 导出（仅系统管理员）。
 
     - 筛选参数与 `/api/c/admin/audit` 一致，前端可原样复用；
-    - 导出内容为已确认订单，因此 `status`（报价状态）只按审计页语义校验，不参与订单行过滤；
+    - `status`（报价状态）按订单关联的 c_quote.status 过滤，与列表同口径；
     - CSV 带 UTF-8 BOM，Excel 打开中文不乱码；路由是精确匹配，不与 `/quotes/{quote_id}` 冲突。
     """
     _require_admin()

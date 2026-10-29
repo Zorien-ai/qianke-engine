@@ -621,16 +621,28 @@ def list_all_orders(
     limit: int = 50,
     *,
     buyer_id: str | None = None,
+    status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> list[dict[str, Any]]:
-    """管理端审计：所有买家的已确认订单，支持买家/时间过滤。"""
+    """管理端审计：所有买家的已确认订单，支持买家/报价状态/时间过滤。
+
+    `status` 是**订单关联报价**的状态（不是订单自身状态）：通过
+    `c_order.quote_id → c_quote.status` 关联过滤。status 非空时，
+    没有 quote_id 的直购订单不返回——它们没有可匹配的报价状态。
+    """
     init()
     where = ["status = 'CONFIRMED'", "order_id LIKE 'order_%'"]
     params: list[Any] = []
     if buyer_id:
         where.append("buyer_id = ?")
         params.append(str(buyer_id).strip())
+    if status:
+        where.append(
+            "quote_id IS NOT NULL AND quote_id IN "
+            "(SELECT quote_id FROM c_quote WHERE status = ?)"
+        )
+        params.append(str(status).strip().upper())
     start = _audit_time(date_from)
     end = _audit_time(date_to, end=True)
     if start:
@@ -740,19 +752,17 @@ def export_audit_orders_csv(
     """管理端 C 端审计订单 CSV（文本，首字符是 UTF-8 BOM）。
 
     与 `/api/c/admin/audit` 保持同一筛选口径：
-    - `buyer_id / date_from / date_to / limit` 直接复用 `list_all_orders`，
-      保证导出的订单行与审计页列表完全一致（同样的排序和截断）；
-    - `status` 是审计页的**报价状态**筛选项，订单行本身没有该字段，
-      因此它不改变导出的订单行；保留参数只为让导出接口能原样透传审计页筛选条件。
+    - `buyer_id / date_from / date_to / limit` 复用 `list_all_orders`；
+    - `status` 按订单关联的报价状态过滤（同列表行为），无 quote_id 的订单在
+      status 非空时不导出，保证“导出的”和“看到的”订单一致（同样的排序、截断和状态关联）。
 
     Returns:
         str: 带 BOM 的 CSV 文本（RFC 4180 换行），调用方按 UTF-8 编码后作为附件下发。
     """
-    # status 只影响报价表，订单 CSV 没有报价状态列，这里显式消费掉参数以表达“已接受但不参与订单筛选”。
-    _ = status
     orders = list_all_orders(
         limit=limit,
         buyer_id=buyer_id,
+        status=status,
         date_from=date_from,
         date_to=date_to,
     )

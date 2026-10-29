@@ -168,7 +168,7 @@ onMounted(load);
         <div class="audit-stat">
           <span>已确认订单</span>
           <strong>{{ summary.order_count || 0 }}</strong>
-          <small>最近 50 条</small>
+          <small>{{ quoteStatus ? `仅 ${quoteStatus} 关联订单` : "最近 50 条" }}</small>
         </div>
         <div class="audit-stat">
           <span>成交金额</span>
@@ -190,7 +190,7 @@ onMounted(load);
       <section class="card">
         <div class="admin-section-head">
           <strong>订单与报价绑定</strong>
-          <span class="field-hint">quote_id / policy_ids / 原价 / 优惠</span>
+          <span class="field-hint">{{ quoteStatus ? `按报价状态 ${quoteStatus} 关联订单 · ` : "" }}quote_id / policy_ids / 原价 / 优惠</span>
         </div>
         <div class="table-wrap">
           <table class="table">
@@ -221,7 +221,7 @@ onMounted(load);
                 <td class="field-hint">{{ date(order.confirmed_at) }}</td>
               </tr>
               <tr v-if="!orders.length">
-                <td colspan="8" class="field-hint">暂无已确认订单</td>
+                <td colspan="8" class="field-hint">{{ quoteStatus ? `暂无关联 ${quoteStatus} 报价的已确认订单` : "暂无已确认订单" }}</td>
               </tr>
             </tbody>
           </table>
