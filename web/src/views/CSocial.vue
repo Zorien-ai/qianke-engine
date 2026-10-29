@@ -18,6 +18,16 @@ function isOwn(message) {
   return message.sender_id && message.sender_id.startsWith("buyer_");
 }
 
+function isCompanion(message) {
+  return message.sender_id && message.sender_id.startsWith("companion_");
+}
+
+function senderLabel(message) {
+  if (isOwn(message)) return "我";
+  if (isCompanion(message)) return "我的伙伴";
+  return selectedName.value;
+}
+
 function connectSocket(friendId) {
   closeSocket();
   if (!friendId) return;
@@ -42,6 +52,7 @@ function connectSocket(friendId) {
     if (payload.type === "chat") {
       if (payload.message) messages.value.push(payload.message);
       if (payload.reply) messages.value.push(payload.reply);
+      if (payload.companion_message) messages.value.push(payload.companion_message);
       scrollToBottom();
     } else if (payload.type === "error") {
       error.value = payload.error?.message || "消息发送失败";
@@ -121,6 +132,7 @@ async function send() {
     );
     if (result.message) messages.value.push(result.message);
     if (result.reply) messages.value.push(result.reply);
+    if (result.companion_message) messages.value.push(result.companion_message);
     scrollToBottom();
   } catch (e) {
     error.value = e?.detail || e?.message || "消息发送失败";
@@ -148,7 +160,7 @@ onBeforeUnmount(closeSocket);
         <p class="social-kicker">C-END · IM</p>
         <h2>社交消息</h2>
         <p class="social-subtitle">
-          IM 社交壳 MVP：好友、单聊、店宠 @ 唤醒。店宠由独立 B 端 Agent 回复，商品库当前仍是 mock。
+          IM 社交壳 MVP：好友、单聊、店宠 @ 唤醒、伙伴锐评。店宠由独立 B 端 Agent 回复，商品库当前仍是 mock。
         </p>
       </div>
       <span class="connection" role="status">
@@ -201,10 +213,10 @@ onBeforeUnmount(closeSocket);
             v-for="message in messages"
             :key="message.message_id"
             class="message-row"
-            :class="{ own: isOwn(message) }"
+            :class="{ own: isOwn(message), companion: isCompanion(message) }"
           >
             <div class="message-meta">
-              {{ isOwn(message) ? "我" : selectedName }} · {{ message.created_at?.slice(11, 19) }}
+              {{ senderLabel(message) }} · {{ message.created_at?.slice(11, 19) }}
             </div>
             <div class="message-bubble">{{ message.content }}</div>
           </div>
@@ -486,6 +498,16 @@ onBeforeUnmount(closeSocket);
   border-color: var(--primary);
   background: var(--primary);
   color: #fff;
+}
+
+.message-row.companion {
+  align-self: flex-start;
+}
+
+.message-row.companion .message-bubble {
+  border-color: var(--primary-soft);
+  background: var(--primary-soft);
+  color: var(--text);
 }
 
 .empty-line {

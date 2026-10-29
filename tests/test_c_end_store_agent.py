@@ -28,6 +28,18 @@ def _catalog_call():
     )
 
 
+def _policy_call():
+    return AIMessage(
+        content="",
+        tool_calls=[{
+            "name": "search_store_policy",
+            "args": {"topic": "活动"},
+            "id": "call_policy_1",
+            "type": "tool_call",
+        }],
+    )
+
+
 def test_intent_gate_requires_wake_and_business_intent():
     assert store_agent.intent_gate("这双鞋多少钱") == (False, False, "这双鞋多少钱")
     assert store_agent.intent_gate("@店宠 你好") == (True, False, "你好")
@@ -57,6 +69,37 @@ def test_reply_with_wake_uses_catalog_tool(tmp_path, monkeypatch):
     assert fake.calls == 2
 
 
+def test_reply_can_query_sop_and_platform_policy(tmp_path, monkeypatch):
+    monkeypatch.setenv("QIANKE_C_END_DB", str(tmp_path / "store_agent_policy.sqlite"))
+    monkeypatch.setattr(store, "_DB_PATH", None)
+    store.init()
+    fake = _FakeLLM([_policy_call(), AIMessage(content="平台满 299 减 30，以结算页为准")])
+    text, awakened = store_agent.reply("buyer_1", "@店宠 现在有什么活动", llm=fake)
+    assert awakened is True
+    assert "满 299" in text
+    assert fake.calls == 2
+
+
+def test_companion_commentary_is_text_only(tmp_path, monkeypatch):
+    from rag_demo.c_end import companion_agent
+
+    monkeypatch.setenv("QIANKE_C_END_DB", str(tmp_path / "companion_comment.sqlite"))
+    monkeypatch.setattr(store, "_DB_PATH", None)
+    store.init()
+
+    class _FakeCommentLLM:
+        def invoke(self, messages):
+            return AIMessage(content="主人，先看清活动规则再决定。")
+
+    text = companion_agent.commentary(
+        "buyer_1",
+        "有什么优惠",
+        "平台满 299 减 30",
+        llm=_FakeCommentLLM(),
+    )
+    assert text == "主人，先看清活动规则再决定。"
+
+
 def test_social_accepts_store_agent_reply_provider(tmp_path, monkeypatch):
     monkeypatch.setenv("QIANKE_C_END_DB", str(tmp_path / "social_agent.sqlite"))
     monkeypatch.setattr(store, "_DB_PATH", None)
@@ -67,6 +110,9 @@ def test_social_accepts_store_agent_reply_provider(tmp_path, monkeypatch):
         "store_demo",
         "@店宠 推荐跑鞋",
         reply_provider=lambda text: ("店宠 Agent 回复", True),
+        commentary_provider=lambda text, reply: "主人，先核对活动规则。",
     )
     assert result["reply"]["content"] == "店宠 Agent 回复"
     assert result["reply"]["awakened"] is True
+    assert result["companion_message"]["content"] == "主人，先核对活动规则。"
+    assert len(social.get_messages("buyer_1", "store_demo")) == 3

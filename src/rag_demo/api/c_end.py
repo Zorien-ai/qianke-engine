@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import social, store, store_agent
+from rag_demo.c_end import companion_agent, social, store, store_agent
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -130,6 +130,9 @@ def send_message(friend_id: str, req: SendMessageIn) -> dict:
             friend_id,
             req.content,
             reply_provider=lambda text: store_agent.reply(buyer_id, text),
+            commentary_provider=lambda text, reply_text: companion_agent.commentary(
+                buyer_id, text, reply_text
+            ),
         )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
@@ -158,6 +161,9 @@ async def chat_websocket(websocket: WebSocket, friend_id: str) -> None:
                     friend_id,
                     content,
                     reply_provider=lambda text: store_agent.reply(buyer_id, text),
+                    commentary_provider=lambda text, reply_text: companion_agent.commentary(
+                        buyer_id, text, reply_text
+                    ),
                 )
                 await websocket.send_json({"type": "chat", **result})
             except store.CStoreError as exc:

@@ -5,7 +5,7 @@
 没有 DEEPSEEK_API_KEY / 数据库时自动 skip，避免 CI 无凭证时误红。
 
 本地执行：
-    DEEPSEEK_API_KEY=... pytest -m integration tests/test_agent_integration.py -q
+    RUN_REAL_AGENT_INTEGRATION=1 DEEPSEEK_API_KEY=... pytest -m integration tests/test_agent_integration.py -q
 """
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ pytestmark = pytest.mark.integration
 
 
 def _require_real_env():
+    if os.getenv("RUN_REAL_AGENT_INTEGRATION") != "1":
+        pytest.skip("真实 Agent 集成测试为显式开关：设置 RUN_REAL_AGENT_INTEGRATION=1 后执行")
     if not os.getenv("DEEPSEEK_API_KEY"):
         pytest.skip("缺少 DEEPSEEK_API_KEY，跳过真实 Agent 集成测试")
     try:

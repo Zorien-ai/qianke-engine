@@ -141,6 +141,7 @@ def send_message(
     content: str,
     *,
     reply_provider: Callable[[str], tuple[str, bool]] | None = None,
+    commentary_provider: Callable[[str, str], str] | None = None,
 ) -> dict[str, Any]:
     text = (content or "").strip()
     if not text:
@@ -149,14 +150,38 @@ def send_message(
         raise store.CStoreError("MESSAGE_TOO_LONG", "消息不能超过 1000 字")
 
     init()
+    # 先读好友并提交，避免在 SQLite 写事务里调用 LLM。
+    check = store._connect()
+    try:
+        _ensure_friends(check, owner_id)
+        check.commit()
+        friend = _friend(check, owner_id, friend_id)
+    finally:
+        check.close()
+    if friend is None:
+        raise store.CStoreError("FRIEND_NOT_FOUND", "好友不存在")
+
+    reply_text: str | None = None
+    awakened = False
+    commentary = ""
+    if friend["kind"] == "merchant":
+        if reply_provider is not None:
+            try:
+                reply_text, awakened = reply_provider(text)
+            except Exception:  # noqa: BLE001 - 店宠失败不应吞掉用户消息
+                reply_text, awakened = _mock_store_reply(text)
+        else:
+            reply_text, awakened = _mock_store_reply(text)
+        if commentary_provider is not None:
+            try:
+                commentary = str(commentary_provider(text, reply_text) or "").strip()
+            except Exception:  # noqa: BLE001 - 伙伴失败不影响店宠回复
+                commentary = ""
+
     conn = store._connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         _ensure_friends(conn, owner_id)
-        friend = _friend(conn, owner_id, friend_id)
-        if friend is None:
-            raise store.CStoreError("FRIEND_NOT_FOUND", "好友不存在")
-
         owner_message = _insert_message(
             conn,
             owner_id=owner_id,
@@ -166,14 +191,8 @@ def send_message(
             content=text,
         )
         reply = None
-        if friend["kind"] == "merchant":
-            if reply_provider is not None:
-                try:
-                    reply_text, awakened = reply_provider(text)
-                except Exception:  # noqa: BLE001 - 店宠失败不应吞掉用户消息
-                    reply_text, awakened = _mock_store_reply(text)
-            else:
-                reply_text, awakened = _mock_store_reply(text)
+        companion_message = None
+        if reply_text is not None:
             reply = _insert_message(
                 conn,
                 owner_id=owner_id,
@@ -183,8 +202,21 @@ def send_message(
                 content=reply_text,
             )
             reply["awakened"] = awakened
+        if commentary:
+            companion_message = _insert_message(
+                conn,
+                owner_id=owner_id,
+                friend_id=friend_id,
+                sender_id=f"companion_{owner_id}",
+                receiver_id=owner_id,
+                content=commentary[:120],
+            )
         conn.commit()
-        return {"message": owner_message, "reply": reply}
+        return {
+            "message": owner_message,
+            "reply": reply,
+            "companion_message": companion_message,
+        }
     except Exception:
         conn.rollback()
         raise
