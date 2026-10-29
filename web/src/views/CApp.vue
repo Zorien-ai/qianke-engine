@@ -91,6 +91,7 @@ const draft = ref("");
 const typing = ref(false);
 const search = ref("");
 const showContext = ref(false);
+const showThreads = ref(false);
 const companion = ref({
   name: "小伴",
   level: 4,
@@ -368,6 +369,15 @@ function toggleContext() {
   showContext.value = !showContext.value;
 }
 
+function openThreads() {
+  showThreads.value = true;
+}
+
+function selectMobileThread(id) {
+  showThreads.value = false;
+  switchThread(id);
+}
+
 onMounted(async () => {
   await Promise.all([loadCompanion(), loadCompanionMessages()]);
   scrollToBottom();
@@ -472,6 +482,11 @@ onMounted(async () => {
         <section class="c-chat" aria-label="与小伴的对话">
           <header class="c-chat-head">
             <div class="c-chat-identity">
+              <button class="c-back-btn" type="button" aria-label="返回消息列表" @click="openThreads">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
               <span class="c-avatar">{{ activeThread.name.slice(0, 1) }}</span>
               <div>
                 <h1>{{ activeThread.name }}</h1>
@@ -479,10 +494,10 @@ onMounted(async () => {
               </div>
             </div>
             <div class="c-chat-actions">
-              <button class="c-icon-btn" type="button" aria-label="搜索会话">
+              <button class="c-icon-btn" type="button" aria-label="当前会话信息" @click="toggleContext">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m20 20-3.2-3.2" />
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 11v5M12 8h.01" />
                 </svg>
               </button>
             </div>
@@ -500,7 +515,10 @@ onMounted(async () => {
                 <span>{{ message.role === "user" ? "我" : message.role === "companion" ? "小伴" : message.role === "merchant" ? activeThread.name : "系统" }}</span>
                 <time>{{ message.time }}</time>
               </div>
-              <p class="c-bubble">{{ message.text }}</p>
+              <p class="c-bubble">
+                {{ message.text }}
+                <time class="c-bubble-time">{{ message.time }}</time>
+              </p>
               <div v-if="message.quote" class="c-quote-attachment">
                 <span class="c-quote-label">报价引用</span>
                 <div class="c-quote-row">
@@ -524,21 +542,28 @@ onMounted(async () => {
 
           <form class="c-composer" @submit.prevent="send">
             <label class="sr-only" for="c-app-input">输入消息</label>
-            <textarea
-              id="c-app-input"
-              v-model="draft"
-              rows="1"
-              placeholder="问商品、活动或售后"
-              @keydown.enter.exact.prevent="send"
-            />
-            <div class="c-composer-foot">
-              <span>Enter 发送 · Shift + Enter 换行</span>
-              <button type="submit" class="c-send-btn" :disabled="!draft.trim() || typing">
-                发送
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <div class="c-composer-row">
+              <button class="c-tool-btn" type="button" aria-label="添加附件" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <textarea
+                id="c-app-input"
+                v-model="draft"
+                rows="1"
+                placeholder="问商品、活动或售后"
+                @keydown.enter.exact.prevent="send"
+              />
+              <button type="submit" class="c-send-btn" :disabled="!draft.trim() || typing" aria-label="发送">
+                <span class="c-send-label">发送</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
                   <path d="m5 12 14-7-4 14-3-6-7-1z" />
                 </svg>
               </button>
+            </div>
+            <div class="c-composer-foot">
+              <span>Enter 发送 · Shift + Enter 换行</span>
             </div>
           </form>
         </section>
@@ -638,6 +663,48 @@ onMounted(async () => {
           <p class="c-context-note">演示数据 · 仅用于界面参考</p>
         </div>
       </aside>
+    </div>
+
+    <div v-if="showThreads" class="c-mobile-thread-screen" role="dialog" aria-label="消息列表">
+      <header class="c-mobile-thread-head">
+        <button type="button" class="c-icon-btn" aria-label="返回对话" @click="showThreads = false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+        <h1>消息</h1>
+        <button type="button" class="c-icon-btn" aria-label="新建会话" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+      </header>
+      <label class="c-mobile-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.2-3.2" />
+        </svg>
+        <input v-model="search" type="search" placeholder="搜索" aria-label="搜索会话" />
+      </label>
+      <div class="c-mobile-thread-list">
+        <button
+          v-for="thread in filteredThreads"
+          :key="thread.id"
+          type="button"
+          class="c-mobile-thread-row"
+          @click="selectMobileThread(thread.id)"
+        >
+          <span class="c-avatar" :class="thread.kind">{{ thread.name.slice(0, 1) }}</span>
+          <span class="c-mobile-thread-copy">
+            <span>
+              <strong>{{ thread.name }}</strong>
+              <time>{{ thread.time }}</time>
+            </span>
+            <small>{{ thread.preview }}</small>
+          </span>
+          <span v-if="thread.unread" class="c-unread">{{ thread.unread }}</span>
+        </button>
+      </div>
     </div>
 
     <nav class="c-mobile-nav" aria-label="移动端导航">
@@ -1099,6 +1166,23 @@ onMounted(async () => {
   gap: 11px;
 }
 
+.c-back-btn {
+  display: none;
+  place-items: center;
+  width: 28px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-2);
+  cursor: pointer;
+}
+
+.c-back-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
 .c-chat-identity h1 {
   margin: 0;
   font-size: 16px;
@@ -1174,7 +1258,7 @@ onMounted(async () => {
 
 .c-bubble {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px 12px 7px;
   border: 1px solid var(--c-line-soft);
   border-radius: 10px;
   border-top-left-radius: 4px;
@@ -1183,6 +1267,15 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;
+}
+
+.c-bubble-time {
+  display: none;
+  margin-left: 10px;
+  color: var(--c-text-3);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .c-message.user .c-bubble {
@@ -1296,6 +1389,30 @@ onMounted(async () => {
   border-radius: 12px;
   background: var(--c-panel);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.c-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.c-tool-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--c-text-3);
+}
+
+.c-tool-btn svg {
+  width: 17px;
+  height: 17px;
 }
 
 .c-composer textarea {
@@ -1657,6 +1774,215 @@ onMounted(async () => {
 
 .c-mobile-nav {
   display: none;
+}
+
+.c-mobile-thread-screen {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .c-topbar {
+    display: none;
+  }
+
+  .c-chat {
+    padding-top: 0;
+  }
+
+  .c-chat-head {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 8px 0 10px;
+    background: var(--c-bg);
+  }
+
+  .c-back-btn {
+    display: grid;
+  }
+
+  .c-message-meta {
+    display: none;
+  }
+
+  .c-bubble-time {
+    display: inline-block;
+  }
+
+  .c-message.user .c-bubble {
+    border-color: #2a3a31;
+    background: #1e2a24;
+    color: #dfe8e2;
+  }
+
+  .c-thread {
+    padding-top: 12px;
+    padding-bottom: 4px;
+  }
+
+  .c-composer {
+    padding: 8px 0 10px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .c-composer-row {
+    align-items: center;
+    gap: 4px;
+    padding: 4px 4px 4px 8px;
+    border: 1px solid var(--c-line);
+    border-radius: 22px;
+    background: var(--c-panel);
+  }
+
+  .c-tool-btn {
+    width: 26px;
+    height: 26px;
+    flex-basis: 26px;
+  }
+
+  .c-composer textarea {
+    padding: 4px 0;
+    font-size: 13px;
+  }
+
+  .c-send-btn {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--c-panel-3);
+  }
+
+  .c-send-label {
+    display: none;
+  }
+
+  .c-composer-foot {
+    display: none;
+  }
+
+  .c-mobile-thread-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    background: var(--c-bg);
+    color: var(--c-text);
+  }
+
+  .c-mobile-thread-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--c-line-soft);
+  }
+
+  .c-mobile-thread-head h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .c-mobile-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    margin: 12px 16px;
+    padding: 0 10px;
+    border: 1px solid var(--c-line);
+    border-radius: 10px;
+    background: var(--c-panel);
+    color: var(--c-text-3);
+  }
+
+  .c-mobile-search svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+  }
+
+  .c-mobile-search input {
+    min-width: 0;
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--c-text);
+    font: inherit;
+    font-size: 12px;
+  }
+
+  .c-mobile-thread-list {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 0 8px;
+  }
+
+  .c-mobile-thread-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    padding: 11px 8px;
+    border: 0;
+    border-bottom: 1px solid var(--c-line-soft);
+    background: transparent;
+    color: var(--c-text);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .c-mobile-thread-row:last-child {
+    border-bottom: 0;
+  }
+
+  .c-mobile-thread-copy {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .c-mobile-thread-copy > span {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .c-mobile-thread-copy strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .c-mobile-thread-copy time {
+    color: var(--c-text-3);
+    font-size: 9px;
+  }
+
+  .c-mobile-thread-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--c-text-3);
+    font-size: 11px;
+  }
 }
 
 .sr-only {

@@ -60,20 +60,33 @@ C 端入口从「企业工作台里的一个页面」改成独立的消费级应
 
 ## 5. 移动端结构
 
+参考 WhatsApp iOS 的移动端信息架构（Mobbin）：
+
+https://mobbin.com/apps/whats-app-ios-8738dbc9-e7a8-4fef-91e5-6afd1c9d092b
+
+映射方式：
+
 ```text
-顶部：千客 / 会员等级 / 会话信息
-中间：完整对话流
-底部：快捷问题 / 输入区 / 固定四栏导航
-概览：从底部导航打开右侧抽屉
+对话页：返回箭头 / 头像 / 名称 / 在线状态 / 右侧信息按钮
+消息：低饱和绿色发件气泡 + 深色收件气泡 + 气泡内时间
+输入：加号 / 胶囊输入框 / 圆形发送
+会话列表：顶部「消息」/ 搜索 / 头像 / 名称 / 预览 / 时间 / 未读
+底部：对话 / 商城 / 订单 / 概览
 ```
 
-移动端截图：`docs/screenshots/c-app-mobile.png`
+保留 C 端自己的中性深色和低饱和规则，不直接复制 WhatsApp 的高饱和绿色。
+
+![移动端对话](F:/workspace/python/rag-demo/docs/screenshots/c-app-mobile-whatsapp.png)
+
+![移动端消息列表](F:/workspace/python/rag-demo/docs/screenshots/c-app-mobile-threads.png)
 
 验证：
 
 ```text
 390 × 844 无横向溢出
-对话 / 快捷问题 / 移动端概览抽屉可用
+对话页返回按钮打开消息列表
+消息列表搜索 / 选中会话可用
+底部导航与气泡内时间正常
 控制台错误 0
 ```
 
