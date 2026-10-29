@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.7.3 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.7.4 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.7.3 |
+| AGENTS.md | v1.7.4 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -481,3 +481,4 @@ IM 社交载体
 | 1.7.1 | 2026-10-29 | C 端审计订单/报价支持 offset 分页与 totals；消息时间戳统一单调递增，修复同秒排序导致的跨聊天顺序漂移 |
 | 1.7.2 | 2026-10-29 | 临时种子数据完成店宠分页、审计分页、任务看板浏览器 E2E；记录到 docs/e2e/c-end-pagination-task-board.md |
 | 1.7.3 | 2026-10-29 | 建立千客设计语言 v1.0：统一 Token/组件契约，定义 B/C/A/官网四种气候与反同质化规则 |
+| 1.7.4 | 2026-10-29 | 新增 /v2/design-preview.html 风格确认页：B/C/A/官网四模式可切换，桌面与移动截图归档 |

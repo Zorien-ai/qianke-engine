@@ -17,7 +17,8 @@
 7. 不要太像：反同质化规则
 8. 现有实现映射
 9. 验收清单
-10. 待确认
+10. 风格确认页
+11. 待确认
 ```
 
 ---
@@ -701,7 +702,42 @@ web/src/App.vue                B 端外壳
 
 ---
 
-## 10. 待确认
+## 10. 风格确认页
+
+静态预览页：
+
+```text
+http://127.0.0.1:8000/v2/design-preview.html
+```
+
+源码：
+
+```text
+web/public/design-preview.html
+```
+
+页面提供一个切换器，对比四种语气：
+
+```text
+B 工作台：纸面、中高密度、表格 + Agent 轨迹
+C App：石墨、低中密度、聊天 + 报价确认
+A 审计：纸面、高密度、筛选 + 审计表
+官网：纸面、低密度、大字号叙事
+```
+
+预览只用于确认方向，不是业务页面；数据全部为模拟值。
+
+截图：
+
+```text
+docs/screenshots/design-preview-b.png
+docs/screenshots/design-preview-c.png
+docs/screenshots/design-preview-a.png
+docs/screenshots/design-preview-landing.png
+docs/screenshots/design-preview-mobile-c.png
+```
+
+## 11. 待确认
 
 ```text
 1. B 端是否默认浅色纸面、深色作为可选？
