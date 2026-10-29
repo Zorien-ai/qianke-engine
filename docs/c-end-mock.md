@@ -231,7 +231,27 @@ POST /api/c/quotes/{quote_id}/prepare
 - 没有好友申请/通过流程
 - 双宠自主谈判协议尚未实现
 
-## 8. 当前买家身份
+## 8. 订单审计页
+
+页面：
+
+```text
+/v2/#/c/orders
+```
+
+![C 端订单审计](screenshots/c-end-orders.png)
+
+展示：
+
+- 正式订单 ID / 确认时间
+- 商品与数量
+- 原价 / 优惠 / 应付
+- 来源 quote_id
+- 命中的 policy_ids
+
+只展示正式订单，不把草稿当订单。
+
+## 9. 当前买家身份
 
 当前复用登录账号：
 

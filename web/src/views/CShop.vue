@@ -103,6 +103,34 @@ async function confirmQuote() {
   }
 }
 
+async function cancelDraft() {
+  if (!quoteDraft.value || quoteBusy.value) return;
+  quoteBusy.value = true;
+  quoteError.value = "";
+  try {
+    await postJson(`/api/c/orders/${encodeURIComponent(quoteDraft.value.order_id)}/cancel`, {});
+    quoteDraft.value = null;
+  } catch (e) {
+    quoteError.value = e?.detail || e?.message || "草稿取消失败";
+  } finally {
+    quoteBusy.value = false;
+  }
+}
+
+async function cancelQuote() {
+  if (!quote.value || quoteBusy.value) return;
+  quoteBusy.value = true;
+  quoteError.value = "";
+  try {
+    await postJson(`/api/c/quotes/${encodeURIComponent(quote.value.quote_id)}/cancel`, {});
+    quote.value = null;
+  } catch (e) {
+    quoteError.value = e?.detail || e?.message || "报价取消失败";
+  } finally {
+    quoteBusy.value = false;
+  }
+}
+
 async function loadProducts() {
   productsLoading.value = true;
   productsError.value = "";
@@ -271,7 +299,7 @@ onMounted(() => {
           </div>
           <div class="quote-chips">
             <span v-for="product in quote.product_refs" :key="product.product_id" class="quote-chip">
-              {{ product.title || product.product_id }}
+              {{ product.title || product.product_id }} × {{ product.quantity || 1 }}
             </span>
             <span v-for="policy in quote.policy_refs" :key="policy.policy_id" class="quote-chip policy">
               {{ policy.title || policy.policy_id }}
@@ -289,14 +317,17 @@ onMounted(() => {
             已创建 {{ quoteOrder.order_id }} · 应付 ¥{{ money(quoteOrder.total_amount) }}
           </div>
           <div v-else-if="quoteDraft" class="quote-actions">
-            <button class="ghost-btn" type="button" :disabled="quoteBusy" @click="quoteDraft = null">
-              返回
+            <button class="ghost-btn" type="button" :disabled="quoteBusy" @click="cancelDraft">
+              取消草稿
             </button>
             <button class="primary-btn" type="button" :disabled="quoteBusy" @click="confirmQuote">
               {{ quoteBusy ? "提交中…" : "确认并创建模拟订单" }}
             </button>
           </div>
           <div v-else class="quote-actions">
+            <button class="ghost-btn" type="button" :disabled="quoteBusy" @click="cancelQuote">
+              取消报价
+            </button>
             <button class="primary-btn" type="button" :disabled="quoteBusy" @click="prepareQuote">
               {{ quoteBusy ? "准备中…" : "使用此报价准备订单" }}
             </button>

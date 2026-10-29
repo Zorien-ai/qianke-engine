@@ -161,3 +161,29 @@ def test_quote_links_order_and_consumes_audit(c_store):
     assert order["quote_id"] == "quote_audit_1"
     assert order["policy_ids"] == ["platform_full_reduce"]
     assert c_store.get_quote("quote_audit_1", "buyer_1")["status"] == "CONSUMED"
+    audit = c_store.list_orders("buyer_1")
+    assert audit[0]["order_id"] == order["order_id"]
+    assert audit[0]["quote_id"] == "quote_audit_1"
+    assert all(item["order_id"].startswith("order_") for item in audit)
+
+
+def test_cancel_quote_and_release_draft(c_store):
+    c_store.create_quote(
+        "buyer_1",
+        "store_demo",
+        {
+            "quote_id": "quote_cancel_1",
+            "product_refs": [{"product_id": "P001", "quantity": 1}],
+            "policy_refs": [],
+        },
+    )
+    draft = c_store.prepare_order("buyer_1", [], quote_id="quote_cancel_1")
+    cancelled = c_store.cancel_order_draft("buyer_1", draft["order_id"])
+    assert cancelled["status"] == "CANCELLED"
+    assert c_store.get_quote("quote_cancel_1", "buyer_1")["status"] == "PENDING"
+
+    again = c_store.prepare_order("buyer_1", [], quote_id="quote_cancel_1")
+    assert again["total_amount"] == 299.0
+    c_store.cancel_order_draft("buyer_1", again["order_id"])
+    c_store.cancel_quote("quote_cancel_1", "buyer_1")
+    assert c_store.get_quote("quote_cancel_1", "buyer_1")["status"] == "CANCELLED"

@@ -514,6 +514,71 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
     }
 
 
+def list_orders(buyer_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """买家已确认订单，用于审计查询。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_order WHERE buyer_id = ? AND status = 'CONFIRMED' "
+            "AND order_id LIKE 'order_%' ORDER BY confirmed_at DESC LIMIT ?",
+            (buyer_id, max(1, min(int(limit), 200))),
+        ).fetchall()
+        return [_order_payload(conn, row) for row in rows]
+    finally:
+        conn.close()
+
+
+def cancel_order_draft(buyer_id: str, draft_id: str) -> dict[str, Any]:
+    """取消草稿；如果草稿绑定了报价，则把报价释放回 PENDING。"""
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM c_order WHERE order_id = ?", (draft_id,)).fetchone()
+        if row is None:
+            raise CStoreError("ORDER_NOT_FOUND", "订单不存在")
+        if row["buyer_id"] != buyer_id:
+            raise CStoreError("ORDER_FORBIDDEN", "不能操作其他用户的订单")
+        if row["status"] != "DRAFT":
+            raise CStoreError("ORDER_NOT_DRAFT", "只有草稿可以取消")
+        conn.execute("UPDATE c_order SET status = 'CANCELLED' WHERE order_id = ?", (draft_id,))
+        if row["quote_id"]:
+            conn.execute(
+                "UPDATE c_quote SET status = 'PENDING' WHERE quote_id = ? AND status = 'PENDING'",
+                (row["quote_id"],),
+            )
+        conn.commit()
+        return {"order_id": draft_id, "status": "CANCELLED", "quote_id": row["quote_id"]}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def cancel_quote(quote_id: str, buyer_id: str) -> dict[str, Any]:
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM c_quote WHERE quote_id = ?", (quote_id,)).fetchone()
+        if row is None:
+            raise CStoreError("QUOTE_NOT_FOUND", "报价不存在")
+        if row["buyer_id"] != buyer_id:
+            raise CStoreError("QUOTE_FORBIDDEN", "不能操作其他用户的报价")
+        if row["status"] != "PENDING":
+            raise CStoreError("QUOTE_NOT_PENDING", "报价已使用或已失效")
+        conn.execute("UPDATE c_quote SET status = 'CANCELLED' WHERE quote_id = ?", (quote_id,))
+        conn.commit()
+        return {"quote_id": quote_id, "status": "CANCELLED"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def _companion_payload(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "owner_id": row["owner_id"],

@@ -129,6 +129,30 @@ def prepare_quote_order(quote_id: str) -> dict:
         raise _http_error(exc) from exc
 
 
+@router.post("/quotes/{quote_id}/cancel")
+def cancel_quote(quote_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.cancel_quote(quote_id, buyer_id)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/orders")
+def list_orders(limit: int = 50) -> dict:
+    buyer_id, _ = _buyer()
+    return {"orders": store.list_orders(buyer_id, limit=limit)}
+
+
+@router.post("/orders/{draft_id}/cancel")
+def cancel_order_draft(draft_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.cancel_order_draft(buyer_id, draft_id)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.get("/friends")
 def list_friends() -> dict:
     buyer_id, _ = _buyer()

@@ -47,6 +47,13 @@ def test_intent_gate_requires_wake_and_business_intent():
     assert (wake, allowed, cleaned) == (True, True, "推荐一双跑鞋")
 
 
+def test_extract_quantity_from_user_text():
+    assert store_agent._extract_quantity("推荐一双跑鞋") == 1
+    assert store_agent._extract_quantity("我要两双") == 2
+    assert store_agent._extract_quantity("买 3 件") == 3
+    assert store_agent._extract_quantity("推荐跑鞋") == 1
+
+
 def test_reply_without_wake_does_not_call_llm(tmp_path, monkeypatch):
     monkeypatch.setenv("QIANKE_C_END_DB", str(tmp_path / "store_agent.sqlite"))
     monkeypatch.setattr(store, "_DB_PATH", None)

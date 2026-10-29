@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -60,6 +61,22 @@ def intent_gate(text: str) -> tuple[bool, bool, str]:
     if not any(keyword in cleaned for keyword in INTENT_KEYWORDS):
         return True, False, cleaned
     return True, True, cleaned
+
+
+_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+_UNIT = r"(?:双|件|个|只|套|箱|瓶|台|条|本|份)"
+
+
+def _extract_quantity(text: str) -> int:
+    """从用户消息里提取数量；报价默认 1，避免凭空放大购买量。"""
+    match = re.search(rf"(\d{{1,2}})\s*{_UNIT}", text)
+    if match:
+        value = int(match.group(1))
+        return value if 1 <= value <= 20 else 1
+    match = re.search(rf"([一二两三四五六七八九十])\s*{_UNIT}", text)
+    if match:
+        return _NUM.get(match.group(1), 1)
+    return 1
 
 
 def _tools():
@@ -160,11 +177,13 @@ def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> Stor
                         result = {"ok": False, "error": {"code": "TOOL_ERROR", "message": str(exc)}}
                 if isinstance(result, dict) and result.get("ok"):
                     if name == "search_catalog":
+                        quantity = _extract_quantity(cleaned)
                         for product in result.get("products") or []:
                             product_refs.append({
                                 "product_id": product.get("product_id"),
                                 "title": product.get("title"),
                                 "price": product.get("price"),
+                                "quantity": quantity,
                             })
                     elif name == "search_store_policy":
                         for policy in result.get("policies") or []:
