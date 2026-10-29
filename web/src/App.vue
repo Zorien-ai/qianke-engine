@@ -50,6 +50,7 @@ const navItems = computed(() => {
     { to: "/", key: "dashboard", label: "工作台", icon: ICONS.dashboard },
     { to: "/chat", key: "chat", label: "对话", icon: ICONS.chat },
     { to: "/agent", key: "agent", label: "Agent 智能助理", icon: ICONS.agent },
+    { to: "/agent/actions", key: "agentActions", label: "任务看板", icon: ICONS.orders },
     { to: "/c", key: "shop", label: "C 端商城", icon: ICONS.shop },
     { to: "/c/app", key: "capp", label: "C 端 App", icon: ICONS.social },
     { to: "/c/social", key: "social", label: "社交消息", icon: ICONS.social },

@@ -16,6 +16,7 @@ import Monitor from "./views/Monitor.vue";
 import Billing from "./views/Billing.vue";
 import MonitorAdmin from "./views/MonitorAdmin.vue";
 import AgentDemo from "./views/AgentDemo.vue";
+import AgentActions from "./views/AgentActions.vue";
 import CShop from "./views/CShop.vue";
 import CSocial from "./views/CSocial.vue";
 import COrders from "./views/COrders.vue";
@@ -41,6 +42,7 @@ const routes = [
   { path: "/", name: "dashboard", component: Dashboard, meta: { title: "工作台" } },
   { path: "/chat", name: "chat", component: Chat, meta: { title: "对话" } },
   { path: "/agent", name: "agent", component: AgentDemo, meta: { title: "Agent 智能助理" } },
+  { path: "/agent/actions", name: "agent-actions", component: AgentActions, meta: { title: "运营任务看板" } },
   { path: "/c", name: "c-shop", component: CShop, meta: { title: "C 端商城" } },
   { path: "/c/social", name: "c-social", component: CSocial, meta: { title: "社交消息" } },
   { path: "/c/orders", name: "c-orders", component: COrders, meta: { title: "我的订单" } },

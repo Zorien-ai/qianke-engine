@@ -92,6 +92,23 @@ Agent 返回的 `pending_actions` 会展示为「待确认写入」：
 DRAFT → CONFIRMED
 ```
 
+任务看板：
+
+```text
+/v2/#/agent/actions
+```
+
+![运营任务看板](screenshots/b-agent-actions.png)
+
+看板支持：
+
+```text
+状态筛选（待确认 / 已确认 / 已完成 / 已取消）
+DRAFT 确认 / 取消
+CONFIRMED 标记完成
+COMPLETED 展示完成时间
+```
+
 ## 6. 任务状态机
 
 ```text
