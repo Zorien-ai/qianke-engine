@@ -61,6 +61,13 @@ class SendMessageIn(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
 
 
+class AppMessageIn(BaseModel):
+    thread_id: str = Field(..., min_length=1, max_length=64)
+    role: str = Field(..., pattern="^(user|companion|assistant|system)$")
+    content: str = Field(..., min_length=1, max_length=2000)
+    metadata: dict = Field(default_factory=dict)
+
+
 def _last_ai_text(messages: list) -> str:
     for msg in reversed(messages or []):
         if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
@@ -103,6 +110,27 @@ def update_companion(req: CompanionPatchIn) -> dict:
             species=req.species,
             persona=req.persona,
             appearance=req.appearance,
+        )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/app/messages")
+def list_app_messages(thread_id: str = "companion", limit: int = 50) -> dict:
+    buyer_id, _ = _buyer()
+    return {"messages": store.list_app_messages(buyer_id, thread_id, limit=limit)}
+
+
+@router.post("/app/messages")
+def save_app_message(req: AppMessageIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.save_app_message(
+            buyer_id,
+            req.thread_id,
+            req.role,
+            req.content,
+            metadata=req.metadata,
         )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc

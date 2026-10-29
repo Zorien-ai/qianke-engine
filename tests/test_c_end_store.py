@@ -187,3 +187,18 @@ def test_cancel_quote_and_release_draft(c_store):
     c_store.cancel_order_draft("buyer_1", again["order_id"])
     c_store.cancel_quote("quote_cancel_1", "buyer_1")
     assert c_store.get_quote("quote_cancel_1", "buyer_1")["status"] == "CANCELLED"
+
+
+def test_app_messages_are_persisted_and_scoped(c_store):
+    c_store.save_app_message("buyer_1", "companion", "user", "看看跑鞋")
+    c_store.save_app_message(
+        "buyer_1",
+        "companion",
+        "companion",
+        "轻量跑鞋 299 元",
+        {"quote_id": "quote_app_1"},
+    )
+    messages = c_store.list_app_messages("buyer_1", "companion")
+    assert [m["role"] for m in messages] == ["user", "companion"]
+    assert messages[1]["metadata"]["quote_id"] == "quote_app_1"
+    assert c_store.list_app_messages("buyer_2", "companion") == []

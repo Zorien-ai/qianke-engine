@@ -207,6 +207,36 @@ async function loadStoreMessages() {
   }
 }
 
+async function loadCompanionMessages() {
+  try {
+    const data = await getJson("/api/c/app/messages?thread_id=companion&limit=50");
+    if (data?.messages?.length) {
+      messagesByThread.value.companion = data.messages.map((message) => ({
+        id: message.message_id,
+        role: message.role === "user" ? "user" : "companion",
+        text: cleanReply(message.content),
+        time: (message.created_at || "").slice(11, 16),
+      }));
+    }
+    scrollToBottom();
+  } catch {
+    // 保留演示种子。
+  }
+}
+
+async function persistAppMessage(role, content, metadata = {}) {
+  try {
+    await postJson("/api/c/app/messages", {
+      thread_id: "companion",
+      role,
+      content,
+      metadata,
+    });
+  } catch {
+    // 消息持久化失败不阻断当前对话。
+  }
+}
+
 async function send() {
   const text = draft.value.trim();
   if (!text || typing.value) return;
@@ -245,6 +275,7 @@ async function send() {
     return;
   }
 
+  await persistAppMessage("user", text);
   typing.value = true;
   try {
     const result = await postJson("/api/c/agent/run", {
@@ -253,10 +284,12 @@ async function send() {
     });
     liveThreadId.value = result.thread_id || liveThreadId.value;
     agentError.value = "";
+    const replyText = cleanReply(result.reply) || "已处理，请查看当前待确认信息。";
     pushMessage({
       role: "companion",
-      text: cleanReply(result.reply) || "已处理，请查看当前待确认信息。",
+      text: replyText,
     });
+    await persistAppMessage("companion", replyText);
     if (result.draft) {
       liveDraft.value = result.draft;
       liveOrder.value = null;
@@ -268,7 +301,9 @@ async function send() {
     }
   } catch (error) {
     agentError.value = error?.detail || error?.message || "小伴暂时无法回应";
-    pushMessage({ role: "companion", ...localReply(text) });
+    const fallback = localReply(text);
+    pushMessage({ role: "companion", ...fallback });
+    await persistAppMessage("companion", fallback.text);
   } finally {
     typing.value = false;
     scrollToBottom();
@@ -286,12 +321,11 @@ async function confirmLiveOrder() {
     });
     liveOrder.value = result.order;
     liveDraft.value = null;
-    pushMessage({
-      role: "companion",
-      text: result.order
-        ? `订单 ${result.order.order_id} 已创建。可以在订单页查看报价和确认记录。`
-        : "订单已确认。",
-    });
+    const replyText = result.order
+      ? `订单 ${result.order.order_id} 已创建。可以在订单页查看报价和确认记录。`
+      : "订单已确认。";
+    pushMessage({ role: "companion", text: replyText });
+    await persistAppMessage("companion", replyText, { order_id: result.order?.order_id || null });
   } catch (error) {
     agentError.value = error?.detail || error?.message || "订单确认失败";
   } finally {
@@ -335,7 +369,7 @@ function toggleContext() {
 }
 
 onMounted(async () => {
-  await loadCompanion();
+  await Promise.all([loadCompanion(), loadCompanionMessages()]);
   scrollToBottom();
 });
 </script>

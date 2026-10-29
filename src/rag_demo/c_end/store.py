@@ -109,6 +109,19 @@ CREATE TABLE IF NOT EXISTS c_companion (
     satiety    INTEGER NOT NULL DEFAULT 60,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS c_app_message (
+    message_id  TEXT PRIMARY KEY,
+    owner_id    TEXT NOT NULL,
+    thread_id   TEXT NOT NULL,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_app_message_owner_thread
+    ON c_app_message (owner_id, thread_id, created_at);
 """
 
 _SEED = (
@@ -660,6 +673,76 @@ def update_companion(
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+def save_app_message(
+    owner_id: str,
+    thread_id: str,
+    role: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """持久化 C 端 App 会话消息；只存消息，不执行任何订单动作。"""
+    thread = str(thread_id or "").strip()
+    if not thread or len(thread) > 64:
+        raise CStoreError("INVALID_THREAD", "会话 ID 不合法")
+    if role not in {"user", "companion", "assistant", "system"}:
+        raise CStoreError("INVALID_ROLE", "消息角色不合法")
+    text = str(content or "").strip()
+    if not text:
+        raise CStoreError("EMPTY_MESSAGE", "消息不能为空")
+    if len(text) > 2000:
+        raise CStoreError("MESSAGE_TOO_LONG", "消息不能超过 2000 字")
+    meta = metadata or {}
+    init()
+    message_id = f"appmsg_{uuid.uuid4().hex[:20]}"
+    created_at = _now()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_app_message(message_id, owner_id, thread_id, role, content, metadata_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (message_id, owner_id, thread, role, text, json.dumps(meta, ensure_ascii=False), created_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {
+        "message_id": message_id,
+        "thread_id": thread,
+        "role": role,
+        "content": text,
+        "metadata": meta,
+        "created_at": created_at,
+    }
+
+
+def list_app_messages(owner_id: str, thread_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_app_message WHERE owner_id = ? AND thread_id = ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (owner_id, str(thread_id), max(1, min(int(limit), 200))),
+        ).fetchall()
+        result = []
+        for row in rows:
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            result.append({
+                "message_id": row["message_id"],
+                "thread_id": row["thread_id"],
+                "role": row["role"],
+                "content": row["content"],
+                "metadata": metadata,
+                "created_at": row["created_at"],
+            })
+        return result
     finally:
         conn.close()
 

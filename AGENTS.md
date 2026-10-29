@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.3.9 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.4.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -373,7 +373,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 
 | 端 | 职责 | 当前状态 |
 |---|---|---|
-| 用户端（C） | 聊天导购、商品推荐、模拟下单、IM 好友单聊 | Mock 购物 + IM 社交 + 店宠 Agent + 独立 C 端 UI（已接 C Agent 草稿/确认） |
+| 用户端（C） | 聊天导购、商品推荐、模拟下单、IM 好友单聊 | Mock 购物 + IM 社交 + 店宠 Agent + 独立 C 端 UI（C Agent、店宠、会话持久化） |
 | 商户端（B） | 洞察分析、千人千面文案、SOP 客服 | 开发中，当前主线 |
 | 管理端（A） | Agent 运行监控、高危调用审计、算力消耗 | 待开发 |
 
@@ -432,7 +432,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.3.9 |
+| AGENTS.md | v1.4.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -460,3 +460,4 @@ IM 社交载体
 | 1.3.7 | 2026-10-29 | 新增独立 C 端 UI 参考（桌面/移动）：中性深色、低饱和、去 AI 装饰；初始页为伙伴对话 |
 | 1.3.8 | 2026-10-29 | C 端 App 接入真实 C Agent：快捷问题生成订单草稿，右侧面板由用户逐单确认后创建订单 |
 | 1.3.9 | 2026-10-29 | C 端 App 店宠会话接入 IM Agent：最近消息持久化加载、真实店宠回复、小伴锐评、结构化报价卡 |
+| 1.4.0 | 2026-10-29 | C 端 App 小伴会话持久化：新增 c_app_message 与 GET/POST app messages；用户消息、Agent 回复、订单确认结果可恢复 |

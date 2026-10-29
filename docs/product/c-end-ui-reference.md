@@ -128,7 +128,27 @@ POST /api/c/friends/store_demo/messages
 
 历史消息会做 emoji/感叹号清理后再展示，避免旧数据破坏新 UI 的克制风格。
 
-## 7. 文件
+## 7. 会话持久化
+
+小伴会话通过以下接口持久化：
+
+```text
+GET  /api/c/app/messages?thread_id=companion&limit=50
+POST /api/c/app/messages
+```
+
+保存内容：
+
+```text
+role: user / companion
+content
+metadata（如 order_id）
+created_at
+```
+
+页面加载时优先展示持久化消息；没有历史时使用演示种子。发送消息、Agent 回复、订单确认结果都会写入该表。
+
+## 8. 文件
 
 ```text
 web/src/views/CApp.vue
