@@ -518,3 +518,203 @@ def test_audit_csv_export_empty_result_keeps_header(c_store):
     assert header == AUDIT_CSV_HEADER
     assert rows == []
 
+
+def _create_order(
+    c_store,
+    buyer_id: str,
+    *,
+    product_id: str = "P003",
+    quantity: int = 1,
+    quote_id: str | None = None,
+    request_id: str | None = None,
+):
+    if quote_id:
+        draft = c_store.prepare_order(buyer_id, [], quote_id=quote_id)
+    else:
+        draft = c_store.prepare_order(
+            buyer_id, [{"product_id": product_id, "quantity": quantity}]
+        )
+    return c_store.confirm_order(
+        buyer_id,
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id=request_id or f"req_{draft['order_id']}",
+    )
+
+
+def _set_quote_created_at(c_store, quote_id: str, value: str) -> None:
+    conn = sqlite3.connect(str(c_store._db_path()))
+    try:
+        conn.execute("UPDATE c_quote SET created_at = ? WHERE quote_id = ?", (value, quote_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_audit_orders_pagination_no_duplicates_or_gaps(c_store):
+    """订单 offset 翻页：与全量列表顺序一致、无重复、无遗漏、越界返回空。"""
+    for index in range(25):
+        order = _create_order(c_store, f"buyer_{1 + index % 2}")
+        _set_confirmed_at(
+            c_store, order["order_id"], f"2026-10-29T10:{index:02d}:00+00:00"
+        )
+    # 两条订单同一确认时间，验证 order_id 兜底排序后翻页仍稳定。
+    tie_at = "2026-10-29T10:09:00+00:00"
+    tied = sorted(
+        order["order_id"] for order in c_store.list_all_orders(limit=200)
+    )[:2]
+    _set_confirmed_at(c_store, tied[0], tie_at)
+    _set_confirmed_at(c_store, tied[1], tie_at)
+
+    assert c_store.count_all_orders() == 25
+    full = [order["order_id"] for order in c_store.list_all_orders(limit=200)]
+    assert len(full) == len(set(full)) == 25
+
+    collected: list[str] = []
+    seen: set[str] = set()
+    for offset in (0, 10, 20, 30):
+        page = c_store.list_all_orders(limit=10, offset=offset)
+        ids = [order["order_id"] for order in page]
+        assert not seen & set(ids)
+        seen |= set(ids)
+        collected.extend(ids)
+    assert collected == full
+
+    # 越界 offset 返回空页；负 offset 按 0 处理；limit 仍钳制。
+    assert c_store.list_all_orders(limit=10, offset=999) == []
+    assert [
+        order["order_id"] for order in c_store.list_all_orders(limit=10, offset=-5)
+    ] == full[:10]
+    assert len(c_store.list_all_orders(limit=0)) == 1
+    assert len(c_store.list_all_orders(limit=9999)) == 25
+
+
+def test_audit_quotes_pagination_no_duplicates_or_gaps(c_store):
+    """报价 offset 翻页：同创建时间用 quote_id 兜底，与全量列表一致。"""
+    for index in range(23):
+        quote_id = f"quote_page_{index:03d}"
+        c_store.create_quote(
+            "buyer_1",
+            "store_demo",
+            {
+                "quote_id": quote_id,
+                "product_refs": [{"product_id": "P001", "quantity": 1}],
+                "policy_refs": [],
+            },
+        )
+        _set_quote_created_at(c_store, quote_id, f"2026-10-29T09:{index:02d}:00+00:00")
+    # 两条报价同一创建时间。
+    _set_quote_created_at(c_store, "quote_page_005", "2026-10-29T09:04:00+00:00")
+
+    assert c_store.count_all_quotes() == 23
+    full = [quote["quote_id"] for quote in c_store.list_all_quotes(limit=200)]
+    assert len(full) == len(set(full)) == 23
+
+    collected: list[str] = []
+    seen: set[str] = set()
+    for offset in (0, 10, 20, 30):
+        page = c_store.list_all_quotes(limit=10, offset=offset)
+        ids = [quote["quote_id"] for quote in page]
+        assert not seen & set(ids)
+        seen |= set(ids)
+        collected.extend(ids)
+    assert collected == full
+    assert c_store.list_all_quotes(limit=10, offset=999) == []
+
+
+def test_audit_pagination_with_filters_and_totals(c_store):
+    """筛选 + 分页组合：total 分别按筛选条件统计，分页不越界不重复。"""
+    # buyer_1：2 个关联 CONSUMED 报价的订单
+    for index in range(2):
+        quote_id = f"quote_combo_{index}"
+        c_store.create_quote(
+            "buyer_1",
+            "store_demo",
+            {
+                "quote_id": quote_id,
+                "product_refs": [{"product_id": "P001", "quantity": 1}],
+                "policy_refs": [],
+            },
+        )
+        order = _create_order(c_store, "buyer_1", quote_id=quote_id)
+        _set_confirmed_at(c_store, order["order_id"], f"2026-10-29T11:0{index}:00+00:00")
+    # buyer_1：3 个直购订单；buyer_2：4 个直购订单
+    for index in range(3):
+        order = _create_order(c_store, "buyer_1")
+        _set_confirmed_at(c_store, order["order_id"], f"2026-10-28T11:0{index}:00+00:00")
+    for index in range(4):
+        order = _create_order(c_store, "buyer_2")
+        _set_confirmed_at(c_store, order["order_id"], f"2026-10-27T11:0{index}:00+00:00")
+
+    assert c_store.count_all_orders() == 9
+    assert c_store.count_all_orders(buyer_id="buyer_1") == 5
+    assert c_store.count_all_orders(status="CONSUMED") == 2
+    assert c_store.count_all_orders(buyer_id="buyer_1", status="CONSUMED") == 2
+    assert c_store.count_all_orders(status="PENDING") == 0
+    assert c_store.count_all_orders(buyer_id="buyer_404") == 0
+
+    # 筛选后的全量列表 == 按 offset 切页拼接
+    full = [
+        order["order_id"]
+        for order in c_store.list_all_orders(limit=200, buyer_id="buyer_1")
+    ]
+    pages: list[str] = []
+    for offset in (0, 2, 4):
+        pages.extend(
+            order["order_id"]
+            for order in c_store.list_all_orders(
+                limit=2, offset=offset, buyer_id="buyer_1"
+            )
+        )
+    assert pages == full and len(pages) == 5
+
+    # status 筛选 + 分页：只有关联 CONSUMED 报价的 2 单
+    consumed = [
+        order["order_id"]
+        for order in c_store.list_all_orders(limit=200, status="CONSUMED")
+    ]
+    assert len(consumed) == 2
+    assert [
+        order["order_id"]
+        for order in c_store.list_all_orders(limit=1, offset=0, status="CONSUMED")
+    ] == consumed[:1]
+    assert [
+        order["order_id"]
+        for order in c_store.list_all_orders(limit=1, offset=1, status="CONSUMED")
+    ] == consumed[1:]
+    assert c_store.list_all_orders(limit=1, offset=2, status="CONSUMED") == []
+
+    # 报价 total 同样按筛选条件分开统计
+    assert c_store.count_all_quotes() == 2
+    assert c_store.count_all_quotes(status="CONSUMED") == 2
+    assert c_store.count_all_quotes(status="PENDING") == 0
+    assert c_store.count_all_quotes(buyer_id="buyer_2") == 0
+
+
+def test_audit_csv_export_still_matches_filtered_list_after_pagination(c_store):
+    """CSV 导出不带 offset：始终导出当前筛选下最近 limit 条，与列表第一页一致。"""
+    for index in range(5):
+        order = _create_order(c_store, "buyer_1")
+        _set_confirmed_at(c_store, order["order_id"], f"2026-10-29T12:0{index}:00+00:00")
+    for index in range(3):
+        order = _create_order(c_store, "buyer_2")
+        _set_confirmed_at(c_store, order["order_id"], f"2026-10-28T12:0{index}:00+00:00")
+
+    _, rows = _parse_audit_csv(
+        c_store.export_audit_orders_csv(limit=50, buyer_id="buyer_1")
+    )
+    list_first_page = [
+        order["order_id"]
+        for order in c_store.list_all_orders(limit=50, buyer_id="buyer_1")
+    ]
+    assert [row[0] for row in rows] == list_first_page
+    assert len(rows) == 5 == c_store.count_all_orders(buyer_id="buyer_1")
+
+    # 列表第二页是另一批数据，导出仍固定为第一页（不带 offset）。
+    second_page = [
+        order["order_id"]
+        for order in c_store.list_all_orders(limit=2, offset=2, buyer_id="buyer_1")
+    ]
+    assert second_page
+    assert [row[0] for row in rows] != second_page
+

@@ -1,11 +1,16 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { apiFetch, ApiError, detailMessage, getJson, readBody } from "../api";
 import { toast, toastError } from "../store";
+
+const PAGE_SIZE = 20;
 
 const orders = ref([]);
 const quotes = ref([]);
 const summary = ref({});
+const ordersTotal = ref(0);
+const quotesTotal = ref(0);
+const offset = ref(0);
 const loading = ref(true);
 const exporting = ref(false);
 const error = ref("");
@@ -29,10 +34,15 @@ function productLabel(product) {
 
 const pendingQuotes = computed(() => summary.value.pending_quotes || 0);
 const quoteStatusCounts = computed(() => summary.value.quote_status || {});
+const maxTotal = computed(() => Math.max(ordersTotal.value, quotesTotal.value));
+const totalPages = computed(() => Math.max(1, Math.ceil(maxTotal.value / PAGE_SIZE)));
+const currentPage = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1);
+const hasPrev = computed(() => offset.value > 0);
+const hasNext = computed(() => offset.value + PAGE_SIZE < maxTotal.value);
 
-// 列表与 CSV 导出共用同一套筛选参数拼装，避免两处逻辑分叉导致参数不一致。
+// 列表、分页与 CSV 导出共用同一套筛选参数拼装，避免两处逻辑分叉导致参数不一致。
 function filterParams() {
-  const params = new URLSearchParams({ limit: "50" });
+  const params = new URLSearchParams();
   if (buyerId.value.trim()) params.set("buyer_id", buyerId.value.trim());
   if (quoteStatus.value) params.set("status", quoteStatus.value);
   if (dateFrom.value) params.set("date_from", dateFrom.value);
@@ -40,14 +50,31 @@ function filterParams() {
   return params;
 }
 
+function pageParams() {
+  const params = filterParams();
+  params.set("limit", String(PAGE_SIZE));
+  params.set("offset", String(offset.value));
+  return params;
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const data = await getJson(`/api/c/admin/audit?${filterParams().toString()}`);
+    const data = await getJson(`/api/c/admin/audit?${pageParams().toString()}`);
     orders.value = data?.orders || [];
     quotes.value = data?.quotes || [];
     summary.value = data?.summary || {};
+    ordersTotal.value = Number(data?.orders_total || 0);
+    quotesTotal.value = Number(data?.quotes_total || 0);
+    // 后端会钳制 offset；若当前页因数据变少越界，回到最后一页重新拉取。
+    const lastPageOffset = Math.max(0, Math.ceil(maxTotal.value / PAGE_SIZE) - 1) * PAGE_SIZE;
+    if (maxTotal.value > 0 && offset.value > lastPageOffset) {
+      offset.value = lastPageOffset;
+      await load();
+      return;
+    }
+    offset.value = Math.max(0, Number(data?.offset ?? offset.value));
   } catch (e) {
     error.value = e?.detail || e?.message || "审计数据加载失败";
     toastError?.(e);
@@ -55,6 +82,19 @@ async function load() {
     loading.value = false;
   }
 }
+
+function changePage(delta) {
+  const nextOffset = offset.value + delta * PAGE_SIZE;
+  if (nextOffset < 0) return;
+  if (nextOffset >= maxTotal.value && delta > 0) return;
+  offset.value = nextOffset;
+  load();
+}
+
+// 筛选条件一变就回到第一页，避免用旧 offset 命中另一套筛选结果。
+watch([buyerId, quoteStatus, dateFrom, dateTo], () => {
+  offset.value = 0;
+});
 
 function attachmentFilename(disposition) {
   const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition || "");
@@ -68,7 +108,10 @@ async function exportCsv() {
   if (exporting.value) return;
   exporting.value = true;
   try {
-    const res = await apiFetch(`/api/c/admin/audit/export?${filterParams().toString()}`);
+    const params = filterParams();
+    // CSV 导出当前筛选下最近 50 条（不跟随列表分页 offset）。
+    params.set("limit", "50");
+    const res = await apiFetch(`/api/c/admin/audit/export?${params.toString()}`);
     if (!res.ok) {
       const data = await readBody(res);
       throw new ApiError(res.status, detailMessage(data, res.status), data);
@@ -97,6 +140,7 @@ function resetFilters() {
   quoteStatus.value = "";
   dateFrom.value = "";
   dateTo.value = "";
+  offset.value = 0;
   load();
 }
 
@@ -168,22 +212,22 @@ onMounted(load);
         <div class="audit-stat">
           <span>已确认订单</span>
           <strong>{{ summary.order_count || 0 }}</strong>
-          <small>{{ quoteStatus ? `仅 ${quoteStatus} 关联订单` : "最近 50 条" }}</small>
+          <small>{{ quoteStatus ? `仅 ${quoteStatus} 关联订单` : "本页" }} · 共 {{ ordersTotal }} 条</small>
         </div>
         <div class="audit-stat">
           <span>成交金额</span>
           <strong>{{ money(summary.gmv || 0) }}</strong>
-          <small>按订单应付合计</small>
+          <small>按本页订单应付合计</small>
         </div>
         <div class="audit-stat">
           <span>报价记录</span>
           <strong>{{ summary.quote_count || 0 }}</strong>
-          <small>最近 50 条</small>
+          <small>本页 · 共 {{ quotesTotal }} 条</small>
         </div>
         <div class="audit-stat">
           <span>待确认报价</span>
           <strong>{{ pendingQuotes }}</strong>
-          <small>PENDING</small>
+          <small>本页 PENDING</small>
         </div>
       </section>
 
@@ -273,6 +317,24 @@ onMounted(load);
           </table>
         </div>
       </section>
+
+      <section class="audit-pagination" aria-label="订单与报价分页">
+        <button
+          type="button"
+          class="btn btn-ghost"
+          :disabled="!hasPrev || loading"
+          @click="changePage(-1)"
+        >上一页</button>
+        <span class="field-hint">
+          第 {{ currentPage }} / {{ totalPages }} 页 · 订单共 {{ ordersTotal }} 条 · 报价共 {{ quotesTotal }} 条
+        </span>
+        <button
+          type="button"
+          class="btn btn-ghost"
+          :disabled="!hasNext || loading"
+          @click="changePage(1)"
+        >下一页</button>
+      </section>
     </template>
   </div>
 </template>
@@ -327,6 +389,18 @@ onMounted(load);
 .audit-filter-actions {
   display: flex;
   gap: 6px;
+}
+
+.audit-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.audit-pagination .field-hint {
+  font-size: 10px;
 }
 
 .audit-stat {

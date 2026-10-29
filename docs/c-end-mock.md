@@ -277,8 +277,20 @@ API：
 GET /api/c/admin/audit?limit=50
 GET /api/c/admin/audit?limit=50&buyer_id=buyer_1&status=PENDING
 GET /api/c/admin/audit?limit=50&date_from=2026-10-29&date_to=2026-10-29
+GET /api/c/admin/audit?limit=20&offset=20
 GET /api/c/admin/audit/export?limit=50&buyer_id=buyer_1
 ```
+
+分页：
+
+```text
+limit 1..200
+offset >= 0
+响应新增 orders_total / quotes_total
+summary 仍描述当前页
+```
+
+订单和报价共用同一 offset，页码按两表 total 的较大值计算。
 
 导出 CSV：
 

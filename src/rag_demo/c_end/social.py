@@ -188,7 +188,7 @@ def _insert_message(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     message_id = f"msg_{uuid.uuid4().hex[:20]}"
-    created_at = store._now()
+    created_at = store._next_message_time()
     meta = metadata or {}
     conn.execute(
         "INSERT INTO c_message(message_id, owner_id, friend_id, sender_id, receiver_id, content, metadata_json, created_at) "

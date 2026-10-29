@@ -52,8 +52,8 @@ _APP_MSG_CLOCK = datetime(2000, 1, 1, tzinfo=timezone.utc)
 _APP_MSG_CLOCK_LOCK = threading.Lock()
 
 
-def _next_app_message_time() -> str:
-    """App 消息时间戳单调递增，避免 Windows 时钟粒度导致同秒排序不稳定。"""
+def _next_message_time() -> str:
+    """消息时间戳单调递增，避免 Windows 时钟粒度导致同秒排序不稳定。"""
     global _APP_MSG_CLOCK
     with _APP_MSG_CLOCK_LOCK:
         now = datetime.now(timezone.utc)
@@ -61,6 +61,9 @@ def _next_app_message_time() -> str:
             now = _APP_MSG_CLOCK + timedelta(microseconds=1)
         _APP_MSG_CLOCK = now
         return now.isoformat(timespec="microseconds")
+
+
+_next_app_message_time = _next_message_time
 
 
 def _connect() -> sqlite3.Connection:
@@ -632,21 +635,14 @@ def _audit_time(value: str | None, *, end: bool = False) -> str | None:
     return text
 
 
-def list_all_orders(
-    limit: int = 50,
+def _audit_order_where(
     *,
     buyer_id: str | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-) -> list[dict[str, Any]]:
-    """管理端审计：所有买家的已确认订单，支持买家/报价状态/时间过滤。
-
-    `status` 是**订单关联报价**的状态（不是订单自身状态）：通过
-    `c_order.quote_id → c_quote.status` 关联过滤。status 非空时，
-    没有 quote_id 的直购订单不返回——它们没有可匹配的报价状态。
-    """
-    init()
+) -> tuple[list[str], list[Any]]:
+    """管理端订单审计的 WHERE 片段与参数（列表 / count / CSV 共用同一口径）。"""
     where = ["status = 'CONFIRMED'", "order_id LIKE 'order_%'"]
     params: list[Any] = []
     if buyer_id:
@@ -666,29 +662,17 @@ def list_all_orders(
     if end:
         where.append("confirmed_at <= ?")
         params.append(end)
-    params.append(max(1, min(int(limit), 200)))
-    conn = _connect()
-    try:
-        rows = conn.execute(
-            f"SELECT * FROM c_order WHERE {' AND '.join(where)} "
-            "ORDER BY confirmed_at DESC LIMIT ?",
-            params,
-        ).fetchall()
-        return [_order_payload(conn, row) for row in rows]
-    finally:
-        conn.close()
+    return where, params
 
 
-def list_all_quotes(
-    limit: int = 50,
+def _audit_quote_where(
     *,
     buyer_id: str | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-) -> list[dict[str, Any]]:
-    """管理端审计：所有买家报价及其状态，支持买家/状态/时间过滤。"""
-    init()
+) -> tuple[list[str], list[Any]]:
+    """管理端报价审计的 WHERE 片段与参数（列表 / count 共用同一口径）。"""
     where = ["1 = 1"]
     params: list[Any] = []
     if buyer_id:
@@ -705,31 +689,150 @@ def list_all_quotes(
     if end:
         where.append("created_at <= ?")
         params.append(end)
-    params.append(max(1, min(int(limit), 200)))
+    return where, params
+
+
+def _audit_page(limit: int, offset: int) -> tuple[int, int]:
+    """limit 钳制在 1..200（与既有口径一致），offset 不能为负。"""
+    return max(1, min(int(limit), 200)), max(0, int(offset))
+
+
+def list_all_orders(
+    limit: int = 50,
+    *,
+    offset: int = 0,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict[str, Any]]:
+    """管理端审计：所有买家的已确认订单，支持买家/报价状态/时间过滤与分页。
+
+    `status` 是**订单关联报价**的状态（不是订单自身状态）：通过
+    `c_order.quote_id → c_quote.status` 关联过滤。status 非空时，
+    没有 quote_id 的直购订单不返回——它们没有可匹配的报价状态。
+    `offset` 按同一排序键翻页；`confirmed_at` 相同用 order_id 兜底，保证不重不漏。
+    """
+    init()
+    where, params = _audit_order_where(
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    limit_value, offset_value = _audit_page(limit, offset)
+    params.extend([limit_value, offset_value])
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM c_order WHERE {' AND '.join(where)} "
+            "ORDER BY confirmed_at DESC, order_id DESC LIMIT ? OFFSET ?",
+            params,
+        ).fetchall()
+        return [_order_payload(conn, row) for row in rows]
+    finally:
+        conn.close()
+
+
+def count_all_orders(
+    *,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> int:
+    """管理端审计：与 `list_all_orders` 同筛选口径的订单总数（用于分页）。"""
+    init()
+    where, params = _audit_order_where(
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    conn = _connect()
+    try:
+        row = conn.execute(
+            f"SELECT COUNT(*) AS n FROM c_order WHERE {' AND '.join(where)}",
+            params,
+        ).fetchone()
+        return int(row["n"])
+    finally:
+        conn.close()
+
+
+def _quote_audit_payload(row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        products = json.loads(row["product_refs_json"] or "[]")
+        policies = json.loads(row["policy_refs_json"] or "[]")
+    except (TypeError, ValueError):
+        products, policies = [], []
+    return {
+        "quote_id": row["quote_id"],
+        "buyer_id": row["buyer_id"],
+        "friend_id": row["friend_id"],
+        "status": row["status"],
+        "product_refs": products,
+        "policy_refs": policies,
+        "created_at": row["created_at"],
+    }
+
+
+def list_all_quotes(
+    limit: int = 50,
+    *,
+    offset: int = 0,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict[str, Any]]:
+    """管理端审计：所有买家报价及其状态，支持买家/状态/时间过滤与分页。
+
+    `offset` 按同一排序键翻页；`created_at` 相同用 quote_id 兜底，保证不重不漏。
+    """
+    init()
+    where, params = _audit_quote_where(
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    limit_value, offset_value = _audit_page(limit, offset)
+    params.extend([limit_value, offset_value])
     conn = _connect()
     try:
         rows = conn.execute(
             f"SELECT * FROM c_quote WHERE {' AND '.join(where)} "
-            "ORDER BY created_at DESC LIMIT ?",
+            "ORDER BY created_at DESC, quote_id DESC LIMIT ? OFFSET ?",
             params,
         ).fetchall()
-        result = []
-        for row in rows:
-            try:
-                products = json.loads(row["product_refs_json"] or "[]")
-                policies = json.loads(row["policy_refs_json"] or "[]")
-            except (TypeError, ValueError):
-                products, policies = [], []
-            result.append({
-                "quote_id": row["quote_id"],
-                "buyer_id": row["buyer_id"],
-                "friend_id": row["friend_id"],
-                "status": row["status"],
-                "product_refs": products,
-                "policy_refs": policies,
-                "created_at": row["created_at"],
-            })
-        return result
+        return [_quote_audit_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def count_all_quotes(
+    *,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> int:
+    """管理端审计：与 `list_all_quotes` 同筛选口径的报价总数（用于分页）。"""
+    init()
+    where, params = _audit_quote_where(
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    conn = _connect()
+    try:
+        row = conn.execute(
+            f"SELECT COUNT(*) AS n FROM c_quote WHERE {' AND '.join(where)}",
+            params,
+        ).fetchone()
+        return int(row["n"])
     finally:
         conn.close()
 
@@ -769,7 +872,8 @@ def export_audit_orders_csv(
     与 `/api/c/admin/audit` 保持同一筛选口径：
     - `buyer_id / date_from / date_to / limit` 复用 `list_all_orders`；
     - `status` 按订单关联的报价状态过滤（同列表行为），无 quote_id 的订单在
-      status 非空时不导出，保证“导出的”和“看到的”订单一致（同样的排序、截断和状态关联）。
+      status 非空时不导出，保证“导出的”和“看到的”订单一致（同样的排序、截断和状态关联）；
+    - CSV 导出**不带 offset**，始终导出当前筛选下最近 `limit` 条（列表分页只是展示层）。
 
     Returns:
         str: 带 BOM 的 CSV 文本（RFC 4180 换行），调用方按 UTF-8 编码后作为附件下发。
@@ -925,7 +1029,7 @@ def save_app_message(
     meta = metadata or {}
     init()
     message_id = f"appmsg_{uuid.uuid4().hex[:20]}"
-    created_at = _next_app_message_time()
+    created_at = _next_message_time()
     conn = _connect()
     try:
         conn.execute(

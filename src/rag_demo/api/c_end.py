@@ -165,21 +165,24 @@ def save_app_message(req: AppMessageIn) -> dict:
 @router.get("/admin/audit")
 def c_end_admin_audit(
     limit: int = 50,
+    offset: int = 0,
     buyer_id: str | None = None,
     status: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> dict:
-    """C 端交易审计：跨买家订单/报价，支持买家/报价状态/自然日筛选。
+    """C 端交易审计：跨买家订单/报价，支持买家/报价状态/自然日筛选与分页。
 
     status 是报价状态，同时作用于两张表：报价列表按 status 过滤，
-    订单列表按订单关联的 c_quote.status 过滤；summary 只统计过滤后的订单。
+    订单列表按订单关联的 c_quote.status 过滤；summary 仍只描述**当前页**，
+    全量条数另由 orders_total / quotes_total 给出（两张表共用同一 limit/offset）。
     """
     _require_admin()
     if status and status.upper() not in {"PENDING", "CONSUMED", "CANCELLED"}:
         raise HTTPException(status_code=400, detail="报价状态不合法")
     orders = store.list_all_orders(
         limit=limit,
+        offset=offset,
         buyer_id=buyer_id,
         status=status,
         date_from=date_from,
@@ -187,6 +190,19 @@ def c_end_admin_audit(
     )
     quotes = store.list_all_quotes(
         limit=limit,
+        offset=offset,
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    orders_total = store.count_all_orders(
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    quotes_total = store.count_all_quotes(
         buyer_id=buyer_id,
         status=status,
         date_from=date_from,
@@ -199,6 +215,10 @@ def c_end_admin_audit(
     return {
         "orders": orders,
         "quotes": quotes,
+        "orders_total": orders_total,
+        "quotes_total": quotes_total,
+        "limit": max(1, min(limit, 200)),
+        "offset": max(0, offset),
         "summary": {
             "order_count": len(orders),
             "gmv": round(sum(float(order.get("total_amount") or 0) for order in orders), 2),
