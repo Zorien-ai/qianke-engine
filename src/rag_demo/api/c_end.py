@@ -26,6 +26,16 @@ def _buyer() -> tuple[str, dict]:
     return f"buyer_{account['id']}", account
 
 
+def _require_admin() -> dict:
+    account = auth.current_account()
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    if not account.get("is_system_admin"):
+        raise HTTPException(status_code=403, detail="只有平台管理员可以查看 C 端审计")
+    return account
+
+
+
 class ItemIn(BaseModel):
     product_id: str = Field(..., min_length=1, max_length=40)
     quantity: int = Field(..., ge=1, le=99)
@@ -148,6 +158,28 @@ def save_app_message(req: AppMessageIn) -> dict:
         )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
+
+
+@router.get("/admin/audit")
+def c_end_admin_audit(limit: int = 50) -> dict:
+    _require_admin()
+    orders = store.list_all_orders(limit=limit)
+    quotes = store.list_all_quotes(limit=limit)
+    status_counts: dict[str, int] = {}
+    for quote in quotes:
+        status = str(quote.get("status") or "UNKNOWN")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    return {
+        "orders": orders,
+        "quotes": quotes,
+        "summary": {
+            "order_count": len(orders),
+            "gmv": round(sum(float(order.get("total_amount") or 0) for order in orders), 2),
+            "quote_count": len(quotes),
+            "quote_status": status_counts,
+            "pending_quotes": status_counts.get("PENDING", 0),
+        },
+    }
 
 
 @router.get("/quotes/{quote_id}")

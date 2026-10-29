@@ -62,6 +62,8 @@ const navItems = computed(() => {
   if (isManager()) items.push({ to: "/billing", key: "billing", label: "Token 账单", icon: ICONS.billing });
   if (store.account && store.account.is_system_admin)
     items.push({ to: "/admin/monitor", key: "adminMonitor", label: "平台监控", icon: ICONS.monitor });
+  if (store.account && store.account.is_system_admin)
+    items.push({ to: "/admin/c-end", key: "adminCEnd", label: "C 端审计", icon: ICONS.orders });
   if (hasCap("ops"))
     items.push({ to: "/settings", key: "settings", label: "权限配置", icon: ICONS.settings });
   return items;

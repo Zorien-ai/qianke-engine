@@ -20,6 +20,7 @@ import CShop from "./views/CShop.vue";
 import CSocial from "./views/CSocial.vue";
 import COrders from "./views/COrders.vue";
 import CApp from "./views/CApp.vue";
+import CAdminAudit from "./views/CAdminAudit.vue";
 
 /**
  * 用 hash 路由：后端把 web/dist 静态挂到 /v2/，没有服务端 fallback，
@@ -44,6 +45,7 @@ const routes = [
   { path: "/c/social", name: "c-social", component: CSocial, meta: { title: "社交消息" } },
   { path: "/c/orders", name: "c-orders", component: COrders, meta: { title: "我的订单" } },
   { path: "/c/app", name: "c-app", component: CApp, meta: { title: "千客 · C 端", standalone: true } },
+  { path: "/admin/c-end", name: "admin-c-end", component: CAdminAudit, meta: { title: "C 端交易审计" } },
   { path: "/kb", name: "kb", component: Kb, meta: { title: "知识库" } },
   { path: "/kb/profiles", name: "kb-profiles", component: KbProfiles, meta: { title: "用户画像" } },
   { path: "/kb/docs", name: "kb-docs", component: KbDocs, meta: { title: "文档管理" } },

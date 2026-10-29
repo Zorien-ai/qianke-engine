@@ -244,3 +244,30 @@ def test_app_messages_pagination_and_clear(c_store):
     assert [m["content"] for m in older] == ["消息0", "消息1"]
     assert c_store.clear_app_messages("buyer_1", "companion") == 4
     assert c_store.list_app_messages("buyer_1", "companion") == []
+
+
+def test_admin_audit_lists_cross_buyer_orders_and_quotes(c_store):
+    c_store.create_quote(
+        "buyer_1",
+        "store_demo",
+        {
+            "quote_id": "quote_admin_1",
+            "product_refs": [{"product_id": "P001", "quantity": 1}],
+            "policy_refs": [{"policy_id": "platform_full_reduce"}],
+        },
+    )
+    draft = c_store.prepare_order("buyer_1", [], quote_id="quote_admin_1")
+    c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_admin_audit_1",
+    )
+    c_store.save_app_message("buyer_2", "companion", "user", "另一买家的消息")
+
+    orders = c_store.list_all_orders()
+    quotes = c_store.list_all_quotes()
+    assert orders[0]["quote_id"] == "quote_admin_1"
+    assert orders[0]["policy_ids"] == ["platform_full_reduce"]
+    assert any(item["buyer_id"] == "buyer_2" for item in quotes) is False
+    assert all(order["order_id"].startswith("order_") for order in orders)

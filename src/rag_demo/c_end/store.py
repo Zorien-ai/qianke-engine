@@ -606,6 +606,51 @@ def cancel_quote(quote_id: str, buyer_id: str) -> dict[str, Any]:
         conn.close()
 
 
+def list_all_orders(limit: int = 50) -> list[dict[str, Any]]:
+    """管理端审计：所有买家的已确认订单。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_order WHERE status = 'CONFIRMED' "
+            "AND order_id LIKE 'order_%' ORDER BY confirmed_at DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+        return [_order_payload(conn, row) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_all_quotes(limit: int = 50) -> list[dict[str, Any]]:
+    """管理端审计：所有买家报价及其状态。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_quote ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+        result = []
+        for row in rows:
+            try:
+                products = json.loads(row["product_refs_json"] or "[]")
+                policies = json.loads(row["policy_refs_json"] or "[]")
+            except (TypeError, ValueError):
+                products, policies = [], []
+            result.append({
+                "quote_id": row["quote_id"],
+                "buyer_id": row["buyer_id"],
+                "friend_id": row["friend_id"],
+                "status": row["status"],
+                "product_refs": products,
+                "policy_refs": policies,
+                "created_at": row["created_at"],
+            })
+        return result
+    finally:
+        conn.close()
+
+
 def _companion_payload(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "owner_id": row["owner_id"],

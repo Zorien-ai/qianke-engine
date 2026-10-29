@@ -1,4 +1,4 @@
-﻿# C 端 Mock 商品与模拟订单 v0.1
+# C 端 Mock 商品与模拟订单 v0.1
 
 > 当前没有真实商品/订单数据，先用独立 SQLite mock 存储验证 C 端订单闭环。
 > 不写入 demo 评测库，不影响 Regression/Benchmark。
@@ -260,3 +260,35 @@ buyer_id = buyer_<app_user.id>
 ```
 
 这不是最终 C 端消费者模型。真正接入前需要独立消费者身份、收货信息和会员体系。
+
+## 10. 管理端 C 端审计
+
+页面：
+
+```text
+/v2/#/admin/c-end
+```
+
+API：
+
+```text
+GET /api/c/admin/audit?limit=50
+```
+
+权限：
+
+```text
+仅 is_system_admin 可访问
+非管理员 403
+```
+
+展示：
+
+- 已确认订单数 / 成交金额
+- 报价数 / PENDING / CONSUMED / CANCELLED
+- 订单与 quote_id、policy_ids、原价、优惠、应付
+- 报价商品引用与政策引用
+
+只读：不提供改价、改单、删除报价入口。
+
+![管理端 C 端审计](screenshots/c-admin-audit.png)
