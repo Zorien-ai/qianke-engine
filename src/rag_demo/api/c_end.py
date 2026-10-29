@@ -293,10 +293,19 @@ def list_friends() -> dict:
 
 
 @router.get("/friends/{friend_id}/messages")
-def list_messages(friend_id: str, limit: int = 50) -> dict:
+def list_messages(friend_id: str, limit: int = 20, before: str | None = None) -> dict:
+    """单聊历史消息：默认返回最近 20 条（时间正序）。
+
+    before 是分页游标（`created_at|message_id`，也兼容只传 created_at），
+    传入后返回该游标之前的一页；不传则返回最新一页。
+    """
     buyer_id, _ = _buyer()
     try:
-        return {"messages": social.get_messages(buyer_id, friend_id, limit=limit)}
+        return {
+            "messages": social.get_messages(
+                buyer_id, friend_id, limit=limit, before=before
+            )
+        }
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
 

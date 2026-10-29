@@ -67,6 +67,7 @@ EXPECTED_ACTION_COLUMNS = [
     "created_at",
     "confirmed_at",
     "confirmed_by",
+    "completed_at",
 ]
 
 CASE_ID_PATTERN = re.compile(r"^[a-z0-9_]+$")
@@ -730,7 +731,7 @@ def _scenario_isolation(
     checks.eq(
         "source_write_verbs",
         sorted({row["verb"] for row in statements}),
-        ["INSERT INTO", "UPDATE"],
+        ["ALTER TABLE", "INSERT INTO", "UPDATE"],
     )
     checks.eq("source_ddl_tables", sorted(set(_ddl_table_targets(actions_source))), [ACTION_TABLE])
     checks.check(

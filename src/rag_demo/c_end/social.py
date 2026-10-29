@@ -11,10 +11,16 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Callable
 
 from rag_demo.c_end import store
+
+# 与 store._now() 产出的 ISO 时间戳对齐（毫秒/微秒、时区后缀都可选）。
+_ISO_TS_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$"
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS c_friend (
@@ -103,7 +109,42 @@ def _message_payload(row) -> dict[str, Any]:
     return payload
 
 
-def get_messages(owner_id: str, friend_id: str, limit: int = 50) -> list[dict[str, Any]]:
+def _parse_message_cursor(before: str | None) -> tuple[str | None, str | None]:
+    """把 before 游标解析成 (created_at, message_id)。
+
+    支持两种格式：
+    - `created_at|message_id`：稳定游标，同一时间戳有多条消息时也不会重复/遗漏；
+    - `created_at`：兼容只传时间戳的旧调用方（同一时间戳的消息可能跨页）。
+
+    空游标返回 (None, None)；合法时间戳但解析失败时同样返回 (None, None)，
+    调用方据此把非法游标当成“没有更早消息”处理。
+    """
+    text = str(before or "").strip()
+    if not text:
+        return None, None
+    if "|" in text:
+        created_at, _, message_id = text.partition("|")
+        created_at = created_at.strip()
+        message_id = message_id.strip()
+    else:
+        created_at, message_id = text, ""
+    if not _ISO_TS_RE.fullmatch(created_at):
+        return None, None
+    return created_at, (message_id or None)
+
+
+def get_messages(
+    owner_id: str,
+    friend_id: str,
+    limit: int = 20,
+    before: str | None = None,
+) -> list[dict[str, Any]]:
+    """会话历史：返回最近 N 条（按时间正序），before 用于加载更早一页。
+
+    排序键是 (created_at, message_id)：同一 created_at 下用 message_id 兜底，
+    保证翻页稳定、无重复无遗漏。非法 before 不回退到最新页（否则前端会反复
+    拉到同一页），而是返回空页，让分页自然结束。
+    """
     init()
     conn = store._connect()
     try:
@@ -111,10 +152,25 @@ def get_messages(owner_id: str, friend_id: str, limit: int = 50) -> list[dict[st
         conn.commit()
         if _friend(conn, owner_id, friend_id) is None:
             raise store.CStoreError("FRIEND_NOT_FOUND", "好友不存在")
+        limit_value = max(1, min(int(limit), 200))
+        cursor_ts, cursor_message_id = _parse_message_cursor(before)
+        if str(before or "").strip() and cursor_ts is None:
+            return []
+        where = "owner_id = ? AND friend_id = ?"
+        params: list[Any] = [owner_id, friend_id]
+        if cursor_ts:
+            if cursor_message_id:
+                where += " AND (created_at < ? OR (created_at = ? AND message_id < ?))"
+                params.extend([cursor_ts, cursor_ts, cursor_message_id])
+            else:
+                where += " AND created_at < ?"
+                params.append(cursor_ts)
+        params.append(limit_value)
         rows = conn.execute(
-            "SELECT * FROM c_message WHERE owner_id = ? AND friend_id = ? "
-            "ORDER BY created_at ASC LIMIT ?",
-            (owner_id, friend_id, max(1, min(int(limit), 200))),
+            "SELECT * FROM (SELECT * FROM c_message WHERE "
+            f"{where} ORDER BY created_at DESC, message_id DESC LIMIT ?) "
+            "ORDER BY created_at ASC, message_id ASC",
+            params,
         ).fetchall()
         return [_message_payload(row) for row in rows]
     finally:

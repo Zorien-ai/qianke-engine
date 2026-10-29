@@ -208,6 +208,8 @@ web/src/views/CShop.vue
 - 只有被 `@店宠` 唤醒且命中意图白名单才进入店宠 Agent
 - 未唤醒时返回固定拦截话术
 - 聊天中不会创建订单；成交仍走 C 端 Agent 的 prepare → 用户确认 → confirm
+- 店宠消息支持 before 游标分页，加载更早消息无重复/无遗漏
+- 分页游标为 `created_at|message_id`，兼容旧式 `created_at`
 
 API：
 

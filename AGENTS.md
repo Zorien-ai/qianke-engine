@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.6.6 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.6.7 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.6.6 |
+| AGENTS.md | v1.6.7 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -476,3 +476,4 @@ IM 社交载体
 | 1.6.4 | 2026-10-29 | C 端审计 status 改为按 quote_id 关联报价状态过滤订单；订单列表、统计、CSV 导出口径统一 |
 | 1.6.5 | 2026-10-29 | 增加受控写 Live Eval（真实 LLM + HTTP E2E，默认 skip）；修复两个 runner 同名导入冲突；诱导直写场景仍有模型行为波动，未宣称稳定通过 |
 | 1.6.6 | 2026-10-29 | 运营跟进任务增加 CONFIRMED → COMPLETED 状态机、完成接口与账号内任务列表接口 |
+| 1.6.7 | 2026-10-29 | C 端店宠消息支持 before 游标分页；App 消息时间戳改为单调递增，修复同秒排序不稳定；同步受控写 Eval 字段 |

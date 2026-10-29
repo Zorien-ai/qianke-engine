@@ -17,7 +17,7 @@ import secrets
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,21 @@ def _db_path() -> Path:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_APP_MSG_CLOCK = datetime(2000, 1, 1, tzinfo=timezone.utc)
+_APP_MSG_CLOCK_LOCK = threading.Lock()
+
+
+def _next_app_message_time() -> str:
+    """App 消息时间戳单调递增，避免 Windows 时钟粒度导致同秒排序不稳定。"""
+    global _APP_MSG_CLOCK
+    with _APP_MSG_CLOCK_LOCK:
+        now = datetime.now(timezone.utc)
+        if now <= _APP_MSG_CLOCK:
+            now = _APP_MSG_CLOCK + timedelta(microseconds=1)
+        _APP_MSG_CLOCK = now
+        return now.isoformat(timespec="microseconds")
 
 
 def _connect() -> sqlite3.Connection:
@@ -910,7 +925,7 @@ def save_app_message(
     meta = metadata or {}
     init()
     message_id = f"appmsg_{uuid.uuid4().hex[:20]}"
-    created_at = _now()
+    created_at = _next_app_message_time()
     conn = _connect()
     try:
         conn.execute(

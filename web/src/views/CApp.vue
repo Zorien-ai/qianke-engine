@@ -114,6 +114,10 @@ const storeQuote = ref(null);
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
+const hasMoreStore = ref(false);
+const storeBefore = ref("");
+const loadingOlderStore = ref(false);
+const storeHistoryHint = ref("");
 const agentBusy = ref(false);
 const agentError = ref("");
 
@@ -207,24 +211,67 @@ function localReply(text) {
   };
 }
 
+function mapStoreMessage(message) {
+  return {
+    id: message.message_id,
+    role: message.sender_id?.startsWith("companion_")
+      ? "companion"
+      : message.sender_id?.startsWith("buyer_")
+        ? "user"
+        : "merchant",
+    text: cleanReply(message.content),
+    time: (message.created_at || "").slice(11, 16),
+    createdAt: message.created_at,
+  };
+}
+
+// 与后端 social.get_messages 的稳定游标一致：created_at + message_id 兜底同一时间戳。
+function storeCursor(message) {
+  if (!message?.created_at) return "";
+  return message.message_id
+    ? `${message.created_at}|${message.message_id}`
+    : message.created_at;
+}
+
 async function loadStoreMessages() {
+  storeHistoryHint.value = "";
   try {
     const data = await getJson("/api/c/friends/store_demo/messages?limit=20");
     if (data?.messages?.length) {
-      messagesByThread.value.store_demo = data.messages.map((message) => ({
-        id: message.message_id,
-        role: message.sender_id?.startsWith("companion_")
-          ? "companion"
-          : message.sender_id?.startsWith("buyer_")
-            ? "user"
-            : "merchant",
-        text: cleanReply(message.content),
-        time: (message.created_at || "").slice(11, 16),
-      }));
+      messagesByThread.value.store_demo = data.messages.map(mapStoreMessage);
+      hasMoreStore.value = data.messages.length >= 20;
+      storeBefore.value = storeCursor(data.messages[0]);
+    } else {
+      hasMoreStore.value = false;
+      storeBefore.value = "";
     }
     scrollToBottom();
   } catch {
     // 保留种子会话，避免接口异常时出现空屏。
+  }
+}
+
+async function loadOlderStore() {
+  if (!hasMoreStore.value || !storeBefore.value || loadingOlderStore.value) return;
+  loadingOlderStore.value = true;
+  storeHistoryHint.value = "";
+  try {
+    const data = await getJson(
+      `/api/c/friends/store_demo/messages?limit=20&before=${encodeURIComponent(storeBefore.value)}`
+    );
+    const raw = data?.messages || [];
+    const existing = new Set((messagesByThread.value.store_demo || []).map((message) => message.id));
+    const older = raw
+      .map(mapStoreMessage)
+      .filter((message) => message.id && !existing.has(message.id));
+    messagesByThread.value.store_demo = [...older, ...(messagesByThread.value.store_demo || [])];
+    hasMoreStore.value = raw.length >= 20;
+    if (raw.length) storeBefore.value = storeCursor(raw[0]);
+  } catch (error) {
+    // 加载失败只做轻提示，保留当前消息与滚动位置。
+    storeHistoryHint.value = error?.detail || error?.message || "更早消息加载失败，请稍后重试";
+  } finally {
+    loadingOlderStore.value = false;
   }
 }
 
@@ -720,8 +767,27 @@ onBeforeUnmount(() => {
           </header>
 
           <div id="c-app-thread" class="c-thread" aria-live="polite">
-            <div v-if="activeId === 'companion' && hasMoreCompanion" class="c-load-more-row">
-              <button type="button" class="c-load-more" @click="loadOlderCompanion">加载更早消息</button>
+            <div
+              v-if="(activeId === 'companion' && hasMoreCompanion) || (activeId === 'store_demo' && hasMoreStore)"
+              class="c-load-more-row"
+            >
+              <button
+                v-if="activeId === 'companion'"
+                type="button"
+                class="c-load-more"
+                @click="loadOlderCompanion"
+              >加载更早消息</button>
+              <button
+                v-else
+                type="button"
+                class="c-load-more"
+                :disabled="loadingOlderStore"
+                @click="loadOlderStore"
+              >{{ loadingOlderStore ? "加载中…" : "加载更早消息" }}</button>
+              <span
+                v-if="activeId === 'store_demo' && storeHistoryHint"
+                class="c-load-more-hint"
+              >{{ storeHistoryHint }}</span>
             </div>
             <div class="c-date-line"><span>今天</span></div>
             <p v-if="!messages.length" class="c-empty-thread">开始新的对话。</p>
@@ -1481,6 +1547,18 @@ onBeforeUnmount(() => {
 .c-load-more:hover {
   color: var(--c-text-2);
   border-color: var(--c-text-3);
+}
+
+.c-load-more:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.c-load-more-hint {
+  margin-left: 8px;
+  align-self: center;
+  color: var(--c-text-3);
+  font-size: 9px;
 }
 
 .c-empty-thread {
