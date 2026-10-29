@@ -23,6 +23,23 @@ const sopSources = computed(() => result.value?.sop?.sources || []);
 const finalReply = computed(() => result.value?.final_reply || "");
 const isGated = computed(() => finalReply.value.includes("未找到匹配用户"));
 
+const pendingActions = computed(() => result.value?.pending_actions || []);
+const actionBusy = ref("");
+
+async function confirmAction(actionId) {
+  if (!actionId || actionBusy.value) return;
+  actionBusy.value = actionId;
+  try {
+    const updated = await postJson(`/api/agent/actions/${encodeURIComponent(actionId)}/confirm`, {});
+    const current = result.value?.pending_actions?.find((item) => item.action_id === actionId);
+    if (current) Object.assign(current, updated);
+  } catch (e) {
+    error.value = e?.detail?.message || e?.detail || e?.message || "任务确认失败";
+  } finally {
+    actionBusy.value = "";
+  }
+}
+
 const STEP_ICON = {
   supervisor: "🧭",
   analyst: "🔍",
@@ -154,6 +171,36 @@ async function copyReply() {
           </div>
         </div>
       </div>
+    </section>
+
+    <section v-if="result && pendingActions.length" class="action-card" aria-label="待确认写入">
+      <div class="section-head">
+        <h3>待确认写入</h3>
+        <span class="section-meta">Agent 只生成草稿，确认后才落正式任务</span>
+      </div>
+      <article v-for="action in pendingActions" :key="action.action_id" class="action-row">
+        <div class="action-copy">
+          <strong>{{ action.title }}</strong>
+          <p>{{ action.description || "运营跟进任务" }}</p>
+          <span class="action-meta">
+            {{ action.owner || "未指定负责人" }} ·
+            {{ action.priority }} ·
+            {{ action.due_date || "未设截止日期" }}
+          </span>
+        </div>
+        <div class="action-side">
+          <span class="action-status" :class="action.status.toLowerCase()">{{ action.status }}</span>
+          <button
+            v-if="action.status === 'DRAFT'"
+            type="button"
+            class="action-confirm"
+            :disabled="actionBusy === action.action_id"
+            @click="confirmAction(action.action_id)"
+          >
+            {{ actionBusy === action.action_id ? "确认中…" : "确认写入" }}
+          </button>
+        </div>
+      </article>
     </section>
 
     <section v-if="result" class="result-grid">
@@ -336,6 +383,47 @@ textarea:disabled { opacity: 0.65; }
 .flow-step.is-running .flow-icon { color: var(--primary); background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 35%, transparent); }
 .flow-step.is-error .flow-icon { color: var(--danger); background: var(--danger-soft); }
 .flow-step.is-final .flow-icon { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.action-card {
+  margin-top: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.action-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.action-copy strong { font-size: 13px; }
+.action-copy p { margin-top: 4px; color: var(--text-2); font-size: 12px; }
+.action-meta { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
+.action-side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.action-status {
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.action-status.confirmed { color: var(--success); background: var(--success-soft); }
+.action-confirm {
+  padding: 6px 10px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-xs);
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.action-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .result-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 18px; align-items: start; }
 .panel { padding: 18px 20px; }

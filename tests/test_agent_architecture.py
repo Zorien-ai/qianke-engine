@@ -31,13 +31,28 @@ def test_tool_result_contract():
 
 
 def test_registry_exposes_tools_and_json_schemas():
-    assert [t.name for t in get_tools()] == ["rag_search", "execute_sql", "calculator"]
+    assert [t.name for t in get_tools()] == [
+        "rag_search",
+        "execute_sql",
+        "calculator",
+        "prepare_followup_task",
+    ]
     schemas = get_tool_schemas()
-    assert set(schemas) == {"rag_search", "execute_sql", "calculator"}
+    assert set(schemas) == {
+        "rag_search",
+        "execute_sql",
+        "calculator",
+        "prepare_followup_task",
+    }
     assert schemas["calculator"]["properties"]["expression"]["type"] == "string"
     assert schemas["rag_search"]["properties"]["top_k"]["default"] == 5
     assert schemas["execute_sql"]["properties"]["sql"]["type"] == "string"
-    assert set(get_tool_contracts()) == {"rag_search", "execute_sql", "calculator"}
+    assert set(get_tool_contracts()) == {
+        "rag_search",
+        "execute_sql",
+        "calculator",
+        "prepare_followup_task",
+    }
 
 
 def test_tool_contract_invoke_accepts_json_arguments():

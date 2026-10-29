@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.5.2 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.6.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -117,7 +117,8 @@ error.code
 Tools
 ├── RAG Tool
 ├── SQL Tool
-└── Calculator
+├── Calculator
+└── prepare_followup_task（受控写入：仅生成待确认草稿）
 ```
 
 未来：Data Ingestion、Dataset Inspection、Dataset Profiling 等。
@@ -364,6 +365,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 | `rag_search(query)` | 只返回原文片段与来源，不生成答案；建议结构 `context / sources / need_sql` |
 | `execute_sql(query)` | Text2SQL → 安全校验 → 只读账号执行；SQL 错误结构化返回，让 Agent 自我修正 |
 | `calculator(expression)` | 安全 AST 解析，禁止 `eval()`；返回结构化结果 |
+| `prepare_followup_task(...)` | 受控写 Tool：只写 DRAFT，等待用户确认后由独立 API 落正式任务 |
 
 当前代码仍使用 `execute_sql(sql=...)` 和 `ToolResult` dict；参数命名与 JSON 字符串化属于后续迁移项，不在文档更新时直接改代码。
 
@@ -432,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.5.2 |
+| AGENTS.md | v1.6.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -467,3 +469,4 @@ IM 社交载体
 | 1.5.0 | 2026-10-29 | 引入 C 端「小鱼」人设守卫：命名/昵称校验、输出禁词与情绪清洗；会话消息分页与清空；C 端界面文案同步 |
 | 1.5.1 | 2026-10-29 | 新增管理端 C 端交易审计：跨买家订单/报价、quote_id/policy_ids/金额链路；仅系统管理员只读访问 |
 | 1.5.2 | 2026-10-29 | C 端审计支持买家/报价状态/自然日范围筛选；前后端参数与列表联动 |
+| 1.6.0 | 2026-10-29 | 经营分析 Agent 增加受控写功能：prepare_followup_task 只生成 DRAFT，用户确认后写入；新增 Tool Policy、动作表、确认 API 与前端待确认面板 |

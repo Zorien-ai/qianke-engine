@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from rag_demo.agent.tool import Tool
+from rag_demo.agent.tools.action import prepare_followup_task
 from rag_demo.agent.tools.calculator import _calculator_adapter, calculator
 from rag_demo.agent.tools.rag import _rag_adapter, rag_search
 from rag_demo.agent.tools.sql import _sql_adapter, execute_sql
@@ -14,7 +15,7 @@ def get_tools(allowed_tools: Iterable[str] | None = None) -> list[Any]:
 
     allowed_tools 非 None 时只暴露白名单内的 Tool；执行前的二次校验在 chatbot 节点。
     """
-    tools = [rag_search, execute_sql, calculator]
+    tools = [rag_search, execute_sql, calculator, prepare_followup_task]
     if allowed_tools is None:
         return tools
     allowed = set(allowed_tools)
@@ -41,6 +42,12 @@ def get_tool_contracts() -> dict[str, Tool]:
             description=calculator.description,
             input_schema=calculator.args_schema.model_json_schema(),
             fn=_calculator_adapter,
+        ),
+        "prepare_followup_task": Tool(
+            name=prepare_followup_task.name,
+            description=prepare_followup_task.description,
+            input_schema=prepare_followup_task.args_schema.model_json_schema(),
+            fn=lambda **kwargs: prepare_followup_task.invoke(kwargs),
         ),
     }
 

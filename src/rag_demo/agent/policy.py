@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-B_AGENT_TOOL_NAMES: tuple[str, ...] = ("rag_search", "execute_sql", "calculator")
+B_AGENT_TOOL_NAMES: tuple[str, ...] = (
+    "rag_search",
+    "execute_sql",
+    "calculator",
+    "prepare_followup_task",
+)
 
 _ANALYTICS_ROLES = frozenset({"admin", "ent_admin", "exec", "analyst", "ops"})
 _CS_ROLE = "cs"

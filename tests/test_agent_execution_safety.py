@@ -223,6 +223,7 @@ def test_policy_denies_demo_and_disabled_accounts():
         "rag_search",
         "execute_sql",
         "calculator",
+        "prepare_followup_task",
     )
 
 
@@ -235,6 +236,7 @@ def test_policy_role_matrix_for_b_tools():
         "rag_search",
         "execute_sql",
         "calculator",
+        "prepare_followup_task",
     )
     assert ToolPolicy.for_account(cs).allowed_tools(cs) == ("rag_search", "calculator")
     assert ToolPolicy.for_account(guest).allowed_tools(guest) == ()

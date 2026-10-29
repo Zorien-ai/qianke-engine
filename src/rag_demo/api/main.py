@@ -48,6 +48,7 @@ from openai import APIError
 from pydantic import BaseModel
 
 from rag_demo import ai_monitor, answer_guard, auth, chat_history, chat_memory, config, conversation, marketing, permissions, tenant_eval
+from rag_demo.agent import actions as agent_actions
 from rag_demo.api.demo_showcase import (
     DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
     DEMO_QUERY_TITLE,
@@ -1258,9 +1259,30 @@ def agent_run(req: AgentRunIn) -> dict:
         raise HTTPException(status_code=502, detail=f"Agent 运行失败：{exc}") from exc
 
     response = _build_agent_response(result, dataset, query)
+    response["pending_actions"] = agent_actions.list_for_request(
+        str(result.get("request_id") or ""), account
+    )
     if replay:
         response["idempotent_replay"] = True
     return response
+
+
+@app.post("/api/agent/actions/{action_id}/confirm")
+def confirm_agent_action(action_id: str) -> dict:
+    account = _require_login()
+    try:
+        return agent_actions.confirm_action(action_id, account)
+    except agent_actions.ActionError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+
+
+@app.post("/api/agent/actions/{action_id}/cancel")
+def cancel_agent_action(action_id: str) -> dict:
+    account = _require_login()
+    try:
+        return agent_actions.cancel_action(action_id, account)
+    except agent_actions.ActionError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
 
 
 @app.post("/search")

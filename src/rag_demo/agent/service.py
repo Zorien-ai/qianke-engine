@@ -8,6 +8,7 @@ import uuid
 from typing import Any, Callable
 
 from rag_demo.agent.context import dataset_scope
+from rag_demo.agent.actions import action_scope
 from rag_demo.agent.execution_store import ClaimResult, ExecutionStore, get_execution_store
 from rag_demo.agent.loop import run_agent_with_retry
 
@@ -124,7 +125,7 @@ def execute_agent(
         raise AgentRequestFailed(claim.error or "该 request_id 已执行失败，请更换 request_id 重试")
 
     def invoke() -> dict[str, Any]:
-        with dataset_scope(dataset):
+        with dataset_scope(dataset), action_scope(dataset, account, request_id):
             return runner(
                 query,
                 request_id=request_id,
