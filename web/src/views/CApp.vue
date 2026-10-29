@@ -1,7 +1,7 @@
-﻿<script setup>
-import { computed, nextTick, onMounted, ref } from "vue";
+<script setup>
+import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { getJson } from "../api";
+import { getJson, postJson } from "../api";
 
 const threads = ref([
   {
@@ -97,6 +97,11 @@ const companion = ref({
   satiety: 62,
   species: "digital_companion",
 });
+const liveThreadId = ref("");
+const liveDraft = ref(null);
+const liveOrder = ref(null);
+const agentBusy = ref(false);
+const agentError = ref("");
 
 const activeThread = computed(() => threads.value.find((item) => item.id === activeId.value) || threads.value[0]);
 const messages = computed(() => messagesByThread.value[activeId.value] || []);
@@ -112,6 +117,15 @@ const statusText = computed(() => {
   if (activeThread.value.kind === "merchant") return "店宠在线";
   return "好友";
 });
+const pendingCount = computed(() => (liveDraft.value ? 1 : liveOrder.value ? 0 : 1));
+
+function cleanReply(text) {
+  return String(text || "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 function nowTime() {
   return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -179,15 +193,65 @@ async function send() {
   }
 
   typing.value = true;
-  await new Promise((resolve) => setTimeout(resolve, 680));
-  pushMessage({ role: "companion", ...localReply(text) });
-  typing.value = false;
-  scrollToBottom();
+  try {
+    const result = await postJson("/api/c/agent/run", {
+      message: text,
+      thread_id: liveThreadId.value || undefined,
+    });
+    liveThreadId.value = result.thread_id || liveThreadId.value;
+    agentError.value = "";
+    pushMessage({
+      role: "companion",
+      text: cleanReply(result.reply) || "已处理，请查看当前待确认信息。",
+    });
+    if (result.draft) {
+      liveDraft.value = result.draft;
+      liveOrder.value = null;
+    } else if (result.order) {
+      liveOrder.value = result.order;
+      liveThreadId.value = "";
+    } else {
+      liveThreadId.value = "";
+    }
+  } catch (error) {
+    agentError.value = error?.detail || error?.message || "小伴暂时无法回应";
+    pushMessage({ role: "companion", ...localReply(text) });
+  } finally {
+    typing.value = false;
+    scrollToBottom();
+  }
+}
+
+async function confirmLiveOrder() {
+  if (!liveThreadId.value || !liveDraft.value || agentBusy.value) return;
+  agentBusy.value = true;
+  agentError.value = "";
+  try {
+    const result = await postJson("/api/c/agent/resume", {
+      thread_id: liveThreadId.value,
+      approved: true,
+    });
+    liveOrder.value = result.order;
+    liveDraft.value = null;
+    pushMessage({
+      role: "companion",
+      text: result.order
+        ? `订单 ${result.order.order_id} 已创建。可以在订单页查看报价和确认记录。`
+        : "订单已确认。",
+    });
+  } catch (error) {
+    agentError.value = error?.detail || error?.message || "订单确认失败";
+  } finally {
+    agentBusy.value = false;
+    scrollToBottom();
+  }
 }
 
 async function sendPrompt(prompt) {
   if (typing.value) return;
-  draft.value = prompt;
+  draft.value = prompt === "看 500 元以内的跑鞋"
+    ? "看 500 元以内的跑鞋，买 1 双，直接生成待确认订单"
+    : prompt;
   await send();
 }
 
@@ -413,8 +477,26 @@ onMounted(async () => {
           </section>
 
           <section class="c-context-section">
-            <header><span>待确认</span><span class="c-count">1</span></header>
-            <div class="c-quote-card">
+            <header><span>待确认</span><span class="c-count">{{ pendingCount }}</span></header>
+            <div v-if="liveDraft" class="c-quote-card">
+              <div class="c-quote-card-top">
+                <span class="c-quote-card-label">小伴生成的订单草稿</span>
+                <span class="c-dot waiting" />
+              </div>
+              <strong>{{ liveDraft.items?.[0]?.title || "订单草稿" }}</strong>
+              <div class="c-quote-price">
+                <span>¥{{ Number(liveDraft.total_amount || 0).toFixed(2) }}</span>
+                <small v-if="liveDraft.discount_amount">优惠 ¥{{ Number(liveDraft.discount_amount).toFixed(2) }}</small>
+              </div>
+              <p>确认后才会创建订单，确认前不会扣库存。</p>
+              <button class="c-confirm-btn" type="button" :disabled="agentBusy" @click="confirmLiveOrder">
+                {{ agentBusy ? "提交中" : "确认并创建订单" }}
+              </button>
+            </div>
+            <div v-else-if="liveOrder" class="c-order-created">
+              订单 {{ liveOrder.order_id }} 已创建 · ¥{{ Number(liveOrder.total_amount || 0).toFixed(2) }}
+            </div>
+            <div v-else class="c-quote-card">
               <div class="c-quote-card-top">
                 <span class="c-quote-card-label">来自店宠的报价</span>
                 <span class="c-dot waiting" />
@@ -424,6 +506,7 @@ onMounted(async () => {
               <p>成交前需在商城逐单确认。</p>
               <RouterLink to="/c" class="c-text-link">查看商城 <span>→</span></RouterLink>
             </div>
+            <p v-if="agentError" class="c-inline-error" role="alert">{{ agentError }}</p>
           </section>
 
           <section class="c-context-section">
@@ -1360,6 +1443,46 @@ onMounted(async () => {
 
 .c-text-link:hover {
   color: var(--c-text);
+}
+
+.c-confirm-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 32px;
+  margin-top: 9px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-panel-2);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.c-confirm-btn:hover:not(:disabled) {
+  background: var(--c-panel-3);
+}
+
+.c-confirm-btn:disabled {
+  color: var(--c-text-3);
+  cursor: not-allowed;
+}
+
+.c-order-created {
+  padding: 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-bg-soft);
+  color: var(--c-text-2);
+  font-size: 10px;
+}
+
+.c-inline-error {
+  margin: 0;
+  color: var(--c-negative);
+  font-size: 9px;
 }
 
 .c-order-row {

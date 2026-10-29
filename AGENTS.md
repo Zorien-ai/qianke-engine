@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.3.7 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.3.8 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -373,7 +373,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 
 | 端 | 职责 | 当前状态 |
 |---|---|---|
-| 用户端（C） | 聊天导购、商品推荐、模拟下单、IM 好友单聊 | Mock 购物 + IM 社交 + 店宠 Agent + 独立 C 端 UI |
+| 用户端（C） | 聊天导购、商品推荐、模拟下单、IM 好友单聊 | Mock 购物 + IM 社交 + 店宠 Agent + 独立 C 端 UI（已接 C Agent 草稿/确认） |
 | 商户端（B） | 洞察分析、千人千面文案、SOP 客服 | 开发中，当前主线 |
 | 管理端（A） | Agent 运行监控、高危调用审计、算力消耗 | 待开发 |
 
@@ -432,7 +432,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.3.7 |
+| AGENTS.md | v1.3.8 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -458,3 +458,4 @@ IM 社交载体
 | 1.3.5 | 2026-10-29 | 报价可直接转订单草稿；订单记录 quote_id / policy_ids / 原价 / 优惠；确认后报价 CONSUMED，形成审计链 |
 | 1.3.6 | 2026-10-29 | 增加报价数量提取、取消草稿/报价释放、C 端订单审计页；只展示正式订单，排除草稿 |
 | 1.3.7 | 2026-10-29 | 新增独立 C 端 UI 参考（桌面/移动）：中性深色、低饱和、去 AI 装饰；初始页为伙伴对话 |
+| 1.3.8 | 2026-10-29 | C 端 App 接入真实 C Agent：快捷问题生成订单草稿，右侧面板由用户逐单确认后创建订单 |
