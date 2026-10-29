@@ -166,6 +166,382 @@
       font-size: 10px;
     }
 
+    /* ---------- White chat ---------- */
+    .w-app {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr) 286px;
+      min-height: 640px;
+      background: var(--paper-0);
+      color: var(--paper-900);
+    }
+    .w-side {
+      padding: 18px 14px;
+      border-right: 1px solid var(--paper-200);
+      background: #FCFCFB;
+    }
+    .w-side-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 4px 18px;
+    }
+    .w-side-head .brand-mark {
+      width: 28px;
+      height: 28px;
+      font-size: 10px;
+      background: var(--paper-900);
+    }
+    .w-side-head strong { display: block; font-size: 12px; font-weight: 600; }
+    .w-side-head span {
+      display: block;
+      color: var(--paper-500);
+      font-family: var(--mono);
+      font-size: 8px;
+      letter-spacing: .06em;
+    }
+    .w-ghost-icon {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--paper-200);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--paper-550);
+      font-size: 13px;
+    }
+    .w-search {
+      margin-bottom: 14px;
+      padding: 8px 10px;
+      border: 1px solid var(--paper-200);
+      border-radius: var(--radius-control);
+      background: var(--paper-0);
+      color: var(--paper-500);
+      font-size: 10px;
+    }
+    .w-side-label {
+      padding: 4px 4px 7px;
+      color: var(--paper-500);
+      font-family: var(--mono);
+      font-size: 8px;
+      letter-spacing: .08em;
+    }
+    .w-thread {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      padding: 10px 8px;
+      border-radius: 8px;
+    }
+    .w-thread.active { background: var(--paper-100); }
+    .w-avatar {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 auto;
+      border: 1px solid var(--paper-200);
+      border-radius: 50%;
+      background: var(--paper-0);
+      color: var(--paper-600);
+      font-size: 10px;
+    }
+    .w-thread-copy { min-width: 0; flex: 1; }
+    .w-thread-top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .w-thread-top strong { font-size: 11px; font-weight: 500; }
+    .w-thread-top time {
+      color: var(--paper-500);
+      font-family: var(--mono);
+      font-size: 8px;
+    }
+    .w-thread-preview {
+      margin-top: 2px;
+      overflow: hidden;
+      color: var(--paper-500);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .w-count {
+      color: var(--paper-500);
+      font-family: var(--mono);
+      font-size: 9px;
+      line-height: 1.9;
+    }
+
+    .w-chat {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      background: var(--paper-0);
+    }
+    .w-chat-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--paper-200);
+    }
+    .w-chat-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
+    .w-chat-head p {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0 0;
+      color: var(--paper-500);
+      font-size: 9px;
+    }
+    .w-online {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--positive);
+    }
+    .w-messages {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 20px;
+      padding: 26px 32px 20px;
+    }
+    .w-day {
+      align-self: center;
+      color: var(--paper-500);
+      font-family: var(--mono);
+      font-size: 8px;
+    }
+    .w-message {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      max-width: 76%;
+    }
+    .w-message.other { align-self: flex-start; }
+    .w-message.self {
+      align-self: flex-end;
+      max-width: 68%;
+      padding: 10px 12px;
+      border: 1px solid var(--paper-200);
+      border-radius: 10px;
+      background: var(--paper-50);
+    }
+    .w-message-body { min-width: 0; }
+    .w-message-body p {
+      margin: 0;
+      color: var(--paper-900);
+      font-size: 12px;
+      line-height: 1.75;
+    }
+    .w-message.self .w-message-body p { font-size: 11px; }
+    .w-message-meta {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      margin-bottom: 3px;
+      color: var(--paper-500);
+      font-size: 8px;
+    }
+    .w-message-meta strong {
+      color: var(--paper-700);
+      font-size: 10px;
+      font-weight: 500;
+    }
+    .w-message-meta time {
+      color: var(--paper-500);
+      font-family: var(--mono);
+      font-size: 8px;
+    }
+    .w-message-meta.right {
+      justify-content: flex-end;
+      margin: 4px 0 0;
+    }
+
+    .w-quote-inline {
+      align-self: flex-start;
+      width: min(360px, 86%);
+      margin: 2px 0 0 38px;
+      padding: 14px;
+      border: 1px solid var(--paper-200);
+      border-radius: 10px;
+      background: var(--paper-0);
+    }
+    .w-quote-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--paper-100);
+    }
+    .w-quote-head strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .w-micro {
+      color: var(--paper-500);
+      font-family: var(--mono);
+      font-size: 8px;
+      letter-spacing: .04em;
+    }
+    .w-quote-status {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: var(--warning-soft);
+      color: var(--warning-text);
+      font-family: var(--mono);
+      font-size: 8px;
+    }
+    .w-quote-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 6px;
+      color: var(--paper-550);
+      font-size: 9px;
+    }
+    .w-quote-row span:last-child {
+      color: var(--paper-700);
+      font-family: var(--mono);
+    }
+    .w-quote-row.total {
+      margin-top: 7px;
+      padding-top: 8px;
+      border-top: 1px solid var(--paper-100);
+      color: var(--paper-900);
+      font-size: 10px;
+    }
+    .w-quote-row.total span:last-child { font-size: 12px; font-weight: 600; }
+    .w-confirm {
+      width: 100%;
+      height: 30px;
+      margin-top: 11px;
+      border: 1px solid var(--paper-900);
+      border-radius: 8px;
+      background: var(--paper-900);
+      color: var(--paper-0);
+      font-size: 9px;
+      font-weight: 500;
+    }
+    .w-quote-note {
+      margin-top: 7px;
+      color: var(--paper-500);
+      font-size: 8px;
+      text-align: center;
+    }
+
+    .w-composer {
+      display: flex;
+      align-items: flex-end;
+      gap: 7px;
+      margin: 0 24px 20px;
+      padding: 7px 7px 7px 12px;
+      border: 1px solid var(--paper-200);
+      border-radius: 12px;
+      background: var(--paper-0);
+    }
+    .w-input {
+      min-width: 0;
+      flex: 1;
+      padding: 5px 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--paper-900);
+      font-size: 10px;
+    }
+    .w-input::placeholder { color: var(--paper-500); }
+    .w-send {
+      display: grid;
+      place-items: center;
+      width: 27px;
+      height: 27px;
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 50%;
+      background: var(--paper-900);
+      color: var(--paper-0);
+      font-size: 11px;
+    }
+
+    .w-context {
+      padding: 20px 16px;
+      border-left: 1px solid var(--paper-200);
+      background: #FCFCFB;
+    }
+    .w-context h3 { margin: 5px 0 0; font-size: 13px; font-weight: 600; }
+    .w-context > p {
+      margin: 5px 0 0;
+      color: var(--paper-550);
+      font-size: 9px;
+      line-height: 1.65;
+    }
+    .w-context-card {
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid var(--paper-200);
+      border-radius: 10px;
+      background: var(--paper-0);
+    }
+    .w-context-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--paper-550);
+      font-size: 9px;
+    }
+    .w-context-price {
+      margin-top: 13px;
+      font-family: var(--mono);
+      font-size: 25px;
+      font-weight: 600;
+      letter-spacing: -.04em;
+    }
+    .w-context-meta {
+      margin-top: 2px;
+      color: var(--paper-500);
+      font-size: 8px;
+    }
+    .w-context-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 8px;
+      color: var(--paper-550);
+      font-size: 9px;
+    }
+    .w-context-row span:last-child {
+      color: var(--paper-700);
+      font-family: var(--mono);
+    }
+    .w-context-row .mono { font-size: 8px; }
+    .w-context-note {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      margin-top: 14px;
+      color: var(--paper-500);
+      font-size: 8px;
+      line-height: 1.6;
+    }
+    .w-dot {
+      width: 4px;
+      height: 4px;
+      margin-top: 5px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--paper-300);
+    }
+
     /* ---------- B Workbench ---------- */
     .b-app {
       display: grid;
@@ -825,6 +1201,26 @@
     }
     .preview-foot code { font-family: var(--mono); font-size: 9px; }
 
+    /* Full-screen white dialogue preview: ?focus=white */
+    body.focus-white { background: var(--paper-0); }
+    body.focus-white .preview-shell { max-width: none; padding: 0; }
+    body.focus-white .preview-head,
+    body.focus-white .mode-tabs,
+    body.focus-white .mode-caption,
+    body.focus-white .preview-foot { display: none; }
+    body.focus-white .stage {
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      background: var(--paper-0);
+    }
+    body.focus-white .mode:not([data-panel="white"]) { display: none !important; }
+    body.focus-white .w-app {
+      min-height: 100vh;
+      height: 100vh;
+    }
+    body.focus-white .w-chat { min-height: 0; }
+
     @media (max-width: 900px) {
       .preview-shell { padding: 16px 12px 40px; }
       .preview-head { flex-direction: column; }
@@ -837,6 +1233,15 @@
       .c-app { grid-template-columns: 1fr; min-height: 0; }
       .c-side, .c-context { display: none; }
       .c-chat { min-height: 560px; }
+      .w-app { grid-template-columns: 1fr; min-height: 0; }
+      .w-side, .w-context { display: none; }
+      .w-chat { min-height: 620px; }
+      .w-chat-head { padding: 14px 16px; }
+      .w-messages { gap: 18px; padding: 20px 16px; }
+      .w-message { max-width: 90%; }
+      .w-message.self { max-width: 86%; }
+      .w-quote-inline { width: auto; margin-left: 38px; }
+      .w-composer { margin: 0 16px 16px; }
       .landing { padding: 0 18px 28px; }
       .landing-hero { grid-template-columns: 1fr; gap: 24px; padding: 36px 0 28px; }
       .landing-links { display: none; }
@@ -858,20 +1263,160 @@
       </div>
       <p class="preview-note">
         统一的是中性色、字体、间距、圆角与组件解剖；不统一的是场景结构。
-        同一产品，四种气候：工作台的纸面、C 端的石墨、审计的证据台、官网的留白。
+        同一产品，五种语气：白对话、工作台纸面、C 端石墨、审计证据台、官网留白。
       </p>
     </header>
 
     <div class="mode-tabs" role="tablist" aria-label="设计语气切换">
-      <button class="mode-tab" role="tab" aria-selected="true" data-mode="b">B 工作台</button>
+      <button class="mode-tab" role="tab" aria-selected="true" data-mode="white">白 · 对话</button>
+      <button class="mode-tab" role="tab" aria-selected="false" data-mode="b">B 工作台</button>
       <button class="mode-tab" role="tab" aria-selected="false" data-mode="c">C App</button>
       <button class="mode-tab" role="tab" aria-selected="false" data-mode="a">A 审计</button>
       <button class="mode-tab" role="tab" aria-selected="false" data-mode="landing">官网</button>
     </div>
 
     <div class="stage">
+      <!-- White chat -->
+      <section class="mode active" data-panel="white" aria-label="白色极简对话风格">
+        <div class="mode-caption">
+          <strong>白 · 对话 · 纸面极简</strong>
+          <code>paper / 低密度 / 无重气泡 / 细线分割 / 对话与确认</code>
+        </div>
+        <div class="w-app">
+          <aside class="w-side">
+            <div class="w-side-head">
+              <div class="brand">
+                <div class="brand-mark">小</div>
+                <div><strong>小鱼</strong><span>COMPANION</span></div>
+              </div>
+              <button class="w-ghost-icon" aria-label="新建对话">+</button>
+            </div>
+            <div class="w-search">搜索对话</div>
+            <div class="w-side-label">最近</div>
+            <div class="w-thread active">
+              <div class="w-avatar">山</div>
+              <div class="w-thread-copy">
+                <div class="w-thread-top"><strong>山野户外旗舰店</strong><time>09:18</time></div>
+                <div class="w-thread-preview">满减活动已更新，可以看看轻量跑鞋</div>
+              </div>
+              <span class="w-count">2</span>
+            </div>
+            <div class="w-thread">
+              <div class="w-avatar">小</div>
+              <div class="w-thread-copy">
+                <div class="w-thread-top"><strong>小鱼</strong><time>09:42</time></div>
+                <div class="w-thread-preview">今天先看什么？我可以帮你整理</div>
+              </div>
+            </div>
+            <div class="w-thread">
+              <div class="w-avatar">户</div>
+              <div class="w-thread-copy">
+                <div class="w-thread-top"><strong>户外搭子</strong><time>昨天</time></div>
+                <div class="w-thread-preview">周末去徒步吗？</div>
+              </div>
+            </div>
+          </aside>
+
+          <main class="w-chat">
+            <header class="w-chat-head">
+              <div>
+                <h2>山野户外旗舰店</h2>
+                <p><span class="w-online" aria-hidden="true"></span>店宠在线 · 只做建议，成交需你确认</p>
+              </div>
+              <button class="w-ghost-icon" aria-label="更多">···</button>
+            </header>
+
+            <div class="w-messages" aria-label="对话消息">
+              <div class="w-day">今天</div>
+
+              <article class="w-message other">
+                <div class="w-avatar">山</div>
+                <div class="w-message-body">
+                  <div class="w-message-meta"><strong>山野户外旗舰店</strong><time>09:18</time></div>
+                  <p>满减活动已更新：满 299 减 30，满 599 减 80。</p>
+                </div>
+              </article>
+
+              <article class="w-message self">
+                <div class="w-message-body">
+                  <p>轻量跑鞋现在多少钱？</p>
+                  <div class="w-message-meta right"><time>09:19</time></div>
+                </div>
+              </article>
+
+              <article class="w-message other">
+                <div class="w-avatar">山</div>
+                <div class="w-message-body">
+                  <div class="w-message-meta"><strong>山野户外旗舰店</strong><time>09:19</time></div>
+                  <p>轻量跑鞋到手 269 元，已按平台满减计算。库存还剩 8 件。</p>
+                </div>
+              </article>
+
+              <article class="w-message self">
+                <div class="w-message-body">
+                  <p>帮我留一双 42 码，明天确认。</p>
+                  <div class="w-message-meta right"><time>09:20</time></div>
+                </div>
+              </article>
+
+              <article class="w-message other">
+                <div class="w-avatar">山</div>
+                <div class="w-message-body">
+                  <div class="w-message-meta"><strong>山野户外旗舰店</strong><time>09:20</time></div>
+                  <p>收到。报价已生成，确认前不会创建订单。</p>
+                </div>
+              </article>
+
+              <div class="w-quote-inline">
+                <div class="w-quote-head">
+                  <div>
+                    <span class="w-micro">QUOTE · Q-2081</span>
+                    <strong>轻量跑鞋 · 42 码</strong>
+                  </div>
+                  <span class="w-quote-status">待确认</span>
+                </div>
+                <div class="w-quote-row"><span>商品金额</span><span>¥299</span></div>
+                <div class="w-quote-row"><span>平台满减</span><span>−¥30</span></div>
+                <div class="w-quote-row total"><span>应付</span><span>¥269</span></div>
+                <button class="w-confirm">确认下单</button>
+                <div class="w-quote-note">确认后才会创建模拟订单</div>
+              </div>
+            </div>
+
+            <div class="w-composer">
+              <input class="w-input" aria-label="输入消息" placeholder="发消息…" />
+              <button class="w-send" aria-label="发送">↑</button>
+            </div>
+          </main>
+
+          <aside class="w-context">
+            <div class="w-micro">当前对话</div>
+            <h3>交易确认</h3>
+            <p>小鱼只做辅助传达与锐评，不议价、不下单。成交由你逐单确认。</p>
+
+            <div class="w-context-card">
+              <div class="w-context-card-head">
+                <span>待确认报价</span>
+                <span class="w-quote-status">PENDING</span>
+              </div>
+              <div class="w-context-price">¥269</div>
+              <div class="w-context-meta">轻量跑鞋 · 42 码 · 1 件</div>
+              <div class="w-context-row"><span>原价</span><span>¥299</span></div>
+              <div class="w-context-row"><span>平台满减</span><span>−¥30</span></div>
+              <div class="w-context-row"><span>报价编号</span><span class="mono">Q-2081</span></div>
+              <button class="w-confirm">确认下单</button>
+            </div>
+
+            <div class="w-context-note">
+              <span class="w-dot" aria-hidden="true"></span>
+              订单创建前可随时取消，不会产生扣款。
+            </div>
+          </aside>
+        </div>
+      </section>
+
       <!-- B Workbench -->
-      <section class="mode active" data-panel="b" aria-label="B 端工作台风格">
+      <section class="mode" data-panel="b" aria-label="B 端工作台风格">
         <div class="mode-caption">
           <strong>B 工作台 · 精确的纸面</strong>
           <code>paper + ink / 中高密度 / 固定侧栏 / 表格与轨迹为主</code>
@@ -1201,7 +1746,13 @@ GROUP BY channel</div>
       tabs.forEach(function (tab) {
         tab.addEventListener('click', function () { activate(tab.dataset.mode); });
       });
-      activate('b');
+      var focus = new URLSearchParams(window.location.search).get('focus');
+      if (focus === 'white') {
+        document.body.classList.add('focus-white');
+        activate('white');
+      } else {
+        activate('white');
+      }
     })();
   </script>
 </body>
