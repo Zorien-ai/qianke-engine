@@ -22,6 +22,7 @@ const ICONS = {
   chat: '<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01"/>',
   agent: '<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/><path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14z"/><path d="M5 15l.6 1.7L7.3 17.3l-1.7.6L5 19.6l-.6-1.7-1.7-.6 1.7-.6L5 15z"/>',
   shop: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+  social: '<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01"/>',
   kb: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
   eval:
     '<path d="M9 3h6v4H9z"/><path d="M9 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3"/><path d="M8 13l2.2 2.2L16 9.5"/>',
@@ -49,6 +50,7 @@ const navItems = computed(() => {
     { to: "/chat", key: "chat", label: "对话", icon: ICONS.chat },
     { to: "/agent", key: "agent", label: "Agent 智能助理", icon: ICONS.agent },
     { to: "/c", key: "shop", label: "C 端商城", icon: ICONS.shop },
+    { to: "/c/social", key: "social", label: "社交消息", icon: ICONS.social },
     { to: "/kb", key: "kb", label: "知识库", icon: ICONS.kb },
   ];
   if (isManager()) items.push({ to: "/staff", key: "staff", label: "员工管理", icon: ICONS.staff });

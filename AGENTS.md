@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.3.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.3.1 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -373,7 +373,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 
 | 端 | 职责 | 当前状态 |
 |---|---|---|
-| 用户端（C） | 聊天导购、商品推荐、模拟下单 | Mock 闭环已跑通；IM 社交待建设 |
+| 用户端（C） | 聊天导购、商品推荐、模拟下单、IM 好友单聊 | Mock 购物闭环 + IM 社交 MVP |
 | 商户端（B） | 洞察分析、千人千面文案、SOP 客服 | 开发中，当前主线 |
 | 管理端（A） | Agent 运行监控、高危调用审计、算力消耗 | 待开发 |
 
@@ -397,7 +397,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 ```text
 阶段一（基础）：商户端单体 ReAct Agent + 3 个原子 Tool（已有基础）
 阶段二：C 端购物 + 模拟订单 + HITL（mock 闭环已跑通）
-阶段三：IM 社交壳 + 好友会话 + 可配置伙伴/宠物形象（进行中）
+阶段三：IM 社交壳 + 好友会话 + 可配置伙伴/宠物形象（MVP 已跑通）
 阶段四：双宠谈判、商家店宠、白名单意图
 阶段五：真实支付 / 真实 IM / SaaS 交付
 ```
@@ -432,7 +432,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.3.0 |
+| AGENTS.md | v1.3.1 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -440,7 +440,7 @@ IM 社交载体
 | Data Ingestion | CSV v1 |
 | Agent | Runtime v0.2.2 |
 | Evaluation | Regression 20 / Benchmark 80（development set） / Eval v2.2 |
-| Next | IM 社交壳 + 可配置伙伴 |
+| Next | 双宠谈判 + 真实商家 Agent |
 | Agent Matrix | B 端主线；C 端 mock 闭环；A 端待开发 |
 
 ## 变更记录
@@ -451,3 +451,4 @@ IM 社交载体
 | 1.1.0 | 2026-10-26 | 合并重复章节；统一标题/列表/代码块；压缩流程图；拆分“工作协议”与“产品设计”；更新 Eval 版本状态 |
 | 1.2.0 | 2026-10-28 | 增加最新目标方向：设计哲学、Tool 契约、三端 Agent 矩阵、LangGraph 编排与演进路线；明确目标态与当前实现差异 |
 | 1.3.0 | 2026-10-29 | 写入 IM 社交电商产品愿景、可配置伙伴抽象、双宠谈判工程边界与简历项目描述；C 端 mock 闭环状态更新 |
+| 1.3.1 | 2026-10-29 | 增加 IM 好友/单聊/WebSocket MVP 与可配置伙伴状态；C 端阶段三标记为 MVP 已跑通 |

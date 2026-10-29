@@ -4,13 +4,13 @@ from __future__ import annotations
 import re
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import store
+from rag_demo.c_end import social, store
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -56,6 +56,10 @@ class CompanionPatchIn(BaseModel):
     appearance: str | None = Field(default=None, max_length=60)
 
 
+class SendMessageIn(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000)
+
+
 def _last_ai_text(messages: list) -> str:
     for msg in reversed(messages or []):
         if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
@@ -99,6 +103,58 @@ def update_companion(req: CompanionPatchIn) -> dict:
         )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
+
+
+@router.get("/friends")
+def list_friends() -> dict:
+    buyer_id, _ = _buyer()
+    return {"friends": social.list_friends(buyer_id)}
+
+
+@router.get("/friends/{friend_id}/messages")
+def list_messages(friend_id: str, limit: int = 50) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return {"messages": social.get_messages(buyer_id, friend_id, limit=limit)}
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/friends/{friend_id}/messages")
+def send_message(friend_id: str, req: SendMessageIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return social.send_message(buyer_id, friend_id, req.content)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.websocket("/ws/chat/{friend_id}")
+async def chat_websocket(websocket: WebSocket, friend_id: str) -> None:
+    token = websocket.cookies.get(auth.SESSION_COOKIE)
+    account = auth.resolve_session(token) if token else None
+    if account is None or account.get("status") != auth.STATUS_ACTIVE:
+        await websocket.close(code=1008)
+        return
+    if account.get("is_demo"):
+        await websocket.close(code=1008)
+        return
+    buyer_id = f"buyer_{account['id']}"
+    await websocket.accept()
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            content = str(payload.get("content") or "")
+            try:
+                result = social.send_message(buyer_id, friend_id, content)
+                await websocket.send_json({"type": "chat", **result})
+            except store.CStoreError as exc:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": {"code": exc.code, "message": exc.message},
+                })
+    except WebSocketDisconnect:
+        return
 
 
 @router.post("/orders/prepare")

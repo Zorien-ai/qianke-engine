@@ -183,7 +183,41 @@ web/src/views/CShop.vue
 
 ![C 端商城](screenshots/c-end-shop.png)
 
-## 7. 当前买家身份
+## 7. IM 社交壳 MVP
+
+页面：
+
+```text
+/v2/#/c/social
+```
+
+![C 端社交](screenshots/c-end-social.png)
+
+已实现：
+
+- mock 好友列表（店宠 + 普通好友）
+- 单聊消息持久化
+- HTTP + WebSocket 双入口
+- 店宠只有被 `@店宠` 唤醒才进入 mock 回复
+- 未唤醒时返回固定拦截话术
+
+API：
+
+```text
+GET  /api/c/friends
+GET  /api/c/friends/{friend_id}/messages
+POST /api/c/friends/{friend_id}/messages
+WS   /api/c/ws/chat/{friend_id}
+```
+
+当前限制：
+
+- 店宠回复是确定性 mock，不是真实 B 端 Agent
+- 没有真实双人推送 / 消息总线
+- demo 账号 WebSocket 也按只读拒绝
+- 没有好友申请/通过流程
+
+## 8. 当前买家身份
 
 当前复用登录账号：
 
