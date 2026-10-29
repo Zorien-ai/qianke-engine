@@ -1,0 +1,25 @@
+{
+  "name": "千客 · C 端",
+  "short_name": "千客",
+  "description": "千客 C 端消费应用：伙伴对话、商品咨询与订单确认。",
+  "start_url": "./#/c/app",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f0f11",
+  "theme_color": "#0f0f11",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

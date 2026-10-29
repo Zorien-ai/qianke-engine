@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.4.2 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.4.3 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -432,7 +432,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.4.2 |
+| AGENTS.md | v1.4.3 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -463,3 +463,4 @@ IM 社交载体
 | 1.4.0 | 2026-10-29 | C 端 App 小伴会话持久化：新增 c_app_message 与 GET/POST app messages；用户消息、Agent 回复、订单确认结果可恢复 |
 | 1.4.1 | 2026-10-29 | C 端 App 移动端参考 WhatsApp iOS 信息架构：会话列表、返回导航、胶囊输入、气泡内时间、圆形发送 |
 | 1.4.2 | 2026-10-29 | C 端 App 店宠会话切换 WebSocket 实时链路，HTTP 保留为回退；移动端消息列表与输入区同步 WhatsApp 风格 |
+| 1.4.3 | 2026-10-29 | C 端 App 加入 PWA manifest/service worker/icons 与 iOS 安全区适配；静态资源缓存，不缓存 API/鉴权/HTML |

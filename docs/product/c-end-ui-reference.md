@@ -164,10 +164,64 @@ created_at
 
 页面加载时优先展示持久化消息；没有历史时使用演示种子。发送消息、Agent 回复、订单确认结果都会写入该表。
 
-## 8. 文件
+## 8. PWA 与移动端安全区
+
+已加入可安装 PWA：
+
+```text
+/v2/manifest.webmanifest
+/v2/sw.js
+/v2/icons/icon-192.png
+/v2/icons/icon-512.png
+```
+
+PWA 配置：
+
+```text
+display: standalone
+start_url: /v2/#/c/app
+scope: /v2/
+theme_color: #0f0f11
+background_color: #0f0f11
+```
+
+Service Worker 只缓存同源静态资源（script/style/image/font），不缓存：
+
+```text
+/api/*
+/auth/*
+/whoami
+/admin/*
+HTML 外壳
+```
+
+移动端增加 iOS 安全区：
+
+```css
+padding-top: env(safe-area-inset-top);
+padding-bottom: env(safe-area-inset-bottom);
+height: calc(56px + env(safe-area-inset-bottom));
+```
+
+覆盖对话头部、底部导航、消息列表头部和主体底部。
+
+验证：
+
+```text
+manifest         200
+icon-192         200
+icon-512         200
+Service Worker   activated，scope /v2/
+C 端 App 控制台  0 errors / 0 warnings
+```
+
+## 9. 文件
 
 ```text
 web/src/views/CApp.vue
 web/src/App.vue          # standalone 路由不套企业工作台外壳
 web/src/router.js
+web/public/manifest.webmanifest
+web/public/sw.js
+web/public/icons/
 ```

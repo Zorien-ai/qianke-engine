@@ -2209,4 +2209,29 @@ onBeforeUnmount(closeStoreSocket);
     padding: 20px 16px;
   }
 }
+
+/* iOS PWA safe area：只在移动端生效，桌面端 env() 为 0。 */
+@media (max-width: 760px) {
+  .c-main {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  .c-chat-head {
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+
+  .c-mobile-nav {
+    height: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .c-mobile-thread-head {
+    height: calc(56px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .c-mobile-thread-screen {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
 </style>
