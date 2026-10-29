@@ -121,6 +121,7 @@ const storeHistoryHint = ref("");
 const agentBusy = ref(false);
 const agentError = ref("");
 const pendingRetry = ref(null);
+const lastStoreSend = ref(null);
 const copyTip = ref("");
 const showJumpBottom = ref(false);
 const composerFocused = ref(false);
@@ -465,6 +466,8 @@ function handleStoreSocket(event) {
   if (activeId.value !== "store_demo") return;
   if (payload.type === "chat") {
     typing.value = false;
+    pendingRetry.value = null;
+    lastStoreSend.value = null;
     if (payload.reply) {
       pushMessage({ role: "merchant", text: cleanReply(payload.reply.content) });
       if (payload.reply.metadata?.quote_id) storeQuote.value = payload.reply.metadata;
@@ -476,6 +479,14 @@ function handleStoreSocket(event) {
   } else if (payload.type === "error") {
     typing.value = false;
     agentError.value = payload.error?.message || "店宠暂时无法回应";
+    if (lastStoreSend.value) {
+      pendingRetry.value = {
+        threadId: "store_demo",
+        text: lastStoreSend.value.text,
+        clientId: lastStoreSend.value.clientId,
+      };
+      lastStoreSend.value = null;
+    }
   }
 }
 
@@ -584,12 +595,16 @@ async function deliverText(text, isRetry = false, clientId = null) {
     if (storeSocket && storeSocket.readyState === WebSocket.OPEN) {
       typing.value = true;
       agentError.value = "";
-      storeSocket.send(JSON.stringify({ content: text }));
+      lastStoreSend.value = { text, clientId };
+      storeSocket.send(JSON.stringify({ content: text, client_message_id: clientId || undefined }));
       return;
     }
     typing.value = true;
     try {
-      const result = await postJson("/api/c/friends/store_demo/messages", { content: text });
+      const result = await postJson("/api/c/friends/store_demo/messages", {
+        content: text,
+        client_message_id: clientId || undefined,
+      });
       if (result.reply) {
         pushMessage({ role: "merchant", text: cleanReply(result.reply.content) });
         if (result.reply.metadata?.quote_id) storeQuote.value = result.reply.metadata;
@@ -597,8 +612,10 @@ async function deliverText(text, isRetry = false, clientId = null) {
       if (result.companion_message) {
         pushMessage({ role: "companion", text: cleanReply(result.companion_message.content) });
       }
+      lastStoreSend.value = null;
       agentError.value = "";
     } catch (error) {
+      lastStoreSend.value = null;
       agentError.value = error?.detail || error?.message || "店宠暂时无法回应";
       pendingRetry.value = { threadId: activeId.value, text, clientId };
     } finally {
@@ -700,6 +717,7 @@ async function loadCompanion() {
 
 async function switchThread(id) {
   closeStoreSocket();
+  lastStoreSend.value = null;
   activeId.value = id;
   showContext.value = false;
   if (id === "store_demo") {

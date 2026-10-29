@@ -218,7 +218,9 @@ API：
 GET  /api/c/friends
 GET  /api/c/friends/{friend_id}/messages
 POST /api/c/friends/{friend_id}/messages
+  → content + client_message_id（可选，幂等键）
 WS   /api/c/ws/chat/{friend_id}
+  → client_message_id（可选，幂等键）
 GET  /api/c/quotes/{quote_id}
 POST /api/c/quotes/{quote_id}/prepare
 ```

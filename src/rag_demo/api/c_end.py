@@ -74,6 +74,7 @@ class CompanionPatchIn(BaseModel):
 
 class SendMessageIn(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
+    client_message_id: str | None = Field(default=None, max_length=128)
 
 
 class AppMessageIn(BaseModel):
@@ -332,19 +333,75 @@ def list_messages(friend_id: str, limit: int = 20, before: str | None = None) ->
         raise _http_error(exc) from exc
 
 
-@router.post("/friends/{friend_id}/messages")
-def send_message(friend_id: str, req: SendMessageIn) -> dict:
-    buyer_id, _ = _buyer()
-    try:
+def _send_store_message_once(
+    buyer_id: str,
+    friend_id: str,
+    content: str,
+    client_id: str | None,
+) -> tuple[dict, bool]:
+    """店宠消息的幂等包装；返回 (result, replay)。"""
+    if not client_id:
         return social.send_message(
             buyer_id,
             friend_id,
-            req.content,
+            content,
+            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text),
+            commentary_provider=lambda text, reply_text: companion_agent.commentary(
+                buyer_id, text, reply_text
+            ),
+        ), False
+
+    request_fingerprint = idempotency.fingerprint(content, friend_id)
+    claim = idempotency.claim(
+        client_id=client_id,
+        owner_id=buyer_id,
+        endpoint="c_store_send",
+        request_fingerprint=request_fingerprint,
+    )
+    if claim["state"] == "replay":
+        return dict(claim["response"]), True
+    if claim["state"] == "in_progress":
+        raise idempotency.IdempotencyConflict("同一条消息正在处理中，请勿重复发送")
+
+    try:
+        result = social.send_message(
+            buyer_id,
+            friend_id,
+            content,
             reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text),
             commentary_provider=lambda text, reply_text: companion_agent.commentary(
                 buyer_id, text, reply_text
             ),
         )
+    except Exception:
+        idempotency.release(
+            client_id=client_id,
+            owner_id=buyer_id,
+            endpoint="c_store_send",
+        )
+        raise
+    idempotency.complete(
+        client_id=client_id,
+        owner_id=buyer_id,
+        endpoint="c_store_send",
+        response=result,
+    )
+    return result, False
+
+
+@router.post("/friends/{friend_id}/messages")
+def send_message(friend_id: str, req: SendMessageIn) -> dict:
+    buyer_id, _ = _buyer()
+    client_id = (req.client_message_id or "").strip() or None
+    if client_id and not _CLIENT_ID_RE.fullmatch(client_id):
+        raise HTTPException(status_code=400, detail="client_message_id 格式不合法")
+    try:
+        result, replay = _send_store_message_once(buyer_id, friend_id, req.content, client_id)
+        if replay:
+            result["idempotent_replay"] = True
+        return result
+    except idempotency.IdempotencyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
 
@@ -365,18 +422,29 @@ async def chat_websocket(websocket: WebSocket, friend_id: str) -> None:
         while True:
             payload = await websocket.receive_json()
             content = str(payload.get("content") or "")
+            client_id = str(payload.get("client_message_id") or "").strip() or None
+            if client_id and not _CLIENT_ID_RE.fullmatch(client_id):
+                await websocket.send_json({
+                    "type": "error",
+                    "error": {"code": "INVALID_CLIENT_MESSAGE_ID", "message": "client_message_id 格式不合法"},
+                })
+                continue
             try:
-                result = await asyncio.to_thread(
-                    social.send_message,
+                result, replay = await asyncio.to_thread(
+                    _send_store_message_once,
                     buyer_id,
                     friend_id,
                     content,
-                    reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text),
-                    commentary_provider=lambda text, reply_text: companion_agent.commentary(
-                        buyer_id, text, reply_text
-                    ),
+                    client_id,
                 )
+                if replay:
+                    result["idempotent_replay"] = True
                 await websocket.send_json({"type": "chat", **result})
+            except idempotency.IdempotencyConflict as exc:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": {"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)},
+                })
             except store.CStoreError as exc:
                 await websocket.send_json({
                     "type": "error",
