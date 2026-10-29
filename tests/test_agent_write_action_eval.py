@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
 import sys
@@ -18,10 +19,21 @@ from pathlib import Path
 import pytest
 
 EVAL_DIR = Path(__file__).parent / "evals" / "agent" / "write_action"
-if str(EVAL_DIR) not in sys.path:
-    sys.path.insert(0, str(EVAL_DIR))
 
-import runner  # noqa: E402
+
+def _load_runner():
+    """用唯一模块名加载本目录 runner，避免与其它 eval 目录的 runner.py 撞名。"""
+    module_name = "write_action_eval_runner"
+    spec = importlib.util.spec_from_file_location(module_name, EVAL_DIR / "runner.py")
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载 runner：{EVAL_DIR / 'runner.py'}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+runner = _load_runner()
 
 from rag_demo.agent import actions, loop  # noqa: E402
 from rag_demo.agent.registry import get_tool_contracts, get_tool_schemas  # noqa: E402
