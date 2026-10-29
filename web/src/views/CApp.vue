@@ -121,6 +121,12 @@ const storeHistoryHint = ref("");
 const agentBusy = ref(false);
 const agentError = ref("");
 const pendingRetry = ref(null);
+const copyTip = ref("");
+const showJumpBottom = ref(false);
+const composerFocused = ref(false);
+let copyTipTimer = null;
+let messagePressTimer = null;
+let messagePressPoint = null;
 
 const activeThread = computed(() => threads.value.find((item) => item.id === activeId.value) || threads.value[0]);
 const messages = computed(() => messagesByThread.value[activeId.value] || []);
@@ -188,11 +194,84 @@ function newClientMessageId() {
   return `cmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function showCopyTip(text = "已复制") {
+  copyTip.value = text;
+  if (copyTipTimer) clearTimeout(copyTipTimer);
+  copyTipTimer = window.setTimeout(() => {
+    copyTip.value = "";
+    copyTipTimer = null;
+  }, 1600);
+}
+
+async function copyMessage(text) {
+  const value = String(text || "").trim();
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    showCopyTip("已复制");
+  } catch {
+    try {
+      const area = document.createElement("textarea");
+      area.value = value;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      showCopyTip("已复制");
+    } catch {
+      showCopyTip("复制失败");
+    }
+  }
+}
+
+function onMessagePress(event, message) {
+  if (event.pointerType === "mouse") return;
+  messagePressPoint = { x: event.clientX, y: event.clientY };
+  if (messagePressTimer) clearTimeout(messagePressTimer);
+  messagePressTimer = window.setTimeout(() => {
+    messagePressTimer = null;
+    copyMessage(message.text);
+  }, 520);
+}
+
+function onMessageMove(event) {
+  if (!messagePressTimer || !messagePressPoint) return;
+  if (Math.abs(event.clientX - messagePressPoint.x) > 10 || Math.abs(event.clientY - messagePressPoint.y) > 10) {
+    clearTimeout(messagePressTimer);
+    messagePressTimer = null;
+  }
+}
+
+function onMessageRelease() {
+  if (messagePressTimer) clearTimeout(messagePressTimer);
+  messagePressTimer = null;
+  messagePressPoint = null;
+}
+
+function onThreadScroll(event) {
+  const el = event?.target;
+  if (!el) return;
+  showJumpBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight > 160;
+}
+
 function scrollToBottom() {
+  showJumpBottom.value = false;
   requestAnimationFrame(() => {
     const el = document.getElementById("c-app-thread");
     if (el) el.scrollTop = el.scrollHeight;
   });
+}
+
+function onComposerFocus() {
+  composerFocused.value = true;
+  syncViewportHeight();
+  window.setTimeout(scrollToBottom, 120);
+}
+
+function onComposerBlur() {
+  composerFocused.value = false;
 }
 
 function syncViewportHeight() {
@@ -204,11 +283,6 @@ function syncViewportHeight() {
 function onViewportResize() {
   syncViewportHeight();
   scrollToBottom();
-}
-
-function onComposerFocus() {
-  syncViewportHeight();
-  window.setTimeout(scrollToBottom, 120);
 }
 
 function resizeComposer(event) {
@@ -692,6 +766,8 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (copyTipTimer) clearTimeout(copyTipTimer);
+  if (messagePressTimer) clearTimeout(messagePressTimer);
   window.visualViewport?.removeEventListener("resize", onViewportResize);
   window.visualViewport?.removeEventListener("scroll", onViewportResize);
   window.removeEventListener("online", onOnline);
@@ -702,7 +778,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="c-app">
+  <div class="c-app" :class="{ 'keyboard-open': composerFocused }">
     <div v-if="!isOnline" class="c-offline-banner" role="status">
       当前处于离线状态，恢复连接后消息会自动继续。
     </div>
@@ -833,7 +909,7 @@ onBeforeUnmount(() => {
             </div>
           </header>
 
-          <div id="c-app-thread" class="c-thread" aria-live="polite">
+          <div id="c-app-thread" class="c-thread" aria-live="polite" @scroll="onThreadScroll">
             <div
               v-if="(activeId === 'companion' && hasMoreCompanion) || (activeId === 'store_demo' && hasMoreStore)"
               class="c-load-more-row"
@@ -863,6 +939,11 @@ onBeforeUnmount(() => {
               :key="message.id"
               class="c-message"
               :class="[message.role]"
+              @pointerdown="onMessagePress($event, message)"
+              @pointermove="onMessageMove"
+              @pointerup="onMessageRelease"
+              @pointercancel="onMessageRelease"
+              @pointerleave="onMessageRelease"
             >
               <span
                 class="c-msg-avatar"
@@ -894,6 +975,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <button
+            v-if="showJumpBottom"
+            type="button"
+            class="c-jump-bottom"
+            @click="scrollToBottom"
+          >
+            回到底部
+          </button>
+
           <div
             v-if="pendingRetry && pendingRetry.threadId === activeId"
             class="c-retry-row"
@@ -924,6 +1014,7 @@ onBeforeUnmount(() => {
                 rows="1"
                 placeholder="问商品、活动或售后"
                 @focus="onComposerFocus"
+                @blur="onComposerBlur"
                 @input="resizeComposer"
                 @keydown.enter.exact.prevent="send"
               />
@@ -940,6 +1031,8 @@ onBeforeUnmount(() => {
           </form>
         </section>
       </main>
+
+      <div v-if="copyTip" class="c-copy-toast" role="status">{{ copyTip }}</div>
 
       <aside class="c-context" :class="{ open: showContext }" aria-label="当前会话信息">
         <div class="c-context-scroll">
@@ -2898,6 +2991,33 @@ onBeforeUnmount(() => {
   color: var(--c-text-3);
 }
 
+.c-app .c-jump-bottom {
+  align-self: center;
+  margin: -4px auto 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  background: var(--c-panel);
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.c-app .c-copy-toast {
+  position: fixed;
+  bottom: calc(118px + env(safe-area-inset-bottom));
+  left: 50%;
+  z-index: 70;
+  padding: 7px 11px;
+  border: 1px solid var(--c-text);
+  border-radius: 999px;
+  background: var(--c-text);
+  color: var(--c-bg);
+  font-size: 10px;
+  transform: translateX(-50%);
+}
+
 .c-app .c-composer {
   padding: 7px 7px 7px 12px;
   border-color: var(--c-line);
@@ -2996,6 +3116,18 @@ onBeforeUnmount(() => {
 
   .c-app .c-chat {
     min-height: 0;
+  }
+
+  .c-app.keyboard-open .c-mobile-nav {
+    display: none;
+  }
+
+  .c-app.keyboard-open .c-main {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .c-app .c-copy-toast {
+    bottom: calc(84px + env(safe-area-inset-bottom));
   }
 
   .c-app .c-message {

@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.7.9 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.8.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.7.9 |
+| AGENTS.md | v1.8.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -487,3 +487,4 @@ IM 社交载体
 | 1.7.7 | 2026-10-29 | 对话消息增加角色头像；发件改为深色 ink 块 + 白字，提升自身消息辨识度；移动端收紧头部/间距并保留安全区 |
 | 1.7.8 | 2026-10-29 | 移动端对话补齐 visualViewport 键盘适配、输入框自增高、失败重试条；重试不重复插入用户消息 |
 | 1.7.9 | 2026-10-30 | C 端 Agent 增加 client_message_id 幂等：重试回放已完成响应，同 ID 不同内容 409，失败释放执行权 |
+| 1.8.0 | 2026-10-30 | 移动端对话增加长按复制、回到底部按钮、输入聚焦隐藏底部导航；键盘/滚动交互形成完整闭环 |
