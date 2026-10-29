@@ -131,3 +131,33 @@ def test_confirm_rewards_companion_once(c_store):
     repeated = c_store.get_companion("buyer_1")
     assert repeated["exp"] == after["exp"]
     assert repeated["satiety"] == after["satiety"]
+
+
+def test_quote_links_order_and_consumes_audit(c_store):
+    quote = c_store.create_quote(
+        "buyer_1",
+        "store_demo",
+        {
+            "quote_id": "quote_audit_1",
+            "product_refs": [{"product_id": "P001", "title": "轻量跑鞋", "price": 299.0}],
+            "policy_refs": [{"policy_id": "platform_full_reduce", "title": "满减活动"}],
+        },
+    )
+    assert quote["status"] == "PENDING"
+
+    draft = c_store.prepare_order("buyer_1", [], quote_id="quote_audit_1")
+    assert draft["quote_id"] == "quote_audit_1"
+    assert draft["original_amount"] == 299.0
+    assert draft["discount_amount"] == 30.0
+    assert draft["total_amount"] == 269.0
+    assert draft["policy_ids"] == ["platform_full_reduce"]
+
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_quote_audit_1",
+    )
+    assert order["quote_id"] == "quote_audit_1"
+    assert order["policy_ids"] == ["platform_full_reduce"]
+    assert c_store.get_quote("quote_audit_1", "buyer_1")["status"] == "CONSUMED"

@@ -202,7 +202,9 @@ web/src/views/CShop.vue
 - 店宠可查询商家 SOP / 平台活动规则
 - C 伙伴只做辅助传达与“锐评”，没有议价/下单权限
 - 店宠回复携带结构化报价引用（quote_id / product_refs / policy_refs）
-- 报价引用只用于咨询与追溯；下单仍走 C 端商城逐单确认
+- 报价引用可跳转商城，直接转订单草稿；仍需用户逐单确认
+- 订单记录 quote_id / policy_ids / original_amount / discount_amount
+- 确认后 quote 状态变为 CONSUMED，形成可追溯审计链
 - 只有被 `@店宠` 唤醒且命中意图白名单才进入店宠 Agent
 - 未唤醒时返回固定拦截话术
 - 聊天中不会创建订单；成交仍走 C 端 Agent 的 prepare → 用户确认 → confirm
@@ -214,6 +216,8 @@ GET  /api/c/friends
 GET  /api/c/friends/{friend_id}/messages
 POST /api/c/friends/{friend_id}/messages
 WS   /api/c/ws/chat/{friend_id}
+GET  /api/c/quotes/{quote_id}
+POST /api/c/quotes/{quote_id}/prepare
 ```
 
 当前限制：
@@ -221,7 +225,8 @@ WS   /api/c/ws/chat/{friend_id}
 - 商品库仍是 mock SQLite
 - 店宠没有真实优惠/改价授权，砍价只能说明需商家确认
 - C 伙伴只有锐评，不做自主谈判
-- 结构化报价尚未直接生成订单；用户需到商城重新选择商品并逐单确认
+- 报价商品数量默认 1，用户可在商城重新准备
+- 只有 platform_full_reduce 活动被确定性应用；其他优惠仍需商家确认
 - 没有真实双人推送 / 消息总线
 - 没有好友申请/通过流程
 - 双宠自主谈判协议尚未实现

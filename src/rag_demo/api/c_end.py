@@ -76,6 +76,8 @@ def _http_error(exc: store.CStoreError) -> HTTPException:
         "INVALID_CONFIRMATION",
         "ORDER_FORBIDDEN",
         "IDEMPOTENCY_CONFLICT",
+        "QUOTE_FORBIDDEN",
+        "QUOTE_NOT_PENDING",
     } else 400
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
 
@@ -102,6 +104,27 @@ def update_companion(req: CompanionPatchIn) -> dict:
             persona=req.persona,
             appearance=req.appearance,
         )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/quotes/{quote_id}")
+def get_quote(quote_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        quote = store.get_quote(quote_id, buyer_id)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+    if quote is None:
+        raise HTTPException(status_code=404, detail="报价不存在")
+    return quote
+
+
+@router.post("/quotes/{quote_id}/prepare")
+def prepare_quote_order(quote_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.prepare_order(buyer_id, [], quote_id=quote_id)
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
 

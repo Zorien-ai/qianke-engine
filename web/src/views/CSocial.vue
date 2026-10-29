@@ -236,7 +236,9 @@ onBeforeUnmount(closeSocket);
                 {{ product.title || product.product_id }}
               </span>
               <small>仅为咨询引用；成交前必须在商城逐单确认。</small>
-              <RouterLink class="quote-link" to="/c">去商城确认</RouterLink>
+              <RouterLink class="quote-link" :to="{ path: '/c', query: { quote: message.metadata.quote_id } }">
+                去商城确认
+              </RouterLink>
             </div>
           </div>
         </div>

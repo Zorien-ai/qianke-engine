@@ -1,12 +1,19 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 import { getJson, postJson } from "../api";
 
+const route = useRoute();
 const products = ref([]);
 const productsLoading = ref(true);
 const productsError = ref("");
 const companion = ref(null);
 const companionError = ref("");
+const quote = ref(null);
+const quoteError = ref("");
+const quoteDraft = ref(null);
+const quoteOrder = ref(null);
+const quoteBusy = ref(false);
 const message = ref("我想买一双轻量跑鞋，预算 500 元以内");
 const running = ref(false);
 const agentError = ref("");
@@ -48,6 +55,51 @@ async function loadCompanion() {
     companion.value = await getJson("/api/c/companion");
   } catch (e) {
     companionError.value = e?.detail || e?.message || "伙伴状态加载失败";
+  }
+}
+
+async function loadQuote() {
+  const quoteId = typeof route.query.quote === "string" ? route.query.quote : "";
+  if (!quoteId) return;
+  try {
+    quote.value = await getJson(`/api/c/quotes/${encodeURIComponent(quoteId)}`);
+  } catch (e) {
+    quoteError.value = e?.detail || e?.message || "聊天报价不存在或已失效";
+  }
+}
+
+async function prepareQuote() {
+  if (!quote.value || quoteBusy.value) return;
+  quoteBusy.value = true;
+  quoteError.value = "";
+  try {
+    quoteDraft.value = await postJson(`/api/c/quotes/${encodeURIComponent(quote.value.quote_id)}/prepare`, {});
+  } catch (e) {
+    quoteError.value = e?.detail || e?.message || "报价转订单失败";
+  } finally {
+    quoteBusy.value = false;
+  }
+}
+
+async function confirmQuote() {
+  if (!quoteDraft.value || quoteBusy.value) return;
+  quoteBusy.value = true;
+  quoteError.value = "";
+  try {
+    const requestId = `c_quote_${Date.now()}`;
+    quoteOrder.value = await postJson(
+      `/api/c/orders/${encodeURIComponent(quoteDraft.value.order_id)}/confirm`,
+      {
+        confirmation_token: quoteDraft.value.confirmation_token,
+        request_id: requestId,
+      }
+    );
+    quoteDraft.value = null;
+    await loadCompanion();
+  } catch (e) {
+    quoteError.value = e?.detail || e?.message || "订单确认失败";
+  } finally {
+    quoteBusy.value = false;
   }
 }
 
@@ -122,6 +174,7 @@ function useProduct(product) {
 onMounted(() => {
   loadProducts();
   loadCompanion();
+  loadQuote();
 });
 </script>
 
@@ -207,6 +260,48 @@ onMounted(() => {
           </div>
         </div>
         <p v-if="companionError" class="state-line state-error" role="alert">{{ companionError }}</p>
+
+        <section v-if="quote" class="quote-panel" aria-label="聊天报价">
+          <div class="quote-panel-head">
+            <div>
+              <span class="quote-kicker">来自聊天的结构化报价</span>
+              <h4>{{ quote.quote_id }}</h4>
+            </div>
+            <span class="quote-status">{{ quoteOrder ? "已确认" : "待确认" }}</span>
+          </div>
+          <div class="quote-chips">
+            <span v-for="product in quote.product_refs" :key="product.product_id" class="quote-chip">
+              {{ product.title || product.product_id }}
+            </span>
+            <span v-for="policy in quote.policy_refs" :key="policy.policy_id" class="quote-chip policy">
+              {{ policy.title || policy.policy_id }}
+            </span>
+          </div>
+          <p v-if="quoteDraft" class="quote-hint">
+            草稿金额 ¥{{ money(quoteDraft.original_amount) }}
+            <template v-if="quoteDraft.discount_amount"> · 优惠 ¥{{ money(quoteDraft.discount_amount) }}</template>
+            · 应付 ¥{{ money(quoteDraft.total_amount) }}
+          </p>
+          <p v-else class="quote-hint">报价只做引用；确认后才会扣库存。</p>
+          <p v-if="quoteError" class="state-line state-error" role="alert">{{ quoteError }}</p>
+
+          <div v-if="quoteOrder" class="quote-order" role="status">
+            已创建 {{ quoteOrder.order_id }} · 应付 ¥{{ money(quoteOrder.total_amount) }}
+          </div>
+          <div v-else-if="quoteDraft" class="quote-actions">
+            <button class="ghost-btn" type="button" :disabled="quoteBusy" @click="quoteDraft = null">
+              返回
+            </button>
+            <button class="primary-btn" type="button" :disabled="quoteBusy" @click="confirmQuote">
+              {{ quoteBusy ? "提交中…" : "确认并创建模拟订单" }}
+            </button>
+          </div>
+          <div v-else class="quote-actions">
+            <button class="primary-btn" type="button" :disabled="quoteBusy" @click="prepareQuote">
+              {{ quoteBusy ? "准备中…" : "使用此报价准备订单" }}
+            </button>
+          </div>
+        </section>
 
         <label class="field-label" for="shop-message">你想买什么？</label>
         <textarea
@@ -456,6 +551,84 @@ onMounted(() => {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 9px;
+}
+
+.quote-panel {
+  margin-top: 12px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.quote-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quote-kicker {
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.quote-panel-head h4 {
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.quote-status {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 9px;
+}
+
+.quote-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.quote-chip {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 10px;
+}
+
+.quote-chip.policy {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.quote-hint {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.quote-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.quote-order {
+  margin-top: 9px;
+  padding: 7px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 11px;
 }
 
 .product-list {

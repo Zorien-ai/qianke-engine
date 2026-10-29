@@ -211,6 +211,11 @@ def send_message(
                 commentary = str(commentary_provider(text, reply_text) or "").strip()
             except Exception:  # noqa: BLE001 - 伙伴失败不影响店宠回复
                 commentary = ""
+        if reply_metadata.get("quote_id"):
+            try:
+                store.create_quote(owner_id, friend_id, reply_metadata)
+            except Exception:  # noqa: BLE001 - 报价落库失败不应吞消息
+                pass
 
     conn = store._connect()
     try:

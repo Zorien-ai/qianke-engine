@@ -68,12 +68,26 @@ CREATE TABLE IF NOT EXISTS c_order (
     buyer_id          TEXT NOT NULL,
     status            TEXT NOT NULL,
     total_amount      REAL NOT NULL,
+    original_amount   REAL NOT NULL DEFAULT 0,
+    discount_amount   REAL NOT NULL DEFAULT 0,
+    quote_id          TEXT,
+    policy_ids_json   TEXT NOT NULL DEFAULT '[]',
     confirmation_hash TEXT,
     snapshot_json     TEXT NOT NULL,
     idempotency_key   TEXT UNIQUE,
     source_order_id   TEXT,
     created_at        TEXT NOT NULL,
     confirmed_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS c_quote (
+    quote_id          TEXT PRIMARY KEY,
+    buyer_id          TEXT NOT NULL,
+    friend_id         TEXT NOT NULL,
+    product_refs_json TEXT NOT NULL,
+    policy_refs_json  TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'PENDING',
+    created_at        TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS c_order_item (
@@ -113,8 +127,15 @@ def init() -> None:
         try:
             conn.executescript(_SCHEMA)
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(c_order)").fetchall()}
-            if "source_order_id" not in columns:
-                conn.execute("ALTER TABLE c_order ADD COLUMN source_order_id TEXT")
+            for name, ddl in (
+                ("source_order_id", "TEXT"),
+                ("original_amount", "REAL NOT NULL DEFAULT 0"),
+                ("discount_amount", "REAL NOT NULL DEFAULT 0"),
+                ("quote_id", "TEXT"),
+                ("policy_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE c_order ADD COLUMN {name} {ddl}")
             count = conn.execute("SELECT COUNT(*) AS n FROM c_product").fetchone()["n"]
             if count == 0:
                 conn.executemany(
@@ -173,15 +194,112 @@ def _validate_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{"product_id": pid, "quantity": qty} for pid, qty in merged.items()]
 
 
-def prepare_order(buyer_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-    """生成待确认订单草稿；不扣库存。"""
+def create_quote(
+    buyer_id: str,
+    friend_id: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    """把店宠结构化报价引用落库，供后续订单审计。"""
+    quote_id = str(metadata.get("quote_id") or "").strip()
+    if not quote_id:
+        return None
     init()
-    normalized = _validate_items(items)
     conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT OR IGNORE INTO c_quote(quote_id, buyer_id, friend_id, product_refs_json, "
+            "policy_refs_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                quote_id,
+                buyer_id,
+                friend_id,
+                json.dumps(metadata.get("product_refs") or [], ensure_ascii=False),
+                json.dumps(metadata.get("policy_refs") or [], ensure_ascii=False),
+                _now(),
+            ),
+        )
+        conn.commit()
+        return get_quote(quote_id, buyer_id)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_quote(quote_id: str, buyer_id: str | None = None) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT * FROM c_quote WHERE quote_id = ?", (quote_id,)).fetchone()
+        if row is None:
+            return None
+        if buyer_id is not None and row["buyer_id"] != buyer_id:
+            raise CStoreError("QUOTE_FORBIDDEN", "不能访问其他用户的报价")
+        return {
+            "quote_id": row["quote_id"],
+            "buyer_id": row["buyer_id"],
+            "friend_id": row["friend_id"],
+            "product_refs": json.loads(row["product_refs_json"] or "[]"),
+            "policy_refs": json.loads(row["policy_refs_json"] or "[]"),
+            "status": row["status"],
+            "created_at": row["created_at"],
+        }
+    finally:
+        conn.close()
+
+
+def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tuple[list[dict[str, Any]], list[str]]:
+    row = conn.execute("SELECT * FROM c_quote WHERE quote_id = ?", (quote_id,)).fetchone()
+    if row is None:
+        raise CStoreError("QUOTE_NOT_FOUND", "报价不存在")
+    if row["buyer_id"] != buyer_id:
+        raise CStoreError("QUOTE_FORBIDDEN", "不能使用其他用户的报价")
+    if row["status"] != "PENDING":
+        raise CStoreError("QUOTE_NOT_PENDING", "报价已使用或已失效")
+    products = json.loads(row["product_refs_json"] or "[]")
+    policies = json.loads(row["policy_refs_json"] or "[]")
+    items = [
+        {"product_id": str(item["product_id"]), "quantity": int(item.get("quantity") or 1)}
+        for item in products
+        if item.get("product_id")
+    ]
+    if not items:
+        raise CStoreError("QUOTE_NO_PRODUCTS", "报价没有可购买商品")
+    policy_ids = [str(item.get("policy_id")) for item in policies if item.get("policy_id")]
+    return items, policy_ids
+
+
+def _quote_discount(original: float, policy_ids: list[str]) -> float:
+    """只应用已配置、确定性的平台活动；C 伙伴/店宠不能自行发明优惠。"""
+    if "platform_full_reduce" in policy_ids:
+        if original >= 599:
+            return 80.0
+        if original >= 299:
+            return 30.0
+    return 0.0
+
+
+def prepare_order(
+    buyer_id: str,
+    items: list[dict[str, Any]],
+    *,
+    quote_id: str | None = None,
+) -> dict[str, Any]:
+    """生成待确认订单草稿；不扣库存。"""
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        policy_ids: list[str] = []
+        if quote_id:
+            normalized, policy_ids = _quote_items(conn, quote_id, buyer_id)
+        else:
+            normalized = _validate_items(items)
+
         products: list[dict[str, Any]] = []
-        total = 0.0
+        original = 0.0
         for item in normalized:
             row = conn.execute(
                 "SELECT * FROM c_product WHERE product_id = ? AND status = 'ACTIVE'",
@@ -192,7 +310,7 @@ def prepare_order(buyer_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
             if row["stock"] < item["quantity"]:
                 raise CStoreError("INSUFFICIENT_STOCK", f"库存不足：{row['title']}")
             unit_price = float(row["price"])
-            total += unit_price * item["quantity"]
+            original += unit_price * item["quantity"]
             products.append({
                 "product_id": row["product_id"],
                 "title": row["title"],
@@ -200,13 +318,27 @@ def prepare_order(buyer_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
                 "unit_price": unit_price,
             })
 
+        discount = _quote_discount(original, policy_ids)
+        total = max(0.0, original - discount)
         order_id = f"draft_{uuid.uuid4().hex[:16]}"
         token = secrets.token_urlsafe(24)
         snapshot = _snapshot(products)
         conn.execute(
-            "INSERT INTO c_order(order_id, buyer_id, status, total_amount, confirmation_hash, "
-            "snapshot_json, created_at) VALUES (?, ?, 'DRAFT', ?, ?, ?, ?)",
-            (order_id, buyer_id, round(total, 2), _sha256(token), snapshot, _now()),
+            "INSERT INTO c_order(order_id, buyer_id, status, total_amount, original_amount, "
+            "discount_amount, quote_id, policy_ids_json, confirmation_hash, snapshot_json, created_at) "
+            "VALUES (?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                order_id,
+                buyer_id,
+                round(total, 2),
+                round(original, 2),
+                round(discount, 2),
+                quote_id,
+                json.dumps(policy_ids, ensure_ascii=False),
+                _sha256(token),
+                snapshot,
+                _now(),
+            ),
         )
         conn.executemany(
             "INSERT INTO c_order_item(order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)",
@@ -225,6 +357,10 @@ def prepare_order(buyer_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
         "buyer_id": buyer_id,
         "items": products,
         "total_amount": round(total, 2),
+        "original_amount": round(original, 2),
+        "discount_amount": round(discount, 2),
+        "quote_id": quote_id,
+        "policy_ids": policy_ids,
         "confirmation_token": token,
         "confirmation_version": 1,
         "message": "请确认订单内容后再提交；确认前不会扣库存。",
@@ -296,10 +432,24 @@ def confirm_order(
 
         order_id = "order_" + uuid.uuid4().hex[:16]
         conn.execute(
-            "INSERT INTO c_order(order_id, buyer_id, status, total_amount, snapshot_json, "
-            "idempotency_key, source_order_id, created_at, confirmed_at) "
-            "VALUES (?, ?, 'CONFIRMED', ?, ?, ?, ?, ?, ?)",
-            (order_id, buyer_id, draft["total_amount"], draft["snapshot_json"], request_id, draft_id, _now(), _now()),
+            "INSERT INTO c_order(order_id, buyer_id, status, total_amount, original_amount, "
+            "discount_amount, quote_id, policy_ids_json, snapshot_json, idempotency_key, "
+            "source_order_id, created_at, confirmed_at) "
+            "VALUES (?, ?, 'CONFIRMED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                order_id,
+                buyer_id,
+                draft["total_amount"],
+                draft["original_amount"] or draft["total_amount"],
+                draft["discount_amount"] or 0,
+                draft["quote_id"],
+                draft["policy_ids_json"] or "[]",
+                draft["snapshot_json"],
+                request_id,
+                draft_id,
+                _now(),
+                _now(),
+            ),
         )
         conn.executemany(
             "INSERT INTO c_order_item(order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)",
@@ -310,6 +460,11 @@ def confirm_order(
             "UPDATE c_order SET status = 'CONFIRMED' WHERE order_id = ?",
             (draft_id,),
         )
+        if draft["quote_id"]:
+            conn.execute(
+                "UPDATE c_quote SET status = 'CONSUMED' WHERE quote_id = ?",
+                (draft["quote_id"],),
+            )
         _reward_companion_conn(conn, buyer_id)
         conn.commit()
         order = conn.execute("SELECT * FROM c_order WHERE order_id = ?", (order_id,)).fetchone()
@@ -339,6 +494,10 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         "status": order["status"],
         "buyer_id": order["buyer_id"],
         "total_amount": float(order["total_amount"]),
+        "original_amount": float(order["original_amount"] or order["total_amount"]),
+        "discount_amount": float(order["discount_amount"] or 0),
+        "quote_id": order["quote_id"],
+        "policy_ids": json.loads(order["policy_ids_json"] or "[]"),
         "items": [
             {
                 "product_id": item["product_id"],
