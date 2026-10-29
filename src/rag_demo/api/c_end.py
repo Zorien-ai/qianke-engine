@@ -6,7 +6,7 @@ import re
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -14,10 +14,12 @@ from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
 from rag_demo.c_end import companion_agent, idempotency, persona as c_persona, social, store, store_agent
+from rag_demo.merchant import MerchantError, get_merchant_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+_AVATAR_KIND_RE = re.compile(r"^(companion|user)$")
 
 
 def _buyer() -> tuple[str, dict]:
@@ -92,16 +94,21 @@ def _last_ai_text(messages: list) -> str:
 
 
 def _http_error(exc: store.CStoreError) -> HTTPException:
-    status = 409 if exc.code in {
-        "INSUFFICIENT_STOCK",
-        "ORDER_CHANGED",
-        "ORDER_NOT_DRAFT",
-        "INVALID_CONFIRMATION",
-        "ORDER_FORBIDDEN",
-        "IDEMPOTENCY_CONFLICT",
-        "QUOTE_FORBIDDEN",
-        "QUOTE_NOT_PENDING",
-    } else 400
+    if exc.code == "AVATAR_TOO_LARGE":
+        status = 413
+    elif exc.code == "AVATAR_NOT_FOUND":
+        status = 404
+    else:
+        status = 409 if exc.code in {
+            "INSUFFICIENT_STOCK",
+            "ORDER_CHANGED",
+            "ORDER_NOT_DRAFT",
+            "INVALID_CONFIRMATION",
+            "ORDER_FORBIDDEN",
+            "IDEMPOTENCY_CONFLICT",
+            "QUOTE_FORBIDDEN",
+            "QUOTE_NOT_PENDING",
+        } else 400
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
 
 
@@ -130,6 +137,150 @@ def update_companion(req: CompanionPatchIn) -> dict:
         )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
+
+
+def _avatar_kind(kind: str) -> str:
+    if not _AVATAR_KIND_RE.fullmatch(str(kind or "")):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_AVATAR_KIND", "message": "头像类型只支持 companion / user"},
+        )
+    return kind
+
+
+@router.post("/companion/avatar/{kind}")
+async def upload_companion_avatar(kind: str, file: UploadFile = File(...)) -> dict:
+    """上传买家/伙伴头像；只接受 PNG / JPEG / WebP 且 ≤ 1MB。
+
+    文件由服务端重命名并写到受控目录，DB 只存相对路径；用户不能控制文件名/路径。
+    """
+    buyer_id, _ = _buyer()
+    _avatar_kind(kind)
+    content_type = file.content_type or ""
+    try:
+        # 多读 1 字节用于判断超限；真正的大小上限在 store 层还有一次校验。
+        data = await file.read(store.AVATAR_MAX_BYTES + 1)
+    except Exception as exc:  # noqa: BLE001 - 上传流读取失败按 400 处理
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "AVATAR_READ_FAILED", "message": "头像读取失败，请重试"},
+        ) from exc
+    finally:
+        await file.close()
+    if len(data) > store.AVATAR_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "AVATAR_TOO_LARGE", "message": "头像不能超过 1MB"},
+        )
+    try:
+        return store.save_companion_avatar(buyer_id, kind, data, content_type)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/companion/avatar/{kind}")
+def get_companion_avatar(kind: str) -> Response:
+    """读取当前登录账号自己的头像；未登录 401，未设置 404，不暴露他人文件。"""
+    buyer_id, _ = _buyer()
+    _avatar_kind(kind)
+    try:
+        found = store.get_companion_avatar(buyer_id, kind)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "AVATAR_NOT_FOUND", "message": "还没有设置这个头像"},
+        )
+    data, media_type = found
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
+@router.delete("/companion/avatar/{kind}")
+def delete_companion_avatar(kind: str) -> dict:
+    """恢复默认头像（前端回退首字）。"""
+    buyer_id, _ = _buyer()
+    _avatar_kind(kind)
+    try:
+        return store.clear_companion_avatar(buyer_id, kind)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/merchant/products")
+def merchant_products(keyword: str | None = None, limit: int = 20) -> dict:
+    """真实商家商品查询（只读）。"""
+    _buyer()
+    try:
+        repo = get_merchant_repository()
+        products = repo.list_products(store_agent.STORE_MERCHANT_ID, keyword=keyword, limit=limit)
+        payload = []
+        for product in products:
+            skus = repo.list_product_skus(product.product_id, merchant_id=store_agent.STORE_MERCHANT_ID)
+            item = product.to_dict()
+            if skus:
+                inventory = repo.get_inventory(skus[0].sku, merchant_id=store_agent.STORE_MERCHANT_ID)
+                item.update({
+                    "sku": skus[0].sku,
+                    "price": float(skus[0].price),
+                    "stock": inventory.available_qty if inventory else 0,
+                })
+            payload.append(item)
+        return {"source": "merchant_v1", "products": payload}
+    except MerchantError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/merchant/inventory/{sku}")
+def merchant_inventory(sku: str) -> dict:
+    """真实商家 SKU 库存查询（只读）。"""
+    _buyer()
+    try:
+        inventory = get_merchant_repository().get_inventory(
+            sku, merchant_id=store_agent.STORE_MERCHANT_ID
+        )
+        if inventory is None:
+            raise HTTPException(status_code=404, detail="没有找到这个 SKU")
+        return {"source": "merchant_v1", "inventory": inventory.to_dict()}
+    except MerchantError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/merchant/orders")
+def merchant_orders(status: str | None = None, limit: int = 20) -> dict:
+    """当前买家在真实商家库中的订单。"""
+    buyer_id, _ = _buyer()
+    try:
+        orders = get_merchant_repository().list_orders(
+            store_agent.STORE_MERCHANT_ID,
+            buyer_id=store_agent.merchant_buyer_id(buyer_id),
+            status=status,
+            limit=limit,
+        )
+        return {"source": "merchant_v1", "orders": [order.to_dict() for order in orders]}
+    except MerchantError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/merchant/orders/{order_id}")
+def merchant_order_detail(order_id: str) -> dict:
+    """当前买家的单笔真实商家订单。"""
+    buyer_id, _ = _buyer()
+    try:
+        order = get_merchant_repository().get_order(
+            order_id,
+            merchant_id=store_agent.STORE_MERCHANT_ID,
+            buyer_id=store_agent.merchant_buyer_id(buyer_id),
+        )
+        if order is None:
+            raise HTTPException(status_code=404, detail="没有找到这笔订单")
+        return {"source": "merchant_v1", "order": order.to_dict()}
+    except MerchantError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/app/messages")

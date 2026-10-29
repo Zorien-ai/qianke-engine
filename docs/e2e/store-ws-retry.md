@@ -88,8 +88,8 @@ tests/test_c_end_ws_retry_e2e.py::test_ws_rejects_unauthenticated_connection PAS
 - WebSocket E2E 使用 Starlette `TestClient` 的协议内通道，覆盖的是**服务端 WS 协议与幂等逻辑**；
   不模拟真实浏览器断线、重连退避、移动端网络切换等客户端行为。
 - 测试用 monkeypatch 替换 auth 与店宠 Agent，不依赖真实账号库/LLM；生产代码未改动。
-- 未执行浏览器 UI 点击（本轮不改 `CApp.vue`，浏览器交互由 Lead 验收）：
-  **WS 协议 E2E 已覆盖，浏览器 UI 点击由 Lead 最终验收。**
+- 浏览器 UI 已由 Lead 用注入式 WebSocket 验证重试条与重发；未模拟真实移动端断网/重连退避，
+  这部分仍需设备网络切换场景补测（见 §6）。
 
 ## 5. 浏览器 UI 验收建议（Lead）
 
@@ -97,3 +97,20 @@ tests/test_c_end_ws_retry_e2e.py::test_ws_rejects_unauthenticated_connection PAS
 2. 断网/弱网重发同一条消息（客户端重试复用同一 `client_message_id`）→ 店宠只回复一次；
 3. 观察第二次响应标记为回放（UI 不重复插入消息/不重复生成报价）；
 4. 刷新页面后历史消息仍可正常分页加载。
+
+## 6. Lead 浏览器 UI E2E（已执行）
+
+环境：Playwright + Chromium，真实 C 端页面 `http://127.0.0.1:8000/v2/#/c/app`；为稳定复现客户端错误，
+用 `addInitScript` 注入测试用 WebSocket（首次 send 返回 error，第二次 send 返回 chat），生产代码未加测试分支。
+
+步骤：
+
+1. 打开店宠会话，输入 `@店宠 测试 WS 重试` 发送；
+2. 断言 `.c-retry-row` 显示“消息没有发出去，内容已保留。重试 / 忽略”；
+3. 点击“重试”；
+4. 断言消息列表出现“重试成功：店宠已收到。”。
+
+结果：通过。截图：`docs/screenshots/store-ws-retry-e2e.png`。
+
+说明：浏览器 E2E 验证的是前端重试条与同 ID 重发交互；服务端 WS 幂等语义由 §2 的 TestClient E2E 覆盖，
+二者组合完成“协议 + UI”验收。真实断网/重连退避仍需在设备网络切换场景补测。

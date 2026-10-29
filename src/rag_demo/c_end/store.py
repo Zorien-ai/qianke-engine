@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -42,6 +43,214 @@ def _db_path() -> Path:
         _DB_PATH = Path(raw)
         _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return _DB_PATH
+
+
+# ==================== 自定义头像（受控文件存储） ====================
+# 安全边界：
+# - 只接受 PNG / JPEG / WebP，且同时校验声明的 MIME、大小与文件魔数；
+# - 文件名与相对路径完全由服务端生成（owner token + kind + uuid），用户无法控制；
+# - DB 只存相对路径，读取时再次校验必须落在受控根目录内；
+# - 每个 owner 一个子目录，读取接口只解析当前登录账号自己的记录。
+AVATAR_KINDS = ("companion", "user")
+AVATAR_MAX_BYTES = 1024 * 1024
+AVATAR_CONTENT_TYPES = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+}
+_AVATAR_MEDIA_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
+_AVATAR_PATH_RE = re.compile(r"^[0-9a-f]{16}/(companion|user)_[0-9a-f]{32}\.(png|jpg|webp)$")
+_AVATAR_COLUMNS = {"companion": "avatar_path", "user": "user_avatar_path"}
+_AVATAR_ROOT: Path | None = None
+
+
+def _avatar_root() -> Path:
+    """头像受控根目录；QIANKE_C_END_AVATAR_DIR 可覆盖（测试/部署用）。"""
+    global _AVATAR_ROOT
+    if _AVATAR_ROOT is None:
+        raw = os.environ.get("QIANKE_C_END_AVATAR_DIR") or str(
+            Path(BASE_DIR) / "var" / "c_end_avatars"
+        )
+        _AVATAR_ROOT = Path(raw)
+        _AVATAR_ROOT.mkdir(parents=True, exist_ok=True)
+    return _AVATAR_ROOT
+
+
+def _normalize_avatar_kind(kind: str) -> str:
+    value = str(kind or "").strip().lower()
+    if value not in AVATAR_KINDS:
+        raise CStoreError("INVALID_AVATAR_KIND", "头像类型只支持 companion / user")
+    return value
+
+
+def _detect_avatar_type(data: bytes) -> str | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def validate_avatar(data: bytes, content_type: str) -> tuple[str, str]:
+    """服务端校验头像：MIME 白名单 + 大小上限 + 文件魔数。返回 (扩展名, 标准 MIME)。"""
+    mime = str(content_type or "").split(";")[0].strip().lower()
+    ext = AVATAR_CONTENT_TYPES.get(mime)
+    if ext is None:
+        raise CStoreError("INVALID_AVATAR_TYPE", "头像只支持 PNG / JPEG / WebP")
+    if not isinstance(data, (bytes, bytearray)) or not data:
+        raise CStoreError("EMPTY_AVATAR", "头像文件为空")
+    if len(data) > AVATAR_MAX_BYTES:
+        raise CStoreError("AVATAR_TOO_LARGE", "头像不能超过 1MB")
+    if _detect_avatar_type(bytes(data)) != ext:
+        raise CStoreError("INVALID_AVATAR_CONTENT", "头像内容与声明的图片类型不一致")
+    return ext, _AVATAR_MEDIA_TYPES[ext]
+
+
+def _avatar_owner_token(owner_id: str) -> str:
+    return hashlib.sha256(str(owner_id).encode("utf-8")).hexdigest()[:16]
+
+
+def _resolve_avatar_path(relative: str) -> Path | None:
+    """把 DB 中的相对路径解析成受控目录内的真实文件；非法路径一律拒绝。"""
+    rel = str(relative or "").strip()
+    if not rel:
+        return None
+    if not _AVATAR_PATH_RE.fullmatch(rel):
+        raise CStoreError("AVATAR_NOT_FOUND", "头像路径不合法")
+    root = _avatar_root().resolve()
+    candidate = (root / rel).resolve()
+    if not candidate.is_relative_to(root):
+        raise CStoreError("AVATAR_NOT_FOUND", "头像路径不合法")
+    return candidate if candidate.is_file() else None
+
+
+def _delete_avatar_file(relative: str) -> None:
+    try:
+        path = _resolve_avatar_path(relative)
+    except CStoreError:
+        return
+    if path is not None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            # 清理旧文件失败不影响新头像生效。
+            pass
+
+
+def _avatar_url(path: str | None, kind: str) -> str:
+    """对外 URL 由服务端拼接；带内容版本号，换头像后能绕过浏览器缓存。"""
+    rel = str(path or "").strip()
+    if not rel:
+        return ""
+    version = hashlib.sha256(rel.encode("utf-8")).hexdigest()[:12]
+    return f"/api/c/companion/avatar/{kind}?v={version}"
+
+
+def save_companion_avatar(
+    owner_id: str,
+    kind: str,
+    data: bytes,
+    content_type: str,
+) -> dict[str, Any]:
+    """保存买家/伙伴头像：唯一写入口，文件与 DB 路径均由服务端生成。"""
+    normalized_kind = _normalize_avatar_kind(kind)
+    ext, media_type = validate_avatar(data, content_type)
+    column = _AVATAR_COLUMNS[normalized_kind]
+    init()
+    relative = f"{_avatar_owner_token(owner_id)}/{normalized_kind}_{uuid.uuid4().hex}.{ext}"
+    root = _avatar_root()
+    target = root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target.with_name(f".{target.name}.tmp")
+    try:
+        temp_path.write_bytes(bytes(data))
+        os.replace(temp_path, target)
+    except OSError as exc:
+        temp_path.unlink(missing_ok=True)
+        raise CStoreError("AVATAR_WRITE_FAILED", "头像保存失败，请稍后重试") from exc
+
+    previous_path = ""
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _ensure_companion(conn, owner_id)
+        previous_path = str(row[column] or "")
+        conn.execute(
+            f"UPDATE c_companion SET {column} = ?, updated_at = ? WHERE owner_id = ?",
+            (relative, _now(), owner_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        target.unlink(missing_ok=True)
+        raise
+    finally:
+        conn.close()
+
+    if previous_path and previous_path != relative:
+        _delete_avatar_file(previous_path)
+
+    payload = get_companion(owner_id)
+    payload["uploaded_avatar"] = {
+        "kind": normalized_kind,
+        "content_type": media_type,
+        "bytes": len(data),
+        "url": payload["avatar_url"] if normalized_kind == "companion" else payload["user_avatar_url"],
+    }
+    return payload
+
+
+def clear_companion_avatar(owner_id: str, kind: str) -> dict[str, Any]:
+    """恢复默认头像：清空 DB 相对路径并删除受控目录内的旧文件。"""
+    normalized_kind = _normalize_avatar_kind(kind)
+    column = _AVATAR_COLUMNS[normalized_kind]
+    init()
+    previous_path = ""
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _ensure_companion(conn, owner_id)
+        previous_path = str(row[column] or "")
+        conn.execute(
+            f"UPDATE c_companion SET {column} = '', updated_at = ? WHERE owner_id = ?",
+            (_now(), owner_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    if previous_path:
+        _delete_avatar_file(previous_path)
+    payload = get_companion(owner_id)
+    payload["cleared_avatar"] = {"kind": normalized_kind}
+    return payload
+
+
+def get_companion_avatar(owner_id: str, kind: str) -> tuple[bytes, str] | None:
+    """读取当前 owner 自己的头像字节；未设置或文件缺失返回 None。"""
+    normalized_kind = _normalize_avatar_kind(kind)
+    column = _AVATAR_COLUMNS[normalized_kind]
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT * FROM c_companion WHERE owner_id = ?", (owner_id,)).fetchone()
+        relative = str(row[column] or "") if row is not None else ""
+    finally:
+        conn.close()
+    path = _resolve_avatar_path(relative)
+    if path is None:
+        return None
+    ext = path.suffix.lstrip(".").lower()
+    media_type = _AVATAR_MEDIA_TYPES.get(ext, "application/octet-stream")
+    try:
+        return path.read_bytes(), media_type
+    except OSError:
+        return None
 
 
 def _now() -> str:
@@ -129,6 +338,8 @@ CREATE TABLE IF NOT EXISTS c_companion (
     level      INTEGER NOT NULL DEFAULT 1,
     exp        INTEGER NOT NULL DEFAULT 0,
     satiety    INTEGER NOT NULL DEFAULT 60,
+    avatar_path      TEXT NOT NULL DEFAULT '',
+    user_avatar_path TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
 );
 
@@ -186,6 +397,15 @@ def init() -> None:
                 conn.execute(
                     "ALTER TABLE c_companion ADD COLUMN user_nickname TEXT NOT NULL DEFAULT ''"
                 )
+            # 自定义头像迁移：旧库补 avatar_path / user_avatar_path，默认空 = 未设置头像。
+            for column_name, column_ddl in (
+                ("avatar_path", "TEXT NOT NULL DEFAULT ''"),
+                ("user_avatar_path", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if column_name not in companion_columns:
+                    conn.execute(
+                        f"ALTER TABLE c_companion ADD COLUMN {column_name} {column_ddl}"
+                    )
             conn.execute(
                 "UPDATE c_companion SET name = ? WHERE name = '小伴' AND user_nickname = ''",
                 (c_persona.DEFAULT_NAME,),
@@ -916,6 +1136,8 @@ def _companion_payload(row: sqlite3.Row) -> dict[str, Any]:
         "level": int(row["level"]),
         "exp": int(row["exp"]),
         "satiety": int(row["satiety"]),
+        "avatar_url": _avatar_url(row["avatar_path"], "companion"),
+        "user_avatar_url": _avatar_url(row["user_avatar_path"], "user"),
         "updated_at": row["updated_at"],
     }
 

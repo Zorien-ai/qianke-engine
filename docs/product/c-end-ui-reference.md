@@ -78,6 +78,8 @@ https://mobbin.com/apps/whats-app-ios-8738dbc9-e7a8-4fef-91e5-6afd1c9d092b
 
 保留 C 端自己的纸白和低饱和规则，不直接复制 WhatsApp 的高饱和绿色。
 
+头像：首字兜底；支持上传 PNG / JPEG / WebP（≤1MB），点击顶部/消息/概览头像可更换，失败回退首字。
+
 ![移动端对话](../screenshots/c-app-white-mobile.png)
 
 验证：

@@ -48,6 +48,9 @@ species: digital_companion / cat / fish / robot / brand_mascot / custom
 ```text
 GET   /api/c/companion
 PATCH /api/c/companion
+POST  /api/c/companion/avatar/{kind}   # kind=companion|user，≤1MB PNG/JPEG/WebP
+GET   /api/c/companion/avatar/{kind}
+DELETE /api/c/companion/avatar/{kind}  # 恢复首字头像
 {"name":"阿团","species":"cat","persona":"calm","appearance":"cat-v1"}
 ```
 
@@ -221,13 +224,17 @@ POST /api/c/friends/{friend_id}/messages
   → content + client_message_id（可选，幂等键）
 WS   /api/c/ws/chat/{friend_id}
   → client_message_id（可选，幂等键）
+GET  /api/c/merchant/products
+GET  /api/c/merchant/inventory/{sku}
+GET  /api/c/merchant/orders
+GET  /api/c/merchant/orders/{order_id}
 GET  /api/c/quotes/{quote_id}
 POST /api/c/quotes/{quote_id}/prepare
 ```
 
 当前限制：
 
-- 商品库仍是 mock SQLite
+- 店宠商品/库存/订单已接商家数据层 `merchant_v1`；C 商城下单仍用 mock `c_product/c_order`，商家库存只读参考
 - 店宠没有真实优惠/改价授权，砍价只能说明需商家确认
 - C 伙伴只有锐评，不做自主谈判
 - 报价商品数量默认 1，用户可在商城重新准备

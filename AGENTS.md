@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.8.1 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.8.2 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.8.1 |
+| AGENTS.md | v1.8.2 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -489,3 +489,4 @@ IM 社交载体
 | 1.7.9 | 2026-10-30 | C 端 Agent 增加 client_message_id 幂等：重试回放已完成响应，同 ID 不同内容 409，失败释放执行权 |
 | 1.8.0 | 2026-10-30 | 移动端对话增加长按复制、回到底部按钮、输入聚焦隐藏底部导航；键盘/滚动交互形成完整闭环 |
 | 1.8.1 | 2026-10-30 | 店宠 IM 消息 HTTP/WebSocket 接入 client_message_id 幂等；重试复用 ID，避免重复触发店宠 Agent |
+| 1.8.2 | 2026-10-30 | 幂等 TTL 清理、WS 重试协议/浏览器 E2E、自定义头像上传、商家商品/库存/订单数据层与店宠/C 端只读 API 接入 |

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { getJson, postJson, del } from "../api";
+import { getJson, postJson, del, postForm } from "../api";
 
 const threads = ref([
   {
@@ -106,6 +106,8 @@ const companion = ref({
   level: 4,
   satiety: 62,
   species: "digital_companion",
+  avatar_url: "",
+  user_avatar_url: "",
 });
 const liveThreadId = ref("");
 const liveDraft = ref(null);
@@ -125,6 +127,15 @@ const lastStoreSend = ref(null);
 const copyTip = ref("");
 const showJumpBottom = ref(false);
 const composerFocused = ref(false);
+const avatarFileInput = ref(null);
+const avatarTarget = ref("companion");
+const avatarBusy = ref("");
+const avatarError = ref("");
+const avatarBroken = ref({});
+const avatarPreview = ref({ companion: "", user: "" });
+const avatarPreviewUrls = new Set();
+const AVATAR_MAX_BYTES = 1024 * 1024;
+const AVATAR_ACCEPT_TYPES = ["image/png", "image/jpeg", "image/webp"];
 let copyTipTimer = null;
 let messagePressTimer = null;
 let messagePressPoint = null;
@@ -149,6 +160,123 @@ function messageAuthor(role) {
 function messageAvatarLabel(role) {
   const name = messageAuthor(role);
   return name.slice(0, 1) || "系";
+}
+
+// ---------------- 自定义头像（伙伴 / 我的） ----------------
+function avatarSrc(kind) {
+  const preview = avatarPreview.value[kind] || "";
+  if (preview) return preview;
+  if (kind === "user") return companion.value.user_avatar_url || "";
+  return companion.value.avatar_url || "";
+}
+
+function avatarChar(kind) {
+  if (kind === "user") {
+    const nickname = String(companion.value.user_nickname || "").trim();
+    return (nickname || "我").slice(0, 1);
+  }
+  return String(companion.value.name || "伴").slice(0, 1);
+}
+
+function avatarVisible(kind) {
+  const src = avatarSrc(kind);
+  return Boolean(src) && !avatarBroken.value[src];
+}
+
+function onAvatarError(src) {
+  if (!src) return;
+  avatarBroken.value = { ...avatarBroken.value, [src]: true };
+}
+
+function threadAvatarKind(thread) {
+  return thread?.kind === "companion" ? "companion" : "";
+}
+
+function threadAvatarSrc(thread) {
+  const kind = threadAvatarKind(thread);
+  return kind ? avatarSrc(kind) : "";
+}
+
+function threadAvatarVisible(thread) {
+  const kind = threadAvatarKind(thread);
+  return kind ? avatarVisible(kind) : false;
+}
+
+function revokePreviewUrl(url) {
+  if (!url || !avatarPreviewUrls.has(url)) return;
+  URL.revokeObjectURL(url);
+  avatarPreviewUrls.delete(url);
+}
+
+function avatarErrorMessage(error) {
+  const detail = error?.payload?.detail;
+  if (detail && typeof detail === "object" && detail.message) return detail.message;
+  if (typeof error?.detail === "string") return error.detail;
+  return error?.message || "头像处理失败，请重试";
+}
+
+function openAvatarPicker(kind) {
+  if (avatarBusy.value) return;
+  avatarTarget.value = kind === "user" ? "user" : "companion";
+  avatarError.value = "";
+  const input = avatarFileInput.value;
+  if (input) {
+    input.value = "";
+    input.click();
+  }
+}
+
+async function onAvatarFileChange(event) {
+  const input = event.target;
+  const file = input?.files?.[0];
+  if (input) input.value = "";
+  if (!file || avatarBusy.value) return;
+  const kind = avatarTarget.value === "user" ? "user" : "companion";
+  const type = String(file.type || "").toLowerCase();
+  if (!AVATAR_ACCEPT_TYPES.includes(type)) {
+    avatarError.value = "头像只支持 PNG / JPEG / WebP";
+    return;
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    avatarError.value = "头像不能超过 1MB";
+    return;
+  }
+
+  const previewUrl = URL.createObjectURL(file);
+  avatarPreviewUrls.add(previewUrl);
+  revokePreviewUrl(avatarPreview.value[kind]);
+  avatarPreview.value = { ...avatarPreview.value, [kind]: previewUrl };
+  avatarBusy.value = kind;
+  avatarError.value = "";
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const data = await postForm(`/api/c/companion/avatar/${kind}`, form);
+    if (data) companion.value = { ...companion.value, ...data };
+    avatarPreview.value = { ...avatarPreview.value, [kind]: "" };
+  } catch (error) {
+    // 失败回退到上传前的头像 URL；没有则回退首字。
+    avatarPreview.value = { ...avatarPreview.value, [kind]: "" };
+    avatarError.value = avatarErrorMessage(error);
+  } finally {
+    revokePreviewUrl(previewUrl);
+    avatarBusy.value = "";
+  }
+}
+
+async function resetAvatar(kind) {
+  if (avatarBusy.value) return;
+  const target = kind === "user" ? "user" : "companion";
+  avatarBusy.value = target;
+  avatarError.value = "";
+  try {
+    const data = await del(`/api/c/companion/avatar/${target}`);
+    if (data) companion.value = { ...companion.value, ...data };
+  } catch (error) {
+    avatarError.value = avatarErrorMessage(error);
+  } finally {
+    avatarBusy.value = "";
+  }
 }
 const statusText = computed(() => {
   if (activeThread.value.kind === "companion") return "在线";
@@ -709,7 +837,10 @@ async function sendPrompt(prompt) {
 async function loadCompanion() {
   try {
     const data = await getJson("/api/c/companion");
-    if (data) companion.value = { ...companion.value, ...data };
+    if (data) {
+      companion.value = { ...companion.value, ...data };
+      avatarBroken.value = {};
+    }
   } catch {
     // UI 参考页在未登录/接口不可用时仍可展示静态状态。
   }
@@ -786,6 +917,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (copyTipTimer) clearTimeout(copyTipTimer);
   if (messagePressTimer) clearTimeout(messagePressTimer);
+  for (const url of avatarPreviewUrls) URL.revokeObjectURL(url);
+  avatarPreviewUrls.clear();
   window.visualViewport?.removeEventListener("resize", onViewportResize);
   window.visualViewport?.removeEventListener("scroll", onViewportResize);
   window.removeEventListener("online", onOnline);
@@ -862,7 +995,15 @@ onBeforeUnmount(() => {
             :class="{ active: activeId === thread.id }"
             @click="switchThread(thread.id)"
           >
-            <span class="c-avatar small" :class="thread.kind">{{ thread.name.slice(0, 1) }}</span>
+            <span class="c-avatar small" :class="thread.kind">
+              <img
+                v-if="threadAvatarVisible(thread)"
+                :src="threadAvatarSrc(thread)"
+                alt=""
+                @error="onAvatarError(threadAvatarSrc(thread))"
+              />
+              <template v-else>{{ thread.name.slice(0, 1) }}</template>
+            </span>
             <span class="c-thread-copy">
               <strong>{{ thread.name }}</strong>
               <small>{{ thread.preview }}</small>
@@ -875,7 +1016,15 @@ onBeforeUnmount(() => {
         </section>
 
         <RouterLink class="c-companion-mini" to="/c/app">
-          <span class="c-avatar">{{ companion.name.slice(0, 1) }}</span>
+          <span class="c-avatar">
+            <img
+              v-if="avatarVisible('companion')"
+              :src="avatarSrc('companion')"
+              alt=""
+              @error="onAvatarError(avatarSrc('companion'))"
+            />
+            <template v-else>{{ avatarChar('companion') }}</template>
+          </span>
           <span class="c-companion-copy">
             <strong>{{ companion.name }}</strong>
             <span><i class="c-dot online" />{{ planLabel }} · 在线</span>
@@ -899,7 +1048,20 @@ onBeforeUnmount(() => {
                 <path d="M12 11v5M12 8h.01" />
               </svg>
             </button>
-            <span class="c-avatar top">伴</span>
+            <button
+              type="button"
+              class="c-avatar top c-avatar-btn"
+              :aria-label="avatarBusy === 'companion' ? '伙伴头像上传中' : '更换伙伴头像'"
+              @click="openAvatarPicker('companion')"
+            >
+              <img
+                v-if="avatarVisible('companion')"
+                :src="avatarSrc('companion')"
+                alt=""
+                @error="onAvatarError(avatarSrc('companion'))"
+              />
+              <template v-else>{{ avatarChar('companion') }}</template>
+            </button>
           </div>
         </header>
 
@@ -911,7 +1073,22 @@ onBeforeUnmount(() => {
                   <path d="m15 18-6-6 6-6" />
                 </svg>
               </button>
-              <span class="c-avatar">{{ activeThread.name.slice(0, 1) }}</span>
+              <button
+                v-if="activeThread.kind === 'companion'"
+                type="button"
+                class="c-avatar c-avatar-btn"
+                aria-label="更换伙伴头像"
+                @click="openAvatarPicker('companion')"
+              >
+                <img
+                  v-if="avatarVisible('companion')"
+                  :src="avatarSrc('companion')"
+                  alt=""
+                  @error="onAvatarError(avatarSrc('companion'))"
+                />
+                <template v-else>{{ avatarChar('companion') }}</template>
+              </button>
+              <span v-else class="c-avatar">{{ activeThread.name.slice(0, 1) }}</span>
               <div>
                 <h1>{{ activeThread.name }}</h1>
                 <p><i class="c-dot" :class="threadDotClass" />{{ statusText }}<span class="c-head-divider">·</span>只做建议，成交需你确认</p>
@@ -963,7 +1140,24 @@ onBeforeUnmount(() => {
               @pointercancel="onMessageRelease"
               @pointerleave="onMessageRelease"
             >
+              <button
+                v-if="message.role === 'user' || message.role === 'companion'"
+                type="button"
+                class="c-msg-avatar"
+                :class="message.role"
+                :aria-label="message.role === 'user' ? '更换我的头像' : '更换伙伴头像'"
+                @click.stop="openAvatarPicker(message.role === 'user' ? 'user' : 'companion')"
+              >
+                <img
+                  v-if="avatarVisible(message.role === 'user' ? 'user' : 'companion')"
+                  :src="avatarSrc(message.role === 'user' ? 'user' : 'companion')"
+                  alt=""
+                  @error="onAvatarError(avatarSrc(message.role === 'user' ? 'user' : 'companion'))"
+                />
+                <template v-else>{{ messageAvatarLabel(message.role) }}</template>
+              </button>
               <span
+                v-else
                 class="c-msg-avatar"
                 :class="message.role"
                 aria-hidden="true"
@@ -1144,6 +1338,67 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="c-context-section">
+            <header><span>头像</span><span class="c-context-link">PNG / JPEG / WebP · ≤1MB</span></header>
+            <div class="c-avatar-row">
+              <span class="c-avatar small">
+                <img
+                  v-if="avatarVisible('companion')"
+                  :src="avatarSrc('companion')"
+                  alt=""
+                  @error="onAvatarError(avatarSrc('companion'))"
+                />
+                <template v-else>{{ avatarChar('companion') }}</template>
+              </span>
+              <span class="c-avatar-row-copy">
+                <strong>伙伴头像</strong>
+                <small>{{ avatarBusy === 'companion' ? '上传中…' : (companion.avatar_url ? '自定义头像' : '未设置，显示首字') }}</small>
+              </span>
+              <button
+                class="c-avatar-action"
+                type="button"
+                :disabled="Boolean(avatarBusy)"
+                @click="openAvatarPicker('companion')"
+              >{{ avatarBusy === 'companion' ? '上传中' : '更换' }}</button>
+              <button
+                v-if="companion.avatar_url"
+                class="c-avatar-action subtle"
+                type="button"
+                :disabled="Boolean(avatarBusy)"
+                @click="resetAvatar('companion')"
+              >恢复默认</button>
+            </div>
+            <div class="c-avatar-row">
+              <span class="c-avatar small">
+                <img
+                  v-if="avatarVisible('user')"
+                  :src="avatarSrc('user')"
+                  alt=""
+                  @error="onAvatarError(avatarSrc('user'))"
+                />
+                <template v-else>{{ avatarChar('user') }}</template>
+              </span>
+              <span class="c-avatar-row-copy">
+                <strong>我的头像</strong>
+                <small>{{ avatarBusy === 'user' ? '上传中…' : (companion.user_avatar_url ? '自定义头像' : '未设置，显示首字') }}</small>
+              </span>
+              <button
+                class="c-avatar-action"
+                type="button"
+                :disabled="Boolean(avatarBusy)"
+                @click="openAvatarPicker('user')"
+              >{{ avatarBusy === 'user' ? '上传中' : '更换' }}</button>
+              <button
+                v-if="companion.user_avatar_url"
+                class="c-avatar-action subtle"
+                type="button"
+                :disabled="Boolean(avatarBusy)"
+                @click="resetAvatar('user')"
+              >恢复默认</button>
+            </div>
+            <p v-if="avatarError" class="c-inline-error" role="alert">{{ avatarError }}</p>
+          </section>
+
+          <section class="c-context-section">
             <header><span>会话</span><span class="c-context-link">仅小鱼</span></header>
             <button
               class="c-danger-link"
@@ -1189,7 +1444,15 @@ onBeforeUnmount(() => {
           class="c-mobile-thread-row"
           @click="selectMobileThread(thread.id)"
         >
-          <span class="c-avatar" :class="thread.kind">{{ thread.name.slice(0, 1) }}</span>
+          <span class="c-avatar" :class="thread.kind">
+            <img
+              v-if="threadAvatarVisible(thread)"
+              :src="threadAvatarSrc(thread)"
+              alt=""
+              @error="onAvatarError(threadAvatarSrc(thread))"
+            />
+            <template v-else>{{ thread.name.slice(0, 1) }}</template>
+          </span>
           <span class="c-mobile-thread-copy">
             <span>
               <strong>{{ thread.name }}</strong>
@@ -1232,6 +1495,15 @@ onBeforeUnmount(() => {
         <span>概览</span>
       </button>
     </nav>
+
+    <input
+      ref="avatarFileInput"
+      class="c-avatar-file"
+      type="file"
+      accept="image/png,image/jpeg,image/webp"
+      aria-label="选择头像文件"
+      @change="onAvatarFileChange"
+    />
   </div>
 </template>
 
@@ -3180,6 +3452,111 @@ onBeforeUnmount(() => {
   .c-app .c-prompt-row {
     padding-top: 6px;
   }
+}
+
+/* ---------------- 自定义头像 ---------------- */
+.c-avatar img,
+.c-msg-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.c-avatar-btn {
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.c-avatar-btn:hover {
+  border-color: var(--c-text-3);
+}
+
+.c-avatar-btn:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.c-app button.c-msg-avatar {
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.c-app button.c-msg-avatar:hover {
+  border-color: var(--c-text-3);
+}
+
+.c-avatar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.c-avatar-row-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.c-avatar-row-copy strong {
+  color: var(--c-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.c-avatar-row-copy small {
+  color: var(--c-text-3);
+  font-size: 10px;
+}
+
+.c-avatar-action {
+  padding: 4px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  background: var(--c-bg);
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.c-avatar-action:hover:not(:disabled) {
+  border-color: var(--c-text-3);
+  color: var(--c-text);
+}
+
+.c-avatar-action.subtle {
+  border-color: transparent;
+  color: var(--c-text-3);
+}
+
+.c-avatar-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.c-avatar-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 </style>

@@ -19,10 +19,21 @@ from pydantic import BaseModel, Field
 
 from rag_demo.agent.tools.calculator import calculator
 from rag_demo.c_end import store, store_policy
+from rag_demo.merchant import MerchantError, get_merchant_repository
 
 logger = logging.getLogger(__name__)
 
 WAKE_TOKEN = "@店宠"
+STORE_MERCHANT_ID = "m_gear_002"
+_MERCHANT_BUYER_IDS = {
+    "buyer_1": "b_2001",
+    "buyer_2": "b_2002",
+}
+
+
+def merchant_buyer_id(buyer_id: str) -> str:
+    """C 端 mock 买家 ID 到商家 OMS 买家 ID 的映射。"""
+    return _MERCHANT_BUYER_IDS.get(str(buyer_id or ""), str(buyer_id or ""))
 
 INTENT_KEYWORDS = (
     "推荐", "商品", "价格", "多少钱", "优惠", "券", "砍价", "便宜",
@@ -33,7 +44,7 @@ INTENT_KEYWORDS = (
 SYSTEM_PROMPT = """你是山野户外旗舰店的店宠，负责 IM 里的售前咨询。
 
 规则：
-- 商品价格、库存只能来自 search_catalog 工具，不得编造。
+- 商品、价格、库存、订单状态只能来自 search_catalog / search_inventory / search_my_orders 工具，不得编造。
 - 商家 SOP、平台活动、售后/物流口径只能来自 search_store_policy 工具，不得编造。
 - 可以解释商品、推荐、计算预算、说明售后/物流口径。
 - 不能直接改价，不能承诺未授权的折扣、赔付或退款。
@@ -50,6 +61,15 @@ class CatalogInput(BaseModel):
 
 class PolicyInput(BaseModel):
     topic: str | None = Field(default=None, max_length=80, description="SOP/活动主题，如发货、退货、满减、黑卡")
+
+
+class InventoryInput(BaseModel):
+    sku: str = Field(..., min_length=1, max_length=80, description="商家 SKU 编码")
+
+
+class OrderLookupInput(BaseModel):
+    order_id: str | None = Field(default=None, max_length=80, description="商家订单号；为空则查当前买家最近订单")
+    status: str | None = Field(default=None, max_length=20, description="订单状态，如 SHIPPED / COMPLETED")
 
 
 def intent_gate(text: str) -> tuple[bool, bool, str]:
@@ -79,21 +99,89 @@ def _extract_quantity(text: str) -> int:
     return 1
 
 
-def _tools():
+def _tools(buyer_id: str = "buyer_1"):
     @tool(args_schema=CatalogInput)
     def search_catalog(need: str, budget: float | None = None) -> dict[str, Any]:
-        """查询真实 mock 商品库；返回价格、库存和商品 ID。"""
-        products = store.list_products(keyword=need, limit=20)
-        if budget is not None:
-            products = [p for p in products if float(p["price"]) <= float(budget)]
-        return {"ok": True, "products": products}
+        """查询真实商家商品库（m_gear_002）；返回价格、库存、SKU 和商品 ID。"""
+        try:
+            repo = get_merchant_repository()
+            products = repo.list_products(STORE_MERCHANT_ID, keyword=need, limit=20)
+            result = []
+            for product in products:
+                skus = repo.list_product_skus(product.product_id, merchant_id=STORE_MERCHANT_ID)
+                if not skus:
+                    continue
+                sku = skus[0]
+                inventory = repo.get_inventory(sku.sku, merchant_id=STORE_MERCHANT_ID)
+                price = float(sku.price)
+                if budget is not None and price > float(budget):
+                    continue
+                item = product.to_dict()
+                item.update({
+                    "price": price,
+                    "stock": inventory.available_qty if inventory else 0,
+                    "sku": sku.sku,
+                    "spec": sku.spec,
+                    "in_stock": inventory.in_stock if inventory else False,
+                    "source": "merchant_v1",
+                })
+                result.append(item)
+            return {"ok": True, "source": "merchant_v1", "products": result}
+        except MerchantError as exc:
+            logger.warning("商家数据层不可用，回退 C 端商品库: %s", exc)
+            products = store.list_products(keyword=need, limit=20)
+            if budget is not None:
+                products = [p for p in products if float(p["price"]) <= float(budget)]
+            for product in products:
+                product["source"] = "c_end_fallback"
+            return {"ok": True, "source": "c_end_fallback", "products": products}
+
+    @tool(args_schema=InventoryInput)
+    def search_inventory(sku: str) -> dict[str, Any]:
+        """按 SKU 查询真实商家库存；只读，不预占。"""
+        try:
+            inventory = get_merchant_repository().get_inventory(sku, merchant_id=STORE_MERCHANT_ID)
+            if inventory is None:
+                return {"ok": False, "error": {"code": "SKU_NOT_FOUND", "message": "没有找到这个 SKU"}}
+            return {"ok": True, "source": "merchant_v1", "inventory": inventory.to_dict()}
+        except MerchantError as exc:
+            return {"ok": False, "error": {"code": "MERCHANT_UNAVAILABLE", "message": str(exc)}}
+
+    @tool(args_schema=OrderLookupInput)
+    def search_my_orders(order_id: str | None = None, status: str | None = None) -> dict[str, Any]:
+        """查询当前买家在真实商家订单库里的订单；只能看自己的订单。"""
+        try:
+            repo = get_merchant_repository()
+            m_buyer = merchant_buyer_id(buyer_id)
+            if order_id:
+                order = repo.get_order(
+                    order_id,
+                    merchant_id=STORE_MERCHANT_ID,
+                    buyer_id=m_buyer,
+                )
+                if order is None:
+                    return {"ok": False, "error": {"code": "ORDER_NOT_FOUND", "message": "没有找到这笔订单"}}
+                return {"ok": True, "source": "merchant_v1", "order": order.to_dict()}
+            orders = repo.list_orders(
+                STORE_MERCHANT_ID,
+                buyer_id=m_buyer,
+                status=status,
+                limit=10,
+            )
+            return {
+                "ok": True,
+                "source": "merchant_v1",
+                "orders": [order.to_dict() for order in orders],
+            }
+        except MerchantError as exc:
+            return {"ok": False, "error": {"code": "MERCHANT_UNAVAILABLE", "message": str(exc)}}
 
     @tool(args_schema=PolicyInput)
     def search_store_policy(topic: str | None = None) -> dict[str, Any]:
         """查询商家 SOP 与平台活动；只返回已配置规则，不执行改价。"""
         return {"ok": True, "policies": store_policy.search_policies(topic)}
 
-    return [search_catalog, search_store_policy, calculator]
+    return [search_catalog, search_inventory, search_my_orders, search_store_policy, calculator]
 
 
 def _make_llm():
@@ -123,10 +211,14 @@ class StoreReply:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _reply_metadata(product_refs: list[dict[str, Any]], policy_refs: list[dict[str, Any]]) -> dict[str, Any]:
-    if not product_refs and not policy_refs:
+def _reply_metadata(
+    product_refs: list[dict[str, Any]],
+    policy_refs: list[dict[str, Any]],
+    order_refs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    if not product_refs and not policy_refs and not order_refs:
         return {}
-    return {
+    metadata = {
         "quote_id": f"quote_{uuid.uuid4().hex[:16]}",
         "product_refs": product_refs[:8],
         "policy_refs": policy_refs[:8],
@@ -134,6 +226,9 @@ def _reply_metadata(product_refs: list[dict[str, Any]], policy_refs: list[dict[s
         "source": "store_pet_agent",
         "note": "仅作咨询/报价引用；成交仍需用户逐单确认",
     }
+    if order_refs:
+        metadata["order_refs"] = order_refs[:8]
+    return metadata
 
 
 def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> StoreReply:
@@ -144,7 +239,7 @@ def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> Stor
     if not allowed:
         return StoreReply("（店宠只处理商品、价格、优惠、售后类问题；这句话不进入大模型）", True)
 
-    tools = _tools()
+    tools = _tools(buyer_id)
     tool_map = {item.name: item for item in tools}
     llm = llm or _make_llm().bind_tools(tools)
     messages: list[Any] = [
@@ -153,6 +248,7 @@ def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> Stor
     ]
     product_refs: list[dict[str, Any]] = []
     policy_refs: list[dict[str, Any]] = []
+    order_refs: list[dict[str, Any]] = []
     try:
         for _ in range(3):
             ai = llm.invoke(messages)
@@ -162,7 +258,7 @@ def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> Stor
                 return StoreReply(
                     content or "店宠暂时没有找到合适商品。",
                     True,
-                    _reply_metadata(product_refs, policy_refs),
+                    _reply_metadata(product_refs, policy_refs, order_refs),
                 )
             messages.append(ai)
             for call in calls:
@@ -183,7 +279,26 @@ def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> Stor
                                 "product_id": product.get("product_id"),
                                 "title": product.get("title"),
                                 "price": product.get("price"),
+                                "sku": product.get("sku"),
+                                "stock": product.get("stock"),
                                 "quantity": quantity,
+                                "source": product.get("source"),
+                            })
+                    elif name == "search_my_orders":
+                        for order in result.get("orders") or []:
+                            order_refs.append({
+                                "order_id": order.get("order_id"),
+                                "status": order.get("status"),
+                                "total_amount": order.get("total_amount"),
+                                "created_at": order.get("created_at"),
+                            })
+                        if result.get("order"):
+                            order = result["order"]
+                            order_refs.append({
+                                "order_id": order.get("order_id"),
+                                "status": order.get("status"),
+                                "total_amount": order.get("total_amount"),
+                                "created_at": order.get("created_at"),
                             })
                     elif name == "search_store_policy":
                         for policy in result.get("policies") or []:
@@ -200,7 +315,7 @@ def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> Stor
         return StoreReply(
             "店宠需要再确认一下商品信息，请稍后再问。",
             True,
-            _reply_metadata(product_refs, policy_refs),
+            _reply_metadata(product_refs, policy_refs, order_refs),
         )
     except Exception:
         logger.exception("店宠 Agent 调用失败 buyer=%s", buyer_id)
