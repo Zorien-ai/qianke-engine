@@ -1285,6 +1285,26 @@ def cancel_agent_action(action_id: str) -> dict:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
 
 
+@app.get("/api/agent/actions")
+def list_agent_actions(status: str | None = None, limit: int = 50) -> dict:
+    account = _require_login()
+    try:
+        return {
+            "actions": agent_actions.list_actions(account, status=status, limit=limit),
+        }
+    except agent_actions.ActionError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+
+
+@app.post("/api/agent/actions/{action_id}/complete")
+def complete_agent_action(action_id: str) -> dict:
+    account = _require_login()
+    try:
+        return agent_actions.complete_action(action_id, account)
+    except agent_actions.ActionError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+
+
 @app.post("/search")
 def search(
     req: SearchRequest,

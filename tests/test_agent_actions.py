@@ -48,3 +48,28 @@ def test_cross_account_cannot_confirm(tmp_path, monkeypatch):
     with pytest.raises(actions.ActionError) as exc:
         actions.confirm_action(action["action_id"], _account("202"))
     assert exc.value.code == "ACTION_FORBIDDEN"
+
+
+def test_action_lifecycle_complete_and_list(tmp_path, monkeypatch):
+    monkeypatch.setenv("QIANKE_AGENT_ACTION_DB", str(tmp_path / "actions_lifecycle.sqlite"))
+    monkeypatch.setattr(actions, "_DB_PATH", None)
+    account = _account("303")
+    with actions.action_scope("test", account, "req_life"):
+        action = actions.create_followup_draft(title="生命周期任务", description="")
+    action_id = action["action_id"]
+
+    with pytest.raises(actions.ActionError) as exc:
+        actions.complete_action(action_id, account)
+    assert exc.value.code == "ACTION_NOT_CONFIRMED"
+
+    actions.confirm_action(action_id, account)
+    completed = actions.complete_action(action_id, account)
+    assert completed["status"] == "COMPLETED"
+    assert completed["completed_at"]
+
+    rows = actions.list_actions(account, status="COMPLETED")
+    assert [row["action_id"] for row in rows] == [action_id]
+
+    with pytest.raises(actions.ActionError) as exc:
+        actions.list_actions(account, status="UNKNOWN")
+    assert exc.value.code == "INVALID_STATUS"

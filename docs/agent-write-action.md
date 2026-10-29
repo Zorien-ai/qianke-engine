@@ -92,7 +92,31 @@ Agent 返回的 `pending_actions` 会展示为「待确认写入」：
 DRAFT → CONFIRMED
 ```
 
-## 6. 数据位置
+## 6. 任务状态机
+
+```text
+DRAFT
+  ├── confirm → CONFIRMED
+  │                └── complete → COMPLETED
+  └── cancel → CANCELLED
+```
+
+接口：
+
+```text
+GET  /api/agent/actions?status=&limit=
+POST /api/agent/actions/{action_id}/complete
+```
+
+规则：
+
+```text
+只有任务所属账号能 complete
+只有 CONFIRMED 可以 complete
+重复 complete 返回 ACTION_NOT_CONFIRMED
+```
+
+## 7. 数据位置
 
 ```text
 var/agent_actions.sqlite
@@ -117,7 +141,7 @@ status
 created_at / confirmed_at / confirmed_by
 ```
 
-## 7. 当前限制
+## 8. 当前限制
 
 ```text
 只写运营跟进任务
@@ -128,7 +152,7 @@ created_at / confirmed_at / confirmed_by
 尚未加入 Regression / Benchmark Eval
 ```
 
-## 8. 后续
+## 9. 后续
 
 ```text
 1. 引入 task 执行与状态机

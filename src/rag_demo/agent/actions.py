@@ -67,10 +67,16 @@ def init() -> None:
                 status      TEXT NOT NULL,
                 created_at  TEXT NOT NULL,
                 confirmed_at TEXT,
-                confirmed_by TEXT
+                confirmed_by TEXT,
+                completed_at TEXT
             )
             """
         )
+        columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(agent_action)").fetchall()
+        }
+        if "completed_at" not in columns:
+            conn.execute("ALTER TABLE agent_action ADD COLUMN completed_at TEXT")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_agent_action_request "
             "ON agent_action(account_id, dataset, request_id, created_at)"
@@ -121,6 +127,7 @@ def _payload(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "confirmed_at": row["confirmed_at"],
         "confirmed_by": row["confirmed_by"],
+        "completed_at": row["completed_at"],
     }
 
 
@@ -223,6 +230,61 @@ def cancel_action(action_id: str, account: dict[str, Any]) -> dict[str, Any]:
         conn.commit()
         row = conn.execute("SELECT * FROM agent_action WHERE action_id = ?", (action_id,)).fetchone()
         return _payload(row)
+    finally:
+        conn.close()
+
+
+def complete_action(action_id: str, account: dict[str, Any]) -> dict[str, Any]:
+    """把已确认任务标记为完成；只允许任务所属账号操作。"""
+    if (account or {}).get("is_demo"):
+        raise ActionError("DEMO_READ_ONLY", "演示账号不能完成运营任务")
+    account_id = str((account or {}).get("id") or "")
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT * FROM agent_action WHERE action_id = ?", (action_id,)).fetchone()
+        if row is None:
+            raise ActionError("ACTION_NOT_FOUND", "动作不存在")
+        if row["account_id"] != account_id:
+            raise ActionError("ACTION_FORBIDDEN", "不能完成其他账号的动作")
+        if row["status"] != "CONFIRMED":
+            raise ActionError("ACTION_NOT_CONFIRMED", "只有已确认任务才能标记完成")
+        conn.execute(
+            "UPDATE agent_action SET status = 'COMPLETED', completed_at = ? WHERE action_id = ?",
+            (_now(), action_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM agent_action WHERE action_id = ?", (action_id,)).fetchone()
+        return _payload(row)
+    finally:
+        conn.close()
+
+
+def list_actions(
+    account: dict[str, Any],
+    *,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """列出当前账号的运营任务，可按状态过滤。"""
+    account_id = str((account or {}).get("id") or "")
+    if not account_id:
+        return []
+    normalized = str(status or "").strip().upper()
+    if normalized and normalized not in {"DRAFT", "CONFIRMED", "COMPLETED", "CANCELLED"}:
+        raise ActionError("INVALID_STATUS", "status 只允许 DRAFT / CONFIRMED / COMPLETED / CANCELLED")
+    init()
+    conn = _connect()
+    try:
+        sql = "SELECT * FROM agent_action WHERE account_id = ?"
+        params: list[Any] = [account_id]
+        if normalized:
+            sql += " AND status = ?"
+            params.append(normalized)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 100)))
+        rows = conn.execute(sql, params).fetchall()
+        return [_payload(row) for row in rows]
     finally:
         conn.close()
 
