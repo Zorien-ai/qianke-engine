@@ -111,6 +111,23 @@ POST /api/c/agent/resume   200
 订单 order_... 已创建
 ```
 
+### 店宠会话
+
+「山野户外旗舰店」会话已接入 IM 店宠接口：
+
+```text
+GET  /api/c/friends/store_demo/messages?limit=20
+POST /api/c/friends/store_demo/messages
+```
+
+- 加载最近 20 条持久化消息
+- `@店宠` 唤醒真实店宠 Agent
+- 店宠回复 + 小伴锐评一起进入消息流
+- 店宠返回的 quote_id 会显示在右侧「待确认」卡片
+- 点击「查看报价」进入商城逐单确认
+
+历史消息会做 emoji/感叹号清理后再展示，避免旧数据破坏新 UI 的克制风格。
+
 ## 7. 文件
 
 ```text

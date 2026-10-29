@@ -100,6 +100,7 @@ const companion = ref({
 const liveThreadId = ref("");
 const liveDraft = ref(null);
 const liveOrder = ref(null);
+const storeQuote = ref(null);
 const agentBusy = ref(false);
 const agentError = ref("");
 
@@ -117,14 +118,28 @@ const statusText = computed(() => {
   if (activeThread.value.kind === "merchant") return "店宠在线";
   return "好友";
 });
-const pendingCount = computed(() => (liveDraft.value ? 1 : liveOrder.value ? 0 : 1));
+const pendingCount = computed(() => {
+  if (liveDraft.value || storeQuote.value) return 1;
+  if (liveOrder.value) return 0;
+  return 1;
+});
 
 function cleanReply(text) {
   return String(text || "")
     .replace(/\*\*/g, "")
     .replace(/`/g, "")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/[\uFE0F\u200D]/g, "")
+    .replace(/！/g, "。")
+    .replace(/!/g, "。")
+    .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function primaryPolicy(quote) {
+  const refs = quote?.policy_refs || [];
+  return refs.find((item) => item.kind === "platform_activity") || refs[0] || null;
 }
 
 function nowTime() {
@@ -171,6 +186,27 @@ function localReply(text) {
   };
 }
 
+async function loadStoreMessages() {
+  try {
+    const data = await getJson("/api/c/friends/store_demo/messages?limit=20");
+    if (data?.messages?.length) {
+      messagesByThread.value.store_demo = data.messages.map((message) => ({
+        id: message.message_id,
+        role: message.sender_id?.startsWith("companion_")
+          ? "companion"
+          : message.sender_id?.startsWith("buyer_")
+            ? "user"
+            : "merchant",
+        text: cleanReply(message.content),
+        time: (message.created_at || "").slice(11, 16),
+      }));
+    }
+    scrollToBottom();
+  } catch {
+    // 保留种子会话，避免接口异常时出现空屏。
+  }
+}
+
 async function send() {
   const text = draft.value.trim();
   if (!text || typing.value) return;
@@ -178,15 +214,32 @@ async function send() {
   draft.value = "";
   scrollToBottom();
 
+  if (activeId.value === "store_demo") {
+    typing.value = true;
+    try {
+      const result = await postJson("/api/c/friends/store_demo/messages", { content: text });
+      if (result.reply) {
+        pushMessage({ role: "merchant", text: cleanReply(result.reply.content) });
+        if (result.reply.metadata?.quote_id) storeQuote.value = result.reply.metadata;
+      }
+      if (result.companion_message) {
+        pushMessage({ role: "companion", text: cleanReply(result.companion_message.content) });
+      }
+      agentError.value = "";
+    } catch (error) {
+      agentError.value = error?.detail || error?.message || "店宠暂时无法回应";
+      pushMessage({ role: "merchant", text: "店宠暂时忙碌，请稍后再试。" });
+    } finally {
+      typing.value = false;
+      scrollToBottom();
+    }
+    return;
+  }
+
   if (activeId.value !== "companion") {
     typing.value = true;
     await new Promise((resolve) => setTimeout(resolve, 520));
-    pushMessage({
-      role: activeId.value === "store_demo" ? "merchant" : "merchant",
-      text: activeId.value === "store_demo"
-        ? "收到。店宠会先核对商品、活动和售后规则，再给你回复。"
-        : "收到，我稍后回复你。",
-    });
+    pushMessage({ role: "merchant", text: "收到，我稍后回复你。" });
     typing.value = false;
     scrollToBottom();
     return;
@@ -249,9 +302,15 @@ async function confirmLiveOrder() {
 
 async function sendPrompt(prompt) {
   if (typing.value) return;
-  draft.value = prompt === "看 500 元以内的跑鞋"
-    ? "看 500 元以内的跑鞋，买 1 双，直接生成待确认订单"
-    : prompt;
+  if (activeId.value === "store_demo") {
+    draft.value = `@店宠 ${prompt}`;
+  } else if (activeId.value === "companion") {
+    draft.value = prompt === "看 500 元以内的跑鞋"
+      ? "看 500 元以内的跑鞋，买 1 双，直接生成待确认订单"
+      : prompt;
+  } else {
+    draft.value = prompt;
+  }
   await send();
 }
 
@@ -264,9 +323,10 @@ async function loadCompanion() {
   }
 }
 
-function switchThread(id) {
+async function switchThread(id) {
   activeId.value = id;
   showContext.value = false;
+  if (id === "store_demo") await loadStoreMessages();
   scrollToBottom();
 }
 
@@ -495,6 +555,24 @@ onMounted(async () => {
             </div>
             <div v-else-if="liveOrder" class="c-order-created">
               订单 {{ liveOrder.order_id }} 已创建 · ¥{{ Number(liveOrder.total_amount || 0).toFixed(2) }}
+            </div>
+            <div v-else-if="storeQuote" class="c-quote-card">
+              <div class="c-quote-card-top">
+                <span class="c-quote-card-label">来自店宠的结构化报价</span>
+                <span class="c-dot waiting" />
+              </div>
+              <strong>{{ storeQuote.product_refs?.[0]?.title || "平台活动引用" }}</strong>
+              <div class="c-quote-price">
+                <span v-if="storeQuote.product_refs?.[0]?.price">¥{{ Number(storeQuote.product_refs[0].price).toFixed(2) }}</span>
+                <small>{{ primaryPolicy(storeQuote)?.title || "以结算页为准" }}</small>
+              </div>
+              <p>报价只做引用，成交前需在商城逐单确认。</p>
+              <RouterLink
+                :to="{ path: '/c', query: { quote: storeQuote.quote_id } }"
+                class="c-text-link"
+              >
+                查看报价 <span>→</span>
+              </RouterLink>
             </div>
             <div v-else class="c-quote-card">
               <div class="c-quote-card-top">
