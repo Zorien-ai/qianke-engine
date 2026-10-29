@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from rag_demo.c_end import store
 
@@ -135,7 +135,13 @@ def _mock_store_reply(content: str) -> tuple[str, bool]:
     return "喵~ 店宠已收到你的问题，当前是 mock 回复，后续接入商家 Agent 后会查商品库和 SOP。", True
 
 
-def send_message(owner_id: str, friend_id: str, content: str) -> dict[str, Any]:
+def send_message(
+    owner_id: str,
+    friend_id: str,
+    content: str,
+    *,
+    reply_provider: Callable[[str], tuple[str, bool]] | None = None,
+) -> dict[str, Any]:
     text = (content or "").strip()
     if not text:
         raise store.CStoreError("EMPTY_MESSAGE", "消息不能为空")
@@ -161,7 +167,13 @@ def send_message(owner_id: str, friend_id: str, content: str) -> dict[str, Any]:
         )
         reply = None
         if friend["kind"] == "merchant":
-            reply_text, awakened = _mock_store_reply(text)
+            if reply_provider is not None:
+                try:
+                    reply_text, awakened = reply_provider(text)
+                except Exception:  # noqa: BLE001 - 店宠失败不应吞掉用户消息
+                    reply_text, awakened = _mock_store_reply(text)
+            else:
+                reply_text, awakened = _mock_store_reply(text)
             reply = _insert_message(
                 conn,
                 owner_id=owner_id,

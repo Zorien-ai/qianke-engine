@@ -148,7 +148,7 @@ onBeforeUnmount(closeSocket);
         <p class="social-kicker">C-END · IM</p>
         <h2>社交消息</h2>
         <p class="social-subtitle">
-          IM 社交壳 MVP：好友、单聊、店宠 @ 唤醒。当前店宠回复为 mock，不连接真实商家 Agent。
+          IM 社交壳 MVP：好友、单聊、店宠 @ 唤醒。店宠由独立 B 端 Agent 回复，商品库当前仍是 mock。
         </p>
       </div>
       <span class="connection" role="status">
@@ -190,7 +190,7 @@ onBeforeUnmount(closeSocket);
         <div class="chat-head">
           <div>
             <h3>{{ selectedName }}</h3>
-            <p>{{ selected?.kind === "merchant" ? "按 @店宠 唤醒；越界消息由 mock 拦截" : "好友单聊" }}</p>
+            <p>{{ selected?.kind === "merchant" ? "按 @店宠 唤醒；越界消息由代码闸门拦截" : "好友单聊" }}</p>
           </div>
           <span class="chat-meta">mock IM</span>
         </div>

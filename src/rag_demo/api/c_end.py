@@ -1,6 +1,7 @@
 """C 端商品浏览与模拟订单 HTTP API。"""
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import social, store
+from rag_demo.c_end import social, store, store_agent
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -124,7 +125,12 @@ def list_messages(friend_id: str, limit: int = 50) -> dict:
 def send_message(friend_id: str, req: SendMessageIn) -> dict:
     buyer_id, _ = _buyer()
     try:
-        return social.send_message(buyer_id, friend_id, req.content)
+        return social.send_message(
+            buyer_id,
+            friend_id,
+            req.content,
+            reply_provider=lambda text: store_agent.reply(buyer_id, text),
+        )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
 
@@ -146,7 +152,13 @@ async def chat_websocket(websocket: WebSocket, friend_id: str) -> None:
             payload = await websocket.receive_json()
             content = str(payload.get("content") or "")
             try:
-                result = social.send_message(buyer_id, friend_id, content)
+                result = await asyncio.to_thread(
+                    social.send_message,
+                    buyer_id,
+                    friend_id,
+                    content,
+                    reply_provider=lambda text: store_agent.reply(buyer_id, text),
+                )
                 await websocket.send_json({"type": "chat", **result})
             except store.CStoreError as exc:
                 await websocket.send_json({
