@@ -129,7 +129,7 @@ def send_message(friend_id: str, req: SendMessageIn) -> dict:
             buyer_id,
             friend_id,
             req.content,
-            reply_provider=lambda text: store_agent.reply(buyer_id, text),
+            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text),
             commentary_provider=lambda text, reply_text: companion_agent.commentary(
                 buyer_id, text, reply_text
             ),
@@ -160,7 +160,7 @@ async def chat_websocket(websocket: WebSocket, friend_id: str) -> None:
                     buyer_id,
                     friend_id,
                     content,
-                    reply_provider=lambda text: store_agent.reply(buyer_id, text),
+                    reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text),
                     commentary_provider=lambda text, reply_text: companion_agent.commentary(
                         buyer_id, text, reply_text
                     ),

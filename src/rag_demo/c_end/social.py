@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any, Callable
 
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS c_message (
     sender_id  TEXT NOT NULL,
     receiver_id TEXT NOT NULL,
     content    TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );
 
@@ -46,6 +48,9 @@ def init() -> None:
         conn = store._connect()
         try:
             conn.executescript(_SCHEMA)
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(c_message)").fetchall()}
+            if "metadata_json" not in cols:
+                conn.execute("ALTER TABLE c_message ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
             conn.commit()
         finally:
             conn.close()
@@ -89,6 +94,15 @@ def _friend(conn, owner_id: str, friend_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def _message_payload(row) -> dict[str, Any]:
+    payload = dict(row)
+    try:
+        payload["metadata"] = json.loads(payload.pop("metadata_json", "{}") or "{}")
+    except (TypeError, ValueError):
+        payload["metadata"] = {}
+    return payload
+
+
 def get_messages(owner_id: str, friend_id: str, limit: int = 50) -> list[dict[str, Any]]:
     init()
     conn = store._connect()
@@ -102,18 +116,28 @@ def get_messages(owner_id: str, friend_id: str, limit: int = 50) -> list[dict[st
             "ORDER BY created_at ASC LIMIT ?",
             (owner_id, friend_id, max(1, min(int(limit), 200))),
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [_message_payload(row) for row in rows]
     finally:
         conn.close()
 
 
-def _insert_message(conn, *, owner_id: str, friend_id: str, sender_id: str, receiver_id: str, content: str) -> dict[str, Any]:
+def _insert_message(
+    conn,
+    *,
+    owner_id: str,
+    friend_id: str,
+    sender_id: str,
+    receiver_id: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     message_id = f"msg_{uuid.uuid4().hex[:20]}"
     created_at = store._now()
+    meta = metadata or {}
     conn.execute(
-        "INSERT INTO c_message(message_id, owner_id, friend_id, sender_id, receiver_id, content, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (message_id, owner_id, friend_id, sender_id, receiver_id, content, created_at),
+        "INSERT INTO c_message(message_id, owner_id, friend_id, sender_id, receiver_id, content, metadata_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (message_id, owner_id, friend_id, sender_id, receiver_id, content, json.dumps(meta, ensure_ascii=False), created_at),
     )
     return {
         "message_id": message_id,
@@ -122,6 +146,7 @@ def _insert_message(conn, *, owner_id: str, friend_id: str, sender_id: str, rece
         "sender_id": sender_id,
         "receiver_id": receiver_id,
         "content": content,
+        "metadata": meta,
         "created_at": created_at,
     }
 
@@ -163,13 +188,22 @@ def send_message(
 
     reply_text: str | None = None
     awakened = False
+    reply_metadata: dict[str, Any] = {}
     commentary = ""
     if friend["kind"] == "merchant":
         if reply_provider is not None:
             try:
-                reply_text, awakened = reply_provider(text)
+                provider_result = reply_provider(text)
+                if hasattr(provider_result, "text"):
+                    reply_text = str(provider_result.text)
+                    awakened = bool(provider_result.awakened)
+                    reply_metadata = dict(getattr(provider_result, "metadata", {}) or {})
+                else:
+                    reply_text, awakened = provider_result
+                    reply_metadata = {}
             except Exception:  # noqa: BLE001 - 店宠失败不应吞掉用户消息
                 reply_text, awakened = _mock_store_reply(text)
+                reply_metadata = {}
         else:
             reply_text, awakened = _mock_store_reply(text)
         if commentary_provider is not None:
@@ -200,6 +234,7 @@ def send_message(
                 sender_id=friend_id,
                 receiver_id=owner_id,
                 content=reply_text,
+                metadata=reply_metadata,
             )
             reply["awakened"] = awakened
         if commentary:

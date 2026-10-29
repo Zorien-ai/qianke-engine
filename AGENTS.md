@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.3.3 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.3.4 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -398,7 +398,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 阶段一（基础）：商户端单体 ReAct Agent + 3 个原子 Tool（已有基础）
 阶段二：C 端购物 + 模拟订单 + HITL（mock 闭环已跑通）
 阶段三：IM 社交壳 + 好友会话 + 可配置伙伴/宠物形象（MVP 已跑通）
-阶段四：双宠谈判、商家店宠、白名单意图（店宠 + 伙伴锐评已接入；C 伙伴无议价权；自主谈判协议待开发）
+阶段四：双宠谈判、商家店宠、白名单意图（店宠结构化报价引用 + 伙伴锐评已接入；C 伙伴无议价权；自主谈判协议待开发）
 阶段五：真实支付 / 真实 IM / SaaS 交付
 ```
 
@@ -432,7 +432,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.3.3 |
+| AGENTS.md | v1.3.4 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -454,3 +454,4 @@ IM 社交载体
 | 1.3.1 | 2026-10-29 | 增加 IM 好友/单聊/WebSocket MVP 与可配置伙伴状态；C 端阶段三标记为 MVP 已跑通 |
 | 1.3.2 | 2026-10-29 | IM 店宠从确定性 mock 升级为独立 B 端店宠 Agent；保留 @ 唤醒与意图白名单，双宠谈判仍未实现 |
 | 1.3.3 | 2026-10-29 | 店宠增加 SOP/平台活动查询；C 伙伴加入“锐评”但无议价/下单权限；成交仍要求用户逐单确认 |
+| 1.3.4 | 2026-10-29 | 店宠回复增加 quote_id / product_refs / policy_refs 结构化引用与审计元数据；商城逐单确认仍是唯一成交入口 |

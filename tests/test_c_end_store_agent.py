@@ -74,9 +74,11 @@ def test_reply_can_query_sop_and_platform_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_DB_PATH", None)
     store.init()
     fake = _FakeLLM([_policy_call(), AIMessage(content="平台满 299 减 30，以结算页为准")])
-    text, awakened = store_agent.reply("buyer_1", "@店宠 现在有什么活动", llm=fake)
-    assert awakened is True
-    assert "满 299" in text
+    result = store_agent.reply_with_meta("buyer_1", "@店宠 现在有什么活动", llm=fake)
+    assert result.awakened is True
+    assert "满 299" in result.text
+    assert result.metadata["requires_user_confirmation"] is True
+    assert result.metadata["policy_refs"]
     assert fake.calls == 2
 
 
@@ -109,10 +111,15 @@ def test_social_accepts_store_agent_reply_provider(tmp_path, monkeypatch):
         "buyer_1",
         "store_demo",
         "@店宠 推荐跑鞋",
-        reply_provider=lambda text: ("店宠 Agent 回复", True),
+        reply_provider=lambda text: store_agent.StoreReply(
+            "店宠 Agent 回复",
+            True,
+            {"quote_id": "quote_1", "requires_user_confirmation": True},
+        ),
         commentary_provider=lambda text, reply: "主人，先核对活动规则。",
     )
     assert result["reply"]["content"] == "店宠 Agent 回复"
     assert result["reply"]["awakened"] is True
+    assert result["reply"]["metadata"]["quote_id"] == "quote_1"
     assert result["companion_message"]["content"] == "主人，先核对活动规则。"
     assert len(social.get_messages("buyer_1", "store_demo")) == 3

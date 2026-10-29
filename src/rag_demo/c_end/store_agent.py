@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -93,15 +95,37 @@ def _make_llm():
 
 
 def reply(buyer_id: str, text: str, *, llm: Any | None = None) -> tuple[str, bool]:
-    """返回 (回复文本, 是否被唤醒)。
+    result = reply_with_meta(buyer_id, text, llm=llm)
+    return result.text, result.awakened
 
-    buyer_id 预留给后续用户画像/会员权益；当前只做商品与规则问答。
-    """
+
+@dataclass
+class StoreReply:
+    text: str
+    awakened: bool
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def _reply_metadata(product_refs: list[dict[str, Any]], policy_refs: list[dict[str, Any]]) -> dict[str, Any]:
+    if not product_refs and not policy_refs:
+        return {}
+    return {
+        "quote_id": f"quote_{uuid.uuid4().hex[:16]}",
+        "product_refs": product_refs[:8],
+        "policy_refs": policy_refs[:8],
+        "requires_user_confirmation": True,
+        "source": "store_pet_agent",
+        "note": "仅作咨询/报价引用；成交仍需用户逐单确认",
+    }
+
+
+def reply_with_meta(buyer_id: str, text: str, *, llm: Any | None = None) -> StoreReply:
+    """返回结构化店宠回复：文本 + 是否唤醒 + 商品/政策引用。"""
     wake, allowed, cleaned = intent_gate(text)
     if not wake:
-        return "（店宠未被唤醒：请 @店宠 并说明售前、售后或砍价需求）", False
+        return StoreReply("（店宠未被唤醒：请 @店宠 并说明售前、售后或砍价需求）", False)
     if not allowed:
-        return "（店宠只处理商品、价格、优惠、售后类问题；这句话不进入大模型）", True
+        return StoreReply("（店宠只处理商品、价格、优惠、售后类问题；这句话不进入大模型）", True)
 
     tools = _tools()
     tool_map = {item.name: item for item in tools}
@@ -110,13 +134,19 @@ def reply(buyer_id: str, text: str, *, llm: Any | None = None) -> tuple[str, boo
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=f"用户 {buyer_id} 说：{cleaned}"),
     ]
+    product_refs: list[dict[str, Any]] = []
+    policy_refs: list[dict[str, Any]] = []
     try:
         for _ in range(3):
             ai = llm.invoke(messages)
             calls = getattr(ai, "tool_calls", None) or []
             if not calls:
                 content = str(getattr(ai, "content", "") or "").strip()
-                return content or "店宠暂时没有找到合适商品。", True
+                return StoreReply(
+                    content or "店宠暂时没有找到合适商品。",
+                    True,
+                    _reply_metadata(product_refs, policy_refs),
+                )
             messages.append(ai)
             for call in calls:
                 name = str(call.get("name") or "")
@@ -128,12 +158,31 @@ def reply(buyer_id: str, text: str, *, llm: Any | None = None) -> tuple[str, boo
                         result = item.invoke(call.get("args") or {})
                     except Exception as exc:  # noqa: BLE001
                         result = {"ok": False, "error": {"code": "TOOL_ERROR", "message": str(exc)}}
+                if isinstance(result, dict) and result.get("ok"):
+                    if name == "search_catalog":
+                        for product in result.get("products") or []:
+                            product_refs.append({
+                                "product_id": product.get("product_id"),
+                                "title": product.get("title"),
+                                "price": product.get("price"),
+                            })
+                    elif name == "search_store_policy":
+                        for policy in result.get("policies") or []:
+                            policy_refs.append({
+                                "policy_id": policy.get("policy_id"),
+                                "kind": policy.get("kind"),
+                                "title": policy.get("title"),
+                            })
                 messages.append(ToolMessage(
                     content=json.dumps(result, ensure_ascii=False),
                     tool_call_id=str(call.get("id") or "call"),
                     name=name,
                 ))
-        return "店宠需要再确认一下商品信息，请稍后再问。", True
+        return StoreReply(
+            "店宠需要再确认一下商品信息，请稍后再问。",
+            True,
+            _reply_metadata(product_refs, policy_refs),
+        )
     except Exception:
         logger.exception("店宠 Agent 调用失败 buyer=%s", buyer_id)
-        return "店宠暂时忙碌，请稍后再试。", True
+        return StoreReply("店宠暂时忙碌，请稍后再试。", True)

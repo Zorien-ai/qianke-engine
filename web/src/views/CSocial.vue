@@ -28,6 +28,14 @@ function senderLabel(message) {
   return selectedName.value;
 }
 
+function quotePolicies(message) {
+  return message.metadata?.policy_refs || [];
+}
+
+function quoteProducts(message) {
+  return message.metadata?.product_refs || [];
+}
+
 function connectSocket(friendId) {
   closeSocket();
   if (!friendId) return;
@@ -219,6 +227,17 @@ onBeforeUnmount(closeSocket);
               {{ senderLabel(message) }} · {{ message.created_at?.slice(11, 19) }}
             </div>
             <div class="message-bubble">{{ message.content }}</div>
+            <div v-if="message.metadata?.quote_id" class="quote-refs">
+              <span class="quote-label">结构化报价引用</span>
+              <span v-for="policy in quotePolicies(message)" :key="policy.policy_id" class="quote-chip">
+                {{ policy.title || policy.policy_id }}
+              </span>
+              <span v-for="product in quoteProducts(message)" :key="product.product_id" class="quote-chip">
+                {{ product.title || product.product_id }}
+              </span>
+              <small>仅为咨询引用；成交前必须在商城逐单确认。</small>
+              <RouterLink class="quote-link" to="/c">去商城确认</RouterLink>
+            </div>
           </div>
         </div>
 
@@ -508,6 +527,43 @@ onBeforeUnmount(closeSocket);
   border-color: var(--primary-soft);
   background: var(--primary-soft);
   color: var(--text);
+}
+
+.quote-refs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 7px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+}
+
+.quote-label {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.quote-chip {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 10px;
+}
+
+.quote-refs small {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.quote-link {
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .empty-line {
