@@ -1040,23 +1040,24 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .c-app {
-  --c-bg: #0f0f11;
-  --c-bg-soft: #131315;
-  --c-panel: #161618;
-  --c-panel-2: #1b1b1e;
-  --c-panel-3: #202023;
-  --c-line: #29292d;
-  --c-line-soft: #232326;
-  --c-text: #e7e7e9;
-  --c-text-2: #a3a3aa;
-  --c-text-3: #707078;
-  --c-accent: #8d96a3;
-  --c-positive: #7e9888;
-  --c-warning: #a89a7c;
-  --c-negative: #a17b7b;
+  --c-bg: #ffffff;
+  --c-bg-soft: #fcfcfb;
+  --c-panel: #ffffff;
+  --c-panel-2: #f6f6f3;
+  --c-panel-3: #efefeb;
+  --c-line: #e4e4de;
+  --c-line-soft: #efefeb;
+  --c-text: #171715;
+  --c-text-2: #5c5c56;
+  --c-text-3: #6b6b64;
+  --c-accent: #587376;
+  --c-positive: #6f8f7a;
+  --c-warning: #7a6340;
+  --c-negative: #8a4f4f;
   min-height: 100dvh;
   background: var(--c-bg);
   color: var(--c-text);
+  color-scheme: light;
   font-family: Inter, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   font-size: 13px;
   line-height: 1.55;
@@ -2239,9 +2240,9 @@ onBeforeUnmount(() => {
   }
 
   .c-message.user .c-bubble {
-    border-color: #2a3a31;
-    background: #1e2a24;
-    color: #dfe8e2;
+    border-color: var(--c-line);
+    background: var(--c-panel-2);
+    color: var(--c-text);
   }
 
   .c-thread {
@@ -2601,4 +2602,212 @@ onBeforeUnmount(() => {
     max-width: none;
   }
 }
+/* ===== 白色极简对话：纸面、行式消息、细线输入 ===== */
+.c-app .c-shell,
+.c-app .c-main {
+  background: var(--c-bg);
+}
+
+.c-app .c-sidebar {
+  border-right-color: var(--c-line);
+  background: var(--c-bg-soft);
+}
+
+.c-app .c-search,
+.c-app .c-composer {
+  background: var(--c-panel);
+}
+
+.c-app .c-search {
+  border-radius: 8px;
+}
+
+.c-app .c-thread-row {
+  border-radius: 8px;
+}
+
+.c-app .c-thread-row:hover {
+  background: var(--c-panel-2);
+}
+
+.c-app .c-thread-row.active {
+  background: var(--c-panel-3);
+}
+
+.c-app .c-avatar {
+  border-color: var(--c-line);
+  background: var(--c-panel);
+  color: var(--c-text-2);
+}
+
+.c-app .c-avatar.merchant {
+  background: var(--c-panel-2);
+}
+
+.c-app .c-topbar {
+  border-bottom-color: var(--c-line);
+  background: var(--c-bg);
+}
+
+.c-app .c-chat {
+  max-width: 920px;
+  padding-bottom: 24px;
+}
+
+.c-app .c-chat-head {
+  padding: 18px 0 15px;
+  border-bottom-color: var(--c-line);
+}
+
+.c-app .c-thread {
+  gap: 22px;
+  padding-top: 24px;
+}
+
+.c-app .c-date-line span {
+  padding: 0;
+  border: 0;
+  color: var(--c-text-3);
+}
+
+.c-app .c-message {
+  gap: 4px;
+}
+
+.c-app .c-message.user {
+  max-width: 70%;
+}
+
+.c-app .c-message-meta {
+  color: var(--c-text-3);
+}
+
+.c-app .c-message-meta span {
+  color: var(--c-text-2);
+  font-weight: 500;
+}
+
+.c-app .c-bubble {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.c-app .c-message.merchant .c-bubble,
+.c-app .c-message.companion .c-bubble {
+  background: transparent;
+}
+
+.c-app .c-message.user .c-bubble {
+  padding: 9px 11px 6px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-panel-2);
+  color: var(--c-text);
+}
+
+.c-app .c-bubble-time {
+  display: inline;
+  color: var(--c-text-3);
+}
+
+.c-app .c-quote-attachment {
+  border-color: var(--c-line);
+  border-radius: 8px;
+  background: var(--c-panel);
+}
+
+.c-app .c-load-more {
+  border-radius: 8px;
+  background: var(--c-panel);
+}
+
+.c-app .c-prompt {
+  border-radius: 8px;
+  background: var(--c-panel);
+}
+
+.c-app .c-composer {
+  padding: 7px 7px 7px 12px;
+  border-color: var(--c-line);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.c-app .c-composer textarea {
+  font-size: 12px;
+}
+
+.c-app .c-send-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: var(--c-text);
+  border-radius: 50%;
+  background: var(--c-text);
+  color: var(--c-bg);
+}
+
+.c-app .c-send-btn .c-send-label {
+  display: none;
+}
+
+.c-app .c-send-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.c-app .c-send-btn:hover:not(:disabled) {
+  background: #2b2b27;
+}
+
+.c-app .c-send-btn:disabled {
+  border-color: var(--c-line);
+  background: var(--c-panel-3);
+  color: var(--c-text-3);
+}
+
+.c-app .c-context {
+  border-left-color: var(--c-line);
+  background: var(--c-bg-soft);
+}
+
+.c-app .c-context-head,
+.c-app .c-context-section,
+.c-app .c-context-section header {
+  border-color: var(--c-line);
+}
+
+.c-app .c-quote-card {
+  border-color: var(--c-line);
+  background: var(--c-panel);
+}
+
+.c-app .c-offline-banner {
+  border-bottom: 1px solid var(--c-line);
+  background: var(--c-panel-2);
+  color: var(--c-text-2);
+}
+
+.c-app .c-install-banner {
+  border-color: var(--c-line);
+  background: var(--c-panel);
+  box-shadow: 0 2px 8px rgba(15, 15, 17, 0.06);
+}
+
+.c-app .c-unread {
+  background: var(--c-text);
+  color: var(--c-bg);
+}
+
+.c-app .c-spark-area {
+  opacity: 0.08;
+}
+
 </style>

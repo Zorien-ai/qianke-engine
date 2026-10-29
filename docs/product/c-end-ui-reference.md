@@ -11,41 +11,43 @@ C 端入口从「企业工作台里的一个页面」改成独立的消费级应
 对话优先
 服务关系清楚
 交易状态可追溯
-中性、哑光、低饱和
+纸白、哑光、低饱和
 ```
 
 初始进入页是「小鱼」对话，而不是数据仪表盘。
 
-![C 端桌面端](../screenshots/c-app-desktop.png)
+![C 端桌面端](../screenshots/c-app-white-desktop.png)
 
-![C 端移动端](../screenshots/c-app-mobile.png)
+![C 端移动端](../screenshots/c-app-white-mobile.png)
 
 ## 2. 六条改造要求的落地
 
 | 要求 | 落地 |
 |---|---|
-| 背景与间距 | 背景 `#0F0F11`，卡片 `#161618`；8px 基准，主要间距 16/20/24/32 |
+| 背景与间距 | 背景 `#FFFFFF`，侧栏 / 上下文 `#FCFCFB`；8px 基准，主要间距 16/20/24/32 |
 | 去饱和 | 无紫蓝渐变、无外发光；强调色仅用于状态与图表 |
 | 品牌精简 | 左上角纯文字「千客」；无 AI/PRO 徽章 |
 | 数据可视化 | 1.5px 低饱和折线；网格透明度极低；无发光 |
 | 微文案 | 无感叹号、火焰、情绪符号；状态用中性描述 |
-| 材质层级 | 卡片与背景明度差极小；阴影模糊 ≤8px、透明度 ≤8%；圆角 8–12px |
+| 材质层级 | 纸白面板 + 1px 细线；阴影只用于浮层；圆角 8–12px |
 
 ## 3. 设计变量
 
 ```css
---c-bg:       #0f0f11;
---c-bg-soft:  #131315;
---c-panel:    #161618;
---c-panel-2:  #1b1b1e;
---c-panel-3:  #202023;
---c-line:     #29292d;
---c-text:     #e7e7e9;
---c-text-2:   #a3a3aa;
---c-text-3:   #707078;
---c-accent:   #8d96a3;
---c-positive: #7e9888;
---c-warning:  #a89a7c;
+--c-bg:       #ffffff;
+--c-bg-soft:  #fcfcfb;
+--c-panel:    #ffffff;
+--c-panel-2:  #f6f6f3;
+--c-panel-3:  #efefeb;
+--c-line:     #e4e4de;
+--c-line-soft:#efefeb;
+--c-text:     #171715;
+--c-text-2:   #5c5c56;
+--c-text-3:   #6b6b64;
+--c-accent:   #587376;
+--c-positive: #6f8f7a;
+--c-warning:  #7a6340;
+--c-negative: #8a4f4f;
 ```
 
 ## 4. 桌面端结构
@@ -56,7 +58,7 @@ C 端入口从「企业工作台里的一个页面」改成独立的消费级应
 右侧 304px：本期概览 / 图表 / 待确认报价 / 最近订单
 ```
 
-桌面端截图：`docs/screenshots/c-app-desktop.png`
+桌面端截图：`docs/screenshots/c-app-white-desktop.png`
 
 ## 5. 移动端结构
 
@@ -68,17 +70,15 @@ https://mobbin.com/apps/whats-app-ios-8738dbc9-e7a8-4fef-91e5-6afd1c9d092b
 
 ```text
 对话页：返回箭头 / 头像 / 名称 / 在线状态 / 右侧信息按钮
-消息：低饱和绿色发件气泡 + 深色收件气泡 + 气泡内时间
-输入：加号 / 胶囊输入框 / 圆形发送
+消息：浅灰纸面发件块 + 行式收件文本 + 气泡内时间
+输入：加号 / 细边框输入 / 圆形发送
 会话列表：顶部「消息」/ 搜索 / 头像 / 名称 / 预览 / 时间 / 未读
 底部：对话 / 商城 / 订单 / 概览
 ```
 
-保留 C 端自己的中性深色和低饱和规则，不直接复制 WhatsApp 的高饱和绿色。
+保留 C 端自己的纸白和低饱和规则，不直接复制 WhatsApp 的高饱和绿色。
 
-![移动端对话](F:/workspace/python/rag-demo/docs/screenshots/c-app-mobile-whatsapp.png)
-
-![移动端消息列表](F:/workspace/python/rag-demo/docs/screenshots/c-app-mobile-threads.png)
+![移动端对话](../screenshots/c-app-white-mobile.png)
 
 验证：
 
@@ -191,8 +191,8 @@ PWA 配置：
 display: standalone
 start_url: /v2/#/c/app
 scope: /v2/
-theme_color: #0f0f11
-background_color: #0f0f11
+theme_color: #ffffff
+background_color: #ffffff
 ```
 
 Service Worker 缓存：
