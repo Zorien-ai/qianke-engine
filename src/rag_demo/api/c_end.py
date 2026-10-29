@@ -4,8 +4,10 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
@@ -199,6 +201,38 @@ def c_end_admin_audit(
             "pending_quotes": status_counts.get("PENDING", 0),
         },
     }
+
+
+@router.get("/admin/audit/export")
+def c_end_admin_audit_export(
+    limit: int = 50,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> Response:
+    """C 端审计订单 CSV 导出（仅系统管理员）。
+
+    - 筛选参数与 `/api/c/admin/audit` 一致，前端可原样复用；
+    - 导出内容为已确认订单，因此 `status`（报价状态）只按审计页语义校验，不参与订单行过滤；
+    - CSV 带 UTF-8 BOM，Excel 打开中文不乱码；路由是精确匹配，不与 `/quotes/{quote_id}` 冲突。
+    """
+    _require_admin()
+    if status and status.upper() not in {"PENDING", "CONSUMED", "CANCELLED"}:
+        raise HTTPException(status_code=400, detail="报价状态不合法")
+    csv_text = store.export_audit_orders_csv(
+        limit=limit,
+        buyer_id=buyer_id,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    filename = f"c_end_audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        content=csv_text.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/quotes/{quote_id}")

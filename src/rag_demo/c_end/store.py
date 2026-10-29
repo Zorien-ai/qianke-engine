@@ -8,7 +8,9 @@
 """
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import os
 import secrets
@@ -703,6 +705,75 @@ def list_all_quotes(
         return result
     finally:
         conn.close()
+
+
+AUDIT_ORDER_CSV_FIELDS = (
+    "order_id",
+    "buyer_id",
+    "total_amount",
+    "original_amount",
+    "discount_amount",
+    "quote_id",
+    "policy_ids",
+    "confirmed_at",
+)
+
+_CSV_BOM = "\ufeff"
+
+
+def _csv_money(value: Any) -> str:
+    """金额统一两位小数；空值按 0 处理，避免 Excel 里出现 269.0 这种列格式不一致。"""
+    try:
+        return f"{float(value or 0):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def export_audit_orders_csv(
+    limit: int = 50,
+    *,
+    buyer_id: str | None = None,
+    status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> str:
+    """管理端 C 端审计订单 CSV（文本，首字符是 UTF-8 BOM）。
+
+    与 `/api/c/admin/audit` 保持同一筛选口径：
+    - `buyer_id / date_from / date_to / limit` 直接复用 `list_all_orders`，
+      保证导出的订单行与审计页列表完全一致（同样的排序和截断）；
+    - `status` 是审计页的**报价状态**筛选项，订单行本身没有该字段，
+      因此它不改变导出的订单行；保留参数只为让导出接口能原样透传审计页筛选条件。
+
+    Returns:
+        str: 带 BOM 的 CSV 文本（RFC 4180 换行），调用方按 UTF-8 编码后作为附件下发。
+    """
+    # status 只影响报价表，订单 CSV 没有报价状态列，这里显式消费掉参数以表达“已接受但不参与订单筛选”。
+    _ = status
+    orders = list_all_orders(
+        limit=limit,
+        buyer_id=buyer_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    buffer = io.StringIO()
+    buffer.write(_CSV_BOM)
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    writer.writerow(AUDIT_ORDER_CSV_FIELDS)
+    for order in orders:
+        writer.writerow(
+            [
+                order.get("order_id") or "",
+                order.get("buyer_id") or "",
+                _csv_money(order.get("total_amount")),
+                _csv_money(order.get("original_amount")),
+                _csv_money(order.get("discount_amount")),
+                order.get("quote_id") or "",
+                ";".join(str(policy) for policy in order.get("policy_ids") or []),
+                order.get("confirmed_at") or "",
+            ]
+        )
+    return buffer.getvalue()
 
 
 def _companion_payload(row: sqlite3.Row) -> dict[str, Any]:

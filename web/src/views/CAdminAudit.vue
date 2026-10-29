@@ -1,12 +1,13 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import { getJson } from "../api";
-import { toastError } from "../store";
+import { apiFetch, ApiError, detailMessage, getJson, readBody } from "../api";
+import { toast, toastError } from "../store";
 
 const orders = ref([]);
 const quotes = ref([]);
 const summary = ref({});
 const loading = ref(true);
+const exporting = ref(false);
 const error = ref("");
 const buyerId = ref("");
 const quoteStatus = ref("");
@@ -29,16 +30,21 @@ function productLabel(product) {
 const pendingQuotes = computed(() => summary.value.pending_quotes || 0);
 const quoteStatusCounts = computed(() => summary.value.quote_status || {});
 
+// 列表与 CSV 导出共用同一套筛选参数拼装，避免两处逻辑分叉导致参数不一致。
+function filterParams() {
+  const params = new URLSearchParams({ limit: "50" });
+  if (buyerId.value.trim()) params.set("buyer_id", buyerId.value.trim());
+  if (quoteStatus.value) params.set("status", quoteStatus.value);
+  if (dateFrom.value) params.set("date_from", dateFrom.value);
+  if (dateTo.value) params.set("date_to", dateTo.value);
+  return params;
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const params = new URLSearchParams({ limit: "50" });
-    if (buyerId.value.trim()) params.set("buyer_id", buyerId.value.trim());
-    if (quoteStatus.value) params.set("status", quoteStatus.value);
-    if (dateFrom.value) params.set("date_from", dateFrom.value);
-    if (dateTo.value) params.set("date_to", dateTo.value);
-    const data = await getJson(`/api/c/admin/audit?${params.toString()}`);
+    const data = await getJson(`/api/c/admin/audit?${filterParams().toString()}`);
     orders.value = data?.orders || [];
     quotes.value = data?.quotes || [];
     summary.value = data?.summary || {};
@@ -47,6 +53,42 @@ async function load() {
     toastError?.(e);
   } finally {
     loading.value = false;
+  }
+}
+
+function attachmentFilename(disposition) {
+  const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition || "");
+  if (!match) return "";
+  const raw = match[1] ? decodeURIComponent(match[1]) : match[2];
+  return (raw || "").trim();
+}
+
+// 下载必须带会话 Cookie：apiFetch 内部固定 credentials: "same-origin"（HttpOnly Cookie 会话）。
+async function exportCsv() {
+  if (exporting.value) return;
+  exporting.value = true;
+  try {
+    const res = await apiFetch(`/api/c/admin/audit/export?${filterParams().toString()}`);
+    if (!res.ok) {
+      const data = await readBody(res);
+      throw new ApiError(res.status, detailMessage(data, res.status), data);
+    }
+    const blob = await res.blob();
+    const filename = attachmentFilename(res.headers.get("Content-Disposition")) || "c_end_audit.csv";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    toast("已导出当前筛选条件下的订单 CSV", "success");
+  } catch (e) {
+    // 导出失败只提示，不覆盖页面已有的审计数据。
+    toast(e?.detail || e?.message || "CSV 导出失败，请稍后重试", "error", 5000);
+  } finally {
+    exporting.value = false;
   }
 }
 
@@ -74,7 +116,15 @@ onMounted(load);
           查看聊天报价、订单和活动政策的绑定关系；只读，不提供改价或改单入口。
         </p>
       </div>
-      <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">刷新</button>
+      <div class="audit-hero-actions">
+        <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">刷新</button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          :disabled="exporting || loading"
+          @click="exportCsv"
+        >{{ exporting ? "导出中…" : "导出 CSV" }}</button>
+      </div>
     </div>
 
     <section class="audit-filters" aria-label="审计筛选">
@@ -228,6 +278,12 @@ onMounted(load);
 </template>
 
 <style scoped>
+.audit-hero-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 .audit-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -1,6 +1,8 @@
 """C 端 mock 商品/模拟订单存储测试。"""
 from __future__ import annotations
 
+import csv
+import io
 import sqlite3
 
 import pytest
@@ -287,4 +289,125 @@ def test_admin_audit_lists_cross_buyer_orders_and_quotes(c_store):
 
     pending = c_store.list_all_quotes(status="PENDING")
     assert [quote["quote_id"] for quote in pending] == ["quote_admin_2"]
+
+
+AUDIT_CSV_HEADER = [
+    "order_id",
+    "buyer_id",
+    "total_amount",
+    "original_amount",
+    "discount_amount",
+    "quote_id",
+    "policy_ids",
+    "confirmed_at",
+]
+
+
+def _parse_audit_csv(csv_text: str) -> tuple[list[str], list[list[str]]]:
+    """CSV 必须是带 BOM 的 UTF-8，解析时先去掉 BOM 才能读到正确表头。"""
+    assert csv_text.startswith("\ufeff")
+    assert csv_text.encode("utf-8").startswith(b"\xef\xbb\xbf")
+    rows = list(csv.reader(io.StringIO(csv_text.lstrip("\ufeff"))))
+    return rows[0], rows[1:]
+
+
+def _set_confirmed_at(c_store, order_id: str, value: str) -> None:
+    conn = sqlite3.connect(str(c_store._db_path()))
+    try:
+        conn.execute("UPDATE c_order SET confirmed_at = ? WHERE order_id = ?", (value, order_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_audit_csv_export_reuses_audit_filters(c_store):
+    """导出复用审计筛选：订单行、顺序、截断与 list_all_orders 完全一致。"""
+    c_store.create_quote(
+        "buyer_1",
+        "store_demo",
+        {
+            "quote_id": "quote_export_1",
+            "product_refs": [{"product_id": "P001", "quantity": 1}],
+            "policy_refs": [
+                {"policy_id": "platform_full_reduce", "title": "满减活动"},
+                {"policy_id": "vip_free_shipping", "title": "会员包邮"},
+            ],
+        },
+    )
+    quote_draft = c_store.prepare_order("buyer_1", [], quote_id="quote_export_1")
+    first = c_store.confirm_order(
+        "buyer_1",
+        quote_draft["order_id"],
+        quote_draft["confirmation_token"],
+        request_id="req_export_1",
+    )
+
+    second_draft = c_store.prepare_order("buyer_2", [{"product_id": "P002", "quantity": 1}])
+    second = c_store.confirm_order(
+        "buyer_2",
+        second_draft["order_id"],
+        second_draft["confirmation_token"],
+        request_id="req_export_2",
+    )
+    # 固定确认时间，让日期筛选可以确定性断言（下单时间默认是 now）。
+    _set_confirmed_at(c_store, first["order_id"], "2026-10-29T10:00:00+00:00")
+    _set_confirmed_at(c_store, second["order_id"], "2026-10-28T09:30:00+00:00")
+
+    header, rows = _parse_audit_csv(c_store.export_audit_orders_csv(limit=50))
+    assert header == AUDIT_CSV_HEADER
+    assert header == list(c_store.AUDIT_ORDER_CSV_FIELDS)
+
+    all_orders = c_store.list_all_orders(limit=50)
+    assert len(rows) == len(all_orders) == 2
+    assert [row[0] for row in rows] == [order["order_id"] for order in all_orders]
+    assert [row[7] for row in rows] == [order["confirmed_at"] for order in all_orders]
+
+    # 每列的值与订单列表一致；policy_ids 用 ; 连接，quote_id 保留审计链。
+    first_row = rows[0]
+    assert first_row[1] == "buyer_1"
+    assert first_row[2] == "269.00"
+    assert first_row[3] == "299.00"
+    assert first_row[4] == "30.00"
+    assert first_row[5] == "quote_export_1"
+    assert first_row[6] == "platform_full_reduce;vip_free_shipping"
+    assert rows[1][1:7] == ["buyer_2", "199.00", "199.00", "0.00", "", ""]
+
+    # 草稿不进入导出（与审计列表同口径：只导已确认订单）。
+    c_store.prepare_order("buyer_2", [{"product_id": "P003", "quantity": 1}])
+    _, rows_after_draft = _parse_audit_csv(c_store.export_audit_orders_csv(limit=50))
+    assert len(rows_after_draft) == 2
+
+    # buyer_id 筛选
+    _, buyer_rows = _parse_audit_csv(c_store.export_audit_orders_csv(limit=50, buyer_id="buyer_1"))
+    buyer_orders = c_store.list_all_orders(limit=50, buyer_id="buyer_1")
+    assert [row[0] for row in buyer_rows] == [order["order_id"] for order in buyer_orders]
+    assert len(buyer_rows) == 1
+
+    # 自然日范围筛选（date_to 含当天 23:59:59）
+    _, day_rows = _parse_audit_csv(
+        c_store.export_audit_orders_csv(limit=50, date_from="2026-10-29", date_to="2026-10-29")
+    )
+    assert [row[0] for row in day_rows] == [first["order_id"]]
+    day_orders = c_store.list_all_orders(
+        limit=50, date_from="2026-10-29", date_to="2026-10-29"
+    )
+    assert [row[0] for row in day_rows] == [order["order_id"] for order in day_orders]
+
+    # limit 生效且与列表同序
+    _, limited_rows = _parse_audit_csv(c_store.export_audit_orders_csv(limit=1))
+    assert [row[0] for row in limited_rows] == [
+        order["order_id"] for order in c_store.list_all_orders(limit=1)
+    ]
+    assert len(limited_rows) == 1
+
+    # status 是报价状态筛选：订单 CSV 无该列，行数与列表保持一致（不丢订单）。
+    _, status_rows = _parse_audit_csv(c_store.export_audit_orders_csv(limit=50, status="PENDING"))
+    assert len(status_rows) == 2
+
+
+def test_audit_csv_export_empty_result_keeps_header(c_store):
+    """无数据时仍返回表头，CSV 行数 = 1。"""
+    header, rows = _parse_audit_csv(c_store.export_audit_orders_csv(buyer_id="buyer_404"))
+    assert header == AUDIT_CSV_HEADER
+    assert rows == []
 
