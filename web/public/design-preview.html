@@ -328,9 +328,9 @@
       align-self: flex-end;
       max-width: 68%;
       padding: 10px 12px;
-      border: 1px solid var(--paper-200);
+      border: 1px solid var(--ink-950);
       border-radius: 10px;
-      background: var(--paper-50);
+      background: var(--ink-950);
     }
     .w-message-body { min-width: 0; }
     .w-message-body p {
@@ -339,7 +339,9 @@
       font-size: 12px;
       line-height: 1.75;
     }
-    .w-message.self .w-message-body p { font-size: 11px; }
+    .w-message.self .w-message-body p { font-size: 11px; color: var(--paper-0); }
+    .w-message.self .w-message-meta,
+    .w-message.self .w-message-meta time { color: var(--ink-300); }
     .w-message-meta {
       display: flex;
       align-items: baseline;

@@ -130,6 +130,18 @@ const filteredThreads = computed(() => {
 });
 const isCompanion = computed(() => activeId.value === "companion");
 const planLabel = computed(() => `L${companion.value.level || 4}`);
+
+function messageAuthor(role) {
+  if (role === "user") return "我";
+  if (role === "companion") return companion.value.name;
+  if (role === "merchant") return activeThread.value.name;
+  return "系统";
+}
+
+function messageAvatarLabel(role) {
+  const name = messageAuthor(role);
+  return name.slice(0, 1) || "系";
+}
 const statusText = computed(() => {
   if (activeThread.value.kind === "companion") return "在线";
   if (activeThread.value.kind === "merchant") {
@@ -797,21 +809,28 @@ onBeforeUnmount(() => {
               class="c-message"
               :class="[message.role]"
             >
-              <div class="c-message-meta">
-                <span>{{ message.role === "user" ? "我" : message.role === "companion" ? companion.name : message.role === "merchant" ? activeThread.name : "系统" }}</span>
-                <time>{{ message.time }}</time>
-              </div>
-              <p class="c-bubble">
-                {{ message.text }}
-                <time class="c-bubble-time">{{ message.time }}</time>
-              </p>
-              <div v-if="message.quote" class="c-quote-attachment">
-                <span class="c-quote-label">报价引用</span>
-                <div class="c-quote-row">
-                  <strong>{{ message.quote.product }}</strong>
-                  <span>¥{{ message.quote.price }}</span>
+              <span
+                class="c-msg-avatar"
+                :class="message.role"
+                aria-hidden="true"
+              >{{ messageAvatarLabel(message.role) }}</span>
+              <div class="c-message-content">
+                <div class="c-message-meta">
+                  <span>{{ messageAuthor(message.role) }}</span>
+                  <time>{{ message.time }}</time>
                 </div>
-                <span class="c-quote-policy">{{ message.quote.policy }} · 以结算页为准</span>
+                <p class="c-bubble">
+                  {{ message.text }}
+                  <time class="c-bubble-time">{{ message.time }}</time>
+                </p>
+                <div v-if="message.quote" class="c-quote-attachment">
+                  <span class="c-quote-label">报价引用</span>
+                  <div class="c-quote-row">
+                    <strong>{{ message.quote.product }}</strong>
+                    <span>¥{{ message.quote.price }}</span>
+                  </div>
+                  <span class="c-quote-policy">{{ message.quote.policy }} · 以结算页为准</span>
+                </div>
               </div>
             </article>
             <div v-if="typing" class="c-typing" role="status">
@@ -2671,11 +2690,53 @@ onBeforeUnmount(() => {
 }
 
 .c-app .c-message {
-  gap: 4px;
+  display: flex;
+  max-width: 84%;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .c-app .c-message.user {
-  max-width: 70%;
+  max-width: 78%;
+  flex-direction: row-reverse;
+  align-items: flex-start;
+}
+
+.c-app .c-message-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.c-app .c-message.user .c-message-content {
+  align-items: flex-end;
+}
+
+.c-app .c-msg-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid var(--c-line);
+  border-radius: 50%;
+  background: var(--c-panel-2);
+  color: var(--c-text-2);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.c-app .c-msg-avatar.user {
+  border-color: var(--c-line);
+  background: var(--c-panel);
+  color: var(--c-text);
+}
+
+.c-app .c-msg-avatar.merchant {
+  border-radius: 8px;
 }
 
 .c-app .c-message-meta {
@@ -2704,10 +2765,14 @@ onBeforeUnmount(() => {
 
 .c-app .c-message.user .c-bubble {
   padding: 9px 11px 6px;
-  border: 1px solid var(--c-line);
+  border: 1px solid var(--c-text);
   border-radius: 10px;
-  background: var(--c-panel-2);
-  color: var(--c-text);
+  background: var(--c-text);
+  color: var(--c-bg);
+}
+
+.c-app .c-message.user .c-bubble-time {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .c-app .c-bubble-time {
@@ -2808,6 +2873,42 @@ onBeforeUnmount(() => {
 
 .c-app .c-spark-area {
   opacity: 0.08;
+}
+
+/* 移动端对话：更紧凑的头部、更清晰的发件块 */
+@media (max-width: 760px) {
+  .c-app .c-message {
+    max-width: 88%;
+  }
+
+  .c-app .c-message.user {
+    max-width: 84%;
+  }
+
+  .c-app .c-msg-avatar {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
+  }
+
+  .c-app .c-back-btn {
+    width: 36px;
+    height: 36px;
+    margin-left: -8px;
+    border-radius: 8px;
+  }
+
+  .c-app .c-chat-head {
+    padding: calc(10px + env(safe-area-inset-top)) 0 12px;
+  }
+
+  .c-app .c-chat {
+    padding-bottom: 16px;
+  }
+
+  .c-app .c-prompt-row {
+    padding-top: 6px;
+  }
 }
 
 </style>
