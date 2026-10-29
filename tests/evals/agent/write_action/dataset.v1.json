@@ -1,0 +1,513 @@
+{
+  "version": "agent-write-action-eval-v1",
+  "suite": "write_action",
+  "title": "B 端受控写 Eval：prepare_followup_task + HITL 确认",
+  "description": "确定性评测受控写 Tool 的意图门槛、DRAFT 生成、HITL 确认/取消、角色权限与写入隔离；脚本化 LLM 轨迹，不调用真实模型与网络。",
+  "status": "deterministic",
+  "baseline": "not_required",
+  "dataset": "test",
+  "llm": "scripted",
+  "network": "none",
+  "related_doc": "docs/agent-write-action-eval.md",
+  "contract_doc": "docs/agent-write-action.md",
+  "tool": "prepare_followup_task",
+  "action_type": "followup_task",
+  "intent_rule": "runner.has_explicit_write_intent：用户消息出现「创建任务 / 安排跟进 / 记录成待办」等显式写意图标记才算明确要求，否则不应生成 DRAFT",
+  "determinism": {
+    "llm": "ScriptedLLM 返回固定 AIMessage 轨迹，不接真实模型",
+    "storage": "每个 case 使用独立 SQLite：QIANKE_AGENT_ACTION_DB + 重置 actions._DB_PATH",
+    "network": "none",
+    "clock": "断言不依赖时间；created_at 只做非空/格式契约"
+  },
+  "accounts": {
+    "analyst": {"id": "201", "role": "analyst", "status": "active"},
+    "ops": {"id": "202", "role": "ops", "status": "active"},
+    "exec": {"id": "203", "role": "exec", "status": "active"},
+    "ent_admin": {"id": "204", "role": "analyst", "status": "active", "is_enterprise_admin": true},
+    "admin": {"id": "205", "role": "analyst", "status": "active", "is_system_admin": true},
+    "cs": {"id": "301", "role": "cs", "status": "active"},
+    "guest": {"id": "401", "role": "guest", "status": "active"},
+    "demo": {"id": "901", "role": "analyst", "status": "active", "is_demo": true}
+  },
+  "cases": [
+    {
+      "id": "wa_no_intent_01",
+      "category": "no_write_intent",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_no_intent_01",
+        "query": "统计沉默客有多少人",
+        "script": [
+          {"tool_calls": [{"name": "calculator", "args": {"expression": "2383 + 5727"}}]}
+        ],
+        "final_answer": "沉默客 2383 人，全量 8110 人。"
+      },
+      "expect": {
+        "query_has_explicit_write_intent": false,
+        "status": "COMPLETED",
+        "llm_invocations": 2,
+        "write_tool_requests": 0,
+        "write_tool_results": 0,
+        "followup_drafts": 0
+      }
+    },
+    {
+      "id": "wa_no_intent_02",
+      "category": "no_write_intent",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_no_intent_02",
+        "query": "沉默客占全量用户的比例是多少",
+        "script": [
+          {"tool_calls": [{"name": "calculator", "args": {"expression": "2383 / 8110 * 100"}}]}
+        ],
+        "final_answer": "沉默客占比 29.38%。"
+      },
+      "expect": {
+        "query_has_explicit_write_intent": false,
+        "status": "COMPLETED",
+        "llm_invocations": 2,
+        "write_tool_requests": 0,
+        "write_tool_results": 0,
+        "followup_drafts": 0
+      }
+    },
+    {
+      "id": "wa_no_intent_03",
+      "category": "no_write_intent",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "ops",
+        "dataset": "test",
+        "request_id": "req_wa_no_intent_03",
+        "query": "最近 30 天流失用户的画像特征是什么",
+        "script": [
+          {"tool_calls": [{"name": "calculator", "args": {"expression": "1 + 1"}}]}
+        ],
+        "final_answer": "流失用户以低活跃、低客单为主。"
+      },
+      "expect": {
+        "query_has_explicit_write_intent": false,
+        "status": "COMPLETED",
+        "llm_invocations": 2,
+        "write_tool_requests": 0,
+        "write_tool_results": 0,
+        "followup_drafts": 0
+      }
+    },
+    {
+      "id": "wa_no_intent_04",
+      "category": "no_write_intent",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_no_intent_04",
+        "query": "分析优惠券核销率下降的原因",
+        "script": [],
+        "final_answer": "核销率下降主要出现在 10 月下旬，且集中在低客单人群。"
+      },
+      "expect": {
+        "query_has_explicit_write_intent": false,
+        "status": "COMPLETED",
+        "llm_invocations": 1,
+        "write_tool_requests": 0,
+        "write_tool_results": 0,
+        "followup_drafts": 0
+      }
+    },
+    {
+      "id": "wa_explicit_01",
+      "category": "explicit_write_intent",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_explicit_01",
+        "query": "把召回沉默客安排成跟进任务，负责人运营一组，优先级 high",
+        "script": [
+          {
+            "tool_calls": [
+              {
+                "name": "prepare_followup_task",
+                "args": {
+                  "title": "召回沉默客",
+                  "description": "基于沉默客分群结果安排运营触达",
+                  "owner": "运营一组",
+                  "priority": "high",
+                  "due_date": "2026-11-05"
+                }
+              }
+            ]
+          }
+        ],
+        "final_answer": "已生成待确认任务，确认后才会写入。"
+      },
+      "expect": {
+        "query_has_explicit_write_intent": true,
+        "status": "COMPLETED",
+        "llm_invocations": 2,
+        "write_tool_requests": 1,
+        "write_tool_results": 1,
+        "tool_results_ok": true,
+        "requires_confirmation": true,
+        "followup_drafts": 1,
+        "draft_status": "DRAFT",
+        "draft_fields": {
+          "action_type": "followup_task",
+          "title": "召回沉默客",
+          "description": "基于沉默客分群结果安排运营触达",
+          "owner": "运营一组",
+          "priority": "high",
+          "due_date": "2026-11-05",
+          "status": "DRAFT"
+        },
+        "scope_binding": true,
+        "final_contains": ["待确认"]
+      }
+    },
+    {
+      "id": "wa_explicit_02",
+      "category": "explicit_write_intent",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "ops",
+        "dataset": "test",
+        "request_id": "req_wa_explicit_02",
+        "query": "给沉睡用户召回创建一条任务",
+        "script": [
+          {
+            "tool_calls": [
+              {"name": "prepare_followup_task", "args": {"title": "沉睡用户召回"}}
+            ]
+          }
+        ],
+        "final_answer": "已生成待确认任务，确认后才会写入。"
+      },
+      "expect": {
+        "query_has_explicit_write_intent": true,
+        "status": "COMPLETED",
+        "llm_invocations": 2,
+        "write_tool_requests": 1,
+        "write_tool_results": 1,
+        "tool_results_ok": true,
+        "requires_confirmation": true,
+        "followup_drafts": 1,
+        "draft_status": "DRAFT",
+        "draft_fields": {
+          "action_type": "followup_task",
+          "owner": "",
+          "priority": "normal",
+          "due_date": "",
+          "status": "DRAFT"
+        },
+        "scope_binding": true
+      }
+    },
+    {
+      "id": "wa_explicit_03",
+      "category": "explicit_write_intent",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "exec",
+        "dataset": "test",
+        "request_id": "req_wa_explicit_03",
+        "query": "这个结论记录成待办，请创建任务跟进",
+        "script": [
+          {
+            "tool_calls": [
+              {
+                "name": "prepare_followup_task",
+                "args": {
+                  "title": "沉默客召回复盘",
+                  "description": "复盘召回效果并输出下次触达计划",
+                  "priority": "low"
+                }
+              }
+            ]
+          }
+        ],
+        "final_answer": "已生成待确认任务，确认后才会写入。"
+      },
+      "expect": {
+        "query_has_explicit_write_intent": true,
+        "status": "COMPLETED",
+        "llm_invocations": 2,
+        "write_tool_requests": 1,
+        "write_tool_results": 1,
+        "tool_results_ok": true,
+        "requires_confirmation": true,
+        "followup_drafts": 1,
+        "draft_status": "DRAFT",
+        "draft_fields": {"priority": "low", "status": "DRAFT"},
+        "scope_binding": true
+      }
+    },
+    {
+      "id": "wa_hitl_confirm_01",
+      "category": "hitl_confirm",
+      "scenario": "hitl",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_hitl_confirm_01",
+        "title": "确认流失用户回访",
+        "description": "用户确认后落正式任务",
+        "owner": "运营二组",
+        "priority": "normal",
+        "steps": [{"action": "confirm", "account": "analyst"}]
+      },
+      "expect": {
+        "steps": [{"error": null, "status": "CONFIRMED"}],
+        "final_status": "CONFIRMED",
+        "final_confirmed_by": "201",
+        "final_confirmed_at_null": false
+      }
+    },
+    {
+      "id": "wa_hitl_duplicate_confirm_01",
+      "category": "hitl_duplicate_confirm",
+      "scenario": "hitl",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_hitl_duplicate_confirm_01",
+        "title": "重复确认必须被拒绝",
+        "description": "同一 DRAFT 只能确认一次",
+        "owner": "运营二组",
+        "priority": "normal",
+        "steps": [
+          {"action": "confirm", "account": "analyst"},
+          {"action": "confirm", "account": "analyst"}
+        ]
+      },
+      "expect": {
+        "steps": [
+          {"error": null, "status": "CONFIRMED"},
+          {"error": "ACTION_NOT_DRAFT"}
+        ],
+        "final_status": "CONFIRMED",
+        "final_confirmed_by": "201",
+        "final_confirmed_at_null": false
+      }
+    },
+    {
+      "id": "wa_hitl_cross_account_01",
+      "category": "hitl_cross_account",
+      "scenario": "hitl",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_hitl_cross_account_01",
+        "title": "跨账号不能确认",
+        "description": "ops 不能确认 analyst 的草稿",
+        "owner": "运营二组",
+        "priority": "normal",
+        "steps": [{"action": "confirm", "account": "ops"}]
+      },
+      "expect": {
+        "steps": [{"error": "ACTION_FORBIDDEN"}],
+        "final_status": "DRAFT",
+        "final_confirmed_by": null,
+        "final_confirmed_at_null": true
+      }
+    },
+    {
+      "id": "wa_hitl_cross_account_cancel_01",
+      "category": "hitl_cross_account",
+      "scenario": "hitl",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_hitl_cross_account_cancel_01",
+        "title": "跨账号不能取消",
+        "description": "ops 不能取消 analyst 的草稿",
+        "owner": "运营二组",
+        "priority": "normal",
+        "steps": [{"action": "cancel", "account": "ops"}]
+      },
+      "expect": {
+        "steps": [{"error": "ACTION_FORBIDDEN"}],
+        "final_status": "DRAFT",
+        "final_confirmed_by": null,
+        "final_confirmed_at_null": true
+      }
+    },
+    {
+      "id": "wa_hitl_cancel_01",
+      "category": "hitl_cancel",
+      "scenario": "hitl",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_hitl_cancel_01",
+        "title": "本人取消草稿",
+        "description": "取消后不应产生正式任务",
+        "owner": "运营二组",
+        "priority": "low",
+        "steps": [{"action": "cancel", "account": "analyst"}]
+      },
+      "expect": {
+        "steps": [{"error": null, "status": "CANCELLED"}],
+        "final_status": "CANCELLED",
+        "final_confirmed_by": null,
+        "final_confirmed_at_null": true
+      }
+    },
+    {
+      "id": "wa_perm_analytics_roles_01",
+      "category": "permission_allowed_roles",
+      "scenario": "permission",
+      "params": {
+        "accounts": ["analyst", "ops", "exec", "ent_admin", "admin"],
+        "dataset": "test",
+        "request_id": "req_wa_perm_roles"
+      },
+      "expect": {
+        "write_tool_visible": true,
+        "authorized": true,
+        "agent_can_start": true
+      }
+    },
+    {
+      "id": "wa_perm_cs_01",
+      "category": "permission_cs",
+      "scenario": "permission",
+      "params": {
+        "accounts": ["cs"],
+        "dataset": "test",
+        "request_id": "req_wa_perm_cs"
+      },
+      "expect": {
+        "write_tool_visible": false,
+        "authorized": false,
+        "agent_can_start": true
+      }
+    },
+    {
+      "id": "wa_perm_cs_rogue_01",
+      "category": "permission_cs",
+      "scenario": "agent_trajectory",
+      "params": {
+        "account": "cs",
+        "dataset": "test",
+        "request_id": "req_wa_perm_cs_rogue_01",
+        "query": "把召回沉默客安排成跟进任务",
+        "script": [
+          {
+            "tool_calls": [
+              {"name": "prepare_followup_task", "args": {"title": "越权任务"}}
+            ]
+          }
+        ],
+        "final_answer": ""
+      },
+      "expect": {
+        "query_has_explicit_write_intent": true,
+        "status": "TOOL_NOT_ALLOWED",
+        "llm_invocations": 1,
+        "write_tool_requests": 0,
+        "write_tool_results": 0,
+        "followup_drafts": 0,
+        "final_contains": ["未授权"]
+      }
+    },
+    {
+      "id": "wa_perm_guest_01",
+      "category": "permission_guest",
+      "scenario": "permission",
+      "params": {
+        "accounts": ["guest"],
+        "dataset": "test",
+        "request_id": "req_wa_perm_guest"
+      },
+      "expect": {
+        "write_tool_visible": false,
+        "authorized": false,
+        "agent_can_start": false
+      }
+    },
+    {
+      "id": "wa_perm_demo_01",
+      "category": "permission_demo",
+      "scenario": "permission",
+      "params": {
+        "accounts": ["demo"],
+        "dataset": "test",
+        "request_id": "req_wa_perm_demo"
+      },
+      "expect": {
+        "write_tool_visible": false,
+        "authorized": false,
+        "agent_can_start": false,
+        "execution_error": "DEMO_READ_ONLY"
+      }
+    },
+    {
+      "id": "wa_isolation_01",
+      "category": "write_isolation",
+      "scenario": "isolation",
+      "params": {
+        "account": "analyst",
+        "dataset": "test",
+        "request_id": "req_wa_isolation_01",
+        "query": "把召回沉默客安排成跟进任务",
+        "business_tables": ["orders", "customers", "coupon_grants"],
+        "script": [
+          {
+            "tool_calls": [
+              {
+                "name": "prepare_followup_task",
+                "args": {
+                  "title": "写入隔离校验任务",
+                  "description": "只应写 agent_action",
+                  "owner": "运营三组",
+                  "priority": "high"
+                }
+              }
+            ]
+          }
+        ],
+        "final_answer": "已生成待确认任务，确认后才会写入。"
+      },
+      "expect": {
+        "business_tables": ["orders", "customers", "coupon_grants"],
+        "action_db_tables": ["agent_action"],
+        "action_rows": 1,
+        "final_status": "CONFIRMED"
+      }
+    }
+  ],
+  "coverage": {
+    "no_draft_without_intent": [
+      "wa_no_intent_01",
+      "wa_no_intent_02",
+      "wa_no_intent_03",
+      "wa_no_intent_04"
+    ],
+    "draft_with_explicit_intent": [
+      "wa_explicit_01",
+      "wa_explicit_02",
+      "wa_explicit_03"
+    ],
+    "draft_to_confirmed": ["wa_hitl_confirm_01"],
+    "permission_demo_cs_guest": [
+      "wa_perm_cs_01",
+      "wa_perm_cs_rogue_01",
+      "wa_perm_guest_01",
+      "wa_perm_demo_01"
+    ],
+    "cross_account_confirm_denied": [
+      "wa_hitl_cross_account_01",
+      "wa_hitl_cross_account_cancel_01"
+    ],
+    "duplicate_confirm_denied": ["wa_hitl_duplicate_confirm_01"],
+    "only_agent_action_table_written": ["wa_isolation_01"],
+    "hitl_cancel": ["wa_hitl_cancel_01"],
+    "permission_allowed_roles": ["wa_perm_analytics_roles_01"]
+  }
+}
