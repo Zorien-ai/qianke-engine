@@ -93,7 +93,10 @@ const search = ref("");
 const showContext = ref(false);
 const showThreads = ref(false);
 const storeSocketState = ref("offline");
+const storeSocketAttempts = ref(0);
 let storeSocket = null;
+let storeReconnectTimer = null;
+let storeManualClose = false;
 const companion = ref({
   name: "小鱼",
   level: 4,
@@ -121,9 +124,17 @@ const isCompanion = computed(() => activeId.value === "companion");
 const planLabel = computed(() => `L${companion.value.level || 4}`);
 const statusText = computed(() => {
   if (activeThread.value.kind === "companion") return "在线";
-  if (activeThread.value.kind === "merchant") return "店宠在线";
+  if (activeThread.value.kind === "merchant") {
+    if (storeSocketState.value === "online") return "店宠在线";
+    if (storeSocketState.value === "reconnecting") return "正在重连";
+    if (storeSocketState.value === "connecting") return "连接中";
+    return "连接已断开";
+  }
   return "好友";
 });
+const threadDotClass = computed(() =>
+  activeThread.value.kind === "merchant" && storeSocketState.value !== "online" ? "connecting" : "online"
+);
 const pendingCount = computed(() => {
   if (liveDraft.value || storeQuote.value) return 1;
   if (liveOrder.value) return 0;
@@ -214,12 +225,69 @@ async function loadStoreMessages() {
 }
 
 function closeStoreSocket() {
+  storeManualClose = true;
+  if (storeReconnectTimer) {
+    clearTimeout(storeReconnectTimer);
+    storeReconnectTimer = null;
+  }
   if (storeSocket) {
     storeSocket.onclose = null;
     storeSocket.close();
     storeSocket = null;
   }
   storeSocketState.value = "offline";
+}
+
+function scheduleStoreReconnect() {
+  if (activeId.value !== "store_demo") return;
+  if (storeSocketAttempts.value >= 5) {
+    storeSocketState.value = "offline";
+    return;
+  }
+  storeSocketAttempts.value += 1;
+  storeSocketState.value = "reconnecting";
+  const delay = Math.min(1000 * 2 ** (storeSocketAttempts.value - 1), 8000);
+  storeReconnectTimer = setTimeout(() => {
+    storeReconnectTimer = null;
+    openStoreSocket(true);
+  }, delay);
+}
+
+function openStoreSocket(isReconnect = false) {
+  if (storeReconnectTimer) {
+    clearTimeout(storeReconnectTimer);
+    storeReconnectTimer = null;
+  }
+  if (storeSocket) {
+    storeSocket.onclose = null;
+    storeSocket.close();
+    storeSocket = null;
+  }
+  storeManualClose = false;
+  if (!isReconnect) storeSocketAttempts.value = 0;
+  try {
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    storeSocket = new WebSocket(`${scheme}://${window.location.host}/api/c/ws/chat/store_demo`);
+  } catch {
+    storeSocketState.value = "fallback";
+    scheduleStoreReconnect();
+    return;
+  }
+  storeSocketState.value = "connecting";
+  storeSocket.onopen = () => {
+    storeSocketAttempts.value = 0;
+    storeSocketState.value = "online";
+  };
+  storeSocket.onmessage = handleStoreSocket;
+  storeSocket.onerror = () => {
+    storeSocketState.value = "reconnecting";
+    if (storeSocket) storeSocket.close();
+  };
+  storeSocket.onclose = () => {
+    storeSocket = null;
+    if (storeManualClose) return;
+    scheduleStoreReconnect();
+  };
 }
 
 function handleStoreSocket(event) {
@@ -244,28 +312,6 @@ function handleStoreSocket(event) {
     typing.value = false;
     agentError.value = payload.error?.message || "店宠暂时无法回应";
   }
-}
-
-function openStoreSocket() {
-  closeStoreSocket();
-  try {
-    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    storeSocket = new WebSocket(`${scheme}://${window.location.host}/api/c/ws/chat/store_demo`);
-  } catch {
-    storeSocketState.value = "fallback";
-    return;
-  }
-  storeSocketState.value = "connecting";
-  storeSocket.onopen = () => {
-    storeSocketState.value = "online";
-  };
-  storeSocket.onmessage = handleStoreSocket;
-  storeSocket.onerror = () => {
-    storeSocketState.value = "fallback";
-  };
-  storeSocket.onclose = () => {
-    storeSocketState.value = "offline";
-  };
 }
 
 async function loadCompanionMessages() {
@@ -603,7 +649,7 @@ onBeforeUnmount(closeStoreSocket);
               <span class="c-avatar">{{ activeThread.name.slice(0, 1) }}</span>
               <div>
                 <h1>{{ activeThread.name }}</h1>
-                <p><i class="c-dot online" />{{ statusText }}<span class="c-head-divider">·</span>只做建议，成交需你确认</p>
+                <p><i class="c-dot" :class="threadDotClass" />{{ statusText }}<span class="c-head-divider">·</span>只做建议，成交需你确认</p>
               </div>
             </div>
             <div class="c-chat-actions">
@@ -1172,6 +1218,10 @@ onBeforeUnmount(closeStoreSocket);
 
 .c-dot.online {
   background: var(--c-positive);
+}
+
+.c-dot.connecting {
+  background: var(--c-warning);
 }
 
 .c-dot.plan {
