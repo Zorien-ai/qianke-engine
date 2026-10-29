@@ -98,7 +98,7 @@ def test_companion_commentary_is_text_only(tmp_path, monkeypatch):
 
     class _FakeCommentLLM:
         def invoke(self, messages):
-            return AIMessage(content="主人，先看清活动规则再决定。")
+            return AIMessage(content="先看清活动规则再决定。")
 
     text = companion_agent.commentary(
         "buyer_1",
@@ -106,7 +106,7 @@ def test_companion_commentary_is_text_only(tmp_path, monkeypatch):
         "平台满 299 减 30",
         llm=_FakeCommentLLM(),
     )
-    assert text == "主人，先看清活动规则再决定。"
+    assert text == "先看清活动规则再决定。"
 
 
 def test_social_accepts_store_agent_reply_provider(tmp_path, monkeypatch):
@@ -123,10 +123,10 @@ def test_social_accepts_store_agent_reply_provider(tmp_path, monkeypatch):
             True,
             {"quote_id": "quote_1", "requires_user_confirmation": True},
         ),
-        commentary_provider=lambda text, reply: "主人，先核对活动规则。",
+        commentary_provider=lambda text, reply: "先核对活动规则。",
     )
     assert result["reply"]["content"] == "店宠 Agent 回复"
     assert result["reply"]["awakened"] is True
     assert result["reply"]["metadata"]["quote_id"] == "quote_1"
-    assert result["companion_message"]["content"] == "主人，先核对活动规则。"
+    assert result["companion_message"]["content"] == "先核对活动规则。"
     assert len(social.get_messages("buyer_1", "store_demo")) == 3

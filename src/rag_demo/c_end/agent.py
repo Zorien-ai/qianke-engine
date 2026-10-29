@@ -12,11 +12,10 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
+from rag_demo.c_end import persona as c_persona
 from rag_demo.c_end import store
 
-C_SYSTEM_PROMPT = """你是千客引擎 C 端导购 Agent。
-
-你可以：
+C_TOOL_RULES = """你可以：
 1. recommend_products(need, budget)：按需求/预算推荐真实商品；
 2. prepare_order(items)：根据商品和数量准备订单草稿。
 
@@ -26,6 +25,24 @@ C_SYSTEM_PROMPT = """你是千客引擎 C 端导购 Agent。
 - 不要在 prepare_order 后自行声称订单已创建；订单必须由用户确认。
 - 如果商品或预算不匹配，如实说明。
 """
+
+
+def build_system_prompt(buyer_id: str) -> str:
+    """人设段 + 工具规则段；人设来自用户可配置的伙伴字段。"""
+    try:
+        companion = store.get_companion(buyer_id)
+    except Exception:  # noqa: BLE001 - 伙伴读取失败不应阻断对话
+        companion = {}
+    return (
+        c_persona.build_persona_prompt(
+            name=companion.get("name"),
+            user_nickname=companion.get("user_nickname"),
+            species=companion.get("species"),
+            persona=companion.get("persona"),
+        )
+        + "\n"
+        + C_TOOL_RULES
+    )
 
 
 class ItemSchema(BaseModel):
@@ -163,7 +180,7 @@ def build_c_graph(buyer_id: str, checkpointer: Any, llm: Any | None = None):
             "messages": [
                 AIMessage(
                     content=(
-                        f"订单已确认：{order['order_id']}，"
+                        f"订单已创建：{order['order_id']}，"
                         f"金额 {order['total_amount']:.2f} 元。"
                     )
                 )
@@ -195,7 +212,10 @@ def run_c_agent(
         raise ValueError("thread_id 已存在，请使用新的 thread_id")
     state = graph.invoke(
         {
-            "messages": [SystemMessage(content=C_SYSTEM_PROMPT), HumanMessage(content=message)],
+            "messages": [
+                SystemMessage(content=build_system_prompt(buyer_id)),
+                HumanMessage(content=message),
+            ],
             "buyer_id": buyer_id,
             "thread_id": thread_id,
             "status": "RUNNING",

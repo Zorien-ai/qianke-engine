@@ -1,4 +1,4 @@
-# C 端 UI 参考：去「AI 味」的消费级界面
+﻿# C 端 UI 参考：去「AI 味」的消费级界面
 
 > 页面：`/v2/#/c/app`
 > 状态：可运行的界面参考，不是最终生产设计稿。
@@ -14,7 +14,7 @@ C 端入口从「企业工作台里的一个页面」改成独立的消费级应
 中性、哑光、低饱和
 ```
 
-初始进入页是「小伴」对话，而不是数据仪表盘。
+初始进入页是「小鱼」对话，而不是数据仪表盘。
 
 ![C 端桌面端](../screenshots/c-app-desktop.png)
 
@@ -93,7 +93,7 @@ https://mobbin.com/apps/whats-app-ios-8738dbc9-e7a8-4fef-91e5-6afd1c9d092b
 ## 6. 交互边界
 
 ```text
-小伴只做解释、提醒、锐评
+小鱼只做解释、提醒、锐评
 店宠负责商品/活动/SOP 查询
 成交必须由用户逐单确认
 ```
@@ -138,7 +138,7 @@ WS   /api/c/ws/chat/store_demo
 - 进入店宠会话时建立 WebSocket
 - `@店宠` 唤醒真实店宠 Agent
 - WebSocket 不可用时回退 HTTP POST
-- 店宠回复 + 小伴锐评一起进入消息流
+- 店宠回复 + 小鱼锐评一起进入消息流
 - 店宠返回的 quote_id 会显示在右侧「待确认」卡片
 - 点击「查看报价」进入商城逐单确认
 
@@ -146,11 +146,13 @@ WS   /api/c/ws/chat/store_demo
 
 ## 7. 会话持久化
 
-小伴会话通过以下接口持久化：
+小鱼会话通过以下接口持久化：
 
 ```text
-GET  /api/c/app/messages?thread_id=companion&limit=50
-POST /api/c/app/messages
+GET    /api/c/app/messages?thread_id=companion&limit=30
+GET    /api/c/app/messages?thread_id=companion&limit=30&before=<cursor>
+POST   /api/c/app/messages
+DELETE /api/c/app/messages?thread_id=companion
 ```
 
 保存内容：
@@ -162,7 +164,13 @@ metadata（如 order_id）
 created_at
 ```
 
-页面加载时优先展示持久化消息；没有历史时使用演示种子。发送消息、Agent 回复、订单确认结果都会写入该表。
+页面加载时优先展示最近 30 条持久化消息；没有历史时使用演示种子。发送消息、Agent 回复、订单确认结果都会写入该表。
+
+会话分页与清理：
+
+- 顶部「加载更早消息」按 `created_at < before` 取上一页；
+- 右侧「清空小鱼会话」二次确认后删除当前 buyer 的 companion 消息；
+- 删除只影响当前买家与会话，不影响订单或报价审计。
 
 ## 8. PWA 与移动端安全区
 

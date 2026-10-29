@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, social, store, store_agent
+from rag_demo.c_end import companion_agent, persona as c_persona, social, store, store_agent
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -51,7 +51,8 @@ class CAgentResumeIn(BaseModel):
 
 
 class CompanionPatchIn(BaseModel):
-    name: str | None = Field(default=None, max_length=20)
+    name: str | None = Field(default=None, max_length=12)
+    user_nickname: str | None = Field(default=None, max_length=12)
     species: str | None = Field(default=None, max_length=60)
     persona: str | None = Field(default=None, max_length=60)
     appearance: str | None = Field(default=None, max_length=60)
@@ -107,6 +108,7 @@ def update_companion(req: CompanionPatchIn) -> dict:
         return store.update_companion(
             buyer_id,
             name=req.name,
+            user_nickname=req.user_nickname,
             species=req.species,
             persona=req.persona,
             appearance=req.appearance,
@@ -116,9 +118,21 @@ def update_companion(req: CompanionPatchIn) -> dict:
 
 
 @router.get("/app/messages")
-def list_app_messages(thread_id: str = "companion", limit: int = 50) -> dict:
+def list_app_messages(
+    thread_id: str = "companion",
+    limit: int = 50,
+    before: str | None = None,
+) -> dict:
     buyer_id, _ = _buyer()
-    return {"messages": store.list_app_messages(buyer_id, thread_id, limit=limit)}
+    return {
+        "messages": store.list_app_messages(buyer_id, thread_id, limit=limit, before=before)
+    }
+
+
+@router.delete("/app/messages")
+def clear_app_messages(thread_id: str = "companion") -> dict:
+    buyer_id, _ = _buyer()
+    return {"deleted": store.clear_app_messages(buyer_id, thread_id)}
 
 
 @router.post("/app/messages")
@@ -310,7 +324,10 @@ def c_agent_run(req: CAgentRunIn) -> dict:
         "requires_confirmation": result["interrupted"],
         "draft": result["draft"],
         "order": result["order"],
-        "reply": _last_ai_text(result["messages"]),
+        # 模型输出统一过 persona guard；确认/取消文案由代码生成，不走这里。
+        "reply": c_persona.guard(_last_ai_text(result["messages"]), tier="L2").text
+        if _last_ai_text(result["messages"])
+        else "",
     }
 
 

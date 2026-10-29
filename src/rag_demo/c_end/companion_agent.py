@@ -1,4 +1,7 @@
-"""C 端守护伙伴：只做辅助传达和锐评，不参与砍价/下单。"""
+"""C 端守护伙伴：只做辅助传达和锐评，不参与砍价/下单。
+
+人格与输出检查统一走 `c_end.persona`，避免两个入口的人设漂移。
+"""
 from __future__ import annotations
 
 import logging
@@ -7,27 +10,25 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
+from rag_demo.c_end import persona as c_persona
 from rag_demo.c_end import store
 
 logger = logging.getLogger(__name__)
 
-FALLBACK = "主人，店宠说得再甜，价格和活动还是以结算页为准。"
+FALLBACK = c_persona.DEFAULT_FALLBACK
 
-SYSTEM_PROMPT = """你是用户的守护伙伴，不是店宠，也不是谈判代表。
+# 供测试与外部引用；运行时按伙伴字段重新生成，保证名字/昵称可配置。
+SYSTEM_PROMPT = c_persona.build_persona_prompt(mode="commentary")
 
-你只能：
-- 帮用户理解店宠回复；
-- 做一句简短、犀利的提醒/锐评；
-- 提醒用户确认价格、活动规则和订单。
 
-你不能：
-- 替用户砍价或答应价格；
-- 承诺优惠、退款、赔付；
-- 替用户确认或创建订单；
-- 编造商品/活动信息。
-
-输出 1-2 句中文，不超过 80 字，不能包含“已下单”“已确认”“保证”等承诺。
-"""
+def _system_prompt(companion: dict[str, Any]) -> str:
+    return c_persona.build_persona_prompt(
+        name=companion.get("name"),
+        user_nickname=companion.get("user_nickname"),
+        species=companion.get("species"),
+        persona=companion.get("persona"),
+        mode="commentary",
+    )
 
 
 def _make_llm():
@@ -52,16 +53,21 @@ def commentary(
     *,
     llm: Any | None = None,
 ) -> str:
-    """生成守护伙伴锐评；无授权动作，仅文本。"""
+    """生成守护伙伴锐评；无授权动作，仅文本，输出必过 persona guard。"""
     try:
         companion = store.get_companion(buyer_id)
     except Exception:
-        companion = {"name": "小伴", "species": "digital_companion", "persona": "warm"}
+        companion = {
+            "name": c_persona.DEFAULT_NAME,
+            "species": c_persona.DEFAULT_SPECIES,
+            "persona": c_persona.DEFAULT_PERSONA,
+            "user_nickname": "",
+        }
 
     try:
         llm = llm or _make_llm()
         response = llm.invoke([
-            SystemMessage(content=SYSTEM_PROMPT),
+            SystemMessage(content=_system_prompt(companion)),
             HumanMessage(content=(
                 f"伙伴名字：{companion.get('name')}\n"
                 f"伙伴设定：{companion.get('species')} / {companion.get('persona')}\n"
@@ -75,8 +81,4 @@ def commentary(
         logger.exception("伙伴锐评生成失败 buyer=%s", buyer_id)
         text = ""
 
-    text = text.strip().strip("`").strip()
-    if not text:
-        return FALLBACK
-    # 不做硬性内容改写；只限长，避免污染聊天区。
-    return text[:120]
+    return c_persona.guard(text, tier="commentary", fallback=FALLBACK).text

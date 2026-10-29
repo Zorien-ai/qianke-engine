@@ -1,4 +1,4 @@
-# C 端 Mock 商品与模拟订单 v0.1
+﻿# C 端 Mock 商品与模拟订单 v0.1
 
 > 当前没有真实商品/订单数据，先用独立 SQLite mock 存储验证 C 端订单闭环。
 > 不写入 demo 评测库，不影响 Regression/Benchmark。
@@ -42,7 +42,7 @@ c_companion
 species: digital_companion / cat / fish / robot / brand_mascot / custom
 ```
 
-默认伙伴为“小伴 / digital_companion”；可通过 PATCH 改名、换 species/persona/appearance。
+默认伙伴为“小鱼 / digital_companion”；可通过 PATCH 改名、换 species/persona/appearance。
 买家的伙伴只在确认订单后获得成长值/饱食度奖励。
 
 ```text

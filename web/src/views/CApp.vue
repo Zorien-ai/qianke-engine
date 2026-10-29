@@ -1,12 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { getJson, postJson } from "../api";
+import { getJson, postJson, del } from "../api";
 
 const threads = ref([
   {
     id: "companion",
-    name: "小伴",
+    name: "小鱼",
     kind: "companion",
     preview: "今天先看什么",
     time: "09:42",
@@ -95,7 +95,7 @@ const showThreads = ref(false);
 const storeSocketState = ref("offline");
 let storeSocket = null;
 const companion = ref({
-  name: "小伴",
+  name: "小鱼",
   level: 4,
   satiety: 62,
   species: "digital_companion",
@@ -104,6 +104,9 @@ const liveThreadId = ref("");
 const liveDraft = ref(null);
 const liveOrder = ref(null);
 const storeQuote = ref(null);
+const hasMoreCompanion = ref(false);
+const companionBefore = ref("");
+const clearingCompanion = ref(false);
 const agentBusy = ref(false);
 const agentError = ref("");
 
@@ -267,18 +270,59 @@ function openStoreSocket() {
 
 async function loadCompanionMessages() {
   try {
-    const data = await getJson("/api/c/app/messages?thread_id=companion&limit=50");
+    const data = await getJson("/api/c/app/messages?thread_id=companion&limit=30");
     if (data?.messages?.length) {
       messagesByThread.value.companion = data.messages.map((message) => ({
         id: message.message_id,
         role: message.role === "user" ? "user" : "companion",
         text: cleanReply(message.content),
         time: (message.created_at || "").slice(11, 16),
+        createdAt: message.created_at,
       }));
+      hasMoreCompanion.value = data.messages.length >= 30;
+      companionBefore.value = data.messages[0]?.created_at || "";
     }
     scrollToBottom();
   } catch {
     // 保留演示种子。
+  }
+}
+
+async function loadOlderCompanion() {
+  if (!hasMoreCompanion.value || !companionBefore.value) return;
+  try {
+    const data = await getJson(
+      `/api/c/app/messages?thread_id=companion&limit=30&before=${encodeURIComponent(companionBefore.value)}`
+    );
+    const older = (data?.messages || []).map((message) => ({
+      id: message.message_id,
+      role: message.role === "user" ? "user" : "companion",
+      text: cleanReply(message.content),
+      time: (message.created_at || "").slice(11, 16),
+      createdAt: message.created_at,
+    }));
+    messagesByThread.value.companion = [...older, ...(messagesByThread.value.companion || [])];
+    hasMoreCompanion.value = older.length >= 30;
+    companionBefore.value = older[0]?.created_at || companionBefore.value;
+  } catch {
+    // 加载失败时保留当前消息。
+  }
+}
+
+async function clearCompanionHistory() {
+  if (clearingCompanion.value) return;
+  if (!window.confirm("清空小鱼会话？此操作不可撤销。")) return;
+  clearingCompanion.value = true;
+  try {
+    await del("/api/c/app/messages?thread_id=companion");
+    messagesByThread.value.companion = [];
+    hasMoreCompanion.value = false;
+    companionBefore.value = "";
+    liveThreadId.value = "";
+  } catch (error) {
+    agentError.value = error?.detail || error?.message || "清空会话失败";
+  } finally {
+    clearingCompanion.value = false;
   }
 }
 
@@ -364,7 +408,7 @@ async function send() {
       liveThreadId.value = "";
     }
   } catch (error) {
-    agentError.value = error?.detail || error?.message || "小伴暂时无法回应";
+    agentError.value = error?.detail || error?.message || "小鱼暂时无法回应";
     const fallback = localReply(text);
     pushMessage({ role: "companion", ...fallback });
     await persistAppMessage("companion", fallback.text);
@@ -548,7 +592,7 @@ onBeforeUnmount(closeStoreSocket);
           </div>
         </header>
 
-        <section class="c-chat" aria-label="与小伴的对话">
+        <section class="c-chat" aria-label="与小鱼的对话">
           <header class="c-chat-head">
             <div class="c-chat-identity">
               <button class="c-back-btn" type="button" aria-label="返回消息列表" @click="openThreads">
@@ -573,7 +617,11 @@ onBeforeUnmount(closeStoreSocket);
           </header>
 
           <div id="c-app-thread" class="c-thread" aria-live="polite">
+            <div v-if="activeId === 'companion' && hasMoreCompanion" class="c-load-more-row">
+              <button type="button" class="c-load-more" @click="loadOlderCompanion">加载更早消息</button>
+            </div>
             <div class="c-date-line"><span>今天</span></div>
+            <p v-if="!messages.length" class="c-empty-thread">开始新的对话。</p>
             <article
               v-for="message in messages"
               :key="message.id"
@@ -581,7 +629,7 @@ onBeforeUnmount(closeStoreSocket);
               :class="[message.role]"
             >
               <div class="c-message-meta">
-                <span>{{ message.role === "user" ? "我" : message.role === "companion" ? "小伴" : message.role === "merchant" ? activeThread.name : "系统" }}</span>
+                <span>{{ message.role === "user" ? "我" : message.role === "companion" ? companion.name : message.role === "merchant" ? activeThread.name : "系统" }}</span>
                 <time>{{ message.time }}</time>
               </div>
               <p class="c-bubble">
@@ -668,7 +716,7 @@ onBeforeUnmount(closeStoreSocket);
             <header><span>待确认</span><span class="c-count">{{ pendingCount }}</span></header>
             <div v-if="liveDraft" class="c-quote-card">
               <div class="c-quote-card-top">
-                <span class="c-quote-card-label">小伴生成的订单草稿</span>
+                <span class="c-quote-card-label">小鱼生成的订单草稿</span>
                 <span class="c-dot waiting" />
               </div>
               <strong>{{ liveDraft.items?.[0]?.title || "订单草稿" }}</strong>
@@ -727,6 +775,18 @@ onBeforeUnmount(closeStoreSocket);
               <span><strong>通勤双肩包</strong><small>10 月 24 日 · 已确认</small></span>
               <span class="c-order-amount">¥199</span>
             </div>
+          </section>
+
+          <section class="c-context-section">
+            <header><span>会话</span><span class="c-context-link">仅小鱼</span></header>
+            <button
+              class="c-danger-link"
+              type="button"
+              :disabled="clearingCompanion"
+              @click="clearCompanionHistory"
+            >
+              {{ clearingCompanion ? "清理中…" : "清空小鱼会话" }}
+            </button>
           </section>
 
           <p class="c-context-note">演示数据 · 仅用于界面参考</p>
@@ -1295,6 +1355,33 @@ onBeforeUnmount(closeStoreSocket);
   font-size: 9px;
 }
 
+.c-load-more-row {
+  display: flex;
+  justify-content: center;
+}
+
+.c-load-more {
+  padding: 4px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-text-3);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.c-load-more:hover {
+  color: var(--c-text-2);
+  border-color: var(--c-text-3);
+}
+
+.c-empty-thread {
+  margin: auto;
+  color: var(--c-text-3);
+  font-size: 11px;
+}
+
 .c-date-line span {
   padding: 2px 8px;
   border: 1px solid var(--c-line-soft);
@@ -1676,6 +1763,26 @@ onBeforeUnmount(closeStoreSocket);
   color: var(--c-text-3);
   font-size: 9px;
   text-decoration: none;
+}
+
+.c-danger-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-3);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.c-danger-link:hover:not(:disabled) {
+  color: var(--c-negative);
+}
+
+.c-danger-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .c-context-link:hover {

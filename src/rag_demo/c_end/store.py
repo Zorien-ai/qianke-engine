@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from rag_demo.c_end import persona as c_persona
 from rag_demo.config import BASE_DIR
 
 _DB_LOCK = threading.Lock()
@@ -101,6 +102,7 @@ CREATE TABLE IF NOT EXISTS c_order_item (
 CREATE TABLE IF NOT EXISTS c_companion (
     owner_id   TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
+    user_nickname TEXT NOT NULL DEFAULT '',
     species    TEXT NOT NULL DEFAULT 'digital_companion',
     persona    TEXT NOT NULL DEFAULT 'warm',
     appearance TEXT NOT NULL DEFAULT '',
@@ -156,6 +158,18 @@ def init() -> None:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     _SEED,
                 )
+            # 伙伴表轻量迁移：老库补 user_nickname 列，并把历史默认名「小伴」迁到「小鱼」。
+            companion_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(c_companion)").fetchall()
+            }
+            if "user_nickname" not in companion_columns:
+                conn.execute(
+                    "ALTER TABLE c_companion ADD COLUMN user_nickname TEXT NOT NULL DEFAULT ''"
+                )
+            conn.execute(
+                "UPDATE c_companion SET name = ? WHERE name = '小伴' AND user_nickname = ''",
+                (c_persona.DEFAULT_NAME,),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -596,6 +610,7 @@ def _companion_payload(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "owner_id": row["owner_id"],
         "name": row["name"],
+        "user_nickname": row["user_nickname"],
         "species": row["species"],
         "persona": row["persona"],
         "appearance": row["appearance"],
@@ -611,9 +626,9 @@ def _ensure_companion(conn: sqlite3.Connection, owner_id: str) -> sqlite3.Row:
     if row is not None:
         return row
     conn.execute(
-        "INSERT INTO c_companion(owner_id, name, species, persona, appearance, updated_at) "
-        "VALUES (?, '小伴', 'digital_companion', 'warm', '', ?)",
-        (owner_id, _now()),
+        "INSERT INTO c_companion(owner_id, name, user_nickname, species, persona, appearance, updated_at) "
+        "VALUES (?, ?, '', 'digital_companion', 'warm', '', ?)",
+        (owner_id, c_persona.DEFAULT_NAME, _now()),
     )
     return conn.execute("SELECT * FROM c_companion WHERE owner_id = ?", (owner_id,)).fetchone()
 
@@ -638,20 +653,37 @@ def update_companion(
     owner_id: str,
     *,
     name: str | None = None,
+    user_nickname: str | None = None,
     species: str | None = None,
     persona: str | None = None,
     appearance: str | None = None,
 ) -> dict[str, Any]:
-    """更新伙伴表现层字段；不改变 Agent 权限。"""
+    """更新伙伴表现层字段；不改变 Agent 权限。
+
+    name / user_nickname 走 persona.validate_name 的同一套规则：
+    1–12 字，只允许中文/英文/数字/下划线，禁止"主人/客服/官方"等身份误导词。
+    """
     fields: list[tuple[str, str]] = []
-    for key, value in (("name", name), ("species", species), ("persona", persona), ("appearance", appearance)):
+    if name is not None:
+        ok, reason = c_persona.validate_name(name)
+        if not ok:
+            raise CStoreError("INVALID_COMPANION_NAME", reason)
+        fields.append(("name", str(name).strip()))
+    if user_nickname is not None:
+        nickname = str(user_nickname).strip()
+        if nickname:
+            ok, reason = c_persona.validate_name(nickname)
+            if not ok:
+                raise CStoreError("INVALID_USER_NICKNAME", reason)
+        # 空字符串表示"就叫你"，是合法状态，不是错误。
+        fields.append(("user_nickname", nickname))
+    for key, value in (("species", species), ("persona", persona), ("appearance", appearance)):
         if value is None:
             continue
         text = str(value).strip()
         if not text:
             raise CStoreError("INVALID_COMPANION", f"{key} 不能为空")
-        limit = 20 if key == "name" else 60
-        if len(text) > limit:
+        if len(text) > 60:
             raise CStoreError("INVALID_COMPANION", f"{key} 太长")
         fields.append((key, text))
     if not fields:
@@ -719,14 +751,26 @@ def save_app_message(
     }
 
 
-def list_app_messages(owner_id: str, thread_id: str, limit: int = 50) -> list[dict[str, Any]]:
+def list_app_messages(
+    owner_id: str,
+    thread_id: str,
+    limit: int = 50,
+    before: str | None = None,
+) -> list[dict[str, Any]]:
+    """返回最近 N 条（按时间正序）；before 用于加载更早一页。"""
     init()
     conn = _connect()
     try:
+        params: list[Any] = [owner_id, str(thread_id)]
+        where = "owner_id = ? AND thread_id = ?"
+        if before:
+            where += " AND created_at < ?"
+            params.append(str(before))
+        params.append(max(1, min(int(limit), 200)))
         rows = conn.execute(
-            "SELECT * FROM c_app_message WHERE owner_id = ? AND thread_id = ? "
-            "ORDER BY created_at ASC LIMIT ?",
-            (owner_id, str(thread_id), max(1, min(int(limit), 200))),
+            "SELECT * FROM (SELECT * FROM c_app_message WHERE "
+            f"{where} ORDER BY created_at DESC LIMIT ?) ORDER BY created_at ASC",
+            params,
         ).fetchall()
         result = []
         for row in rows:
@@ -743,6 +787,20 @@ def list_app_messages(owner_id: str, thread_id: str, limit: int = 50) -> list[di
                 "created_at": row["created_at"],
             })
         return result
+    finally:
+        conn.close()
+
+
+def clear_app_messages(owner_id: str, thread_id: str) -> int:
+    init()
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM c_app_message WHERE owner_id = ? AND thread_id = ?",
+            (owner_id, str(thread_id)),
+        )
+        conn.commit()
+        return cursor.rowcount
     finally:
         conn.close()
 

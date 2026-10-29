@@ -95,18 +95,41 @@ def test_other_buyer_cannot_confirm(c_store):
 def test_companion_is_configurable_not_hardcoded_fish(c_store):
     companion = c_store.get_companion("buyer_1")
     assert companion["species"] == "digital_companion"
-    assert companion["name"] == "小伴"
+    assert companion["name"] == "小鱼"
+    assert companion["user_nickname"] == ""
 
     updated = c_store.update_companion(
         "buyer_1",
         name="阿团",
+        user_nickname="小满",
         species="cat",
         persona="calm",
         appearance="cat-v1",
     )
     assert updated["name"] == "阿团"
+    assert updated["user_nickname"] == "小满"
     assert updated["species"] == "cat"
     assert c_store.get_companion("buyer_1")["appearance"] == "cat-v1"
+
+
+def test_companion_name_and_nickname_validation(c_store):
+    c_store.get_companion("buyer_1")
+
+    with pytest.raises(c_store.CStoreError) as exc:
+        c_store.update_companion("buyer_1", name="客服小鱼")
+    assert exc.value.code == "INVALID_COMPANION_NAME"
+
+    with pytest.raises(c_store.CStoreError) as exc:
+        c_store.update_companion("buyer_1", user_nickname="主人")
+    assert exc.value.code == "INVALID_USER_NICKNAME"
+
+    with pytest.raises(c_store.CStoreError) as exc:
+        c_store.update_companion("buyer_1", name="一二三四五六七八九十一二三")
+    assert exc.value.code == "INVALID_COMPANION_NAME"
+
+    # 清空昵称是合法状态：之后一律称呼"你"。
+    cleared = c_store.update_companion("buyer_1", user_nickname="")
+    assert cleared["user_nickname"] == ""
 
 
 def test_confirm_rewards_companion_once(c_store):
@@ -202,3 +225,22 @@ def test_app_messages_are_persisted_and_scoped(c_store):
     assert [m["role"] for m in messages] == ["user", "companion"]
     assert messages[1]["metadata"]["quote_id"] == "quote_app_1"
     assert c_store.list_app_messages("buyer_2", "companion") == []
+
+
+def test_app_messages_pagination_and_clear(c_store):
+    import time
+
+    for index in range(4):
+        c_store.save_app_message("buyer_1", "companion", "user", f"消息{index}")
+        time.sleep(0.01)
+    latest = c_store.list_app_messages("buyer_1", "companion", limit=2)
+    assert [m["content"] for m in latest] == ["消息2", "消息3"]
+    older = c_store.list_app_messages(
+        "buyer_1",
+        "companion",
+        limit=2,
+        before=latest[0]["created_at"],
+    )
+    assert [m["content"] for m in older] == ["消息0", "消息1"]
+    assert c_store.clear_app_messages("buyer_1", "companion") == 4
+    assert c_store.list_app_messages("buyer_1", "companion") == []
