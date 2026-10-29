@@ -184,6 +184,10 @@ function nowTime() {
   return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
+function newClientMessageId() {
+  return `cmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function scrollToBottom() {
   requestAnimationFrame(() => {
     const el = document.getElementById("c-app-thread");
@@ -475,13 +479,14 @@ async function persistAppMessage(role, content, metadata = {}) {
 async function send() {
   const text = draft.value.trim();
   if (!text || typing.value) return;
+  const clientId = newClientMessageId();
   pushMessage({ role: "user", text });
   draft.value = "";
   const input = document.getElementById("c-app-input");
   if (input) input.style.height = "auto";
   pendingRetry.value = null;
   scrollToBottom();
-  await deliverText(text);
+  await deliverText(text, false, clientId);
 }
 
 async function retrySend() {
@@ -493,14 +498,14 @@ async function retrySend() {
   }
   pendingRetry.value = null;
   agentError.value = "";
-  await deliverText(failed.text, true);
+  await deliverText(failed.text, true, failed.clientId);
 }
 
 function clearRetry() {
   pendingRetry.value = null;
 }
 
-async function deliverText(text, isRetry = false) {
+async function deliverText(text, isRetry = false, clientId = null) {
   if (activeId.value === "store_demo") {
     if (storeSocket && storeSocket.readyState === WebSocket.OPEN) {
       typing.value = true;
@@ -521,7 +526,7 @@ async function deliverText(text, isRetry = false) {
       agentError.value = "";
     } catch (error) {
       agentError.value = error?.detail || error?.message || "店宠暂时无法回应";
-      pendingRetry.value = { threadId: activeId.value, text };
+      pendingRetry.value = { threadId: activeId.value, text, clientId };
     } finally {
       typing.value = false;
       scrollToBottom();
@@ -544,6 +549,7 @@ async function deliverText(text, isRetry = false) {
     const result = await postJson("/api/c/agent/run", {
       message: text,
       thread_id: liveThreadId.value || undefined,
+      client_message_id: clientId || undefined,
     });
     liveThreadId.value = result.thread_id || liveThreadId.value;
     agentError.value = "";
@@ -564,7 +570,7 @@ async function deliverText(text, isRetry = false) {
     }
   } catch (error) {
     agentError.value = error?.detail || error?.message || "小鱼暂时无法回应";
-    pendingRetry.value = { threadId: activeId.value, text };
+    pendingRetry.value = { threadId: activeId.value, text, clientId };
   } finally {
     typing.value = false;
     scrollToBottom();

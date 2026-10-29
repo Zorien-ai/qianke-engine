@@ -143,6 +143,7 @@ API：
 POST /api/c/agent/run
   → 首次一般返回 200 + status=AWAITING_CONFIRMATION + draft
   → 也可能直接返回推荐结果
+  → client_message_id：客户端重试幂等键；已完成的请求回放原响应
 
 POST /api/c/agent/resume
   → thread_id + approved

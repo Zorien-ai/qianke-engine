@@ -13,10 +13,11 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, persona as c_persona, social, store, store_agent
+from rag_demo.c_end import companion_agent, idempotency, persona as c_persona, social, store, store_agent
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
 
 def _buyer() -> tuple[str, dict]:
@@ -55,6 +56,7 @@ class ConfirmOrderIn(BaseModel):
 class CAgentRunIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     thread_id: str | None = Field(default=None, max_length=128)
+    client_message_id: str | None = Field(default=None, max_length=128)
 
 
 class CAgentResumeIn(BaseModel):
@@ -423,9 +425,31 @@ def get_order(order_id: str) -> dict:
 @router.post("/agent/run")
 def c_agent_run(req: CAgentRunIn) -> dict:
     buyer_id, _ = _buyer()
+    client_id = (req.client_message_id or "").strip() or None
+    if client_id and not _CLIENT_ID_RE.fullmatch(client_id):
+        raise HTTPException(status_code=400, detail="client_message_id 格式不合法")
     thread_id = (req.thread_id or "").strip() or f"c_thread_{uuid.uuid4().hex[:16]}"
     if not _THREAD_RE.fullmatch(thread_id):
         raise HTTPException(status_code=400, detail="thread_id 格式不合法")
+
+    request_fingerprint = idempotency.fingerprint(req.message, req.thread_id)
+    if client_id:
+        try:
+            claim = idempotency.claim(
+                client_id=client_id,
+                owner_id=buyer_id,
+                endpoint="c_agent_run",
+                request_fingerprint=request_fingerprint,
+            )
+        except idempotency.IdempotencyConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if claim["state"] == "replay":
+            replay = dict(claim["response"])
+            replay["idempotent_replay"] = True
+            return replay
+        if claim["state"] == "in_progress":
+            raise HTTPException(status_code=409, detail="同一条消息正在处理中，请勿重复发送")
+
     try:
         result = c_agent.run_c_agent(
             req.message.strip(),
@@ -434,10 +458,15 @@ def c_agent_run(req: CAgentRunIn) -> dict:
             checkpointer=get_checkpointer(),
         )
     except ValueError as exc:
+        if client_id:
+            idempotency.release(client_id=client_id, owner_id=buyer_id, endpoint="c_agent_run")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
+        if client_id:
+            idempotency.release(client_id=client_id, owner_id=buyer_id, endpoint="c_agent_run")
         raise HTTPException(status_code=502, detail=f"C 端 Agent 运行失败：{exc}") from exc
-    return {
+
+    response = {
         "thread_id": thread_id,
         "status": result["status"],
         "interrupted": result["interrupted"],
@@ -449,6 +478,14 @@ def c_agent_run(req: CAgentRunIn) -> dict:
         if _last_ai_text(result["messages"])
         else "",
     }
+    if client_id:
+        idempotency.complete(
+            client_id=client_id,
+            owner_id=buyer_id,
+            endpoint="c_agent_run",
+            response=response,
+        )
+    return response
 
 
 @router.post("/agent/resume")
