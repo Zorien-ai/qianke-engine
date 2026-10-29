@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.3.6 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.3.7 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -373,7 +373,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 
 | 端 | 职责 | 当前状态 |
 |---|---|---|
-| 用户端（C） | 聊天导购、商品推荐、模拟下单、IM 好友单聊 | Mock 购物 + IM 社交 + 店宠 Agent + 伙伴锐评 |
+| 用户端（C） | 聊天导购、商品推荐、模拟下单、IM 好友单聊 | Mock 购物 + IM 社交 + 店宠 Agent + 独立 C 端 UI |
 | 商户端（B） | 洞察分析、千人千面文案、SOP 客服 | 开发中，当前主线 |
 | 管理端（A） | Agent 运行监控、高危调用审计、算力消耗 | 待开发 |
 
@@ -397,7 +397,7 @@ Agent 负责调查与决策辅助；系统负责安全、数据正确性、执�
 ```text
 阶段一（基础）：商户端单体 ReAct Agent + 3 个原子 Tool（已有基础）
 阶段二：C 端购物 + 模拟订单 + HITL（mock 闭环已跑通）
-阶段三：IM 社交壳 + 好友会话 + 可配置伙伴/宠物形象（MVP 已跑通）
+阶段三：IM 社交壳 + 好友会话 + 可配置伙伴/宠物形象（MVP 已跑通；C 端独立 UI 参考已加入）
 阶段四：双宠谈判、商家店宠、白名单意图（店宠结构化报价 → 商城订单审计链已接入；C 端有订单审计页；自主谈判协议待开发）
 阶段五：真实支付 / 真实 IM / SaaS 交付
 ```
@@ -432,7 +432,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.3.6 |
+| AGENTS.md | v1.3.7 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -457,3 +457,4 @@ IM 社交载体
 | 1.3.4 | 2026-10-29 | 店宠回复增加 quote_id / product_refs / policy_refs 结构化引用与审计元数据；商城逐单确认仍是唯一成交入口 |
 | 1.3.5 | 2026-10-29 | 报价可直接转订单草稿；订单记录 quote_id / policy_ids / 原价 / 优惠；确认后报价 CONSUMED，形成审计链 |
 | 1.3.6 | 2026-10-29 | 增加报价数量提取、取消草稿/报价释放、C 端订单审计页；只展示正式订单，排除草稿 |
+| 1.3.7 | 2026-10-29 | 新增独立 C 端 UI 参考（桌面/移动）：中性深色、低饱和、去 AI 装饰；初始页为伙伴对话 |

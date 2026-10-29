@@ -51,6 +51,7 @@ const navItems = computed(() => {
     { to: "/chat", key: "chat", label: "对话", icon: ICONS.chat },
     { to: "/agent", key: "agent", label: "Agent 智能助理", icon: ICONS.agent },
     { to: "/c", key: "shop", label: "C 端商城", icon: ICONS.shop },
+    { to: "/c/app", key: "capp", label: "C 端 App", icon: ICONS.social },
     { to: "/c/social", key: "social", label: "社交消息", icon: ICONS.social },
     { to: "/c/orders", key: "orders", label: "我的订单", icon: ICONS.orders },
     { to: "/kb", key: "kb", label: "知识库", icon: ICONS.kb },
@@ -71,12 +72,17 @@ const pageTitle = computed(() => (route.meta && route.meta.title) || "工作台"
 watch(
   () => route.path,
   () => {
-    if (!(route.meta && route.meta.public)) document.title = "千客引擎 · 新版工作台";
+    if (route.meta && route.meta.standalone) {
+      document.title = route.meta.title || "千客";
+    } else if (!(route.meta && route.meta.public)) {
+      document.title = "千客引擎 · 新版工作台";
+    }
   },
   { immediate: true },
 );
 // 公开营销页（/home）不套应用外壳：它自带极简导航与暖白底色
 const isPublicRoute = computed(() => !!(route.meta && route.meta.public));
+const isStandaloneRoute = computed(() => !!(route.meta && route.meta.standalone));
 const accountName = computed(() => {
   const a = store.account;
   if (!a) return "未登录";
@@ -141,6 +147,12 @@ function closeDrawer() {
 
   <!-- 公开落地页：不渲染侧边栏 / topbar / 抽屉，页面自带营销页顶栏 -->
   <template v-else-if="isPublicRoute">
+    <RouterView />
+    <ToastHost />
+  </template>
+
+  <!-- 独立 C 端应用：不套企业工作台外壳 -->
+  <template v-else-if="isStandaloneRoute">
     <RouterView />
     <ToastHost />
   </template>
