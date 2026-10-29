@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { getJson, postJson } from "../api";
 
@@ -92,6 +92,8 @@ const typing = ref(false);
 const search = ref("");
 const showContext = ref(false);
 const showThreads = ref(false);
+const storeSocketState = ref("offline");
+let storeSocket = null;
 const companion = ref({
   name: "小伴",
   level: 4,
@@ -208,6 +210,61 @@ async function loadStoreMessages() {
   }
 }
 
+function closeStoreSocket() {
+  if (storeSocket) {
+    storeSocket.onclose = null;
+    storeSocket.close();
+    storeSocket = null;
+  }
+  storeSocketState.value = "offline";
+}
+
+function handleStoreSocket(event) {
+  let payload;
+  try {
+    payload = JSON.parse(event.data);
+  } catch {
+    return;
+  }
+  if (activeId.value !== "store_demo") return;
+  if (payload.type === "chat") {
+    typing.value = false;
+    if (payload.reply) {
+      pushMessage({ role: "merchant", text: cleanReply(payload.reply.content) });
+      if (payload.reply.metadata?.quote_id) storeQuote.value = payload.reply.metadata;
+    }
+    if (payload.companion_message) {
+      pushMessage({ role: "companion", text: cleanReply(payload.companion_message.content) });
+    }
+    scrollToBottom();
+  } else if (payload.type === "error") {
+    typing.value = false;
+    agentError.value = payload.error?.message || "店宠暂时无法回应";
+  }
+}
+
+function openStoreSocket() {
+  closeStoreSocket();
+  try {
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    storeSocket = new WebSocket(`${scheme}://${window.location.host}/api/c/ws/chat/store_demo`);
+  } catch {
+    storeSocketState.value = "fallback";
+    return;
+  }
+  storeSocketState.value = "connecting";
+  storeSocket.onopen = () => {
+    storeSocketState.value = "online";
+  };
+  storeSocket.onmessage = handleStoreSocket;
+  storeSocket.onerror = () => {
+    storeSocketState.value = "fallback";
+  };
+  storeSocket.onclose = () => {
+    storeSocketState.value = "offline";
+  };
+}
+
 async function loadCompanionMessages() {
   try {
     const data = await getJson("/api/c/app/messages?thread_id=companion&limit=50");
@@ -246,6 +303,12 @@ async function send() {
   scrollToBottom();
 
   if (activeId.value === "store_demo") {
+    if (storeSocket && storeSocket.readyState === WebSocket.OPEN) {
+      typing.value = true;
+      agentError.value = "";
+      storeSocket.send(JSON.stringify({ content: text }));
+      return;
+    }
     typing.value = true;
     try {
       const result = await postJson("/api/c/friends/store_demo/messages", { content: text });
@@ -359,9 +422,13 @@ async function loadCompanion() {
 }
 
 async function switchThread(id) {
+  closeStoreSocket();
   activeId.value = id;
   showContext.value = false;
-  if (id === "store_demo") await loadStoreMessages();
+  if (id === "store_demo") {
+    await loadStoreMessages();
+    openStoreSocket();
+  }
   scrollToBottom();
 }
 
@@ -382,6 +449,8 @@ onMounted(async () => {
   await Promise.all([loadCompanion(), loadCompanionMessages()]);
   scrollToBottom();
 });
+
+onBeforeUnmount(closeStoreSocket);
 </script>
 
 <template>

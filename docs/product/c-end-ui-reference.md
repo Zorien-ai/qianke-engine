@@ -131,10 +131,13 @@ POST /api/c/agent/resume   200
 ```text
 GET  /api/c/friends/store_demo/messages?limit=20
 POST /api/c/friends/store_demo/messages
+WS   /api/c/ws/chat/store_demo
 ```
 
 - 加载最近 20 条持久化消息
+- 进入店宠会话时建立 WebSocket
 - `@店宠` 唤醒真实店宠 Agent
+- WebSocket 不可用时回退 HTTP POST
 - 店宠回复 + 小伴锐评一起进入消息流
 - 店宠返回的 quote_id 会显示在右侧「待确认」卡片
 - 点击「查看报价」进入商城逐单确认
