@@ -92,6 +92,10 @@ const typing = ref(false);
 const search = ref("");
 const showContext = ref(false);
 const showThreads = ref(false);
+const isOnline = ref(typeof navigator === "undefined" ? true : navigator.onLine);
+const deferredInstallPrompt = ref(null);
+const showInstall = ref(false);
+const installHint = ref("");
 const storeSocketState = ref("offline");
 const storeSocketAttempts = ref(0);
 let storeSocket = null;
@@ -526,6 +530,32 @@ function toggleContext() {
   showContext.value = !showContext.value;
 }
 
+function onBeforeInstall(event) {
+  event.preventDefault();
+  deferredInstallPrompt.value = event;
+  showInstall.value = true;
+}
+
+function onOnline() {
+  isOnline.value = true;
+}
+
+function onOffline() {
+  isOnline.value = false;
+}
+
+async function installPwa() {
+  const prompt = deferredInstallPrompt.value;
+  if (!prompt) return;
+  prompt.prompt();
+  try {
+    await prompt.userChoice;
+  } finally {
+    deferredInstallPrompt.value = null;
+    showInstall.value = false;
+  }
+}
+
 function openThreads() {
   showThreads.value = true;
 }
@@ -537,14 +567,41 @@ function selectMobileThread(id) {
 
 onMounted(async () => {
   await Promise.all([loadCompanion(), loadCompanionMessages()]);
+  window.addEventListener("online", onOnline);
+  window.addEventListener("offline", onOffline);
+  window.addEventListener("beforeinstallprompt", onBeforeInstall);
+  const standalone =
+    window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+  if (!standalone && /iPad|iPhone|iPod/.test(window.navigator.userAgent || "")) {
+    installHint.value = "Safari：分享 → 添加到主屏幕";
+    showInstall.value = true;
+  }
   scrollToBottom();
 });
 
-onBeforeUnmount(closeStoreSocket);
+onBeforeUnmount(() => {
+  window.removeEventListener("online", onOnline);
+  window.removeEventListener("offline", onOffline);
+  window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+  closeStoreSocket();
+});
 </script>
 
 <template>
   <div class="c-app">
+    <div v-if="!isOnline" class="c-offline-banner" role="status">
+      当前处于离线状态，恢复连接后消息会自动继续。
+    </div>
+
+    <div v-if="showInstall" class="c-install-banner" role="status">
+      <div class="c-install-copy">
+        <strong>安装千客</strong>
+        <small>{{ installHint || "添加到主屏幕，像 App 一样打开" }}</small>
+      </div>
+      <button v-if="deferredInstallPrompt" type="button" class="c-install-btn" @click="installPwa">安装</button>
+      <button type="button" class="c-install-dismiss" aria-label="关闭安装提示" @click="showInstall = false">关闭</button>
+    </div>
+
     <div class="c-shell">
       <aside class="c-sidebar" aria-label="C 端导航">
         <div class="c-brand">
@@ -2002,6 +2059,74 @@ onBeforeUnmount(closeStoreSocket);
   display: none;
 }
 
+.c-offline-banner {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 60;
+  padding: 7px 16px;
+  background: var(--c-warning);
+  color: #16130d;
+  font-size: 10px;
+  text-align: center;
+}
+
+.c-install-banner {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 360px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-panel);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+}
+
+.c-install-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.c-install-copy strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.c-install-copy small {
+  color: var(--c-text-3);
+  font-size: 9px;
+}
+
+.c-install-btn,
+.c-install-dismiss {
+  padding: 5px 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.c-install-btn {
+  border-color: var(--c-text-3);
+  color: var(--c-text);
+}
+
+.c-install-dismiss {
+  color: var(--c-text-3);
+}
+
 .c-mobile-thread-screen {
   display: none;
 }
@@ -2389,6 +2514,13 @@ onBeforeUnmount(closeStoreSocket);
 
   .c-mobile-thread-screen {
     padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .c-install-banner {
+    right: 16px;
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    left: 16px;
+    max-width: none;
   }
 }
 </style>

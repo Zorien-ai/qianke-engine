@@ -195,15 +195,34 @@ theme_color: #0f0f11
 background_color: #0f0f11
 ```
 
-Service Worker 只缓存同源静态资源（script/style/image/font），不缓存：
+Service Worker 缓存：
+
+```text
+script / style / image / font
+导航 HTML 外壳（离线兜底）
+manifest / icons 由浏览器缓存
+```
+
+明确不缓存：
 
 ```text
 /api/*
 /auth/*
 /whoami
 /admin/*
-HTML 外壳
 ```
+
+安装提示：
+
+- 监听 `beforeinstallprompt`，支持 Chromium 安装；
+- iOS Safari 显示「分享 → 添加到主屏幕」提示；
+- 已 standalone 打开时不显示。
+
+在线状态：
+
+- 监听 online / offline；
+- 离线时顶部显示「当前处于离线状态」；
+- WebSocket 断线继续走重连退避；HTTP 请求失败由页面错误处理兜底。
 
 移动端增加 iOS 安全区：
 
@@ -222,6 +241,9 @@ manifest         200
 icon-192         200
 icon-512         200
 Service Worker   activated，scope /v2/
+shell cache      存在
+离线事件         顶部提示出现，恢复后消失
+安装事件         安装条出现
 C 端 App 控制台  0 errors / 0 warnings
 ```
 
