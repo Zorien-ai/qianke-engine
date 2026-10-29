@@ -120,6 +120,7 @@ const loadingOlderStore = ref(false);
 const storeHistoryHint = ref("");
 const agentBusy = ref(false);
 const agentError = ref("");
+const pendingRetry = ref(null);
 
 const activeThread = computed(() => threads.value.find((item) => item.id === activeId.value) || threads.value[0]);
 const messages = computed(() => messagesByThread.value[activeId.value] || []);
@@ -188,6 +189,29 @@ function scrollToBottom() {
     const el = document.getElementById("c-app-thread");
     if (el) el.scrollTop = el.scrollHeight;
   });
+}
+
+function syncViewportHeight() {
+  const height = window.visualViewport?.height || window.innerHeight;
+  if (!height) return;
+  document.documentElement.style.setProperty("--c-vh", `${height}px`);
+}
+
+function onViewportResize() {
+  syncViewportHeight();
+  scrollToBottom();
+}
+
+function onComposerFocus() {
+  syncViewportHeight();
+  window.setTimeout(scrollToBottom, 120);
+}
+
+function resizeComposer(event) {
+  const el = event?.target;
+  if (!el || el.tagName !== "TEXTAREA") return;
+  el.style.height = "auto";
+  el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
 }
 
 function pushMessage(message) {
@@ -453,8 +477,30 @@ async function send() {
   if (!text || typing.value) return;
   pushMessage({ role: "user", text });
   draft.value = "";
+  const input = document.getElementById("c-app-input");
+  if (input) input.style.height = "auto";
+  pendingRetry.value = null;
   scrollToBottom();
+  await deliverText(text);
+}
 
+async function retrySend() {
+  const failed = pendingRetry.value;
+  if (!failed || typing.value) return;
+  if (failed.threadId !== activeId.value) {
+    pendingRetry.value = null;
+    return;
+  }
+  pendingRetry.value = null;
+  agentError.value = "";
+  await deliverText(failed.text, true);
+}
+
+function clearRetry() {
+  pendingRetry.value = null;
+}
+
+async function deliverText(text, isRetry = false) {
   if (activeId.value === "store_demo") {
     if (storeSocket && storeSocket.readyState === WebSocket.OPEN) {
       typing.value = true;
@@ -475,7 +521,7 @@ async function send() {
       agentError.value = "";
     } catch (error) {
       agentError.value = error?.detail || error?.message || "店宠暂时无法回应";
-      pushMessage({ role: "merchant", text: "店宠暂时忙碌，请稍后再试。" });
+      pendingRetry.value = { threadId: activeId.value, text };
     } finally {
       typing.value = false;
       scrollToBottom();
@@ -492,7 +538,7 @@ async function send() {
     return;
   }
 
-  await persistAppMessage("user", text);
+  if (!isRetry) await persistAppMessage("user", text);
   typing.value = true;
   try {
     const result = await postJson("/api/c/agent/run", {
@@ -518,9 +564,7 @@ async function send() {
     }
   } catch (error) {
     agentError.value = error?.detail || error?.message || "小鱼暂时无法回应";
-    const fallback = localReply(text);
-    pushMessage({ role: "companion", ...fallback });
-    await persistAppMessage("companion", fallback.text);
+    pendingRetry.value = { threadId: activeId.value, text };
   } finally {
     typing.value = false;
     scrollToBottom();
@@ -626,6 +670,9 @@ function selectMobileThread(id) {
 
 onMounted(async () => {
   await Promise.all([loadCompanion(), loadCompanionMessages()]);
+  syncViewportHeight();
+  window.visualViewport?.addEventListener("resize", onViewportResize);
+  window.visualViewport?.addEventListener("scroll", onViewportResize);
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.addEventListener("beforeinstallprompt", onBeforeInstall);
@@ -639,6 +686,8 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.visualViewport?.removeEventListener("resize", onViewportResize);
+  window.visualViewport?.removeEventListener("scroll", onViewportResize);
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("beforeinstallprompt", onBeforeInstall);
@@ -839,6 +888,16 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <div
+            v-if="pendingRetry && pendingRetry.threadId === activeId"
+            class="c-retry-row"
+            role="alert"
+          >
+            <span>消息没有发出去，内容已保留。</span>
+            <button type="button" class="c-retry-btn" @click="retrySend">重试</button>
+            <button type="button" class="c-retry-dismiss" @click="clearRetry">忽略</button>
+          </div>
+
           <div class="c-prompt-row">
             <button type="button" class="c-prompt" @click="sendPrompt('看 500 元以内的跑鞋')">看 500 元以内的跑鞋</button>
             <button type="button" class="c-prompt" @click="sendPrompt('查平台活动')">查平台活动</button>
@@ -858,6 +917,8 @@ onBeforeUnmount(() => {
                 v-model="draft"
                 rows="1"
                 placeholder="问商品、活动或售后"
+                @focus="onComposerFocus"
+                @input="resizeComposer"
                 @keydown.enter.exact.prevent="send"
               />
               <button type="submit" class="c-send-btn" :disabled="!draft.trim() || typing" aria-label="发送">
@@ -2796,6 +2857,41 @@ onBeforeUnmount(() => {
   background: var(--c-panel);
 }
 
+.c-app .c-retry-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0 6px;
+  padding: 7px 9px;
+  border: 1px solid rgba(122, 99, 64, 0.22);
+  border-radius: 8px;
+  background: rgba(160, 138, 100, 0.08);
+  color: var(--c-warning);
+  font-size: 9px;
+}
+
+.c-app .c-retry-row > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.c-app .c-retry-btn,
+.c-app .c-retry-dismiss {
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.c-app .c-retry-dismiss {
+  border-color: transparent;
+  color: var(--c-text-3);
+}
+
 .c-app .c-composer {
   padding: 7px 7px 7px 12px;
   border-color: var(--c-line);
@@ -2877,6 +2973,25 @@ onBeforeUnmount(() => {
 
 /* 移动端对话：更紧凑的头部、更清晰的发件块 */
 @media (max-width: 760px) {
+  .c-app {
+    height: var(--c-vh, 100dvh);
+    min-height: 0;
+  }
+
+  .c-app .c-shell {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .c-app .c-main {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .c-app .c-chat {
+    min-height: 0;
+  }
+
   .c-app .c-message {
     max-width: 88%;
   }
