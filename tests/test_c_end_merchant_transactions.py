@@ -209,3 +209,62 @@ def test_reconcile_detects_merchant_cancel_without_c_cancel(c_store):
         issue["order_id"] == order["order_id"] and issue["issue"] == "STATUS_DIVERGENCE"
         for issue in report["issues"]
     )
+
+
+def _shipped_order(c_store, request_id: str):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P001", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id=request_id,
+    )
+    writer = get_merchant_write_repository()
+    writer.update_order_status("m_gear_002", order["order_id"], "PAID")
+    writer.update_order_status(
+        "m_gear_002",
+        order["order_id"],
+        "SHIPPED",
+        tracking_no="SF1234567890",
+        carrier="顺丰速运",
+    )
+    return order
+
+
+def test_after_sale_approved_refunds_order(c_store):
+    order = _shipped_order(c_store, "req_c_after_sale_001")
+    ticket = c_store.create_after_sale(
+        "buyer_1",
+        order["order_id"],
+        sale_type="REFUND_ONLY",
+        reason="尺码不合适",
+    )
+    assert ticket["status"] == "OPEN"
+    payload = c_store.get_order(order["order_id"])
+    assert payload["can_after_sale"] is False
+    assert payload["after_sale"]["ticket_id"] == ticket["ticket_id"]
+
+    resolved = c_store.resolve_after_sale(ticket["ticket_id"], approved=True)
+    assert resolved["status"] == "APPROVED"
+    assert resolved["refund_amount"] == 299.0
+    refunded = c_store.get_order(order["order_id"])
+    assert refunded["status"] == "REFUNDED"
+    assert refunded["merchant_status"] == "REFUNDED"
+    assert refunded["merchant_refund_amount"] == 299.0
+    assert any(row["order_id"] == order["order_id"] for row in c_store.list_orders("buyer_1"))
+
+
+def test_after_sale_rejected_keeps_order(c_store):
+    order = _shipped_order(c_store, "req_c_after_sale_002")
+    ticket = c_store.create_after_sale(
+        "buyer_1",
+        order["order_id"],
+        sale_type="RETURN_REFUND",
+        reason="不想要了",
+    )
+    resolved = c_store.resolve_after_sale(ticket["ticket_id"], approved=False)
+    assert resolved["status"] == "REJECTED"
+    payload = c_store.get_order(order["order_id"])
+    assert payload["status"] == "CONFIRMED"
+    assert payload["merchant_status"] == "SHIPPED"
+    assert payload["can_after_sale"] is True

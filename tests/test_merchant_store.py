@@ -465,14 +465,16 @@ def test_closed_repository_raises_unavailable(merchant_db):
 
 # ==================== 11. 订单生命周期 / 物流字段（task-45） ====================
 def test_order_status_transitions_contract():
-    """状态机是公开契约：只允许 CREATED→PAID→SHIPPED→COMPLETED，及 CREATED/PAID→CANCELLED。"""
-    from rag_demo.merchant import ORDER_STATUS_TRANSITIONS
+    """状态机是公开契约：CREATED→PAID→SHIPPED→COMPLETED，及取消/售后退款迁移。"""
+    from rag_demo.merchant import ORDER_STATUS_REFUNDED, ORDER_STATUS_TRANSITIONS
 
+    assert ORDER_STATUS_REFUNDED == "REFUNDED"
     assert ORDER_STATUS_TRANSITIONS["CREATED"] == {"PAID", "CANCELLED"}
     assert ORDER_STATUS_TRANSITIONS["PAID"] == {"SHIPPED", "CANCELLED"}
-    assert ORDER_STATUS_TRANSITIONS["SHIPPED"] == {"COMPLETED"}
-    assert ORDER_STATUS_TRANSITIONS["COMPLETED"] == set()
+    assert ORDER_STATUS_TRANSITIONS["SHIPPED"] == {"COMPLETED", "REFUNDED"}
+    assert ORDER_STATUS_TRANSITIONS["COMPLETED"] == {"REFUNDED"}
     assert ORDER_STATUS_TRANSITIONS["CANCELLED"] == set()
+    assert ORDER_STATUS_TRANSITIONS["REFUNDED"] == set()
 
 
 def test_seed_shipped_and_completed_orders_have_logistics(seed):

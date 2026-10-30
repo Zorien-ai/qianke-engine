@@ -8,7 +8,8 @@
 - 所有查询**参数化**、所有列表查询统一过 ``clamp_limit``；多租户查询缺 merchant_id
   时失败关闭（``MerchantDataError``），绝不退化成全表读。
 - 写操作（``reserve_inventory`` / ``commit_reservation`` / ``release_reservation`` /
-  ``create_order`` / ``update_order_status``）全部走 ``BEGIN IMMEDIATE`` 事务：
+  ``create_order`` / ``update_order_status`` / ``cancel_order`` / ``refund_order``）
+  全部走 ``BEGIN IMMEDIATE`` 事务：
   库存扣减/恢复与预占记录同事务，订单状态与物流/时间字段同事务；
   幂等、参数化、租户必填；库存不足/非法迁移等异常整体回滚。**这不是真实 OMS 写通道**。
 
@@ -49,6 +50,7 @@ from .models import (
     ORDER_STATUS_COMPLETED,
     ORDER_STATUS_CREATED,
     ORDER_STATUS_PAID,
+    ORDER_STATUS_REFUNDED,
     ORDER_STATUS_SHIPPED,
     ORDER_STATUS_TRANSITIONS,
     PRODUCT_STATUS_ACTIVE,
@@ -141,7 +143,8 @@ CREATE TABLE IF NOT EXISTS m_order (
     cancelled_at TEXT,
     refund_amount TEXT,
     refunded_at  TEXT,
-    cancel_request_id TEXT
+    cancel_request_id TEXT,
+    refund_request_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_m_order_merchant ON m_order (merchant_id, created_at);
@@ -291,11 +294,11 @@ class SqliteMerchantRepository:
 
         老库（v1 已上线/本地 var 库）需要补：
             m_order.source_ref / tracking_no / carrier / shipped_at / completed_at /
-            cancelled_at / refund_amount / refunded_at / cancel_request_id
+            cancelled_at / refund_amount / refunded_at / cancel_request_id / refund_request_id
         新库在建表时已包含这些列；这里用 PRAGMA 检查逐列 ALTER，幂等可重复执行。
         """
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(m_order)")}
-        # 列名 → SQL 类型；全部允许 NULL（历史订单没有物流/取消信息是正常状态）
+        # 列名 → SQL 类型；全部允许 NULL（历史订单没有物流/取消/退款信息是正常状态）
         missing_columns = {
             "source_ref": "TEXT",
             "tracking_no": "TEXT",
@@ -306,14 +309,19 @@ class SqliteMerchantRepository:
             "refund_amount": "TEXT",
             "refunded_at": "TEXT",
             "cancel_request_id": "TEXT",
+            "refund_request_id": "TEXT",
         }
         for name, sql_type in missing_columns.items():
             if name not in columns:
                 conn.execute(f"ALTER TABLE m_order ADD COLUMN {name} {sql_type}")
-        # 取消 request_id 幂等键：老库补列后同样要有唯一约束（部分唯一索引允许多个 NULL）
+        # request_id 幂等键：老库补列后同样要有唯一约束（部分唯一索引允许多个 NULL）
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_cancel_request "
             "ON m_order (cancel_request_id) WHERE cancel_request_id IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_refund_request "
+            "ON m_order (refund_request_id) WHERE refund_request_id IS NOT NULL"
         )
 
     def _ensure_open(self) -> None:
@@ -967,11 +975,14 @@ class SqliteMerchantRepository:
         状态机见 ``models.ORDER_STATUS_TRANSITIONS``：
             CREATED -> PAID -> SHIPPED -> COMPLETED
             CREATED / PAID -> CANCELLED
+            SHIPPED / COMPLETED -> REFUNDED（只能走 refund_order(amount=...)）
         - 同状态重复调用是**幂等重放**：返回已有订单，不重复写时间戳；
           SHIPPED 重放时若带不同物流单号/承运商 → ``MERCHANT_CONFLICT``（防悄悄改单号）；
         - 非法迁移 → ``MERCHANT_CONFLICT``；未知状态/参数/物流字段非法 → ``MERCHANT_INVALID``；
         - 流转到 SHIPPED **必须**提供合法 ``tracking_no``（v1 规则 4~64 位字母/数字/`-_.`）；
           carrier 可选；其它状态不允许携带物流字段（避免写进无法解释的数据）；
+        - 流转到 REFUNDED **一律拒绝**（``MERCHANT_INVALID``）：售后退款必须带金额/幂等键，
+          请用 :meth:`refund_order`，避免无金额退款绕过审计；
         - 自动写状态时间：PAID→paid_at、SHIPPED→shipped_at、COMPLETED→completed_at；
         - 流转到 CANCELLED 与 :meth:`cancel_order` 语义一致：写 cancelled_at、
           PAID 取消写模拟退款、按已提交预占恢复库存（但没有 request_id 幂等键，
@@ -985,6 +996,11 @@ class SqliteMerchantRepository:
         if target not in ORDER_STATUSES:
             raise MerchantInvalidError(
                 f"未知订单状态: {status}（允许: {', '.join(ORDER_STATUSES)}）"
+            )
+        if target == ORDER_STATUS_REFUNDED:
+            raise MerchantInvalidError(
+                "REFUNDED 只能通过 refund_order(merchant_id, order_id, amount=...) 执行；"
+                "update_order_status 不允许无金额退款"
             )
         tracking = (
             _normalize_tracking_no(tracking_no) if tracking_no is not None else None
@@ -1118,6 +1134,137 @@ class SqliteMerchantRepository:
                     "request_id 已被其他取消请求占用，请重试或换用新的 request_id"
                 ) from exc
             raise MerchantInternalError(f"取消订单事务失败: {exc}") from exc
+
+    def refund_order(
+        self,
+        merchant_id: str,
+        order_id: str,
+        amount: Any = None,
+        request_id: str | None = None,
+    ) -> Order:
+        """售后退款：SHIPPED/COMPLETED → REFUNDED（部分/全额；默认不恢复库存；幂等）。
+
+        业务规则（task-49）：
+        - 只允许 SHIPPED/COMPLETED → REFUNDED；CREATED/PAID 未发货，应走 cancel_order；
+          CANCELLED 拒绝；重复退款幂等（同 request_id 或同金额重放返回已有订单）；
+        - amount：None → 默认全额 total_amount；必须 >0、<= total_amount、最多 2 位小数；
+          非法金额 → ``MERCHANT_INVALID``（不允许超退/负数/NaN/Inf/超过 2 位小数）；
+        - 写 refund_amount/refunded_at；保留 paid_at/shipped_at/completed_at 与物流字段，
+          不写 cancelled_at；**不恢复库存/不改变预占**（退货验收入库是独立流程）；
+        - request_id 幂等键（<=128）：同 key 重放返回同一结果；同 key 跨订单 → Conflict；
+          空白/超长 → Invalid；并发同 key 只有一次写入；
+        - 事务化（BEGIN IMMEDIATE）、租户隔离、merchant_id 必填。
+        """
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        order = _required_text(order_id, "order_id")
+        request = request_id
+        if request is not None:
+            request = _required_text(request, "request_id", max_length=128)
+
+        try:
+            with self._lock, self._transaction() as conn:
+                now = _now()
+                if request is not None:
+                    bound = conn.execute(
+                        "SELECT * FROM m_order WHERE refund_request_id = ?", (request,)
+                    ).fetchone()
+                    if bound is not None:
+                        if (
+                            str(bound["order_id"]) != order
+                            or str(bound["merchant_id"]) != merchant
+                        ):
+                            raise MerchantConflictError(
+                                "request_id 已被用于其他订单的退款，不能跨订单复用"
+                            )
+                        # 同 request_id 重放：金额必须与首次一致，避免 key 相同
+                        # 但金额被悄悄改写（幂等键绑定的是「这笔退款」而不是任意退款）。
+                        bound_total = _as_decimal(bound["total_amount"])
+                        candidate = (
+                            bound_total
+                            if amount is None
+                            else _normalize_refund_amount(amount)
+                        )
+                        stored = (
+                            _as_decimal(bound["refund_amount"])
+                            if bound["refund_amount"] is not None
+                            else None
+                        )
+                        if stored is None or candidate != stored:
+                            raise MerchantConflictError(
+                                "request_id 已用于该订单的另一次退款，退款金额不一致；"
+                                "请使用新的 request_id"
+                            )
+                        return self._hydrate_orders(conn, [bound])[0]
+
+                row = conn.execute(
+                    "SELECT * FROM m_order WHERE order_id = ?", (order,)
+                ).fetchone()
+                if row is None or str(row["merchant_id"]) != merchant:
+                    raise MerchantNotFoundError(f"订单不存在: {order}")
+
+                current = str(row["status"]).upper()
+                total = _as_decimal(row["total_amount"])
+                requested_amount = (
+                    total if amount is None else _normalize_refund_amount(amount)
+                )
+                if requested_amount <= 0:
+                    raise MerchantInvalidError("退款金额必须大于 0")
+                if requested_amount > total:
+                    raise MerchantInvalidError(
+                        f"退款金额不能超过订单总额: amount={money_text(requested_amount)} "
+                        f"> total={money_text(total)}"
+                    )
+
+                if current == ORDER_STATUS_REFUNDED:
+                    existing_amount = (
+                        _as_decimal(row["refund_amount"])
+                        if row["refund_amount"] is not None
+                        else None
+                    )
+                    if existing_amount is not None and requested_amount == existing_amount:
+                        return self._hydrate_orders(conn, [row])[0]  # 幂等：不重复退款
+                    raise MerchantConflictError(
+                        "订单已退款"
+                        f"（{money_text(existing_amount) if existing_amount is not None else '金额未知'}），"
+                        "不能重复退款或改变退款金额"
+                    )
+                if current == ORDER_STATUS_CANCELLED:
+                    raise MerchantConflictError("订单已取消，不能售后退款")
+                if current not in (ORDER_STATUS_SHIPPED, ORDER_STATUS_COMPLETED):
+                    if current in (ORDER_STATUS_CREATED, ORDER_STATUS_PAID):
+                        raise MerchantConflictError(
+                            f"当前状态 {current} 未发货，不能售后退款；"
+                            "请使用 cancel_order(...) 取消订单（含模拟退款/库存补偿）"
+                        )
+                    raise MerchantInternalError(
+                        f"订单 {order} 当前状态非法: {row['status']!r}"
+                    )
+
+                assignments: dict[str, Any] = {
+                    "status": ORDER_STATUS_REFUNDED,
+                    "refund_amount": money_text(requested_amount),
+                    "refunded_at": now,
+                }
+                if request is not None:
+                    assignments["refund_request_id"] = request
+                set_sql = ", ".join(f"{column} = ?" for column in assignments)
+                cursor = conn.execute(
+                    f"UPDATE m_order SET {set_sql} WHERE order_id = ? AND merchant_id = ?",
+                    (*assignments.values(), order, merchant),
+                )
+                if cursor.rowcount != 1:
+                    raise MerchantNotFoundError(f"订单不存在: {order}")
+                updated = conn.execute(
+                    "SELECT * FROM m_order WHERE order_id = ?", (order,)
+                ).fetchone()
+                return self._hydrate_orders(conn, [updated])[0]
+        except sqlite3.IntegrityError as exc:  # 并发下同 request_id 抢写唯一索引
+            if "refund_request_id" in str(exc):
+                raise MerchantConflictError(
+                    "request_id 已被其他退款请求占用，请重试或换用新的 request_id"
+                ) from exc
+            raise MerchantInternalError(f"退款订单事务失败: {exc}") from exc
 
     # ---------- 写操作：内部辅助 ----------
     def _resolve_write_lines(
@@ -1662,6 +1809,30 @@ def _normalize_carrier(value: Any) -> str | None:
     if any(ord(character) < 32 for character in text):
         raise MerchantInvalidError("carrier 含非法控制字符")
     return text
+
+
+def _normalize_refund_amount(value: Any) -> Decimal:
+    """售后退款金额（task-49）：必须正数、有限、最多 2 位小数。
+
+    为什么失败关闭而不做四舍五入：退款金额会被真实财务/对账使用，
+    静默 round 会制造「账面对不上」；宁可让调用方显式处理。
+    上限（<= total_amount）需要订单总额，由 refund_order 在查到订单后校验。
+    """
+    if value is None:
+        raise MerchantInvalidError("退款金额不能为空")
+    if isinstance(value, bool):
+        raise MerchantInvalidError("退款金额必须是数字，不能是布尔值")
+    try:
+        amount = _as_decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        raise MerchantInvalidError(f"退款金额非法: {value!r}") from None
+    if not amount.is_finite():
+        raise MerchantInvalidError("退款金额必须是有限数值（不允许 NaN/Infinity）")
+    if amount <= 0:
+        raise MerchantInvalidError("退款金额必须大于 0")
+    if amount.as_tuple().exponent < -2:
+        raise MerchantInvalidError("退款金额最多 2 位小数")
+    return amount
 
 
 def _normalize_ttl(value: Any) -> int:

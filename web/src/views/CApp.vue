@@ -842,6 +842,8 @@ async function sendPrompt(prompt) {
 
 /* ---------- 最近订单（真实数据，GET /api/c/orders?limit=3） ---------- */
 function orderStatusLabel(order) {
+  // 售后工单已退款 / 商家订单已退款：最近订单同样显示「已退款」
+  if (String(order?.after_sale?.status || "").toUpperCase() === "REFUNDED") return "已退款";
   const raw = String(order?.merchant_status || order?.status || "").trim();
   if (!raw) return "已确认";
   const labels = {
@@ -854,6 +856,7 @@ function orderStatusLabel(order) {
     COMPLETED: "已完成",
     CANCELLED: "已取消",
     CANCELED: "已取消",
+    REFUNDED: "已退款",
   };
   return labels[raw.toUpperCase()] || raw;
 }

@@ -124,6 +124,19 @@ GET /api/c/admin/reconciliation
   → 检查 C/商家订单状态与原始金额，旧平台订单单独计数
 ```
 
+售后（发货后）：
+
+```text
+POST /api/c/orders/{order_id}/after-sales
+  → 仅 SHIPPED/COMPLETED 可申请
+  → 工单 OPEN
+GET  /api/c/orders/{order_id}/after-sales
+GET  /api/c/admin/after-sales
+PATCH /api/c/admin/after-sales/{ticket_id} {"approved":true}
+  → 商家 refund_order → REFUNDED
+  → C 订单 REFUNDED
+```
+
 ## 3. 强制约束
 
 - prepare 不扣 C 端库存，但预占商家库存（取消/过期释放）

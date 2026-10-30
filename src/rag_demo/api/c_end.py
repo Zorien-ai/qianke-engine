@@ -59,6 +59,15 @@ class CancelOrderIn(BaseModel):
     request_id: str | None = Field(default=None, max_length=128)
 
 
+class AfterSaleIn(BaseModel):
+    type: str = Field(..., pattern="^(REFUND_ONLY|RETURN_REFUND)$")
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class AfterSaleResolveIn(BaseModel):
+    approved: bool
+
+
 class CAgentRunIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     thread_id: str | None = Field(default=None, max_length=128)
@@ -106,8 +115,10 @@ def _last_ai_text(messages: list) -> str:
 def _http_error(exc: store.CStoreError) -> HTTPException:
     if exc.code == "AVATAR_TOO_LARGE":
         status = 413
-    elif exc.code == "AVATAR_NOT_FOUND":
+    elif exc.code in {"AVATAR_NOT_FOUND", "AFTER_SALE_NOT_FOUND", "ORDER_NOT_FOUND"}:
         status = 404
+    elif exc.code in {"AFTER_SALE_FORBIDDEN", "ORDER_FORBIDDEN"}:
+        status = 403
     else:
         status = 409 if exc.code in {
             "INSUFFICIENT_STOCK",
@@ -122,6 +133,8 @@ def _http_error(exc: store.CStoreError) -> HTTPException:
             "MERCHANT_ORDER_NOT_FOUND",
             "MERCHANT_CONFLICT",
             "MERCHANT_EXPIRED",
+            "AFTER_SALE_NOT_ALLOWED",
+            "AFTER_SALE_EXISTS",
         } else 400
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
 
@@ -695,6 +708,50 @@ def get_order(order_id: str) -> dict:
     if order["buyer_id"] != buyer_id:
         raise HTTPException(status_code=403, detail="不能查看其他用户的订单")
     return order
+
+
+@router.get("/orders/{order_id}/after-sales")
+def list_order_after_sales(order_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    order = store.get_order(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    if order["buyer_id"] != buyer_id:
+        raise HTTPException(status_code=403, detail="不能查看其他用户的订单")
+    return {"tickets": store.list_after_sales(buyer_id, order_id=order_id)}
+
+
+@router.post("/orders/{order_id}/after-sales")
+def create_order_after_sale(order_id: str, req: AfterSaleIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.create_after_sale(
+            buyer_id,
+            order_id,
+            sale_type=req.type,
+            reason=req.reason,
+        )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/admin/after-sales")
+def admin_after_sales(status: str | None = None, limit: int = 100) -> dict:
+    _require_admin()
+    tickets = store.list_after_sales(limit=limit)
+    if status:
+        expected = status.upper()
+        tickets = [ticket for ticket in tickets if ticket["status"] == expected]
+    return {"tickets": tickets}
+
+
+@router.patch("/admin/after-sales/{ticket_id}")
+def admin_resolve_after_sale(ticket_id: str, req: AfterSaleResolveIn) -> dict:
+    _require_admin()
+    try:
+        return store.resolve_after_sale(ticket_id, approved=req.approved)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
 
 
 @router.post("/agent/run")

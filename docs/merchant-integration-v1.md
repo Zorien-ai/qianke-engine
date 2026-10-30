@@ -190,7 +190,7 @@ repo = get_merchant_repository(backend="oms", seed=False)
 
 ```bash
 uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py -q
-# 结果：117 passed（45 只读/种子用例 + 72 写接口/状态机/取消用例；离线，约 11s）
+# 结果：127 passed（45 只读/种子用例 + 82 写接口/状态机/取消/售后退款用例；离线，约 11s）
 ```
 
 覆盖：
@@ -212,7 +212,12 @@ uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.p
   allocations 精确恢复库存并标记 REVERSED、重复取消不重复退款/恢复、`request_id` 幂等
   与跨订单冲突、SHIPPED/COMPLETED 拒绝、跨租户 NotFound、并发同 request_id 只补偿一次、
   无预占订单不凭空补库存、`update_order_status(CANCELLED)` 与 `cancel_order` 同语义、
-  老库迁移后取消/退款可用、旧种子 CANCELLED 订单幂等兼容。
+  老库迁移后取消/退款可用、旧种子 CANCELLED 订单幂等兼容；
+- 售后退款/REFUNDED（task-49）：SHIPPED/COMPLETED 部分/全额退款、默认不恢复库存
+  （有已提交预占也不动）、金额边界（>0/<=total/最多 2 位小数/NaN/Inf/布尔拒绝）、
+  重复退款幂等与金额/`request_id` 冲突、非法状态（CREATED/PAID 引导 cancel_order、
+  CANCELLED 拒绝、REFUNDED 终态）、`update_order_status(REFUNDED)` 拒绝、跨租户/未知订单、
+  并发同 request_id 只写一次、状态筛选与 `to_dict()` 输出、老库迁移后售后退款可用。
 - 另：`tests/test_c_end_store_agent_merchant.py`、`tests/test_c_end_agent_merchant.py`
   覆盖 C 端只读接入（由对应改动方负责，本任务未修改）。
 
@@ -287,6 +292,7 @@ writer.commit_reservation("m_tea_001", held.reservation_id, order_id=order.order
 | `create_order(merchant_id, order_id, buyer_id, items, total_amount, source_ref=None)` | 幂等写订单 + 行快照；**不改库存**；返回 `Order` | 金额不一致/参数非法 `MERCHANT_INVALID`；未知 SKU/商品 `MERCHANT_NOT_FOUND`；order_id 属其他商家 `MERCHANT_CONFLICT` |
 | `update_order_status(merchant_id, order_id, status, tracking_no=None, carrier=None)` | 订单状态机流转（见 §11）：写状态时间与物流字段；`CANCELLED` 与 §12 的取消语义一致；返回 `Order` | 非法迁移 `MERCHANT_CONFLICT`；未知状态/物流字段非法 `MERCHANT_INVALID`；未知/跨租户 `MERCHANT_NOT_FOUND` |
 | `cancel_order(merchant_id, order_id, request_id=None)` | 取消订单（见 §12）：CREATED/PAID→CANCELLED、PAID 写模拟退款、按已提交预占恢复库存；幂等；返回 `Order` | 非法状态 `MERCHANT_CONFLICT`；`request_id` 冲突/参数非法 `MERCHANT_CONFLICT`/`MERCHANT_INVALID`；未知/跨租户 `MERCHANT_NOT_FOUND` |
+| `refund_order(merchant_id, order_id, amount=None, request_id=None)` | 售后退款（见 §13）：SHIPPED/COMPLETED→REFUNDED、部分/全额、默认不恢复库存；幂等；返回 `Order` | 非发货状态/终态 `MERCHANT_CONFLICT`；金额非法/`update_order_status(REFUNDED)` `MERCHANT_INVALID`；`request_id` 冲突 `MERCHANT_CONFLICT`；未知/跨租户 `MERCHANT_NOT_FOUND` |
 
 ### 10.3 状态机与库存账目口径
 
@@ -335,9 +341,10 @@ reserve ──> RESERVED ──commit──> COMMITTED   (available 保持 -q，
   `allocations`（实际扣减的仓库明细），释放/提交按它精确回滚；
 - `m_order` 新增 `source_ref`（来源引用）与 v1.2 的 `tracking_no / carrier / shipped_at / completed_at`
   物流/生命周期列；v1.3 增加 `cancelled_at / refund_amount / refunded_at` 与内部幂等键
-  `cancel_request_id`（部分唯一索引，允许多个 NULL）；全部允许 NULL（历史订单没有这些信息是正常状态）；
+  `cancel_request_id`；v1.4 增加内部幂等键 `refund_request_id`；三个 request_id/退款列
+  均走部分唯一索引（允许多个 NULL）；全部允许 NULL（历史订单没有这些信息是正常状态）；
 - **老库自动迁移**：初始化时用 `PRAGMA table_info` 检查并 `ALTER TABLE` 补列（幂等），
-  v1/v1.1/v1.2 的 `var/merchant_v1.sqlite` 不需要手工重建；
+  v1/v1.1/v1.2/v1.3 的 `var/merchant_v1.sqlite` 不需要手工重建；
 - `seed(force=True)` 会连同 `m_reservation` 一起重置（仅本地调试，不对外暴露）。
 
 ## 11. 订单状态机与物流字段（v1.2 / task-45）
@@ -349,16 +356,22 @@ reserve ──> RESERVED ──commit──> COMMITTED   (available 保持 -q，
 
 ```text
 CREATED ──PAID──> PAID ──SHIPPED──> SHIPPED ──COMPLETED──> COMPLETED
-   │                │
-   └──CANCELLED─────┴──CANCELLED──> CANCELLED
+   │                │                  │                      │
+   └──CANCELLED─────┴──CANCELLED──> CANCELLED                │
+                                        REFUNDED <────────────┘
+                                           ▲
+                                           └── SHIPPED ──REFUNDED（售后退款，§13）
 ```
 
 - 合法迁移：`CREATED→PAID`、`PAID→SHIPPED`、`SHIPPED→COMPLETED`；
   `CREATED→CANCELLED`、`PAID→CANCELLED`；
-- **终态** `COMPLETED` / `CANCELLED` 不允许任何迁移（同状态重复调用是幂等重放，不属于迁移）；
+  `SHIPPED/COMPLETED→REFUNDED`（**只能**经 `refund_order(amount=...)`，见 §13）；
+- **终态** `COMPLETED` 只能去 `REFUNDED`；`CANCELLED` / `REFUNDED` 是终态，不再允许任何迁移
+  （同状态重复调用是幂等重放，不属于迁移）；
 - 同状态重复调用：返回已有订单，**不重写时间戳**；
 - 非法迁移 → `MERCHANT_CONFLICT`（文案带当前状态与允许的下一步）；
-- 未知状态/参数非法 → `MERCHANT_INVALID`；未知订单/其他租户 → `MERCHANT_NOT_FOUND`；`merchant_id` 必填。
+- 未知状态/参数非法 → `MERCHANT_INVALID`；未知订单/其他租户 → `MERCHANT_NOT_FOUND`；`merchant_id` 必填；
+  `update_order_status(status=REFUNDED)` 一律 `MERCHANT_INVALID`（必须走带金额的 `refund_order`）。
 
 ### 11.2 方法契约
 
@@ -377,11 +390,11 @@ order = writer.update_order_status("m_tea_001", "ORD-20261003-0003", "COMPLETED"
 
 | 参数/规则 | 说明 |
 | --- | --- |
-| `status` | 只接受 `CREATED/PAID/SHIPPED/COMPLETED/CANCELLED`（大小写不敏感，统一转大写） |
+| `status` | 只接受 `CREATED/PAID/SHIPPED/COMPLETED/CANCELLED/REFUNDED`（大小写不敏感，统一转大写）；`REFUNDED` 必须走 §13 的 `refund_order`，本方法传入会 `MERCHANT_INVALID` |
 | `tracking_no` | 流转到 `SHIPPED` **必填**；v1 规则：4~64 位，字母/数字开头，可含 `-_.`；其他状态携带 → `MERCHANT_INVALID` |
 | `carrier` | 可选（如「顺丰速运」）；最长 64 字符、不允许控制字符；仅 `SHIPPED` 允许携带 |
 | 幂等 | 同状态重复调用返回已有订单；SHIPPED 重放若物流单号/承运商与已保存不同 → `MERCHANT_CONFLICT`（防止悄悄改单号） |
-| 时间字段 | `PAID`→写 `paid_at`；`SHIPPED`→写 `shipped_at`；`COMPLETED`→写 `completed_at`；`CANCELLED`→写 `cancelled_at` 并触发模拟退款/库存补偿（语义同 §12 的 `cancel_order`，保留 `paid_at` 供对账） |
+| 时间字段 | `PAID`→写 `paid_at`；`SHIPPED`→写 `shipped_at`；`COMPLETED`→写 `completed_at`；`CANCELLED`→写 `cancelled_at` 并触发模拟退款/库存补偿（语义同 §12 的 `cancel_order`，保留 `paid_at` 供对账）；`REFUNDED` 由 §13 写 `refunded_at`/`refund_amount` |
 | 事务 | `BEGIN IMMEDIATE`：状态、物流字段、时间字段同事务提交；并发同迁移只有一个真正写入，其余幂等返回 |
 | 订单行/金额 | 状态更新**不改**订单行、金额、来源引用 |
 
@@ -407,7 +420,8 @@ SHIPPED/COMPLETED 必须有 `tracking_no`+`shipped_at`，COMPLETED 另有 `compl
 1. 本地状态机不是真实 OMS 回调：没有支付网关验签、物流轨迹、真实退款通道、售后/逆向流程
    （§12 的退款是本地模拟账目，不是支付网关退款）；
 2. `PAID` 只是状态与时间戳，没有支付流水号/金额对账字段（真实接入需扩展 `payment_*`）；
-3. 状态流转不可逆（CANCELLED 后不能复活），没有「拒绝收货/退货退款」等扩展状态；
+3. 状态流转不可逆（CANCELLED / REFUNDED 后不能复活），没有「拒绝收货/部分退货多次退款」等
+   扩展状态；已发货/已完成的本地模拟售后退款见 §13，真实退货退款仍需 OMS；
 4. 未接入 API / Agent 的自动状态推进（管理员状态操作 API 与 C 端展示由接入方负责，
    数据层只提供确定性能力）；
 5. 并发保证仍是 SQLite 单机单写者语义；PG/OMS adapter 需自行实现同等事务与幂等。
@@ -483,13 +497,79 @@ cancel:    available +q (按 allocations 原仓库), 预占 COMMITTED -> REVERSE
 
 1. 不是真实支付网关：没有退款单号、支付流水、通道回调、部分退款/多次退款；
    `refund_amount` 固定为订单全额（或 CREATED 的 0），只是本地模拟账目；
-2. 只能取消**未发货**订单；已发货/已完成需要售后/退货退款流程（未实现，继续由 OMS 负责）；
+2. 只能取消**未发货**订单；已发货/已完成订单的售后退款见 §13（本地模拟、默认不恢复库存），
+   真实退货退款/逆向物流仍由 OMS 负责；
 3. 没有取消原因、操作人、审核人等审计字段；`request_id` 只做幂等键，不代表操作身份；
 4. 种子里的历史 `CANCELLED` 订单没有退款字段（保持原样，不自动补）；
 5. 库存补偿依赖预占记录；若预占记录缺失/被清理，取消不会凭空补库存（宁可不补，也不制造假库存）；
 6. 并发保证仍是 SQLite 单机单写者语义；PG/OMS adapter 需实现同等事务、幂等与库存补偿。
 
-## 13. 变更记录
+## 13. 售后退款与 REFUNDED 状态（v1.4 / task-49）
+
+> 仍然**不是真实支付网关**：本节的退款是本地 SQLite 的模拟账目，用于固定「发货后退款」
+> 的状态、金额与幂等语义；真实退款/退货退款必须走支付网关/OMS 受控链路 + 人工确认 + 对账。
+
+### 13.1 方法契约
+
+```python
+# 全额退款（amount=None → 默认订单 total_amount）
+refunded = writer.refund_order("m_gear_002", "ORD-20261004-0004")
+
+# 部分退款 + request_id 幂等键（重试/并发重放不重复退款）
+refunded = writer.refund_order(
+    "m_gear_002", "ORD-20261004-0004",
+    amount="168.50", request_id="refund-req-20261030-01",
+)
+```
+
+| 参数/规则 | 说明 |
+| --- | --- |
+| 允许状态 | 只允许 `SHIPPED` / `COMPLETED` → `REFUNDED`；`CREATED` / `PAID` 未发货 → `MERCHANT_CONFLICT`（提示用 `cancel_order`）；`CANCELLED` → `MERCHANT_CONFLICT`；已 `REFUNDED` → 幂等/冲突判定 |
+| `amount` | `None` → 默认 `total_amount`（全额）；否则必须 `>0`、`<=total_amount`、有限数值、最多 2 位小数；非法 → `MERCHANT_INVALID` |
+| 写入字段 | `status=REFUNDED`、`refund_amount=amount`、`refunded_at=now`；保留 `paid_at/shipped_at/completed_at`、物流字段；`cancelled_at` 保持 `None` |
+| 库存 | **默认且当前不恢复库存**（即使订单关联 COMMITTED 预占也不动）；退货验收入库是独立流程，避免把未验收商品加回可售库存 |
+| 重复退款 | 已 `REFUNDED`：同 `request_id`（或未传 request_id）且金额一致 → 返回已有订单；金额不一致/重复退款 → `MERCHANT_CONFLICT` |
+| `request_id` | 幂等键（≤128 字符）：同 key 重放返回同一结果（金额必须一致）；同 key 跨订单 → `MERCHANT_CONFLICT`；空白/超长 → `MERCHANT_INVALID`；并发同 key 只有一次写入 |
+| 事务 / 租户 | `BEGIN IMMEDIATE`；状态、退款金额、退款时间同事务提交；`merchant_id` 必填；未知/跨租户 → `MERCHANT_NOT_FOUND` |
+| 状态机入口 | `update_order_status(status=REFUNDED)` **一律拒绝**（`MERCHANT_INVALID`），必须走本方法以携带金额/幂等键 |
+
+### 13.2 金额与退款账目口径
+
+- 本实现每个订单最多一次退款动作：一旦 `REFUNDED` 即为终态；
+  `refund_amount` 记录本次退款金额（可小于 `total_amount`，代表部分退款）；
+- 不做多次部分退款累加（真实售后可能需要多次退款，属于后续扩展，需新增 refund 流水表）；
+- `amount` 不做四舍五入：超过 2 位小数直接拒绝，避免账面对不上；
+- PAID 未发货取消走 §12 `cancel_order`（写退款 + 恢复库存），与本节分开：
+  **未发货取消 ≠ 发货后退款**。
+
+### 13.3 库存 / 预占口径
+
+- 本节退款**不恢复库存、不改变预占状态**：SHIPPED/COMPLETED 商品已离开可售库存，
+  退货验收入库（质检/上架）是独立流程，不能因为「退款成功」就自动加回可售；
+- 取消（§12）才按 COMMITTED 预占 allocations 恢复 available 并标 `REVERSED`；
+- 因此退款订单若仍关联 COMMITTED 预占，该预占保持 COMMITTED，直到后续独立退货入库流程处理。
+
+### 13.4 模型 / 表字段 / 迁移
+
+- 订单状态枚举新增 `REFUNDED`；`Order.refund_amount` / `refunded_at` 复用 §12 的字段
+  （退款动作写这两个字段）；`to_dict()` 同步输出；
+- `m_order` 增加内部幂等键 `refund_request_id TEXT` 与部分唯一索引
+  `idx_m_order_refund_request (refund_request_id) WHERE refund_request_id IS NOT NULL`
+  （不进 `Order` 公共模型）；
+- **老库自动迁移**：初始化时 `PRAGMA table_info(m_order)` 检查并逐列 `ALTER TABLE`（幂等），
+  补列后再建索引；v1.x 的 `var/merchant_v1.sqlite` 无需手工重建；
+- 种子数据不使用 `REFUNDED` 状态（由真实写操作产生），无需调整 CSV。
+
+### 13.5 限制
+
+1. 不是真实支付网关：没有退款单号、支付流水、通道回调、多次/部分累计退款；
+   `refund_amount` 只是本地模拟账目；
+2. 每个订单最多一次退款动作（`REFUNDED` 终态）；如需多次部分退款需新增退款流水表与状态扩展；
+3. 不恢复库存、不改预占；退货验收入库/逆向物流由 OMS 独立流程负责；
+4. 没有退款原因/操作人/审核人审计字段；`request_id` 只做幂等键，不代表操作身份；
+5. 并发保证仍是 SQLite 单机单写者语义；PG/OMS adapter 需实现同等事务、幂等与唯一约束。
+
+## 14. 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
@@ -497,3 +577,4 @@ cancel:    available +q (按 allocations 原仓库), 预占 COMMITTED -> REVERSE
 | v1.1 | 2026-10-30 | 新增本地写入能力：`MerchantWriteRepository`、`m_reservation`、事务化 reserve/commit/release/create_order（幂等、库存不足失败关闭、租户必填）、`m_order.source_ref` 与老库自动迁移；新增 30 例写接口单测（合计 68 例） |
 | v1.2 | 2026-10-30 | 新增订单状态机与物流字段：`update_order_status`、`Order.tracking_no/carrier/shipped_at/completed_at`、`m_order` 四列与老库自动迁移、种子 SHIPPED/COMPLETED 物流数据与校验；新增 31 例状态机/物流/迁移测试（合计 101 例） |
 | v1.3 | 2026-10-30 | 新增订单取消与模拟退款：`cancel_order(..., request_id)`、`Order.cancelled_at/refund_amount/refunded_at`、`m_order` 取消/退款列 + `cancel_request_id` 唯一幂等键与老库自动迁移、按已提交预占 allocations 恢复库存并标记 `REVERSED`、`update_order_status(CANCELLED)` 同语义；新增 16 例取消/退款/库存补偿测试（合计 117 例） |
+| v1.4 | 2026-10-30 | 新增发货后售后退款与 `REFUNDED` 状态：状态机 `SHIPPED/COMPLETED→REFUNDED`、`refund_order(amount/request_id)`（部分/全额、默认全额、默认不恢复库存）、`m_order.refund_request_id` 唯一幂等键与老库自动迁移、`update_order_status(REFUNDED)` 拒绝；新增 10 例售后退款/金额/幂等/迁移测试（合计 127 例） |

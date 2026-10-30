@@ -10,6 +10,13 @@ const pendingCancelId = ref("");
 const cancellingId = ref("");
 const cancelError = ref("");
 const cancelNotice = ref("");
+// 售后：afterSaleOpenId = 展开申请表单的订单；afterSaleBusy = 正在提交的订单
+const afterSaleOpenId = ref("");
+const afterSaleType = ref("REFUND_ONLY");
+const afterSaleReason = ref("");
+const afterSaleBusy = ref("");
+const afterSaleError = ref("");
+const afterSaleNotice = ref("");
 
 function money(value) {
   return Number(value || 0).toFixed(2);
@@ -33,6 +40,7 @@ const STATUS_LABELS = {
   COMPLETED: "已完成",
   CANCELLED: "已取消",
   CANCELED: "已取消",
+  REFUNDED: "已退款",
 };
 
 function orderStatus(order) {
@@ -44,6 +52,7 @@ function orderStatus(order) {
 function orderStatusTone(order) {
   const raw = String(order?.merchant_status || order?.status || "").toUpperCase();
   if (raw === "CANCELLED" || raw === "CANCELED") return "is-cancelled";
+  if (raw === "REFUNDED") return "is-refunded";
   if (raw === "CREATED" || raw === "PENDING") return "is-created";
   if (raw === "SHIPPED" || raw === "DELIVERING") return "is-shipped";
   if (raw === "COMPLETED") return "is-completed";
@@ -140,9 +149,9 @@ function isCancelled(order) {
   return raw === "CANCELLED" || raw === "CANCELED" || !!order?.merchant_cancelled_at;
 }
 
-/** 只对后端明确允许取消的订单显示入口；已取消的不能再取消 */
+/** 只对后端明确允许取消的订单显示入口；已取消/已退款的不能再取消 */
 function canCancel(order) {
-  return !!order?.can_cancel && !isCancelled(order);
+  return !!order?.can_cancel && !isCancelled(order) && !isRefunded(order);
 }
 
 function cancelAt(order) {
@@ -157,12 +166,12 @@ function refundAmount(order) {
   return Number(value);
 }
 
-function cancelErrorMessage(e) {
+function apiErrorMessage(e, fallback) {
   const detail = e?.payload?.detail;
   if (detail && typeof detail === "object") {
-    return detail.message || detail.code || "取消订单失败";
+    return detail.message || detail.code || fallback;
   }
-  return e?.detail || e?.message || "取消订单失败";
+  return e?.detail || e?.message || fallback;
 }
 
 function askCancel(order) {
@@ -196,9 +205,129 @@ async function confirmCancel(order) {
     pendingCancelId.value = "";
     await loadOrders();
   } catch (e) {
-    cancelError.value = cancelErrorMessage(e);
+    cancelError.value = apiErrorMessage(e, "取消订单失败");
   } finally {
     cancellingId.value = "";
+  }
+}
+
+/* ---------- 申请售后（can_after_sale / after_sale / REFUNDED） ---------- */
+const AFTER_SALE_TYPE_LABELS = {
+  REFUND_ONLY: "仅退款",
+  RETURN_REFUND: "退货退款",
+};
+
+const AFTER_SALE_STATUS_LABELS = {
+  OPEN: "待处理",
+  PENDING: "待处理",
+  PROCESSING: "待处理",
+  APPROVED: "已通过",
+  ACCEPTED: "已通过",
+  REJECTED: "已拒绝",
+  REFUNDED: "已退款",
+  CANCELLED: "已撤销",
+  CANCELED: "已撤销",
+};
+
+function afterSaleOf(order) {
+  const value = order?.after_sale;
+  return value && typeof value === "object" ? value : null;
+}
+
+function afterSaleStatus(order) {
+  return statusKey(afterSaleOf(order)?.status);
+}
+
+/** REFUNDED：订单已退款（商家状态 / 旧 status / 售后工单任一命中），不能再取消或再申请 */
+function isRefunded(order) {
+  return (
+    afterSaleStatus(order) === "REFUNDED" ||
+    statusKey(order?.merchant_status) === "REFUNDED" ||
+    statusKey(order?.status) === "REFUNDED"
+  );
+}
+
+/** 有未结束的售后工单时不允许重复申请（后端唯一索引也只允许一个 OPEN） */
+function isAfterSaleOpen(order) {
+  return ["OPEN", "PENDING", "PROCESSING"].includes(afterSaleStatus(order));
+}
+
+function canApplyAfterSale(order) {
+  return !!order?.can_after_sale && !isRefunded(order) && !isAfterSaleOpen(order);
+}
+
+function afterSaleStatusLabel(order) {
+  const status = afterSaleStatus(order);
+  return AFTER_SALE_STATUS_LABELS[status] || afterSaleOf(order)?.status || "待处理";
+}
+
+function afterSaleTone(order) {
+  const status = afterSaleStatus(order);
+  if (status === "REFUNDED") return "is-refunded";
+  if (status === "APPROVED" || status === "ACCEPTED") return "is-approved";
+  if (status === "REJECTED") return "is-rejected";
+  return "is-open";
+}
+
+function afterSaleTypeLabel(type) {
+  const key = statusKey(type);
+  return AFTER_SALE_TYPE_LABELS[key] || type || "售后";
+}
+
+/** 退款金额优先取售后工单；REFUNDED 时回退订单上的退款金额（都是后端事实，不推断） */
+function afterSaleRefundAmount(order) {
+  const ticketAmount = afterSaleOf(order)?.refund_amount;
+  if (ticketAmount !== null && ticketAmount !== undefined && ticketAmount !== "") {
+    return Number(ticketAmount);
+  }
+  if (isRefunded(order) && order?.merchant_refund_amount !== null && order?.merchant_refund_amount !== undefined && order.merchant_refund_amount !== "") {
+    return Number(order.merchant_refund_amount);
+  }
+  return null;
+}
+
+function openAfterSale(order) {
+  if (!canApplyAfterSale(order) || afterSaleBusy.value) return;
+  afterSaleError.value = "";
+  afterSaleNotice.value = "";
+  afterSaleOpenId.value = order.order_id;
+  afterSaleType.value = "REFUND_ONLY";
+  afterSaleReason.value = "";
+}
+
+function dismissAfterSale() {
+  if (afterSaleBusy.value) return;
+  afterSaleOpenId.value = "";
+  afterSaleError.value = "";
+  afterSaleReason.value = "";
+}
+
+async function submitAfterSale(order) {
+  if (!order || afterSaleBusy.value) return;
+  const reason = afterSaleReason.value.trim();
+  if (!reason) {
+    afterSaleError.value = "请填写申请原因后再提交";
+    return;
+  }
+  afterSaleBusy.value = order.order_id;
+  afterSaleError.value = "";
+  try {
+    const payload = await postJson(
+      `/api/c/orders/${encodeURIComponent(order.order_id)}/after-sales`,
+      { type: afterSaleType.value, reason }
+    );
+    // 契约：返回 ticket（兼容直接返回 ticket 或 {ticket} 包装）
+    const ticket = payload?.ticket || payload || {};
+    afterSaleNotice.value = ticket?.ticket_id
+      ? `售后申请已提交：工单 ${ticket.ticket_id}（处理中）`
+      : "售后申请已提交，请等待商家处理";
+    afterSaleOpenId.value = "";
+    afterSaleReason.value = "";
+    await loadOrders();
+  } catch (e) {
+    afterSaleError.value = apiErrorMessage(e, "售后申请提交失败");
+  } finally {
+    afterSaleBusy.value = "";
   }
 }
 
@@ -234,6 +363,7 @@ onMounted(loadOrders);
     </header>
 
     <p v-if="cancelNotice" class="state-line state-ok" role="status">{{ cancelNotice }}</p>
+    <p v-if="afterSaleNotice" class="state-line state-ok" role="status">{{ afterSaleNotice }}</p>
     <p v-if="cancelError" class="state-line state-error" role="alert">{{ cancelError }}</p>
     <p v-if="error" class="state-line state-error" role="alert">{{ error }}</p>
     <p v-if="loading" class="state-line" role="status">正在加载订单…</p>
@@ -258,6 +388,54 @@ onMounted(loadOrders);
               :disabled="!!cancellingId"
               @click="askCancel(order)"
             >取消订单</button>
+            <button
+              v-if="canApplyAfterSale(order)"
+              class="order-cancel-btn"
+              type="button"
+              :disabled="!!afterSaleBusy"
+              @click="openAfterSale(order)"
+            >申请售后</button>
+          </div>
+        </div>
+
+        <!-- 售后申请：行内表单，类型 + 原因，提交后才创建工单 -->
+        <div v-if="afterSaleOpenId === order.order_id" class="after-sale-form">
+          <p class="after-sale-form-title">
+            申请售后 <code>{{ order.order_id }}</code>
+          </p>
+          <div class="after-sale-fields">
+            <label class="after-sale-field">
+              <span>售后类型</span>
+              <select v-model="afterSaleType" @change="afterSaleError = ''">
+                <option value="REFUND_ONLY">仅退款</option>
+                <option value="RETURN_REFUND">退货退款</option>
+              </select>
+            </label>
+            <label class="after-sale-field after-sale-reason">
+              <span>申请原因</span>
+              <textarea
+                v-model="afterSaleReason"
+                rows="2"
+                maxlength="200"
+                placeholder="请说明问题，例如：商品破损 / 未按时发货"
+                @input="afterSaleError = ''"
+              ></textarea>
+            </label>
+          </div>
+          <p v-if="afterSaleError" class="after-sale-error" role="alert">{{ afterSaleError }}</p>
+          <div class="after-sale-form-foot">
+            <span class="after-sale-count">{{ afterSaleReason.length }}/200</span>
+            <div class="after-sale-form-actions">
+              <button type="button" class="ghost-btn" :disabled="!!afterSaleBusy" @click="dismissAfterSale">
+                取消
+              </button>
+              <button
+                type="button"
+                class="order-cancel-btn is-primary"
+                :disabled="!!afterSaleBusy"
+                @click="submitAfterSale(order)"
+              >{{ afterSaleBusy === order.order_id ? "提交中…" : "提交申请" }}</button>
+            </div>
           </div>
         </div>
 
@@ -309,6 +487,32 @@ onMounted(loadOrders);
             <span>取消时间</span>
             <code>{{ shortMinute(cancelAt(order)) }}</code>
           </div>
+        </div>
+
+        <!-- 售后工单：已申请的订单展示状态/工单号/退款；REFUNDED 不再显示取消与申请入口 -->
+        <div v-if="afterSaleOf(order)" class="order-after-sale" :class="afterSaleTone(order)">
+          <div class="after-sale-head">
+            <span class="after-sale-tag">售后 · {{ afterSaleStatusLabel(order) }}</span>
+            <code v-if="afterSaleOf(order).ticket_id" class="after-sale-ticket">
+              {{ afterSaleOf(order).ticket_id }}
+            </code>
+          </div>
+          <div class="after-sale-meta">
+            <span>{{ afterSaleTypeLabel(afterSaleOf(order).type) }}</span>
+            <span v-if="afterSaleOf(order).reason">原因：{{ afterSaleOf(order).reason }}</span>
+            <span v-if="afterSaleRefundAmount(order) !== null">
+              退款金额 ¥{{ money(afterSaleRefundAmount(order)) }}
+            </span>
+            <span v-if="afterSaleOf(order).created_at">
+              申请于 {{ shortMinute(afterSaleOf(order).created_at) }}
+            </span>
+            <span v-if="afterSaleOf(order).resolved_at">
+              处理于 {{ shortMinute(afterSaleOf(order).resolved_at) }}
+            </span>
+          </div>
+        </div>
+        <div v-else-if="isRefunded(order)" class="order-after-sale is-refunded">
+          <span class="after-sale-tag">售后 · 已退款</span>
         </div>
 
         <!-- 状态时间线：仅 merchant 订单出现，老订单保持原有简洁样式 -->
@@ -513,6 +717,183 @@ onMounted(loadOrders);
   font-size: 10px;
 }
 
+/* 提交售后：主色确认按钮 */
+.order-cancel-btn.is-primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.order-cancel-btn.is-primary:hover:not(:disabled) {
+  border-color: var(--primary-strong);
+  background: var(--primary-strong);
+  color: #fff;
+}
+
+/* ---------- 售后申请表单 ---------- */
+.after-sale-form {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--primary-soft) 26%, var(--surface));
+}
+
+.after-sale-form-title {
+  margin: 0 0 9px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.after-sale-form-title code {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.after-sale-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.after-sale-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.after-sale-field select,
+.after-sale-field textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.after-sale-field select {
+  min-width: 128px;
+}
+
+.after-sale-reason {
+  flex: 1 1 240px;
+}
+
+.after-sale-reason textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.after-sale-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.after-sale-form-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.after-sale-count {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.after-sale-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.after-sale-form-actions .ghost-btn {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 10px;
+}
+
+/* ---------- 售后工单状态 ---------- */
+.order-after-sale {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+}
+
+.order-after-sale.is-open {
+  border-color: color-mix(in srgb, var(--warn) 30%, var(--border));
+  background: color-mix(in srgb, var(--warn-soft) 34%, var(--surface));
+}
+
+.order-after-sale.is-approved,
+.order-after-sale.is-refunded {
+  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
+  background: color-mix(in srgb, var(--success-soft) 30%, var(--surface));
+}
+
+.order-after-sale.is-rejected {
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
+  background: color-mix(in srgb, var(--danger-soft) 28%, var(--surface));
+}
+
+.after-sale-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.after-sale-tag {
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.order-after-sale.is-open .after-sale-tag {
+  color: var(--warn);
+}
+
+.order-after-sale.is-approved .after-sale-tag,
+.order-after-sale.is-refunded .after-sale-tag {
+  color: var(--success);
+}
+
+.order-after-sale.is-rejected .after-sale-tag {
+  color: var(--danger);
+}
+
+.after-sale-ticket {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  word-break: break-all;
+}
+
+.after-sale-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
 .order-id {
   font-family: var(--mono);
   font-size: 12px;
@@ -553,6 +934,11 @@ onMounted(loadOrders);
 .order-status.is-cancelled {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.order-status.is-refunded {
+  background: var(--success-soft);
+  color: var(--success);
 }
 
 .order-merchant {
@@ -843,6 +1229,20 @@ onMounted(loadOrders);
 
   .order-cancel-actions {
     justify-content: flex-end;
+  }
+
+  .after-sale-fields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .after-sale-field select,
+  .after-sale-field textarea {
+    width: 100%;
+  }
+
+  .after-sale-reason {
+    flex-basis: auto;
   }
 
   .timeline-step {

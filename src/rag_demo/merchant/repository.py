@@ -172,7 +172,9 @@ class MerchantWriteRepository(Protocol):
     ) -> Order:
         """订单状态机流转（幂等；只允许合法迁移）。
 
-        合法迁移：``CREATED->PAID->SHIPPED->COMPLETED``；``CREATED/PAID->CANCELLED``。
+        合法迁移：``CREATED->PAID->SHIPPED->COMPLETED``；``CREATED/PAID->CANCELLED``；
+        ``SHIPPED/COMPLETED->REFUNDED`` **只能**通过 :meth:`refund_order`（需要退款金额），
+        本方法传 ``status=REFUNDED`` 会抛 ``MERCHANT_INVALID``，避免无金额退款绕过审计。
         - 同状态重复调用返回已有订单（幂等，不重复写时间戳）；
         - 非法迁移抛 ``MERCHANT_CONFLICT``，未知状态/参数非法抛 ``MERCHANT_INVALID``；
         - 流转到 ``SHIPPED`` 必须提供合法 ``tracking_no``（v1 规则：4~64 位字母/数字/``-_.``），
@@ -181,6 +183,33 @@ class MerchantWriteRepository(Protocol):
         - 流转到 ``CANCELLED`` 与 :meth:`cancel_order` 语义一致（模拟退款 + 库存恢复），
           区别只是没有 ``request_id`` 幂等键；业务代码应优先用 ``cancel_order``；
         - 未知订单/跨租户一律 ``MERCHANT_NOT_FOUND``；``merchant_id`` 必填。
+        """
+        ...
+
+    def refund_order(
+        self,
+        merchant_id: str,
+        order_id: str,
+        amount: Any = None,
+        request_id: str | None = None,
+    ) -> Order:
+        """售后退款（SHIPPED/COMPLETED → REFUNDED；部分/全额；默认不恢复库存；幂等）。
+
+        业务规则（task-49）：
+        - 只允许 ``SHIPPED`` / ``COMPLETED`` → ``REFUNDED``；``CREATED`` / ``PAID`` 未发货，
+          应走 :meth:`cancel_order`（``MERCHANT_CONFLICT``）；``CANCELLED`` 拒绝；
+        - ``amount``：None → 默认订单全额 ``total_amount``；必须是有限正数、最多 2 位小数、
+          且 ``<= total_amount``；非法金额 ``MERCHANT_INVALID``；
+        - 写 ``refund_amount = amount``、``refunded_at = now``；保留已有时序字段
+          （``paid_at/shipped_at/completed_at``、物流字段）与 ``cancelled_at=None``；
+        - **默认不恢复库存**：售后退货验收入库是独立流程，本方法不改库存/预占
+          （即使订单有 COMMITTED 预占也不动，避免把未验收商品凭空加回可售库存）；
+        - 重复退款幂等：已 ``REFUNDED`` 时，同 ``request_id``（或未传 request_id 且金额相同）
+          返回已有订单，不重复写时间/金额；金额或 request_id 不匹配 → ``MERCHANT_CONFLICT``；
+        - ``request_id`` 幂等键：同 key 跨订单 → ``MERCHANT_CONFLICT``；空白/超长 →
+          ``MERCHANT_INVALID``；
+        - 事务化（`BEGIN IMMEDIATE`）、租户隔离（未知/跨租户 ``MERCHANT_NOT_FOUND``）、
+          ``merchant_id`` 必填。
         """
         ...
 

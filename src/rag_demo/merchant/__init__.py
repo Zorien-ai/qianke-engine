@@ -4,7 +4,8 @@
 ----------
 这是**独立、可测试、可替换的商家数据层**：商品 / SKU / 库存 / 订单查询，
 以及幂等的**库存预占（reserve/commit/release）、订单写入（create_order）、
-订单生命周期（paid/shipped/completed）与取消/模拟退款（cancel_order）**。
+订单生命周期（paid/shipped/completed/refunded）、取消（cancel_order）与
+售后退款（refund_order，默认不恢复库存）**。
 默认落在 SQLite（``QIANKE_MERCHANT_DB``），接口面向未来的真实 OMS / PostgreSQL。
 
 ⚠ 它**不是**真实 OMS：没有商家鉴权/支付对账；SQLite 写通道只是本地演示/测试实现。
@@ -68,6 +69,7 @@ from .limits import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, clamp_limit
 from .models import (
     DEFAULT_CURRENCY,
     ORDER_STATUSES,
+    ORDER_STATUS_REFUNDED,
     ORDER_STATUS_TRANSITIONS,
     RESERVATION_STATUSES,
     RESERVATION_STATUS_COMMITTED,
@@ -106,6 +108,7 @@ __all__ = [
     "MAX_RESERVATION_TTL_SECONDS",
     "MAX_WRITE_ITEMS",
     "ORDER_STATUSES",
+    "ORDER_STATUS_REFUNDED",
     "ORDER_STATUS_TRANSITIONS",
     "RESERVATION_STATUSES",
     "RESERVATION_STATUS_COMMITTED",

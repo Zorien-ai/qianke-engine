@@ -192,6 +192,21 @@ POST /api/c/orders/{order_id}/cancel         # 取消已确认订单，成功返
 - 失败时展示后端 `detail.message`（如「已发货订单不可取消」），订单状态与按钮保持不变；
 - CApp「最近订单」复用既有 `loadRecentOrders`，进入/切回会话时自然拿到取消后的状态（`merchant_status=CANCELLED` → 已取消）。
 
+申请售后与工单状态：
+
+```text
+GET  /api/c/orders                              # order 新增 can_after_sale / after_sale
+POST /api/c/orders/{order_id}/after-sales        # body {type: REFUND_ONLY|RETURN_REFUND, reason} → ticket
+GET  /api/c/orders/{order_id}/after-sales        # 返回该订单售后工单列表
+```
+
+`after_sale` 结构：`{ticket_id, status, type, reason, refund_amount, created_at, resolved_at}`（无工单为 null）。
+
+- 仅 `can_after_sale=true` 的订单显示「申请售后」；点击后行内表单选择「仅退款 / 退货退款」+ 填写原因（前端必填、≤200 字），确认提交才创建工单；
+- 提交成功后刷新列表：展示工单号与「售后 · 待处理」；已有工单的订单展示状态（待处理 / 已通过 / 已拒绝）、类型、原因、退款金额（有值）、申请与处理时间；
+- `REFUNDED`（售后工单已退款或订单状态已退款）显示「已退款」，不再显示取消订单与申请售后入口；已拒绝且后端 `can_after_sale=true` 时允许重新申请；
+- 前端只展示后端字段，不推断退款金额或工单状态；CApp「最近订单」对已退款订单显示「已退款」。
+
 ## 7. 会话持久化
 
 小鱼会话通过以下接口持久化：

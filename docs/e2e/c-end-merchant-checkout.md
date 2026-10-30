@@ -44,7 +44,7 @@ merchant order = CREATED / 299.00 / buyer b_2001
 
 ```bash
 .\.venv\Scripts\python.exe -m pytest tests/ -q
-# 511 passed, 5 skipped, 1 warning
+# 523 passed, 5 skipped, 1 warning
 ```
 
 新增覆盖：
@@ -186,11 +186,56 @@ C 已取消 / 商家未取消 → STATUS_DIVERGENCE
 旧平台订单单独计数 legacy
 ```
 
-## 6. 已知限制
+## 6. 售后工单 / 售后退款（P1-C）
+
+C 端申请售后：
+
+```text
+POST /api/c/orders/{order_id}/after-sales
+{"type":"REFUND_ONLY","reason":"尺码偏小，申请仅退款"}
+```
+
+条件：
+
+```text
+C 订单 CONFIRMED
+商家订单 SHIPPED / COMPLETED
+没有处理中/已通过的售后
+```
+
+流程：
+
+```text
+创建工单 OPEN
+→ 平台管理员审批
+→ approved=true：商家 refund_order(SHIPPED/COMPLETED -> REFUNDED)
+→ C 订单 REFUNDED，工单 APPROVED，记录退款金额
+→ approved=false：工单 REJECTED，订单保持原状态
+```
+
+实测：
+
+```text
+已发货订单 order_7df6bb9b221542e6
+→ 点击「申请售后」
+→ 选择仅退款 + 原因
+→ 工单 as_e2f3e6f37f804a8f（处理中）
+→ 管理员审批通过
+→ 页面：已退款 / 售后·已通过 / 退款金额 ¥159.00 / 处理于 10-30 13:39
+```
+
+售后字段：
+
+```text
+can_after_sale
+after_sale {ticket_id,status,type,reason,refund_amount,created_at,resolved_at}
+```
+
+## 7. 已知限制
 
 - 商家写层仍是 SQLite 本地 adapter，不是真实 OMS；生产需替换 adapter + 鉴权/支付/对账。
 - C 端下单与商家写分属两个 SQLite 事务，没有分布式事务；当前用预占 + 幂等 + 补偿释放降低不一致，极端进程崩溃窗口仍需对账任务。
 - 预占过期是懒清理（无后台 TTL worker）。
 - 订单状态流转目前由平台管理员模拟，不是真实商家后台/OMS 回调。
-- 退款为本地模拟，没有支付网关/退款单号/部分退款/售后审核。
-- 浏览器 E2E 只跑了单次下单与取消，未做并发下单/多买家竞争。
+- 退款/售后是本地模拟：没有支付网关、物流退货验收、质检、部分退款累计；售后退款默认不回补库存。
+- 浏览器 E2E 只跑了单次下单、取消与售后，未做并发下单/多买家竞争。
