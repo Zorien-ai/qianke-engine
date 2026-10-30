@@ -655,17 +655,22 @@ def test_full_reserve_create_order_commit_flow(repo, writer, seed):
     assert repo.get_order("ORD-FLOW", merchant_id=merchant_id).source_ref == "quote-flow"
 
 
-# ==================== 8. 老库迁移（v1.1 无 source_ref / v1.2 无物流字段） ====================
+# ==================== 8. 老库迁移（v1.1 source_ref / v1.2 物流 / v1.3 取消退款） ====================
 def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
-    """模拟老库：缺 source_ref / 物流字段 / m_reservation；升级后首次初始化应自动补齐。"""
+    """模拟老库：缺 source_ref / 物流字段 / 取消退款字段 / m_reservation；初始化应自动补齐。"""
     connection = sqlite3.connect(str(merchant_db))
     try:
+        connection.execute("DROP INDEX IF EXISTS idx_m_order_cancel_request")
         for column in (
             "source_ref",
             "tracking_no",
             "carrier",
             "shipped_at",
             "completed_at",
+            "cancelled_at",
+            "refund_amount",
+            "refunded_at",
+            "cancel_request_id",
         ):
             connection.execute(f"ALTER TABLE m_order DROP COLUMN {column}")
         connection.execute("DROP TABLE m_reservation")
@@ -689,6 +694,7 @@ def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
             connection.close()
         assert {
             "source_ref", "tracking_no", "carrier", "shipped_at", "completed_at",
+            "cancelled_at", "refund_amount", "refunded_at", "cancel_request_id",
         } <= columns
         assert "m_reservation" in tables
 
@@ -713,6 +719,20 @@ def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
         assert shipped.tracking_no == "SF1234567890" and shipped.shipped_at
         completed = upgraded.update_order_status(merchant_id, "ORD-MIGRATED", "COMPLETED")
         assert completed.completed_at
+
+        # 迁移后的老库也能取消：PAID → 模拟退款（全额）+ cancelled_at
+        upgraded.create_order(
+            merchant_id, "ORD-MIGRATED-CANCEL", "b_1",
+            [{"sku": sku, "quantity": 1}], sku_row.price,
+        )
+        upgraded.update_order_status(merchant_id, "ORD-MIGRATED-CANCEL", "PAID")
+        cancelled = upgraded.cancel_order(
+            merchant_id, "ORD-MIGRATED-CANCEL", request_id="req-migrated-cancel"
+        )
+        assert cancelled.status == "CANCELLED"
+        assert cancelled.cancelled_at
+        assert cancelled.refund_amount == sku_row.price
+        assert cancelled.refunded_at
     finally:
         upgraded.close()
 
@@ -987,6 +1007,299 @@ def test_update_status_does_not_touch_order_lines_or_amount(repo, writer, seed):
     assert after.total_amount == before.total_amount
     assert after.item_count == before.item_count
     assert [item.sku for item in after.items] == [item.sku for item in before.items]
+
+
+# ==================== 10. 订单取消 / 模拟退款 / 库存恢复（task-47） ====================
+def _reservation_status(merchant_db, reservation_id: str) -> str | None:
+    connection = sqlite3.connect(str(merchant_db))
+    connection.row_factory = sqlite3.Row
+    try:
+        row = connection.execute(
+            "SELECT status FROM m_reservation WHERE reservation_id = ?",
+            (reservation_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    return None if row is None else str(row["status"])
+
+
+def _inventory_snapshot(repo, seed) -> dict:
+    return {record.sku: _stock(repo, record.sku) for record in seed.inventory_records}
+
+
+def _setup_committed_order(repo, writer, seed, *, tag: str = "CANCEL"):
+    """预占 → 下单 → 提交，返回订单 + 库存基线（用于验证取消补偿）。"""
+    merchant_id, sku, quantity, total = _order_items(seed, repo)
+    inventory = repo.get_inventory(sku)
+    baseline_available = sum(item.available_qty for item in inventory.warehouses)
+    baseline_reserved = sum(item.reserved_qty for item in inventory.warehouses)
+    reservation_id = f"RSV-{tag}"
+    order_id = f"ORD-{tag}"
+    writer.reserve_inventory(
+        merchant_id, reservation_id,
+        [{"sku": sku, "quantity": quantity}], buyer_id="b_1",
+    )
+    writer.create_order(
+        merchant_id, order_id, "b_1",
+        [{"sku": sku, "quantity": quantity}], total,
+    )
+    writer.commit_reservation(merchant_id, reservation_id, order_id=order_id)
+    return {
+        "merchant_id": merchant_id,
+        "sku": sku,
+        "quantity": quantity,
+        "total": total,
+        "reservation_id": reservation_id,
+        "order_id": order_id,
+        "baseline_available": baseline_available,
+        "baseline_reserved": baseline_reserved,
+    }
+
+
+def test_cancel_created_order_writes_zero_refund(repo, writer, seed):
+    order = _seed_order(seed, "CREATED")
+
+    cancelled = writer.cancel_order(order.merchant_id, order.order_id)
+
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.cancelled_at
+    assert cancelled.refund_amount == Decimal("0")
+    assert cancelled.refunded_at is None
+    payload = cancelled.to_dict()
+    assert payload["cancelled_at"] == cancelled.cancelled_at
+    assert payload["refund_amount"] == "0.00"
+    assert payload["refunded_at"] is None
+    assert repo.get_order(order.order_id, merchant_id=order.merchant_id).status == "CANCELLED"
+
+
+def test_cancel_paid_order_writes_simulated_refund(repo, writer, seed):
+    order = _seed_order(seed, "PAID")
+    paid_at = order.paid_at
+
+    cancelled = writer.cancel_order(order.merchant_id, order.order_id)
+
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.paid_at == paid_at  # 保留支付时间供对账
+    assert cancelled.refund_amount == order.total_amount  # 全额模拟退款
+    assert cancelled.refunded_at
+    assert cancelled.cancelled_at
+    assert Decimal(cancelled.to_dict()["refund_amount"]) == order.total_amount
+
+
+def test_cancel_restores_stock_from_committed_reservation(repo, writer, seed, merchant_db):
+    setup = _setup_committed_order(repo, writer, seed, tag="CREATED-RESTORE")
+    sku = setup["sku"]
+    _assert_stock(
+        repo, sku,
+        available=setup["baseline_available"] - setup["quantity"],
+        reserved=setup["baseline_reserved"],
+    )
+
+    cancelled = writer.cancel_order(setup["merchant_id"], setup["order_id"])
+
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.refund_amount == Decimal("0")  # CREATED 取消无退款
+    # 库存按已提交预占的 allocations 精确回到原仓库；reserved 不再变化
+    _assert_stock(
+        repo, sku,
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+    assert _reservation_status(merchant_db, setup["reservation_id"]) == "REVERSED"
+    # 冲销后的预占不能再提交；重复释放是幂等返回，不会二次恢复
+    with pytest.raises(MerchantConflictError):
+        writer.commit_reservation(
+            setup["merchant_id"], setup["reservation_id"], order_id=setup["order_id"]
+        )
+    released = writer.release_reservation(setup["merchant_id"], setup["reservation_id"])
+    assert released.status == "REVERSED"
+    _assert_stock(
+        repo, sku,
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+
+
+def test_cancel_paid_order_with_reservation_refunds_and_restores(repo, writer, seed, merchant_db):
+    setup = _setup_committed_order(repo, writer, seed, tag="PAID-RESTORE")
+    paid = writer.update_order_status(setup["merchant_id"], setup["order_id"], "PAID")
+    assert paid.paid_at
+
+    cancelled = writer.cancel_order(setup["merchant_id"], setup["order_id"])
+
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.refund_amount == setup["total"]
+    assert cancelled.refunded_at
+    assert cancelled.paid_at == paid.paid_at
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+    assert _reservation_status(merchant_db, setup["reservation_id"]) == "REVERSED"
+
+
+def test_repeated_cancel_does_not_double_restore_or_refund(repo, writer, seed, merchant_db):
+    setup = _setup_committed_order(repo, writer, seed, tag="REPEAT")
+    first = writer.cancel_order(
+        setup["merchant_id"], setup["order_id"], request_id="req-repeat-cancel"
+    )
+    stock_after_first = _stock(repo, setup["sku"])
+
+    second = writer.cancel_order(
+        setup["merchant_id"], setup["order_id"], request_id="req-repeat-cancel"
+    )
+    third = writer.cancel_order(setup["merchant_id"], setup["order_id"])
+
+    for result in (second, third):
+        assert result.status == "CANCELLED"
+        assert result.cancelled_at == first.cancelled_at
+        assert result.refund_amount == first.refund_amount
+        assert result.refunded_at == first.refunded_at
+    assert _stock(repo, setup["sku"]) == stock_after_first  # 绝不二次恢复库存
+    assert _reservation_status(merchant_db, setup["reservation_id"]) == "REVERSED"
+
+
+def test_cancel_request_id_idempotency_and_cross_order_conflict(repo, writer, seed):
+    merchant_id, sku = _pick_sku(seed, repo)
+    sku_row = next(item for item in seed.skus if item.sku == sku)
+    for order_id in ("ORD-REQ-1", "ORD-REQ-2"):
+        writer.create_order(
+            merchant_id, order_id, "b_1",
+            [{"sku": sku, "quantity": 1}], sku_row.price,
+        )
+
+    first = writer.cancel_order(merchant_id, "ORD-REQ-1", request_id="req-idem-1")
+    replay = writer.cancel_order(merchant_id, "ORD-REQ-1", request_id="req-idem-1")
+    assert replay.cancelled_at == first.cancelled_at
+    assert replay.refund_amount == first.refund_amount
+
+    with pytest.raises(MerchantConflictError):
+        writer.cancel_order(merchant_id, "ORD-REQ-2", request_id="req-idem-1")
+    # 其他订单仍可用新的 request_id 取消
+    second = writer.cancel_order(merchant_id, "ORD-REQ-2", request_id="req-idem-2")
+    assert second.status == "CANCELLED"
+
+    writer.create_order(
+        merchant_id, "ORD-REQ-3", "b_1",
+        [{"sku": sku, "quantity": 1}], sku_row.price,
+    )
+    for bad_request_id in ("", "   ", "x" * 129):
+        with pytest.raises(MerchantInvalidError):
+            writer.cancel_order(merchant_id, "ORD-REQ-3", request_id=bad_request_id)
+
+
+def test_cancel_rejects_shipped_and_completed(repo, writer, seed):
+    before = _inventory_snapshot(repo, seed)
+    for status in ("SHIPPED", "COMPLETED"):
+        order = _seed_order(seed, status)
+        with pytest.raises(MerchantConflictError) as excinfo:
+            writer.cancel_order(order.merchant_id, order.order_id)
+        assert excinfo.value.code == "MERCHANT_CONFLICT"
+        persisted = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+        assert persisted.status == status
+        assert persisted.cancelled_at is None
+        assert persisted.refund_amount is None
+        assert persisted.refunded_at is None
+    assert _inventory_snapshot(repo, seed) == before
+
+
+def test_cancel_unknown_cross_tenant_and_missing_merchant(repo, writer, seed):
+    order = _seed_order(seed, "CREATED")
+    other = _other_merchant(seed, order.merchant_id)
+    with pytest.raises(MerchantNotFoundError):
+        writer.cancel_order(other, order.order_id)
+    with pytest.raises(MerchantNotFoundError):
+        writer.cancel_order(order.merchant_id, "ORD-MISSING")
+    for merchant_id in ("", "   ", None):
+        with pytest.raises(MerchantDataError) as excinfo:
+            writer.cancel_order(merchant_id, order.order_id)
+        assert excinfo.value.code == "MERCHANT_DATA"
+    assert repo.get_order(order.order_id).status == "CREATED"
+
+
+def test_cancel_legacy_cancelled_seed_order_is_idempotent(repo, writer, seed):
+    """旧种子里的 CANCELLED 订单没有退款字段（历史数据）；重复取消不能凭空补退款。"""
+    order = _seed_order(seed, "CANCELLED")
+    before = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    assert before.cancelled_at is None and before.refund_amount is None
+
+    result = writer.cancel_order(order.merchant_id, order.order_id)
+
+    assert result.status == "CANCELLED"
+    assert result.cancelled_at is None
+    assert result.refund_amount is None
+    assert repo.get_order(order.order_id).to_dict() == before.to_dict()
+
+
+def test_update_order_status_cancelled_uses_cancellation_semantics(repo, writer, seed, merchant_db):
+    """update_order_status(..., CANCELLED) 不能绕过退款/库存补偿（与 cancel_order 同语义）。"""
+    setup = _setup_committed_order(repo, writer, seed, tag="STATUS-CANCEL")
+    writer.update_order_status(setup["merchant_id"], setup["order_id"], "PAID")
+
+    cancelled = writer.update_order_status(
+        setup["merchant_id"], setup["order_id"], "CANCELLED"
+    )
+
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.cancelled_at
+    assert cancelled.refund_amount == setup["total"]  # PAID 取消
+    assert cancelled.refunded_at
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+    assert _reservation_status(merchant_db, setup["reservation_id"]) == "REVERSED"
+
+
+def test_cancel_without_reservation_does_not_change_inventory(repo, writer, seed):
+    """种子订单/直接 create_order 没有预占扣减，取消不能凭空补库存（文档策略）。"""
+    before = _inventory_snapshot(repo, seed)
+    order = _seed_order(seed, "PAID")
+
+    cancelled = writer.cancel_order(order.merchant_id, order.order_id)
+
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.refund_amount == order.total_amount
+    assert _inventory_snapshot(repo, seed) == before
+
+
+def test_cancel_does_not_touch_order_lines_or_amount(repo, writer, seed):
+    order = _seed_order(seed, "PAID")
+    before = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    writer.cancel_order(order.merchant_id, order.order_id)
+    after = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    assert after.total_amount == before.total_amount
+    assert after.item_count == before.item_count
+    assert [item.sku for item in after.items] == [item.sku for item in before.items]
+
+
+def test_concurrent_cancel_same_request_id_restores_once(repo, writer, seed, merchant_db):
+    setup = _setup_committed_order(repo, writer, seed, tag="CONCURRENT-CANCEL")
+    instances = [_thread_repo(merchant_db) for _ in range(3)]
+
+    def attempt(instance):
+        return instance.cancel_order(
+            setup["merchant_id"], setup["order_id"], request_id="req-concurrent-cancel"
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(pool.map(attempt, instances))
+    finally:
+        for instance in instances:
+            instance.close()
+
+    assert all(result.status == "CANCELLED" for result in results)
+    assert len({result.cancelled_at for result in results}) == 1
+    assert len({result.refund_amount for result in results}) == 1
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+    assert _reservation_status(merchant_db, setup["reservation_id"]) == "REVERSED"
 
 
 def test_write_errors_are_structured(seed, repo):

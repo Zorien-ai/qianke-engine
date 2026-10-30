@@ -178,7 +178,31 @@ class MerchantWriteRepository(Protocol):
         - 流转到 ``SHIPPED`` 必须提供合法 ``tracking_no``（v1 规则：4~64 位字母/数字/``-_.``），
           ``carrier`` 可选；其它状态不允许携带物流字段；
         - 自动写状态时间：PAID→``paid_at``、SHIPPED→``shipped_at``、COMPLETED→``completed_at``；
+        - 流转到 ``CANCELLED`` 与 :meth:`cancel_order` 语义一致（模拟退款 + 库存恢复），
+          区别只是没有 ``request_id`` 幂等键；业务代码应优先用 ``cancel_order``；
         - 未知订单/跨租户一律 ``MERCHANT_NOT_FOUND``；``merchant_id`` 必填。
+        """
+        ...
+
+    def cancel_order(
+        self,
+        merchant_id: str,
+        order_id: str,
+        request_id: str | None = None,
+    ) -> Order:
+        """取消订单（模拟退款 + 按已提交预占的 allocations 恢复库存；幂等）。
+
+        业务规则：
+        - 只允许 ``CREATED`` / ``PAID`` → ``CANCELLED``；``SHIPPED`` / ``COMPLETED`` 拒绝
+          （``MERCHANT_CONFLICT``）；重复取消返回已有订单（幂等，不重复退款/恢复库存）；
+        - PAID 取消写入模拟退款：``refund_amount = total_amount``、``refunded_at = now``；
+          CREATED 取消：``refund_amount = 0``、``refunded_at = None``；
+        - 库存恢复：只按**已提交预占**（``m_reservation.order_id`` 指向本订单且状态 COMMITTED）
+          的仓库 allocations 逐仓 `available_qty += q`，随后预占标记 ``REVERSED``；
+          没有预占的订单（如种子订单/直接 create_order）**不凭空补库存**（允许取消，库存不变）；
+        - 事务化（`BEGIN IMMEDIATE`）；``request_id`` 作为幂等键：同 request_id 重放返回同一结果，
+          同 request_id 用于取消其他订单 → ``MERCHANT_CONFLICT``；
+        - ``merchant_id`` 必填、租户隔离（未知/跨租户 `MERCHANT_NOT_FOUND`）。
         """
         ...
 

@@ -49,20 +49,23 @@ ORDER_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
 
 DEFAULT_CURRENCY = "CNY"
 
-# ---------- 库存预占状态（task-43） ----------
+# ---------- 库存预占状态（task-43 / task-47） ----------
 # RESERVED  : 预占中（available 已扣、reserved 已加），可 release 或 commit
 # COMMITTED : 已提交为订单（available 保持扣减，reserved 已转出）
 # RELEASED  : 已主动释放（库存已恢复）
 # EXPIRED   : 已过期（库存已恢复；由 commit/reserve/release 懒触发）
+# REVERSED  : 已因订单取消冲销（available 已按 allocations 恢复；task-47）
 RESERVATION_STATUS_RESERVED = "RESERVED"
 RESERVATION_STATUS_COMMITTED = "COMMITTED"
 RESERVATION_STATUS_RELEASED = "RELEASED"
 RESERVATION_STATUS_EXPIRED = "EXPIRED"
+RESERVATION_STATUS_REVERSED = "REVERSED"
 RESERVATION_STATUSES: tuple[str, ...] = (
     RESERVATION_STATUS_RESERVED,
     RESERVATION_STATUS_COMMITTED,
     RESERVATION_STATUS_RELEASED,
     RESERVATION_STATUS_EXPIRED,
+    RESERVATION_STATUS_REVERSED,
 )
 
 
@@ -318,6 +321,12 @@ class Order:
         paid_at      支付时间（CREATED→PAID 时写入）
         shipped_at   发货时间（PAID→SHIPPED 时写入）
         completed_at 完成时间（SHIPPED→COMPLETED 时写入）
+
+    取消/模拟退款字段（task-47）：
+        cancelled_at   取消时间（CREATED/PAID→CANCELLED 时写入）
+        refund_amount  模拟退款金额：PAID 取消 = total_amount；CREATED 取消 = 0；
+                       未取消/历史种子订单为 None
+        refunded_at    模拟退款时间：PAID 取消时写入；CREATED 取消/未退款为 None
     """
 
     merchant_id: str
@@ -335,6 +344,9 @@ class Order:
     carrier: str | None = None
     shipped_at: str | None = None
     completed_at: str | None = None
+    cancelled_at: str | None = None
+    refund_amount: Decimal | None = None
+    refunded_at: str | None = None
 
     @property
     def item_count(self) -> int:
@@ -356,6 +368,13 @@ class Order:
             "completed_at": self.completed_at,
             "tracking_no": self.tracking_no,
             "carrier": self.carrier,
+            "cancelled_at": self.cancelled_at,
+            "refund_amount": (
+                money_text(self.refund_amount)
+                if self.refund_amount is not None
+                else None
+            ),
+            "refunded_at": self.refunded_at,
             "source_ref": self.source_ref,
             "item_count": self.item_count,
             "items": [item.to_dict() for item in self.items],
@@ -383,6 +402,7 @@ __all__ = [
     "RESERVATION_STATUS_EXPIRED",
     "RESERVATION_STATUS_RELEASED",
     "RESERVATION_STATUS_RESERVED",
+    "RESERVATION_STATUS_REVERSED",
     "Reservation",
     "ReservationAllocation",
     "ReservationItem",

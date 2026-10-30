@@ -180,6 +180,18 @@ merchant_timeline      [{status, at}] 状态历史（后端给了优先用）
 - 承运商与运单号在卡片内独立展示；右侧「最近订单」空间有限，只显示承运商 + 单号后 4 位，完整单号放 `title`；
 - 没有 merchant 字段的旧订单不显示时间线与物流，保持原有样式。
 
+取消订单与退款：
+
+```text
+GET  /api/c/orders                           # order 新增 can_cancel / merchant_cancelled_at / merchant_refund_amount
+POST /api/c/orders/{order_id}/cancel         # 取消已确认订单，成功返回 order；失败 detail 为 {code, message}
+```
+
+- 仅 `can_cancel=true` 的订单显示「取消订单」按钮；点击后行内展开二次确认（保留订单 / 确认取消），确认才发请求；
+- 成功后刷新列表：状态显示「已取消」，有 `merchant_refund_amount` 时展示退款金额、有 `merchant_cancelled_at` 时展示取消时间；已取消订单不再出现取消按钮；
+- 失败时展示后端 `detail.message`（如「已发货订单不可取消」），订单状态与按钮保持不变；
+- CApp「最近订单」复用既有 `loadRecentOrders`，进入/切回会话时自然拿到取消后的状态（`merchant_status=CANCELLED` → 已取消）。
+
 ## 7. 会话持久化
 
 小鱼会话通过以下接口持久化：

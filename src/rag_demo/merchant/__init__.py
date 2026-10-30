@@ -3,7 +3,8 @@
 一句话定位
 ----------
 这是**独立、可测试、可替换的商家数据层**：商品 / SKU / 库存 / 订单查询，
-以及幂等的**库存预占（reserve/commit/release）与订单写入（create_order）**。
+以及幂等的**库存预占（reserve/commit/release）、订单写入（create_order）、
+订单生命周期（paid/shipped/completed）与取消/模拟退款（cancel_order）**。
 默认落在 SQLite（``QIANKE_MERCHANT_DB``），接口面向未来的真实 OMS / PostgreSQL。
 
 ⚠ 它**不是**真实 OMS：没有商家鉴权/支付对账；SQLite 写通道只是本地演示/测试实现。
@@ -22,7 +23,13 @@
     held = writer.reserve_inventory(
         "m_tea_001", "RSV-1", [{"sku": "SKU-TEA-001-250G", "quantity": 2}], ttl_seconds=900
     )
-    writer.commit_reservation("m_tea_001", "RSV-1", order_id="ORD-1")
+    order = writer.create_order(
+        "m_tea_001", "ORD-1", "b_1001",
+        [{"sku": "SKU-TEA-001-250G", "quantity": 2}], "596.00",
+    )
+    writer.commit_reservation("m_tea_001", "RSV-1", order_id=order.order_id)
+    writer.update_order_status("m_tea_001", order.order_id, "PAID")
+    cancelled = writer.cancel_order("m_tea_001", order.order_id)
 
 模块划分
 --------
@@ -31,7 +38,7 @@
     errors.py             结构化错误（稳定 code，写操作有 MERCHANT_STOCK / CONFLICT / EXPIRED…）
     repository.py         MerchantRepository（只读）+ MerchantWriteRepository（写）协议
     seeds.py              data/merchant/*.csv 读取 + 校验 + 规模下限
-    sqlite_repository.py  默认 SQLite 实现（读查询 + 事务化预占/订单写入 + 订单状态机）
+    sqlite_repository.py  默认 SQLite 实现（读查询 + 事务化预占/订单写入/状态机/取消退款）
     factory.py            后端注册 / 选择 / 缓存 / 写能力检查
 """
 from __future__ import annotations
@@ -67,6 +74,7 @@ from .models import (
     RESERVATION_STATUS_EXPIRED,
     RESERVATION_STATUS_RELEASED,
     RESERVATION_STATUS_RESERVED,
+    RESERVATION_STATUS_REVERSED,
     Inventory,
     InventoryRecord,
     Order,
@@ -104,6 +112,7 @@ __all__ = [
     "RESERVATION_STATUS_EXPIRED",
     "RESERVATION_STATUS_RELEASED",
     "RESERVATION_STATUS_RESERVED",
+    "RESERVATION_STATUS_REVERSED",
     "Inventory",
     "InventoryRecord",
     "MerchantConfigurationError",

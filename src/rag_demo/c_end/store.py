@@ -831,6 +831,61 @@ def confirm_order(
         conn.close()
 
 
+def cancel_confirmed_order(
+    buyer_id: str,
+    order_id: str,
+    *,
+    request_id: str | None = None,
+) -> dict[str, Any]:
+    """取消已确认订单：商家模拟退款/恢复商家库存，再恢复 C 库存并标记 CANCELLED。"""
+    init()
+    row = get_order(order_id)
+    if row is None:
+        raise CStoreError("ORDER_NOT_FOUND", "订单不存在")
+    if row["buyer_id"] != buyer_id:
+        raise CStoreError("ORDER_FORBIDDEN", "不能取消其他用户的订单")
+    if row["status"] == "CANCELLED":
+        return row
+    if row["status"] != "CONFIRMED":
+        raise CStoreError("ORDER_NOT_CANCELLABLE", "只有已确认订单可以取消")
+    if not row.get("merchant_order_id"):
+        raise CStoreError("MERCHANT_ORDER_NOT_FOUND", "旧平台订单没有商家订单，无法执行商家退款")
+
+    try:
+        get_merchant_write_repository().cancel_order(
+            _MERCHANT_ID,
+            order_id,
+            request_id=request_id,
+        )
+    except MerchantError as exc:
+        raise _merchant_error(exc) from exc
+
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE c_order SET status = 'CANCELLED' WHERE order_id = ? AND buyer_id = ?",
+            (order_id, buyer_id),
+        )
+        items = conn.execute(
+            "SELECT product_id, quantity FROM c_order_item WHERE order_id = ?",
+            (order_id,),
+        ).fetchall()
+        for item in items:
+            conn.execute(
+                "UPDATE c_product SET stock = stock + ? WHERE product_id = ?",
+                (item["quantity"], item["product_id"]),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    cancelled = get_order(order_id)
+    return cancelled or row
+
+
 def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, Any]:
     items = conn.execute(
         "SELECT product_id, quantity, unit_price FROM c_order_item WHERE order_id = ?",
@@ -867,7 +922,7 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
             if at:
                 timeline.append({"status": status, "at": at})
         if merchant_order.status == "CANCELLED":
-            timeline.append({"status": "CANCELLED", "at": ""})
+            timeline.append({"status": "CANCELLED", "at": merchant_order.cancelled_at or ""})
         status_at = next(
             (item["at"] for item in reversed(timeline) if item["at"]),
             None,
@@ -901,20 +956,97 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         "merchant_carrier": merchant_order.carrier if merchant_order else None,
         "merchant_status_at": status_at,
         "merchant_timeline": timeline,
+        "merchant_cancelled_at": merchant_order.cancelled_at if merchant_order else None,
+        "merchant_refund_amount": (
+            float(merchant_order.refund_amount)
+            if merchant_order is not None and merchant_order.refund_amount is not None
+            else None
+        ),
+        "merchant_refunded_at": merchant_order.refunded_at if merchant_order else None,
+        "can_cancel": bool(
+            merchant_order is not None
+            and order["status"] == "CONFIRMED"
+            and merchant_order.status in {"CREATED", "PAID"}
+        ),
     }
 
 
 def list_orders(buyer_id: str, limit: int = 50) -> list[dict[str, Any]]:
-    """买家已确认订单，用于审计查询。"""
+    """买家已确认/已取消订单，用于订单页展示与审计查询。"""
     init()
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM c_order WHERE buyer_id = ? AND status = 'CONFIRMED' "
+            "SELECT * FROM c_order WHERE buyer_id = ? AND status IN ('CONFIRMED', 'CANCELLED') "
             "AND order_id LIKE 'order_%' ORDER BY confirmed_at DESC LIMIT ?",
             (buyer_id, max(1, min(int(limit), 200))),
         ).fetchall()
         return [_order_payload(conn, row) for row in rows]
+    finally:
+        conn.close()
+
+
+def reconcile_orders(limit: int = 200) -> dict[str, Any]:
+    """核对 C 订单与商家订单：缺失、状态、原始金额。旧平台订单单独计数。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_order WHERE order_id LIKE 'order_%' "
+            "ORDER BY confirmed_at DESC, order_id DESC LIMIT ?",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+        checked = 0
+        legacy = 0
+        issues: list[dict[str, Any]] = []
+        repo = get_merchant_repository()
+        for row in rows:
+            payload = _order_payload(conn, row)
+            merchant_order_id = payload.get("merchant_order_id")
+            if not merchant_order_id:
+                legacy += 1
+                continue
+            checked += 1
+            merchant_order = repo.get_order(
+                merchant_order_id,
+                merchant_id=_MERCHANT_ID,
+                buyer_id=_merchant_buyer_id(row["buyer_id"]),
+            )
+            if merchant_order is None:
+                issues.append({
+                    "order_id": row["order_id"],
+                    "issue": "MERCHANT_ORDER_MISSING",
+                })
+                continue
+            c_status = str(row["status"]).upper()
+            m_status = str(merchant_order.status).upper()
+            if c_status == "CONFIRMED" and m_status == "CANCELLED":
+                issues.append({
+                    "order_id": row["order_id"],
+                    "issue": "STATUS_DIVERGENCE",
+                    "c_status": c_status,
+                    "merchant_status": m_status,
+                })
+            elif c_status == "CANCELLED" and m_status != "CANCELLED":
+                issues.append({
+                    "order_id": row["order_id"],
+                    "issue": "STATUS_DIVERGENCE",
+                    "c_status": c_status,
+                    "merchant_status": m_status,
+                })
+            if abs(float(row["original_amount"]) - float(merchant_order.total_amount)) > 0.01:
+                issues.append({
+                    "order_id": row["order_id"],
+                    "issue": "AMOUNT_DIVERGENCE",
+                    "c_amount": float(row["original_amount"]),
+                    "merchant_amount": float(merchant_order.total_amount),
+                })
+        return {
+            "checked": checked,
+            "legacy": legacy,
+            "issues": issues,
+            "ok": not issues,
+        }
     finally:
         conn.close()
 

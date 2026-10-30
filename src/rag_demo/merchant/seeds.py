@@ -243,7 +243,10 @@ def _parse_inventory(rows: list[dict[str, str]]) -> list[InventoryRecord]:
 
 
 def _optional_timestamp(row: dict[str, str], column: str, filename: str) -> str | None:
-    """可选 ISO-8601 时间列（paid_at / shipped_at / completed_at）：空值允许，非空必须可解析。"""
+    """可选 ISO-8601 时间列（paid_at/shipped_at/completed_at/cancelled_at/refunded_at）。
+
+    空值允许（旧种子文件没有这些列也是正常状态），非空必须可解析。
+    """
     raw = _optional_text(row, column)
     if raw is None:
         return None
@@ -254,6 +257,24 @@ def _optional_timestamp(row: dict[str, str], column: str, filename: str) -> str 
             f"{filename} 第 {row['__line__']} 行: 列「{column}」不是合法 ISO-8601 时间（收到 {raw!r}）"
         ) from None
     return raw
+
+
+def _optional_money(row: dict[str, str], column: str, filename: str) -> Decimal | None:
+    """可选金额列（取消退款 refund_amount）：空值允许，非空必须是有限非负十进制。"""
+    raw = _optional_text(row, column)
+    if raw is None:
+        return None
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, TypeError, ValueError):
+        raise MerchantSeedError(
+            f"{filename} 第 {row['__line__']} 行: 列「{column}」不是合法金额（收到 {raw!r}）"
+        ) from None
+    if not value.is_finite() or value < 0:
+        raise MerchantSeedError(
+            f"{filename} 第 {row['__line__']} 行: 列「{column}」必须是非负有限金额（收到 {raw!r}）"
+        )
+    return value
 
 
 def _parse_order_header(row: dict[str, str]) -> dict[str, Any]:
@@ -273,6 +294,10 @@ def _parse_order_header(row: dict[str, str]) -> dict[str, Any]:
         "carrier": _optional_text(row, "carrier"),
         "shipped_at": _optional_timestamp(row, "shipped_at", filename),
         "completed_at": _optional_timestamp(row, "completed_at", filename),
+        # 取消/模拟退款字段（task-47）：同样可选列，旧种子文件缺列时全部为 None
+        "cancelled_at": _optional_timestamp(row, "cancelled_at", filename),
+        "refund_amount": _optional_money(row, "refund_amount", filename),
+        "refunded_at": _optional_timestamp(row, "refunded_at", filename),
     }
 
 
@@ -337,6 +362,9 @@ def _build_orders(
                 carrier=header["carrier"],
                 shipped_at=header["shipped_at"],
                 completed_at=header["completed_at"],
+                cancelled_at=header["cancelled_at"],
+                refund_amount=header["refund_amount"],
+                refunded_at=header["refunded_at"],
             )
         )
     return orders

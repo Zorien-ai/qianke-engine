@@ -55,6 +55,10 @@ class ConfirmOrderIn(BaseModel):
     request_id: str | None = Field(default=None, max_length=128)
 
 
+class CancelOrderIn(BaseModel):
+    request_id: str | None = Field(default=None, max_length=128)
+
+
 class CAgentRunIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     thread_id: str | None = Field(default=None, max_length=128)
@@ -114,6 +118,10 @@ def _http_error(exc: store.CStoreError) -> HTTPException:
             "IDEMPOTENCY_CONFLICT",
             "QUOTE_FORBIDDEN",
             "QUOTE_NOT_PENDING",
+            "ORDER_NOT_CANCELLABLE",
+            "MERCHANT_ORDER_NOT_FOUND",
+            "MERCHANT_CONFLICT",
+            "MERCHANT_EXPIRED",
         } else 400
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
 
@@ -322,6 +330,13 @@ def save_app_message(req: AppMessageIn) -> dict:
         raise _http_error(exc) from exc
 
 
+@router.get("/admin/reconciliation")
+def admin_reconciliation(limit: int = 200) -> dict:
+    """C 订单与商家订单对账（仅平台管理员）。"""
+    _require_admin()
+    return store.reconcile_orders(limit=limit)
+
+
 @router.get("/admin/audit")
 def c_end_admin_audit(
     limit: int = 50,
@@ -480,11 +495,23 @@ def list_orders(limit: int = 50) -> dict:
     return {"orders": store.list_orders(buyer_id, limit=limit)}
 
 
-@router.post("/orders/{draft_id}/cancel")
-def cancel_order_draft(draft_id: str) -> dict:
+@router.post("/orders/{order_id}/cancel")
+def cancel_order(order_id: str, req: CancelOrderIn | None = None) -> dict:
+    """取消订单：DRAFT 释放预占；CONFIRMED 走商家取消/模拟退款并恢复库存。"""
     buyer_id, _ = _buyer()
     try:
-        return store.cancel_order_draft(buyer_id, draft_id)
+        order = store.get_order(order_id)
+        if order is None:
+            raise store.CStoreError("ORDER_NOT_FOUND", "订单不存在")
+        if order["buyer_id"] != buyer_id:
+            raise store.CStoreError("ORDER_FORBIDDEN", "不能取消其他用户的订单")
+        if order["status"] == "DRAFT":
+            return store.cancel_order_draft(buyer_id, order_id)
+        return store.cancel_confirmed_order(
+            buyer_id,
+            order_id,
+            request_id=req.request_id if req else None,
+        )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
 

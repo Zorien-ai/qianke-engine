@@ -105,6 +105,25 @@ merchant_tracking_no / merchant_carrier
 merchant_status_at / merchant_timeline
 ```
 
+取消/退款：
+
+```text
+POST /api/c/orders/{order_id}/cancel
+  → DRAFT：释放商家预占
+  → CONFIRMED：商家 CREATED/PAID -> CANCELLED
+     PAID 模拟退款 refund_amount=total_amount
+     CREATED refund_amount=0
+     恢复商家库存 + C 库存
+  → SHIPPED/COMPLETED 拒绝取消
+```
+
+对账：
+
+```text
+GET /api/c/admin/reconciliation
+  → 检查 C/商家订单状态与原始金额，旧平台订单单独计数
+```
+
 ## 3. 强制约束
 
 - prepare 不扣 C 端库存，但预占商家库存（取消/过期释放）

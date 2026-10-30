@@ -537,3 +537,53 @@ def test_seed_shipped_order_without_tracking_is_rejected(tmp_path):
     with pytest.raises(MerchantSeedError) as excinfo:
         load_seed_data(broken)
     assert "tracking_no" in excinfo.value.message
+
+
+# ==================== 12. 取消/模拟退款字段兼容（task-47） ====================
+def test_reservation_status_reversed_contract():
+    from rag_demo.merchant import RESERVATION_STATUSES, RESERVATION_STATUS_REVERSED
+
+    assert RESERVATION_STATUS_REVERSED == "REVERSED"
+    assert "REVERSED" in RESERVATION_STATUSES
+
+
+def test_order_model_exposes_cancellation_fields(repo, seed):
+    """Order.to_dict 始终输出取消/退款字段；未取消订单为 None（前端可稳定读取）。"""
+    cancelled = next(order for order in seed.orders if order.status == "CANCELLED")
+    payload = repo.get_order(
+        cancelled.order_id, merchant_id=cancelled.merchant_id
+    ).to_dict()
+    assert "cancelled_at" in payload
+    assert "refund_amount" in payload
+    assert "refunded_at" in payload
+    assert payload["cancelled_at"] is None
+    assert payload["refund_amount"] is None
+    assert payload["refunded_at"] is None
+
+    paid = next(order for order in seed.orders if order.status == "PAID")
+    paid_payload = repo.get_order(paid.order_id, merchant_id=paid.merchant_id).to_dict()
+    assert paid_payload["cancelled_at"] is None
+    assert paid_payload["refund_amount"] is None
+    assert paid_payload["refunded_at"] is None
+
+
+def test_seed_orders_parse_without_cancellation_columns(tmp_path):
+    """seeds 兼容旧种子文件：orders.csv 没有取消/退款列时解析为 None，不报错。"""
+    real_dir = Path(load_seed_data().source_dir)
+    legacy = tmp_path / "legacy-cancel-seed"
+    shutil.copytree(real_dir, legacy)
+    orders_path = legacy / "orders.csv"
+    lines = orders_path.read_text(encoding="utf-8-sig").splitlines()
+    header = lines[0].split(",")
+    dropped = {"cancelled_at", "refund_amount", "refunded_at"}
+    keep = [index for index, name in enumerate(header) if name not in dropped]
+    rebuilt = [",".join(parts[index] for index in keep) for parts in (line.split(",") for line in lines)]
+    orders_path.write_text("\n".join(rebuilt) + "\n", encoding="utf-8")
+
+    data = load_seed_data(legacy)
+
+    assert data.orders
+    cancelled = next(order for order in data.orders if order.status == "CANCELLED")
+    assert cancelled.cancelled_at is None
+    assert cancelled.refund_amount is None
+    assert cancelled.refunded_at is None

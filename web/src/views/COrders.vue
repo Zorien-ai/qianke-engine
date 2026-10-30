@@ -1,10 +1,15 @@
 <script setup>
 import { onMounted, ref } from "vue";
-import { getJson } from "../api";
+import { getJson, postJson } from "../api";
 
 const orders = ref([]);
 const loading = ref(true);
 const error = ref("");
+// 取消订单：pendingCancelId = 当前展开二次确认的订单；cancellingId = 正在请求的订单
+const pendingCancelId = ref("");
+const cancellingId = ref("");
+const cancelError = ref("");
+const cancelNotice = ref("");
 
 function money(value) {
   return Number(value || 0).toFixed(2);
@@ -115,13 +120,86 @@ function orderTimeline(order) {
     steps.push({
       status: "CANCELLED",
       label: STATUS_LABELS.CANCELLED,
-      at: atByStatus.CANCELLED || atByStatus.CANCELED || order?.merchant_status_at || "",
+      at:
+        atByStatus.CANCELLED ||
+        atByStatus.CANCELED ||
+        order?.merchant_cancelled_at ||
+        order?.merchant_status_at ||
+        "",
       reached: true,
       current: true,
       cancelled: true,
     });
   }
   return steps;
+}
+
+/* ---------- 取消订单 / 退款（can_cancel / merchant_cancelled_at / merchant_refund_amount） ---------- */
+function isCancelled(order) {
+  const raw = statusKey(order?.merchant_status);
+  return raw === "CANCELLED" || raw === "CANCELED" || !!order?.merchant_cancelled_at;
+}
+
+/** 只对后端明确允许取消的订单显示入口；已取消的不能再取消 */
+function canCancel(order) {
+  return !!order?.can_cancel && !isCancelled(order);
+}
+
+function cancelAt(order) {
+  if (order?.merchant_cancelled_at) return order.merchant_cancelled_at;
+  return isCancelled(order) ? order?.merchant_status_at || "" : "";
+}
+
+/** 后端只给 merchant_refund_amount 时才展示退款金额（0 也照实显示），不推断 */
+function refundAmount(order) {
+  const value = order?.merchant_refund_amount;
+  if (value === null || value === undefined || value === "") return null;
+  return Number(value);
+}
+
+function cancelErrorMessage(e) {
+  const detail = e?.payload?.detail;
+  if (detail && typeof detail === "object") {
+    return detail.message || detail.code || "取消订单失败";
+  }
+  return e?.detail || e?.message || "取消订单失败";
+}
+
+function askCancel(order) {
+  if (!canCancel(order) || cancellingId.value) return;
+  cancelError.value = "";
+  pendingCancelId.value = order.order_id;
+}
+
+function dismissCancel() {
+  if (cancellingId.value) return;
+  pendingCancelId.value = "";
+  cancelError.value = "";
+}
+
+async function confirmCancel(order) {
+  if (!order || !canCancel(order) || cancellingId.value) return;
+  cancellingId.value = order.order_id;
+  cancelError.value = "";
+  try {
+    const payload = await postJson(
+      `/api/c/orders/${encodeURIComponent(order.order_id)}/cancel`,
+      {}
+    );
+    // 契约：成功返回 order（兼容直接返回 order 或 {order} 两种包装）
+    const returned = payload?.order || payload || {};
+    const refund = returned.merchant_refund_amount;
+    cancelNotice.value =
+      refund === null || refund === undefined || refund === ""
+        ? `订单 ${order.order_id} 已取消`
+        : `订单 ${order.order_id} 已取消，退款 ¥${money(refund)} 已原路退回`;
+    pendingCancelId.value = "";
+    await loadOrders();
+  } catch (e) {
+    cancelError.value = cancelErrorMessage(e);
+  } finally {
+    cancellingId.value = "";
+  }
 }
 
 async function loadOrders() {
@@ -155,6 +233,8 @@ onMounted(loadOrders);
       </button>
     </header>
 
+    <p v-if="cancelNotice" class="state-line state-ok" role="status">{{ cancelNotice }}</p>
+    <p v-if="cancelError" class="state-line state-error" role="alert">{{ cancelError }}</p>
     <p v-if="error" class="state-line state-error" role="alert">{{ error }}</p>
     <p v-if="loading" class="state-line" role="status">正在加载订单…</p>
     <p v-else-if="!orders.length" class="empty-card">还没有已确认订单。</p>
@@ -169,7 +249,34 @@ onMounted(loadOrders);
               商家单号 <code>{{ order.merchant_order_id }}</code>
             </p>
           </div>
-          <span class="order-status" :class="orderStatusTone(order)">{{ orderStatus(order) }}</span>
+          <div class="order-top-actions">
+            <span class="order-status" :class="orderStatusTone(order)">{{ orderStatus(order) }}</span>
+            <button
+              v-if="canCancel(order)"
+              class="order-cancel-btn"
+              type="button"
+              :disabled="!!cancellingId"
+              @click="askCancel(order)"
+            >取消订单</button>
+          </div>
+        </div>
+
+        <!-- 二次确认：行内展开，避免误触直接取消 -->
+        <div v-if="pendingCancelId === order.order_id" class="order-cancel-confirm">
+          <p>
+            确认取消订单 <strong>{{ order.order_id }}</strong>？已支付金额将原路退回，取消后不可恢复。
+          </p>
+          <div class="order-cancel-actions">
+            <button type="button" class="ghost-btn" :disabled="!!cancellingId" @click="dismissCancel">
+              保留订单
+            </button>
+            <button
+              type="button"
+              class="order-cancel-btn is-danger"
+              :disabled="!!cancellingId"
+              @click="confirmCancel(order)"
+            >{{ cancellingId === order.order_id ? "取消中…" : "确认取消" }}</button>
+          </div>
         </div>
 
         <ul class="order-items">
@@ -191,12 +298,25 @@ onMounted(loadOrders);
           </div>
         </div>
 
+        <!-- 已取消 / 退款信息：只在订单确实已取消时出现 -->
+        <div v-if="isCancelled(order)" class="order-refund">
+          <span class="order-refund-tag">已取消</span>
+          <div v-if="refundAmount(order) !== null" class="refund-row">
+            <span>退款金额</span>
+            <strong>¥{{ money(refundAmount(order)) }}</strong>
+          </div>
+          <div v-if="cancelAt(order)" class="refund-row">
+            <span>取消时间</span>
+            <code>{{ shortMinute(cancelAt(order)) }}</code>
+          </div>
+        </div>
+
         <!-- 状态时间线：仅 merchant 订单出现，老订单保持原有简洁样式 -->
         <section v-if="hasMerchantFlow(order)" class="order-timeline" aria-label="订单状态时间线">
           <div class="order-timeline-head">
             <span>状态时间线</span>
-            <span v-if="order.merchant_status_at" class="order-timeline-at">
-              最近更新 {{ shortMinute(order.merchant_status_at) }}
+            <span v-if="order.merchant_status_at || cancelAt(order)" class="order-timeline-at">
+              最近更新 {{ shortMinute(order.merchant_status_at || cancelAt(order)) }}
             </span>
           </div>
           <ol class="timeline-steps">
@@ -289,6 +409,23 @@ onMounted(loadOrders);
   text-align: center;
 }
 
+/* 状态提示：加载 / 错误 / 取消成功 */
+.state-line {
+  min-height: 18px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.state-error {
+  color: var(--danger);
+}
+
+.state-ok {
+  color: var(--success);
+}
+
 .order-list {
   display: flex;
   flex-direction: column;
@@ -307,6 +444,73 @@ onMounted(loadOrders);
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.order-top-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* 取消订单：低调描边按钮，二次确认才用危险色 */
+.order-cancel-btn {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.order-cancel-btn:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.order-cancel-btn.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.order-cancel-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.order-cancel-confirm {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border));
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--danger-soft) 42%, var(--surface));
+}
+
+.order-cancel-confirm p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.order-cancel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.order-cancel-actions .ghost-btn {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 10px;
 }
 
 .order-id {
@@ -564,6 +768,46 @@ onMounted(loadOrders);
   word-break: break-all;
 }
 
+/* ---------- 已取消 / 退款 ---------- */
+.order-refund {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.order-refund-tag {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.refund-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.refund-row strong {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.refund-row code {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
 .order-total {
   display: flex;
   align-items: center;
@@ -587,6 +831,18 @@ onMounted(loadOrders);
 @media (max-width: 640px) {
   .orders-head {
     flex-direction: column;
+  }
+
+  .order-top {
+    gap: 8px;
+  }
+
+  .order-id {
+    word-break: break-all;
+  }
+
+  .order-cancel-actions {
+    justify-content: flex-end;
   }
 
   .timeline-step {
