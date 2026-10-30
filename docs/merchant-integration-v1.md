@@ -155,6 +155,10 @@ repo = get_merchant_repository(backend="oms", seed=False)
   - `search_inventory`：按 SKU 查询跨仓汇总库存；
   - `search_my_orders`：按当前买家映射查询真实商家订单，只返回自己的订单；
   - 工具结果带 `source=merchant_v1`，Agent 元数据写入 `product_refs` / `order_refs`。
+- C 伙伴 Agent `rag_demo.c_end.agent` 也接入同一数据层：
+  - `recommend_products`：商品 + 首 SKU + 库存 + 商家来源；
+  - `query_my_orders`：当前买家自己的商家订单与物流状态，不能查其他买家；
+  - 实测“查一下我的物流”已返回 `ORD-20261007-0007` / `ORD-20261004-0004`，不再回答“没有工具”。
 - 买家映射：`buyer_1 → b_2001`、`buyer_2 → b_2002`（集中定义在 `store_agent.merchant_buyer_id`）。
 - C 端只读 API：
   - `GET /api/c/merchant/products?keyword=&limit=`
@@ -167,8 +171,8 @@ repo = get_merchant_repository(backend="oms", seed=False)
 ## 8. 测试
 
 ```bash
-uv run python -m pytest tests/test_merchant_store.py tests/test_c_end_store_agent_merchant.py -q
-# 结果：42 passed（商家数据层 + 店宠 Agent 接入）
+uv run python -m pytest tests/test_merchant_store.py tests/test_c_end_store_agent_merchant.py tests/test_c_end_agent_merchant.py -q
+# 结果：45 passed（商家数据层 + 店宠 Agent + C 伙伴 Agent 接入）
 ```
 
 覆盖：种子规模下限与完整性、初始化幂等/force 重灌、env 路径覆盖、工厂缓存与重置、

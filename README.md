@@ -184,6 +184,7 @@ npm ci
 npm run build
 cd ..
 
+# 也可以在仓库根目录直接执行：npm run build（根 package.json 转发到 web/）
 uv run uvicorn rag_demo.api.main:app --host 0.0.0.0 --port 8000
 ```
 

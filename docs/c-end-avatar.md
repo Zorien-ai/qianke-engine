@@ -108,8 +108,8 @@ $ .\.venv\Scripts\python.exe -m pytest tests/test_c_end_store.py tests/test_c_en
 30 passed in 9.61s
 
 $ .\.venv\Scripts\python.exe -m pytest tests/ -q
-404 passed, 5 skipped, 1 warning in 36.02s
-（全量套件，含本次新增 17 条；5 skipped 为既有的真实模型/集成类用例）
+411 passed, 5 skipped, 1 warning in 33.37s
+（当前全量套件，含头像、商家、幂等；5 skipped 为既有的真实模型/集成类用例）
 
 $ cd web && npm run build
 vite v6.4.4 building for production...
@@ -139,7 +139,7 @@ HTTP 200/401/400/404/413 与错误码
 
 | 项 | 说明 |
 |---|---|
-| 浏览器 E2E | **未做**真实浏览器点击上传（本次只实际执行了 pytest 与 `npm run build`，没有伪造浏览器结果）。原因：本机 `127.0.0.1:8000` 上运行的是**本次改动前启动**的旧后端进程（不带 reload，`GET /api/c/companion/avatar/companion` 在该进程上返回 404，而新代码对未登录请求应返回 401），Vite dev server 也未启动；在不擅自重启他人服务的前提下无法完成真实点击链路。建议后续重启后端后，用 Playwright/Chrome DevTools 走一遍：`/login` → `/v2/c/app` → 点头像 → 选择 PNG → 即时预览 → 刷新确认持久化 → 「恢复默认」回退首字 |
+| 浏览器 E2E | 已用 Playwright 真实后端验证：点击「更换伙伴头像」/「更换我的头像」→ 选择 PNG → 上传 200、`<img>` 加载成功；随后 DELETE 恢复默认并刷新，确认回退首字。测试用 1×1 透明测试图，未覆盖真实照片画质/EXIF |
 | 图片内容解码 | 服务端只校验魔数与大小，不解码像素；畸形但魔数正确的图片仍会存储并在前端 `<img>` 失败时回退首字 |
 | 图片压缩/裁剪 | 不做服务端缩放、裁切、EXIF 清理；大尺寸图片由前端 `object-fit: cover` 展示 |
 | 旧头像物理清理 | 替换/删除时 best-effort 删除旧文件；删除失败只保留孤儿文件，不影响新头像 |

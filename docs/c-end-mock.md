@@ -133,7 +133,8 @@ C 端 Agent Graph：
 
 ```text
 用户消息
-  → recommend_products（真实商品库）
+  → recommend_products（商家真实商品/库存）
+  → query_my_orders（当前买家自己的商家订单/物流状态，可选）
   → prepare_order（只生成 DRAFT）
   → interrupt（返回草稿，等待用户确认）
   → approved=true  → confirm_order（扣库存，生成正式模拟订单）

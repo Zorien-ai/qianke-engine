@@ -13,14 +13,17 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
 from rag_demo.c_end import persona as c_persona
-from rag_demo.c_end import store
+from rag_demo.c_end import store, store_agent
+from rag_demo.merchant import MerchantError, get_merchant_repository
 
 C_TOOL_RULES = """你可以：
-1. recommend_products(need, budget)：按需求/预算推荐真实商品；
-2. prepare_order(items)：根据商品和数量准备订单草稿。
+1. recommend_products(need, budget)：按需求/预算推荐真实商家商品；
+2. query_my_orders(order_id, status)：查询当前买家的真实商家订单/物流状态；
+3. prepare_order(items)：根据商品和数量准备订单草稿。
 
 规则：
 - 商品价格、库存、订单金额只能来自工具结果，禁止编造。
+- 用户问物流、订单到哪、发货状态时，调用 query_my_orders，不要说自己没有工具。
 - 用户表达购买意向后，调用 prepare_order 生成待确认订单。
 - 不要在 prepare_order 后自行声称订单已创建；订单必须由用户确认。
 - 如果商品或预算不匹配，如实说明。
@@ -54,6 +57,11 @@ class PrepareOrderSchema(BaseModel):
     items: list[ItemSchema] = Field(..., min_length=1, max_length=20)
 
 
+class OrderQuerySchema(BaseModel):
+    order_id: str | None = Field(default=None, max_length=80)
+    status: str | None = Field(default=None, max_length=20)
+
+
 class CAgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     buyer_id: str
@@ -66,11 +74,67 @@ class CAgentState(TypedDict, total=False):
 def _tools(buyer_id: str):
     @tool
     def recommend_products(need: str, budget: float | None = None) -> dict[str, Any]:
-        """按需求关键词和预算推荐商品；返回真实商品列表。"""
-        products = store.list_products(keyword=need, limit=20)
-        if budget is not None:
-            products = [p for p in products if float(p["price"]) <= float(budget)]
-        return {"ok": True, "products": products}
+        """按需求关键词和预算推荐真实商家商品；返回价格、库存、SKU 和商品 ID。"""
+        try:
+            repo = get_merchant_repository()
+            products = repo.list_products(store_agent.STORE_MERCHANT_ID, keyword=need, limit=20)
+            result = []
+            for product in products:
+                skus = repo.list_product_skus(product.product_id, merchant_id=store_agent.STORE_MERCHANT_ID)
+                if not skus:
+                    continue
+                sku = skus[0]
+                inventory = repo.get_inventory(sku.sku, merchant_id=store_agent.STORE_MERCHANT_ID)
+                price = float(sku.price)
+                if budget is not None and price > float(budget):
+                    continue
+                item = product.to_dict()
+                item.update({
+                    "price": price,
+                    "stock": inventory.available_qty if inventory else 0,
+                    "sku": sku.sku,
+                    "spec": sku.spec,
+                    "in_stock": inventory.in_stock if inventory else False,
+                    "source": "merchant_v1",
+                })
+                result.append(item)
+            return {"ok": True, "source": "merchant_v1", "products": result}
+        except MerchantError:
+            products = store.list_products(keyword=need, limit=20)
+            if budget is not None:
+                products = [p for p in products if float(p["price"]) <= float(budget)]
+            for product in products:
+                product["source"] = "c_end_fallback"
+            return {"ok": True, "source": "c_end_fallback", "products": products}
+
+    @tool(args_schema=OrderQuerySchema)
+    def query_my_orders(order_id: str | None = None, status: str | None = None) -> dict[str, Any]:
+        """查询当前买家自己的真实商家订单与物流状态；不能查其他买家。"""
+        try:
+            repo = get_merchant_repository()
+            m_buyer = store_agent.merchant_buyer_id(buyer_id)
+            if order_id:
+                order = repo.get_order(
+                    order_id,
+                    merchant_id=store_agent.STORE_MERCHANT_ID,
+                    buyer_id=m_buyer,
+                )
+                if order is None:
+                    return {"ok": False, "error": {"code": "ORDER_NOT_FOUND", "message": "没有找到这笔订单"}}
+                return {"ok": True, "source": "merchant_v1", "order": order.to_dict()}
+            orders = repo.list_orders(
+                store_agent.STORE_MERCHANT_ID,
+                buyer_id=m_buyer,
+                status=status,
+                limit=10,
+            )
+            return {
+                "ok": True,
+                "source": "merchant_v1",
+                "orders": [order.to_dict() for order in orders],
+            }
+        except MerchantError as exc:
+            return {"ok": False, "error": {"code": "MERCHANT_UNAVAILABLE", "message": str(exc)}}
 
     @tool(args_schema=PrepareOrderSchema)
     def prepare_order(items: list[ItemSchema]) -> dict[str, Any]:
@@ -82,7 +146,7 @@ def _tools(buyer_id: str):
         draft = store.prepare_order(buyer_id, normalized)
         return {"ok": True, "data": draft, **draft}
 
-    return [recommend_products, prepare_order]
+    return [recommend_products, query_my_orders, prepare_order]
 
 
 def _make_llm():

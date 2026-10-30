@@ -1,0 +1,10 @@
+{
+  "name": "qianke-workspace",
+  "private": true,
+  "description": "千客引擎工作区入口：前端实际位于 web/，根目录脚本用于避免误在仓库根执行 npm run build。",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "preview": "npm --prefix web run preview"
+  }
+}
