@@ -881,6 +881,25 @@ function orderMark(order) {
   return order?.merchant_order_id ? "M" : "P";
 }
 
+/* ---------- 物流（承运商 + 运单号；侧栏空间小，只显示承运商与单号后 4 位） ---------- */
+function logisticsTail(value) {
+  const text = String(value || "").trim();
+  return text.length > 4 ? `…${text.slice(-4)}` : text;
+}
+
+function orderLogisticsShort(order) {
+  const carrier = String(order?.merchant_carrier || "").trim();
+  const tracking = String(order?.merchant_tracking_no || "").trim();
+  if (!tracking) return carrier;
+  return `${carrier || "物流"} · ${logisticsTail(tracking)}`;
+}
+
+function orderLogisticsTitle(order) {
+  const carrier = String(order?.merchant_carrier || "").trim() || "物流";
+  const tracking = String(order?.merchant_tracking_no || "").trim();
+  return tracking ? `${carrier} ${tracking}` : carrier;
+}
+
 async function loadRecentOrders() {
   recentOrdersLoading.value = true;
   try {
@@ -1404,6 +1423,11 @@ onBeforeUnmount(() => {
                   {{ orderDateLabel(order.confirmed_at || order.created_at) }} ·
                   {{ orderStatusLabel(order) }}
                 </small>
+                <small
+                  v-if="orderLogisticsShort(order)"
+                  class="c-order-logistics"
+                  :title="orderLogisticsTitle(order)"
+                >{{ orderLogisticsShort(order) }}</small>
               </span>
               <span class="c-order-amount">{{ orderAmountLabel(order) }}</span>
             </div>
@@ -2664,6 +2688,11 @@ onBeforeUnmount(() => {
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 物流行：承运商 + 单号后 4 位，完整单号放 title；继承 small 的省略号 */
+.c-order-row .c-order-logistics {
+  color: var(--c-accent);
 }
 
 .c-order-hint {

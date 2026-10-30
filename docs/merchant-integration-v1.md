@@ -108,6 +108,9 @@ print(order.total_amount, order.item_count)
 - 18 个商品、30 个 SKU、34 条库存记录（含跨仓与 1 条零库存）、8 个订单、13 个订单行；
 - 文件：`products.csv` / `skus.csv` / `inventory.csv` / `orders.csv` / `order_items.csv`，
   表头与字段含义见文件首行；金额为十进制字符串，时间为 ISO-8601 文本（`+08:00`）。
+- `orders.csv` 自 v1.2 起带物流/生命周期列：`tracking_no / carrier / shipped_at / completed_at`；
+  已有 SHIPPED / COMPLETED 订单已补齐物流单号、承运商与状态时间。新列是**可选列**，缺省空值
+  兼容旧种子文件。
 
 `seeds.load_seed_data()` 在入库前做完整性校验：
 
@@ -115,7 +118,9 @@ print(order.total_amount, order.item_count)
 2. 引用完整（SKU→商品、库存→SKU、订单行→SKU、订单行→订单），且**商家归属一致**；
 3. 每个商品至少一个 SKU；
 4. `订单总额 == Σ 行小计`，`行小计 == 数量 × 单价`（Decimal 精确比较）；
-5. 规模下限（≥8/20/5）。
+5. 状态/物流一致性：SHIPPED/COMPLETED 必须有 `tracking_no` 与 `shipped_at`；COMPLETED 还必须有
+   `completed_at` 且不早于 `shipped_at`；物流单号全局唯一；时间列必须是合法 ISO-8601；
+6. 规模下限（≥8/20/5）。
 
 **重置**：SQLite adapter 提供 `repo.seed(force=True)`（清空 m_* 表后重灌，仅限本地调试；
 不对外暴露 API）。正常启动是幂等的：库中已有商品时不重复插入。
@@ -176,26 +181,31 @@ repo = get_merchant_repository(backend="oms", seed=False)
   - `GET /api/c/merchant/orders?status=&limit=`
   - `GET /api/c/merchant/orders/{order_id}`
 - 实测：店宠回答跑鞋时返回 `SKU-GEAR-P001-STD`、库存 20；物流问题返回 `ORD-20261007-0007` 等真实商家订单。
-- **边界**：C 商城下单仍走 `c_product/c_order` 表，商家库存目前是只读参考，没有和 C 端扣减做双写/预占；
-  本地 SQLite 写层（§10）已具备预占/订单写入能力，但**尚未接入 API / Agent 的交易链路**；
-  真实交易接入需 OMS 写通道 + 用户确认，见 §9。
+- **边界**：C 商城下单已通过 §10 写层完成「商家库存预占 → 商家订单写入 → 提交预占」（1.8.4）；
+  订单状态流转（PAID/SHIPPED/COMPLETED）已由 §11 的 `update_order_status` 提供数据层能力，
+  C 端订单时间线/物流展示由负责人接入；真实交易接入仍需 OMS 写通道 + 用户确认，见 §9/§11。
 
 ## 8. 测试
 
 ```bash
 uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py -q
-# 结果：68 passed（38 只读/种子用例 + 30 写接口用例；离线，约 7s）
+# 结果：101 passed（42 只读/种子用例 + 59 写接口/状态机用例；离线，约 10s）
 ```
 
 覆盖：
 - 只读/种子：规模下限与完整性、初始化幂等/force 重灌、env 路径覆盖、工厂缓存与重置、
   商品/SKU/库存/订单查询、**租户隔离**（跨商家、`get_*` 作用域、缺 `merchant_id` 失败关闭）、
   无库存 vs 不存在、limit 钳制（纯函数 + 查询路径）、可替换后端注册（Fake adapter）、
-  坏种子（引用缺失/规模不足/目录不存在）结构化拒绝、关闭后不可用；
+  坏种子（引用缺失/规模不足/目录不存在/物流字段缺失）结构化拒绝、关闭后不可用、
+  种子 SHIPPED/COMPLETED 物流字段与 `Order.to_dict()` 生命周期字段；
 - 写接口：reserve 成功/幂等/冲突/库存不足/参数非法/未知 SKU/过期、commit 幂等与库存口径、
   release 幂等与已提交拒绝、过期 commit/release 语义、**并发同 id 只扣一次**、
   **并发竞争不超卖**、create_order 幂等/金额不一致拒绝/租户隔离/促销价/来源引用、
-  写操作 merchant_id 必填、写错误结构化。
+  写操作 merchant_id 必填、写错误结构化；
+- 订单状态机（task-45）：CREATED→PAID→SHIPPED→COMPLETED 全链路与时间字段、同状态幂等
+  不重写时间戳、SHIPPED 必须带合法物流单号（格式规则）、非法迁移 `MERCHANT_CONFLICT`、
+  取消规则（CREATED/PAID→CANCELLED，保留 paid_at）、跨租户 NotFound、并发同迁移幂等、
+  物流字段只允许出现在 SHIPPED、状态更新不影响订单行/金额、老库自动迁移后状态机可用。
 - 另：`tests/test_c_end_store_agent_merchant.py`、`tests/test_c_end_agent_merchant.py`
   覆盖 C 端只读接入（由对应改动方负责，本任务未修改）。
 
@@ -267,6 +277,7 @@ writer.commit_reservation("m_tea_001", held.reservation_id, order_id=order.order
 | `commit_reservation(merchant_id, reservation_id, order_id=None)` | 预占转订单占用：available 保持扣减、reserved 转出；返回 `Reservation(status=COMMITTED)` | 未知/跨租户 `MERCHANT_NOT_FOUND`；已释放/已提交到其他订单 `MERCHANT_CONFLICT`；过期 `MERCHANT_EXPIRED`（库存已释放） |
 | `release_reservation(merchant_id, reservation_id)` | 释放预占、恢复库存；返回 `Reservation(status=RELEASED/EXPIRED)` | 未知/跨租户 `MERCHANT_NOT_FOUND`；已提交 `MERCHANT_CONFLICT`；重复释放/过期释放幂等 |
 | `create_order(merchant_id, order_id, buyer_id, items, total_amount, source_ref=None)` | 幂等写订单 + 行快照；**不改库存**；返回 `Order` | 金额不一致/参数非法 `MERCHANT_INVALID`；未知 SKU/商品 `MERCHANT_NOT_FOUND`；order_id 属其他商家 `MERCHANT_CONFLICT` |
+| `update_order_status(merchant_id, order_id, status, tracking_no=None, carrier=None)` | 订单状态机流转（见 §11）：写状态时间与物流字段；返回 `Order` | 非法迁移 `MERCHANT_CONFLICT`；未知状态/物流字段非法 `MERCHANT_INVALID`；未知/跨租户 `MERCHANT_NOT_FOUND` |
 
 ### 10.3 状态机与库存账目口径
 
@@ -309,14 +320,87 @@ reserve ──> RESERVED ──commit──> COMMITTED   (available 保持 -q，
 - 新增 `m_reservation`：`reservation_id / merchant_id / buyer_id / status / expires_at /
   items_json / created_at / updated_at / order_id`；`items_json` 同时保存请求行与
   `allocations`（实际扣减的仓库明细），释放/提交按它精确回滚；
-- `m_order` 新增 `source_ref`（来源引用，如 quote_id / agent action id）；
+- `m_order` 新增 `source_ref`（来源引用）与 v1.2 的 `tracking_no / carrier / shipped_at / completed_at`
+  物流/生命周期列；全部允许 NULL（历史订单没有物流信息是正常状态）；
 - **老库自动迁移**：初始化时用 `PRAGMA table_info` 检查并 `ALTER TABLE` 补列（幂等），
-  已有 v1 数据的 `var/merchant_v1.sqlite` 不需要手工重建；
+  v1/v1.1 的 `var/merchant_v1.sqlite` 不需要手工重建；
 - `seed(force=True)` 会连同 `m_reservation` 一起重置（仅本地调试，不对外暴露）。
 
-## 11. 变更记录
+## 11. 订单状态机与物流字段（v1.2 / task-45）
+
+> 仍然**不是真实 OMS 写通道**：状态流转是本地 SQLite 的确定性实现，用于在接 OMS 前
+> 固定订单生命周期语义；真实支付回调/物流轨迹/退款售后必须由 OMS + 人工确认链路负责。
+
+### 11.1 状态机
+
+```text
+CREATED ──PAID──> PAID ──SHIPPED──> SHIPPED ──COMPLETED──> COMPLETED
+   │                │
+   └──CANCELLED─────┴──CANCELLED──> CANCELLED
+```
+
+- 合法迁移：`CREATED→PAID`、`PAID→SHIPPED`、`SHIPPED→COMPLETED`；
+  `CREATED→CANCELLED`、`PAID→CANCELLED`；
+- **终态** `COMPLETED` / `CANCELLED` 不允许任何迁移（同状态重复调用是幂等重放，不属于迁移）；
+- 同状态重复调用：返回已有订单，**不重写时间戳**；
+- 非法迁移 → `MERCHANT_CONFLICT`（文案带当前状态与允许的下一步）；
+- 未知状态/参数非法 → `MERCHANT_INVALID`；未知订单/其他租户 → `MERCHANT_NOT_FOUND`；`merchant_id` 必填。
+
+### 11.2 方法契约
+
+```python
+order = writer.update_order_status(
+    "m_tea_001",
+    "ORD-20261003-0003",
+    "PAID",
+)
+order = writer.update_order_status(
+    "m_tea_001", "ORD-20261003-0003", "SHIPPED",
+    tracking_no="SF1435267890123", carrier="顺丰速运",
+)
+order = writer.update_order_status("m_tea_001", "ORD-20261003-0003", "COMPLETED")
+```
+
+| 参数/规则 | 说明 |
+| --- | --- |
+| `status` | 只接受 `CREATED/PAID/SHIPPED/COMPLETED/CANCELLED`（大小写不敏感，统一转大写） |
+| `tracking_no` | 流转到 `SHIPPED` **必填**；v1 规则：4~64 位，字母/数字开头，可含 `-_.`；其他状态携带 → `MERCHANT_INVALID` |
+| `carrier` | 可选（如「顺丰速运」）；最长 64 字符、不允许控制字符；仅 `SHIPPED` 允许携带 |
+| 幂等 | 同状态重复调用返回已有订单；SHIPPED 重放若物流单号/承运商与已保存不同 → `MERCHANT_CONFLICT`（防止悄悄改单号） |
+| 时间字段 | `PAID`→写 `paid_at`；`SHIPPED`→写 `shipped_at`；`COMPLETED`→写 `completed_at`；`CANCELLED` 只改状态（保留 `paid_at` 供对账） |
+| 事务 | `BEGIN IMMEDIATE`：状态、物流字段、时间字段同事务提交；并发同迁移只有一个真正写入，其余幂等返回 |
+| 订单行/金额 | 状态更新**不改**订单行、金额、来源引用 |
+
+### 11.3 模型 / 表字段
+
+`Order` 新增（均允许 `None`）：
+`tracking_no`、`carrier`、`shipped_at`、`completed_at`；`paid_at` 已有。
+`to_dict()` 同步输出这些字段，C 端订单时间线与物流展示可直接消费。
+
+`m_order` 新增列：`tracking_no TEXT, carrier TEXT, shipped_at TEXT, completed_at TEXT`；
+**老库自动迁移**：初始化时 `PRAGMA table_info(m_order)` 检查并逐列 `ALTER TABLE`（幂等），
+v1/v1.1 的 `var/merchant_v1.sqlite` 无需手工重建（迁移后可继续走完整状态机）。
+
+### 11.4 种子数据
+
+`data/merchant/orders.csv` 追加列：`tracking_no, carrier, shipped_at, completed_at`；
+已有 SHIPPED / COMPLETED 订单补上物流单号、承运商与状态时间（时间顺序校验）：
+SHIPPED/COMPLETED 必须有 `tracking_no`+`shipped_at`，COMPLETED 另有 `completed_at`，
+且物流单号全局唯一。列是**可选列**：缺省空值兼容旧种子文件（PAID/CREATED/CANCELLED 无物流）。
+
+### 11.5 限制
+
+1. 本地状态机不是真实 OMS 回调：没有支付网关验签、物流轨迹、退款/售后/逆向流程；
+2. `PAID` 只是状态与时间戳，没有支付流水号/金额对账字段（真实接入需扩展 `payment_*`）；
+3. 状态流转不可逆（CANCELLED 后不能复活），没有「拒绝收货/退货退款」等扩展状态；
+4. 未接入 API / Agent 的自动状态推进（管理员状态操作 API 与 C 端展示由接入方负责，
+   数据层只提供确定性能力）；
+5. 并发保证仍是 SQLite 单机单写者语义；PG/OMS adapter 需自行实现同等事务与幂等。
+
+## 12. 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v1 | 2026-10-30 | 新增可替换的商家数据层：模型/协议/SQLite adapter/种子校验/工厂与 38 例离线单测 |
 | v1.1 | 2026-10-30 | 新增本地写入能力：`MerchantWriteRepository`、`m_reservation`、事务化 reserve/commit/release/create_order（幂等、库存不足失败关闭、租户必填）、`m_order.source_ref` 与老库自动迁移；新增 30 例写接口单测（合计 68 例） |
+| v1.2 | 2026-10-30 | 新增订单状态机与物流字段：`update_order_status`、`Order.tracking_no/carrier/shipped_at/completed_at`、`m_order` 四列与老库自动迁移、种子 SHIPPED/COMPLETED 物流数据与校验；新增 31 例状态机/物流/迁移测试（合计 101 例） |

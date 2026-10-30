@@ -166,6 +166,20 @@ GET /api/c/orders?limit=50   # 订单页
 - 有 `merchant_order_id` 时在订单号下方显示「商家单号」；
 - 最近订单为空显示「还没有订单」；加载失败只做轻提示，不清空已加载的列表。
 
+状态时间线与物流（merchant 字段）：
+
+```text
+merchant_tracking_no   运单号
+merchant_carrier       承运商
+merchant_status_at     最近状态时间
+merchant_timeline      [{status, at}] 状态历史（后端给了优先用）
+```
+
+- 订单页按标准四步（已创建 → 已支付 → 已发货 → 已完成）展示已到达节点；已取消订单额外显示取消节点；
+- 时间优先取 `merchant_timeline[].at`，没有时只对当前状态使用 `merchant_status_at`，不推断/编造时间；
+- 承运商与运单号在卡片内独立展示；右侧「最近订单」空间有限，只显示承运商 + 单号后 4 位，完整单号放 `title`；
+- 没有 merchant 字段的旧订单不显示时间线与物流，保持原有样式。
+
 ## 7. 会话持久化
 
 小鱼会话通过以下接口持久化：

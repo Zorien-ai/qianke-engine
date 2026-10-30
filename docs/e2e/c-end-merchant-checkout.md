@@ -44,21 +44,103 @@ merchant order = CREATED / 299.00 / buyer b_2001
 
 ```bash
 .\.venv\Scripts\python.exe -m pytest tests/ -q
-# 448 passed, 5 skipped, 1 warning
+# 480 passed, 5 skipped, 1 warning
 ```
 
 新增覆盖：
 
 ```text
-tests/test_merchant_write.py                     32 条（预占/释放/提交/订单幂等/并发/迁移）
-tests/test_c_end_merchant_transactions.py         5 条（C 草稿预占、确认写商家订单、取消释放、重复确认、库存不足、订单列表）
+tests/test_merchant_store.py                     42 条（种子/查询/物流字段校验）
+tests/test_merchant_write.py                     59 条（预占/订单/状态机/并发/迁移）
+tests/test_c_end_merchant_transactions.py         6 条（C 草稿预占、确认写商家订单、取消释放、重复确认、库存不足、物流时间线）
 tests/conftest.py                                 测试级商家库隔离
 ```
 
-## 4. 已知限制
+## 4. 订单状态与物流（P1）
+
+管理员模拟商家状态流转：
+
+```text
+PATCH /api/c/admin/merchant/orders/{order_id}/status
+{"status":"PAID"}
+{"status":"SHIPPED","tracking_no":"SF1234567890","carrier":"顺丰速运"}
+{"status":"COMPLETED"}
+```
+
+真实执行结果：
+
+```text
+PAID       200  status=PAID
+SHIPPED    200  status=SHIPPED tracking_no=SF1234567890
+COMPLETED  200  status=COMPLETED
+
+GET /api/c/orders?limit=3
+order_6bf23b016e5e41fe
+merchant_status=COMPLETED
+merchant_tracking_no=SF1234567890
+merchant_carrier=顺丰速运
+merchant_timeline 4 条
+```
+
+C 订单页实测：
+
+```text
+已完成
+状态时间线 最近更新 10-30 09:25
+已创建 10-30 08:09
+已支付 10-30 09:25
+已发货 10-30 09:25
+已完成 10-30 09:25
+承运商 顺丰速运
+运单号 SF1234567890
+```
+
+CApp 最近订单实测：
+
+```text
+M 轻量跑鞋 10 月 30 日 · 已完成 顺丰速运 · …7890 ¥299
+```
+
+小鱼实测：
+
+```text
+查到你 5 笔订单，只有一笔有运单号：
+顺丰速运 SF1234567890，对应 order_6bf23b016e5e41fe
+（轻量跑鞋，299 元，已完成）。
+```
+
+C 端订单返回：
+
+```text
+merchant_status
+merchant_tracking_no
+merchant_carrier
+merchant_status_at
+merchant_timeline = [{status, at}, ...]
+```
+
+C 订单页展示四步时间线（已创建 → 已支付 → 已发货 → 已完成）和物流单号；CApp 最近订单显示承运商/单号后四位。旧平台订单（无商家字段）保持原样式。
+
+状态机：
+
+```text
+CREATED -> PAID -> SHIPPED -> COMPLETED
+CREATED/PAID -> CANCELLED
+```
+
+约束：
+
+```text
+SHIPPED 必须提供合法 tracking_no
+同状态重复调用幂等
+已发货后不能悄悄改物流单号/承运商
+跨租户按不存在处理
+```
+
+## 5. 已知限制
 
 - 商家写层仍是 SQLite 本地 adapter，不是真实 OMS；生产需替换 adapter + 鉴权/支付/对账。
 - C 端下单与商家写分属两个 SQLite 事务，没有分布式事务；当前用预占 + 幂等 + 补偿释放降低不一致，极端进程崩溃窗口仍需对账任务。
 - 预占过期是懒清理（无后台 TTL worker）。
-- 商家订单状态目前固定 CREATED，没有支付/发货状态流转。
+- 订单状态流转目前由平台管理员模拟，不是真实商家后台/OMS 回调。
 - 浏览器 E2E 只跑了单次下单，未做并发下单/多买家竞争。

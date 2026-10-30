@@ -14,7 +14,7 @@ from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
 from rag_demo.c_end import companion_agent, idempotency, persona as c_persona, social, store, store_agent
-from rag_demo.merchant import MerchantError, get_merchant_repository
+from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -77,6 +77,12 @@ class CompanionPatchIn(BaseModel):
 class SendMessageIn(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
     client_message_id: str | None = Field(default=None, max_length=128)
+
+
+class MerchantOrderStatusIn(BaseModel):
+    status: str = Field(..., pattern="^(PAID|SHIPPED|COMPLETED|CANCELLED)$")
+    tracking_no: str | None = Field(default=None, max_length=64)
+    carrier: str | None = Field(default=None, max_length=64)
 
 
 class AppMessageIn(BaseModel):
@@ -443,6 +449,29 @@ def cancel_quote(quote_id: str) -> dict:
         return store.cancel_quote(quote_id, buyer_id)
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
+
+
+@router.patch("/admin/merchant/orders/{order_id}/status")
+def admin_update_merchant_order_status(order_id: str, req: MerchantOrderStatusIn) -> dict:
+    """平台管理员模拟商家订单状态流转；真实 OMS 由商家侧回调替代。"""
+    _require_admin()
+    try:
+        order = get_merchant_write_repository().update_order_status(
+            store_agent.STORE_MERCHANT_ID,
+            order_id,
+            req.status,
+            tracking_no=req.tracking_no,
+            carrier=req.carrier,
+        )
+    except MerchantError as exc:
+        code = getattr(exc, "code", "MERCHANT_ERROR")
+        status = 404 if code == "MERCHANT_NOT_FOUND" else 409 if code in {
+            "MERCHANT_CONFLICT",
+            "MERCHANT_STOCK",
+            "MERCHANT_EXPIRED",
+        } else 400
+        raise HTTPException(status_code=status, detail=exc.to_dict()) from exc
+    return {"source": "merchant_v1", "order": order.to_dict()}
 
 
 @router.get("/orders")

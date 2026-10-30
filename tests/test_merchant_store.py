@@ -461,3 +461,79 @@ def test_closed_repository_raises_unavailable(merchant_db):
     with pytest.raises(MerchantUnavailableError) as excinfo:
         repository.list_products("m_tea_001")
     assert excinfo.value.code == "MERCHANT_UNAVAILABLE"
+
+
+# ==================== 11. 订单生命周期 / 物流字段（task-45） ====================
+def test_order_status_transitions_contract():
+    """状态机是公开契约：只允许 CREATED→PAID→SHIPPED→COMPLETED，及 CREATED/PAID→CANCELLED。"""
+    from rag_demo.merchant import ORDER_STATUS_TRANSITIONS
+
+    assert ORDER_STATUS_TRANSITIONS["CREATED"] == {"PAID", "CANCELLED"}
+    assert ORDER_STATUS_TRANSITIONS["PAID"] == {"SHIPPED", "CANCELLED"}
+    assert ORDER_STATUS_TRANSITIONS["SHIPPED"] == {"COMPLETED"}
+    assert ORDER_STATUS_TRANSITIONS["COMPLETED"] == set()
+    assert ORDER_STATUS_TRANSITIONS["CANCELLED"] == set()
+
+
+def test_seed_shipped_and_completed_orders_have_logistics(seed):
+    """种子 CSV 的 SHIPPED/COMPLETED 订单必须带物流单号、承运商与发货时间。"""
+    shipped = [order for order in seed.orders if order.status == "SHIPPED"]
+    completed = [order for order in seed.orders if order.status == "COMPLETED"]
+    assert shipped and completed, "种子需要同时有 SHIPPED 与 COMPLETED 订单覆盖状态机"
+    for order in shipped + completed:
+        assert order.tracking_no, f"{order.order_id} 缺少 tracking_no"
+        assert order.carrier, f"{order.order_id} 缺少 carrier"
+        assert order.shipped_at, f"{order.order_id} 缺少 shipped_at"
+    for order in completed:
+        assert order.completed_at, f"{order.order_id} 缺少 completed_at"
+        assert order.completed_at >= order.shipped_at
+    # 未发货状态允许没有物流字段（解析兼容缺省空值）
+    for order in seed.orders:
+        if order.status in ("CREATED", "PAID", "CANCELLED"):
+            assert order.tracking_no is None
+            assert order.shipped_at is None
+
+
+def test_order_model_exposes_lifecycle_fields(repo, seed):
+    shipped = next(order for order in seed.orders if order.status == "SHIPPED")
+    fetched = repo.get_order(shipped.order_id, merchant_id=shipped.merchant_id)
+    payload = fetched.to_dict()
+    assert payload["status"] == "SHIPPED"
+    assert payload["tracking_no"] == shipped.tracking_no
+    assert payload["carrier"] == shipped.carrier
+    assert payload["shipped_at"] == shipped.shipped_at
+    assert payload["completed_at"] is None
+    assert payload["paid_at"] == shipped.paid_at
+
+    created = next(order for order in seed.orders if order.status == "CREATED")
+    created_payload = repo.get_order(created.order_id).to_dict()
+    assert created_payload["tracking_no"] is None
+    assert created_payload["carrier"] is None
+    assert created_payload["shipped_at"] is None
+    assert created_payload["completed_at"] is None
+
+
+def test_seed_shipped_order_without_tracking_is_rejected(tmp_path):
+    """seeds 校验：SHIPPED 订单缺物流单号必须被结构化拒绝（不允许脏种子进库）。"""
+    real_dir = Path(load_seed_data().source_dir)
+    broken = tmp_path / "broken-logistics-seed"
+    shutil.copytree(real_dir, broken)
+    orders_path = broken / "orders.csv"
+    lines = orders_path.read_text(encoding="utf-8-sig").splitlines()
+    header = lines[0].split(",")
+    tracking_index = header.index("tracking_no")
+    status_index = header.index("status")
+    changed = False
+    for index in range(1, len(lines)):
+        parts = lines[index].split(",")
+        if parts[status_index] == "SHIPPED":
+            parts[tracking_index] = ""
+            lines[index] = ",".join(parts)
+            changed = True
+            break
+    assert changed, "测试需要至少一条 SHIPPED 种子订单"
+    orders_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(MerchantSeedError) as excinfo:
+        load_seed_data(broken)
+    assert "tracking_no" in excinfo.value.message

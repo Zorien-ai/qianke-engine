@@ -853,6 +853,25 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         )
     except MerchantError:
         merchant_order = None
+    timeline: list[dict[str, Any]] = []
+    status_at = None
+    if merchant_order is not None:
+        timeline = [
+            {"status": "CREATED", "at": merchant_order.created_at},
+        ]
+        for status, at in (
+            ("PAID", merchant_order.paid_at),
+            ("SHIPPED", merchant_order.shipped_at),
+            ("COMPLETED", merchant_order.completed_at),
+        ):
+            if at:
+                timeline.append({"status": status, "at": at})
+        if merchant_order.status == "CANCELLED":
+            timeline.append({"status": "CANCELLED", "at": ""})
+        status_at = next(
+            (item["at"] for item in reversed(timeline) if item["at"]),
+            None,
+        )
     return {
         "order_id": order["order_id"],
         "status": order["status"],
@@ -878,6 +897,10 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         "merchant_order_id": merchant_order.order_id if merchant_order else None,
         "merchant_status": merchant_order.status if merchant_order else None,
         "merchant_source": "merchant_v1" if merchant_order else None,
+        "merchant_tracking_no": merchant_order.tracking_no if merchant_order else None,
+        "merchant_carrier": merchant_order.carrier if merchant_order else None,
+        "merchant_status_at": status_at,
+        "merchant_timeline": timeline,
     }
 
 

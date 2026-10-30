@@ -45,6 +45,85 @@ function orderStatusTone(order) {
   return "";
 }
 
+/* ---------- 状态时间线 / 物流（merchant 数据；老订单没有 merchant 字段时保持原样式） ---------- */
+const ORDER_FLOW = [
+  { status: "CREATED", label: "已创建" },
+  { status: "PAID", label: "已支付" },
+  { status: "SHIPPED", label: "已发货" },
+  { status: "COMPLETED", label: "已完成" },
+];
+
+function statusKey(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+/** 有商家域状态或时间线才画时间线；旧平台订单不出现这一段 */
+function hasMerchantFlow(order) {
+  return !!(
+    statusKey(order?.merchant_status) ||
+    (Array.isArray(order?.merchant_timeline) && order.merchant_timeline.length)
+  );
+}
+
+function hasLogistics(order) {
+  return !!(order?.merchant_tracking_no || order?.merchant_carrier);
+}
+
+function shortMinute(value) {
+  const text = String(value || "").replace("T", " ");
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (!match) return text.slice(0, 16);
+  return `${match[2]}-${match[3]} ${match[4]}:${match[5]}`;
+}
+
+/**
+ * 时间线节点：标准四步（已创建/已支付/已发货/已完成）+ 已取消。
+ * - 后端给了 merchant_timeline 就按它标记已到达节点与时间；
+ * - 没给时间线但有 merchant_status 时按状态顺序推断已到达节点（不编造时间）；
+ * - 时间只显示后端明确给出的（时间线条目 / merchant_status_at）。
+ */
+function orderTimeline(order) {
+  const history = Array.isArray(order?.merchant_timeline) ? order.merchant_timeline : [];
+  const reachedFromHistory = new Set(
+    history.map((entry) => statusKey(entry?.status)).filter(Boolean)
+  );
+  const atByStatus = {};
+  for (const entry of history) {
+    const key = statusKey(entry?.status);
+    if (key && !atByStatus[key] && entry?.at) atByStatus[key] = entry.at;
+  }
+
+  const current = statusKey(order?.merchant_status);
+  const cancelled = current === "CANCELLED" || current === "CANCELED";
+  const currentIndex = ORDER_FLOW.findIndex((step) => step.status === current);
+
+  const steps = ORDER_FLOW.map((step, index) => {
+    let reached;
+    if (history.length) reached = reachedFromHistory.has(step.status);
+    else if (currentIndex >= 0) reached = index <= currentIndex;
+    else reached = false;
+    return {
+      status: step.status,
+      label: step.label,
+      at: atByStatus[step.status] || (current === step.status ? order?.merchant_status_at : "") || "",
+      reached,
+      current: !cancelled && current === step.status,
+    };
+  });
+
+  if (cancelled) {
+    steps.push({
+      status: "CANCELLED",
+      label: STATUS_LABELS.CANCELLED,
+      at: atByStatus.CANCELLED || atByStatus.CANCELED || order?.merchant_status_at || "",
+      reached: true,
+      current: true,
+      cancelled: true,
+    });
+  }
+  return steps;
+}
+
 async function loadOrders() {
   loading.value = true;
   error.value = "";
@@ -109,6 +188,44 @@ onMounted(loadOrders);
           <div v-if="order.policy_ids?.length">
             <span>政策</span>
             <span v-for="policy in order.policy_ids" :key="policy" class="audit-chip">{{ policy }}</span>
+          </div>
+        </div>
+
+        <!-- 状态时间线：仅 merchant 订单出现，老订单保持原有简洁样式 -->
+        <section v-if="hasMerchantFlow(order)" class="order-timeline" aria-label="订单状态时间线">
+          <div class="order-timeline-head">
+            <span>状态时间线</span>
+            <span v-if="order.merchant_status_at" class="order-timeline-at">
+              最近更新 {{ shortMinute(order.merchant_status_at) }}
+            </span>
+          </div>
+          <ol class="timeline-steps">
+            <li
+              v-for="step in orderTimeline(order)"
+              :key="step.status"
+              class="timeline-step"
+              :class="{
+                'is-reached': step.reached,
+                'is-current': step.current,
+                'is-cancelled': step.cancelled,
+              }"
+            >
+              <span class="timeline-dot" aria-hidden="true" />
+              <span class="timeline-label">{{ step.label }}</span>
+              <span class="timeline-time">{{ step.at ? shortMinute(step.at) : "" }}</span>
+            </li>
+          </ol>
+        </section>
+
+        <!-- 物流信息：承运商 + 运单号 -->
+        <div v-if="hasLogistics(order)" class="order-logistics">
+          <div class="logistics-row">
+            <span>承运商</span>
+            <strong>{{ order.merchant_carrier || "—" }}</strong>
+          </div>
+          <div class="logistics-row">
+            <span>运单号</span>
+            <code>{{ order.merchant_tracking_no || "—" }}</code>
           </div>
         </div>
 
@@ -297,6 +414,156 @@ onMounted(loadOrders);
   color: var(--primary);
 }
 
+/* ---------- 状态时间线 ---------- */
+.order-timeline {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.order-timeline-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.order-timeline-at {
+  font-family: var(--mono);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.timeline-steps {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-step {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 10px;
+  color: var(--muted);
+}
+
+.timeline-step::before {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  left: 11px;
+  height: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.timeline-step:last-child::before {
+  display: none;
+}
+
+.timeline-dot {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.timeline-label {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-time {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-step.is-reached {
+  color: var(--text-2);
+}
+
+.timeline-step.is-reached::before {
+  background: var(--border-strong);
+}
+
+.timeline-step.is-reached .timeline-dot {
+  border-color: var(--text-2);
+  background: var(--text-2);
+}
+
+.timeline-step.is-current .timeline-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.timeline-step.is-current .timeline-dot {
+  border-color: var(--primary);
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.timeline-step.is-cancelled {
+  color: var(--danger);
+}
+
+.timeline-step.is-cancelled .timeline-dot {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.timeline-step.is-cancelled .timeline-label {
+  color: var(--danger);
+}
+
+/* ---------- 物流信息 ---------- */
+.order-logistics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.logistics-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.logistics-row strong {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.logistics-row code {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  word-break: break-all;
+}
+
 .order-total {
   display: flex;
   align-items: center;
@@ -320,6 +587,18 @@ onMounted(loadOrders);
 @media (max-width: 640px) {
   .orders-head {
     flex-direction: column;
+  }
+
+  .timeline-step {
+    padding-right: 6px;
+  }
+
+  .timeline-label {
+    font-size: 9.5px;
+  }
+
+  .timeline-time {
+    font-size: 8.5px;
   }
 
   .order-total {

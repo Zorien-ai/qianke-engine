@@ -23,6 +23,7 @@ import hashlib
 import io
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
@@ -30,6 +31,8 @@ from typing import Any, Iterable
 from .errors import MerchantSeedError
 from .models import (
     DEFAULT_CURRENCY,
+    ORDER_STATUS_COMPLETED,
+    ORDER_STATUS_SHIPPED,
     PRODUCT_STATUS_ACTIVE,
     InventoryRecord,
     Order,
@@ -239,6 +242,20 @@ def _parse_inventory(rows: list[dict[str, str]]) -> list[InventoryRecord]:
     ]
 
 
+def _optional_timestamp(row: dict[str, str], column: str, filename: str) -> str | None:
+    """可选 ISO-8601 时间列（paid_at / shipped_at / completed_at）：空值允许，非空必须可解析。"""
+    raw = _optional_text(row, column)
+    if raw is None:
+        return None
+    try:
+        datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        raise MerchantSeedError(
+            f"{filename} 第 {row['__line__']} 行: 列「{column}」不是合法 ISO-8601 时间（收到 {raw!r}）"
+        ) from None
+    return raw
+
+
 def _parse_order_header(row: dict[str, str]) -> dict[str, Any]:
     filename = _SEED_FILES["orders"]
     return {
@@ -250,7 +267,12 @@ def _parse_order_header(row: dict[str, str]) -> dict[str, Any]:
         "currency": (_optional_text(row, "currency") or DEFAULT_CURRENCY).upper(),
         "channel": _optional_text(row, "channel"),
         "created_at": _text(row, "created_at", filename),
-        "paid_at": _optional_text(row, "paid_at"),
+        "paid_at": _optional_timestamp(row, "paid_at", filename),
+        # 物流/生命周期字段（task-45）：可选列，缺省空值兼容旧种子文件
+        "tracking_no": _optional_text(row, "tracking_no"),
+        "carrier": _optional_text(row, "carrier"),
+        "shipped_at": _optional_timestamp(row, "shipped_at", filename),
+        "completed_at": _optional_timestamp(row, "completed_at", filename),
     }
 
 
@@ -311,6 +333,10 @@ def _build_orders(
                 created_at=header["created_at"],
                 paid_at=header["paid_at"],
                 items=items,
+                tracking_no=header["tracking_no"],
+                carrier=header["carrier"],
+                shipped_at=header["shipped_at"],
+                completed_at=header["completed_at"],
             )
         )
     return orders
@@ -368,6 +394,8 @@ def _validate(
             )
 
     order_by_id: dict[str, Order] = {}
+    # 物流单号全局唯一（同一单号不能挂在两笔订单上）——真实面单号天然唯一
+    seen_tracking: dict[str, str] = {}
     for order in orders:
         if order.order_id in order_by_id:
             issues.append(f"订单 ID 重复: {order.order_id}")
@@ -393,6 +421,35 @@ def _validate(
                 f"订单 {order.order_id} 金额不一致: 订单总额 {order.total_amount} != "
                 f"订单行合计 {line_sum}"
             )
+
+        # ---- 状态机 / 物流字段一致性（task-45）----
+        # SHIPPED / COMPLETED 必须有物流单号与发货时间；COMPLETED 还必须有完成时间。
+        # 其它状态允许物流字段为空（旧种子只有 PAID/CREATED/CANCELLED 时完全兼容）。
+        status = (order.status or "").upper()
+        if status in (ORDER_STATUS_SHIPPED, ORDER_STATUS_COMPLETED):
+            if not order.tracking_no:
+                issues.append(f"订单 {order.order_id} 状态 {status} 必须有 tracking_no")
+            else:
+                previous = seen_tracking.get(order.tracking_no)
+                if previous is not None and previous != order.order_id:
+                    issues.append(
+                        f"物流单号重复: {order.tracking_no}（订单 {previous} 与 {order.order_id}）"
+                    )
+                seen_tracking[order.tracking_no] = order.order_id
+            if not order.shipped_at:
+                issues.append(f"订单 {order.order_id} 状态 {status} 必须有 shipped_at")
+        if status == ORDER_STATUS_COMPLETED and not order.completed_at:
+            issues.append(f"订单 {order.order_id} 状态 COMPLETED 必须有 completed_at")
+        if order.shipped_at and order.completed_at:
+            try:
+                shipped = datetime.fromisoformat(order.shipped_at)
+                completed = datetime.fromisoformat(order.completed_at)
+                if completed < shipped:
+                    issues.append(
+                        f"订单 {order.order_id} completed_at 早于 shipped_at"
+                    )
+            except (TypeError, ValueError):
+                pass  # 时间格式问题已由 _optional_timestamp 在解析阶段报错
 
     if len(products) < MIN_PRODUCTS:
         issues.append(f"商品数量不足: {len(products)} < {MIN_PRODUCTS}（v1 种子要求）")

@@ -8,8 +8,9 @@
 - 所有查询**参数化**、所有列表查询统一过 ``clamp_limit``；多租户查询缺 merchant_id
   时失败关闭（``MerchantDataError``），绝不退化成全表读。
 - 写操作（``reserve_inventory`` / ``commit_reservation`` / ``release_reservation`` /
-  ``create_order``）全部走 ``BEGIN IMMEDIATE`` 事务：库存扣减/恢复与预占记录同事务，
-  幂等、参数化、租户必填；库存不足等异常整体回滚。**这不是真实 OMS 写通道**。
+  ``create_order`` / ``update_order_status``）全部走 ``BEGIN IMMEDIATE`` 事务：
+  库存扣减/恢复与预占记录同事务，订单状态与物流/时间字段同事务；
+  幂等、参数化、租户必填；库存不足/非法迁移等异常整体回滚。**这不是真实 OMS 写通道**。
 
 未来接真实 OMS/PG 时：实现 ``MerchantRepository``（只读）与
 ``MerchantWriteRepository``（写）两个协议并把工厂注册到
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 from collections.abc import Mapping
@@ -42,7 +44,12 @@ from .errors import (
 from .limits import DEFAULT_LIST_LIMIT, clamp_limit
 from .models import (
     DEFAULT_CURRENCY,
+    ORDER_STATUSES,
+    ORDER_STATUS_COMPLETED,
     ORDER_STATUS_CREATED,
+    ORDER_STATUS_PAID,
+    ORDER_STATUS_SHIPPED,
+    ORDER_STATUS_TRANSITIONS,
     PRODUCT_STATUS_ACTIVE,
     RESERVATION_STATUS_COMMITTED,
     RESERVATION_STATUS_EXPIRED,
@@ -71,6 +78,9 @@ _ENV_SEED_DIR = "QIANKE_MERCHANT_SEED_DIR"
 DEFAULT_RESERVATION_TTL_SECONDS = 900
 MAX_RESERVATION_TTL_SECONDS = 7 * 24 * 3600  # 预占最多保留 7 天
 MAX_WRITE_ITEMS = 50                          # 单次预占/订单最多 50 行
+# 物流单号规则（v1）：4~64 位，字母/数字开头，可含 - _ .；承运商最长 64 字符
+TRACKING_NO_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{3,63}$")
+MAX_CARRIER_LENGTH = 64
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS m_product (
@@ -121,7 +131,11 @@ CREATE TABLE IF NOT EXISTS m_order (
     channel      TEXT,
     created_at   TEXT NOT NULL,
     paid_at      TEXT,
-    source_ref   TEXT
+    source_ref   TEXT,
+    tracking_no  TEXT,
+    carrier      TEXT,
+    shipped_at   TEXT,
+    completed_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_m_order_merchant ON m_order (merchant_id, created_at);
@@ -269,12 +283,22 @@ class SqliteMerchantRepository:
     def _migrate_schema(conn: sqlite3.Connection) -> None:
         """轻量迁移：``CREATE TABLE IF NOT EXISTS`` 不会给**已存在**的表补列。
 
-        老库（v1 已上线/本地 var 库）需要补 ``m_order.source_ref``；
-        新库在建表时已包含该列，这里的 PRAGMA 检查是幂等的。
+        老库（v1 已上线/本地 var 库）需要补：
+            m_order.source_ref / tracking_no / carrier / shipped_at / completed_at
+        新库在建表时已包含这些列；这里用 PRAGMA 检查逐列 ALTER，幂等可重复执行。
         """
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(m_order)")}
-        if "source_ref" not in columns:
-            conn.execute("ALTER TABLE m_order ADD COLUMN source_ref TEXT")
+        # 列名 → SQL 类型；全部允许 NULL（历史订单没有物流信息是正常状态）
+        missing_columns = {
+            "source_ref": "TEXT",
+            "tracking_no": "TEXT",
+            "carrier": "TEXT",
+            "shipped_at": "TEXT",
+            "completed_at": "TEXT",
+        }
+        for name, sql_type in missing_columns.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE m_order ADD COLUMN {name} {sql_type}")
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -373,13 +397,15 @@ class SqliteMerchantRepository:
         )
         conn.executemany(
             "INSERT INTO m_order "
-            "(order_id, merchant_id, buyer_id, status, total_amount, currency, channel, created_at, paid_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(order_id, merchant_id, buyer_id, status, total_amount, currency, channel, "
+            " created_at, paid_at, tracking_no, carrier, shipped_at, completed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     o.order_id, o.merchant_id, o.buyer_id, o.status,
                     money_text(o.total_amount), o.currency, o.channel,
-                    o.created_at, o.paid_at,
+                    o.created_at, o.paid_at, o.tracking_no, o.carrier,
+                    o.shipped_at, o.completed_at,
                 )
                 for o in data.orders
             ],
@@ -570,7 +596,8 @@ class SqliteMerchantRepository:
 
         sql = (
             "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
-            "channel, created_at, paid_at, source_ref FROM m_order WHERE merchant_id = ?"
+            "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
+            "shipped_at, completed_at FROM m_order WHERE merchant_id = ?"
         )
         params: list[Any] = [merchant]
         buyer = _clean_optional(buyer_id)
@@ -602,7 +629,8 @@ class SqliteMerchantRepository:
             return None
         sql = (
             "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
-            "channel, created_at, paid_at, source_ref FROM m_order WHERE order_id = ?"
+            "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
+            "shipped_at, completed_at FROM m_order WHERE order_id = ?"
         )
         params: list[Any] = [order]
         merchant = _clean_optional(merchant_id)
@@ -901,6 +929,98 @@ class SqliteMerchantRepository:
                 "SELECT * FROM m_order WHERE order_id = ?", (order,)
             ).fetchone()
             return self._hydrate_orders(conn, [row])[0]
+
+    def update_order_status(
+        self,
+        merchant_id: str,
+        order_id: str,
+        status: str,
+        tracking_no: str | None = None,
+        carrier: str | None = None,
+    ) -> Order:
+        """订单状态机流转（幂等；只允许合法迁移）。
+
+        状态机见 ``models.ORDER_STATUS_TRANSITIONS``：
+            CREATED -> PAID -> SHIPPED -> COMPLETED
+            CREATED / PAID -> CANCELLED
+        - 同状态重复调用是**幂等重放**：返回已有订单，不重复写时间戳；
+          SHIPPED 重放时若带不同物流单号/承运商 → ``MERCHANT_CONFLICT``（防悄悄改单号）；
+        - 非法迁移 → ``MERCHANT_CONFLICT``；未知状态/参数/物流字段非法 → ``MERCHANT_INVALID``；
+        - 流转到 SHIPPED **必须**提供合法 ``tracking_no``（v1 规则 4~64 位字母/数字/`-_.`）；
+          carrier 可选；其它状态不允许携带物流字段（避免写进无法解释的数据）；
+        - 自动写状态时间：PAID→paid_at、SHIPPED→shipped_at、COMPLETED→completed_at；
+          CANCELLED 保留 paid_at（用于对账），不新增时间字段；
+        - 未知订单 / 其他租户 → ``MERCHANT_NOT_FOUND``（不泄露存在性）；merchant_id 必填。
+        """
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        order = _required_text(order_id, "order_id")
+        target = _required_text(status, "status", max_length=32).upper()
+        if target not in ORDER_STATUSES:
+            raise MerchantInvalidError(
+                f"未知订单状态: {status}（允许: {', '.join(ORDER_STATUSES)}）"
+            )
+        tracking = (
+            _normalize_tracking_no(tracking_no) if tracking_no is not None else None
+        )
+        carrier_value = _normalize_carrier(carrier)
+        if target != ORDER_STATUS_SHIPPED and (tracking is not None or carrier_value is not None):
+            raise MerchantInvalidError("只有 SHIPPED 状态允许携带 tracking_no/carrier")
+        if target == ORDER_STATUS_SHIPPED and tracking is None:
+            raise MerchantInvalidError("SHIPPED 状态必须提供 tracking_no（物流单号）")
+
+        with self._lock, self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM m_order WHERE order_id = ?", (order,)
+            ).fetchone()
+            if row is None or str(row["merchant_id"]) != merchant:
+                raise MerchantNotFoundError(f"订单不存在: {order}")
+            current = str(row["status"]).upper()
+            if current not in ORDER_STATUS_TRANSITIONS:
+                raise MerchantInternalError(
+                    f"订单 {order} 当前状态非法: {row['status']!r}"
+                )
+            if target == current:
+                # 幂等重放：同状态不改任何字段；但 SHIPPED 的物流快照不能悄悄变
+                if target == ORDER_STATUS_SHIPPED:
+                    if tracking is not None and tracking != row["tracking_no"]:
+                        raise MerchantConflictError(
+                            "订单已发货且物流单号不同，不能修改物流单号"
+                        )
+                    if carrier_value is not None and carrier_value != row["carrier"]:
+                        raise MerchantConflictError(
+                            "订单已发货且承运商不同，不能修改承运商"
+                        )
+                return self._hydrate_orders(conn, [row])[0]
+            if target not in ORDER_STATUS_TRANSITIONS[current]:
+                allowed = ", ".join(sorted(ORDER_STATUS_TRANSITIONS[current])) or "无（终态）"
+                raise MerchantConflictError(
+                    f"非法订单状态迁移: {current} -> {target}（当前状态允许: {allowed}）"
+                )
+
+            now = _now()
+            assignments: dict[str, Any] = {"status": target}
+            if target == ORDER_STATUS_PAID:
+                assignments["paid_at"] = now
+            elif target == ORDER_STATUS_SHIPPED:
+                assignments["shipped_at"] = now
+                assignments["tracking_no"] = tracking
+                assignments["carrier"] = carrier_value
+            elif target == ORDER_STATUS_COMPLETED:
+                assignments["completed_at"] = now
+            # CANCELLED：仅改状态（保留已有 paid_at 供对账）
+
+            set_sql = ", ".join(f"{column} = ?" for column in assignments)
+            cursor = conn.execute(
+                f"UPDATE m_order SET {set_sql} WHERE order_id = ? AND merchant_id = ?",
+                (*assignments.values(), order, merchant),
+            )
+            if cursor.rowcount != 1:
+                raise MerchantNotFoundError(f"订单不存在: {order}")
+            updated = conn.execute(
+                "SELECT * FROM m_order WHERE order_id = ?", (order,)
+            ).fetchone()
+            return self._hydrate_orders(conn, [updated])[0]
 
     # ---------- 写操作：内部辅助 ----------
     def _resolve_write_lines(
@@ -1242,6 +1362,16 @@ class SqliteMerchantRepository:
                     source_ref=(
                         row["source_ref"] if "source_ref" in row.keys() else None
                     ),
+                    tracking_no=(
+                        row["tracking_no"] if "tracking_no" in row.keys() else None
+                    ),
+                    carrier=row["carrier"] if "carrier" in row.keys() else None,
+                    shipped_at=(
+                        row["shipped_at"] if "shipped_at" in row.keys() else None
+                    ),
+                    completed_at=(
+                        row["completed_at"] if "completed_at" in row.keys() else None
+                    ),
                 )
             )
         return orders
@@ -1296,6 +1426,40 @@ def _parse_money(value: Any, field: str, *, minimum: Decimal = Decimal("0")) -> 
     if amount < minimum:
         raise MerchantInvalidError(f"{field} 不能小于 {money_text(minimum)}")
     return amount
+
+
+def _normalize_tracking_no(value: Any) -> str:
+    """物流单号校验（v1 规则）：4~64 位，字母/数字开头，可含 ``-_.``。
+
+    为什么要有格式规则：物流单号会被下游面单/查询接口直接使用，
+    空白、中文、超长或带控制字符的「单号」在真实承运商侧一定失败；
+    与其等到发货后才炸，不如在状态流转时失败关闭。
+    """
+    if value is None:
+        raise MerchantInvalidError("tracking_no 不能为空")
+    text = str(value).strip()
+    if not text:
+        raise MerchantInvalidError("tracking_no 不能为空")
+    if not TRACKING_NO_PATTERN.match(text):
+        raise MerchantInvalidError(
+            "tracking_no 格式非法：需 4~64 位字母/数字开头，可包含 - _ . "
+            f"（收到 {value!r}）"
+        )
+    return text
+
+
+def _normalize_carrier(value: Any) -> str | None:
+    """承运商名称：可选；去空白后最长 64 字符，不允许控制字符（允许中文/空格）。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) > MAX_CARRIER_LENGTH:
+        raise MerchantInvalidError(f"carrier 过长（最多 {MAX_CARRIER_LENGTH} 字符）")
+    if any(ord(character) < 32 for character in text):
+        raise MerchantInvalidError("carrier 含非法控制字符")
+    return text
 
 
 def _normalize_ttl(value: Any) -> int:

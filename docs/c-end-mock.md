@@ -68,8 +68,8 @@ P006 防晒衣       159
 ## 2. 订单状态
 
 ```text
-DRAFT      已准备，未扣库存
-CONFIRMED  已确认，已扣库存
+DRAFT      已准备，商家库存已预占，C 端库存未扣
+CONFIRMED  已确认，已写商家订单，C 端库存已扣
 ```
 
 流程：
@@ -77,6 +77,7 @@ CONFIRMED  已确认，已扣库存
 ```text
 POST /api/c/orders/prepare
   → 校验商品/库存/价格
+  → 预占商家库存（15 分钟 TTL）
   → 创建 DRAFT
   → 返回 order_id + confirmation_token + 订单摘要
 
@@ -85,12 +86,28 @@ POST /api/c/orders/prepare
 POST /api/c/orders/{draft_id}/confirm
   → 校验 token
   → 校验商品价格/库存未变化
-  → 扣库存 + 创建 CONFIRMED 订单
+  → 写商家订单（source_ref=draft_id）
+  → 提交商家预占
+  → 扣 C 端库存 + 创建 CONFIRMED 订单
+```
+
+商家订单状态（C 订单接口回传）：
+
+```text
+CREATED -> PAID -> SHIPPED -> COMPLETED
+CREATED/PAID -> CANCELLED
+```
+
+物流字段：
+
+```text
+merchant_tracking_no / merchant_carrier
+merchant_status_at / merchant_timeline
 ```
 
 ## 3. 强制约束
 
-- prepare 不扣库存
+- prepare 不扣 C 端库存，但预占商家库存（取消/过期释放）
 - confirm 必须带 confirmation_token
 - token 绑定草稿快照
 - 商品价格变化后旧确认失效

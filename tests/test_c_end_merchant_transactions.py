@@ -123,3 +123,29 @@ def test_order_list_includes_merchant_status(c_store):
     assert orders[0]["order_id"] == order["order_id"]
     assert orders[0]["merchant_status"] == "CREATED"
     assert orders[0]["merchant_source"] == "merchant_v1"
+
+
+def test_order_list_exposes_logistics_after_shipping(c_store):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P005", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_c_merchant_ship_001",
+    )
+    writer = get_merchant_write_repository()
+    writer.update_order_status("m_gear_002", order["order_id"], "PAID")
+    writer.update_order_status(
+        "m_gear_002",
+        order["order_id"],
+        "SHIPPED",
+        tracking_no="SF1234567890",
+        carrier="顺丰速运",
+    )
+    shipped = c_store.list_orders("buyer_1")[0]
+    assert shipped["merchant_status"] == "SHIPPED"
+    assert shipped["merchant_tracking_no"] == "SF1234567890"
+    assert shipped["merchant_carrier"] == "顺丰速运"
+    assert shipped["merchant_status_at"]
+    timeline = {entry["status"]: entry["at"] for entry in shipped["merchant_timeline"]}
+    assert "CREATED" in timeline and "PAID" in timeline and "SHIPPED" in timeline

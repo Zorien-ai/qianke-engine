@@ -31,7 +31,7 @@
     errors.py             结构化错误（稳定 code，写操作有 MERCHANT_STOCK / CONFLICT / EXPIRED…）
     repository.py         MerchantRepository（只读）+ MerchantWriteRepository（写）协议
     seeds.py              data/merchant/*.csv 读取 + 校验 + 规模下限
-    sqlite_repository.py  默认 SQLite 实现（读查询 + 事务化预占/订单写入）
+    sqlite_repository.py  默认 SQLite 实现（读查询 + 事务化预占/订单写入 + 订单状态机）
     factory.py            后端注册 / 选择 / 缓存 / 写能力检查
 """
 from __future__ import annotations
@@ -61,6 +61,7 @@ from .limits import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, clamp_limit
 from .models import (
     DEFAULT_CURRENCY,
     ORDER_STATUSES,
+    ORDER_STATUS_TRANSITIONS,
     RESERVATION_STATUSES,
     RESERVATION_STATUS_COMMITTED,
     RESERVATION_STATUS_EXPIRED,
@@ -97,6 +98,7 @@ __all__ = [
     "MAX_RESERVATION_TTL_SECONDS",
     "MAX_WRITE_ITEMS",
     "ORDER_STATUSES",
+    "ORDER_STATUS_TRANSITIONS",
     "RESERVATION_STATUSES",
     "RESERVATION_STATUS_COMMITTED",
     "RESERVATION_STATUS_EXPIRED",

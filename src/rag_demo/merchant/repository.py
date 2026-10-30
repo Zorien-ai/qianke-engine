@@ -162,5 +162,25 @@ class MerchantWriteRepository(Protocol):
         """
         ...
 
+    def update_order_status(
+        self,
+        merchant_id: str,
+        order_id: str,
+        status: str,
+        tracking_no: str | None = None,
+        carrier: str | None = None,
+    ) -> Order:
+        """订单状态机流转（幂等；只允许合法迁移）。
+
+        合法迁移：``CREATED->PAID->SHIPPED->COMPLETED``；``CREATED/PAID->CANCELLED``。
+        - 同状态重复调用返回已有订单（幂等，不重复写时间戳）；
+        - 非法迁移抛 ``MERCHANT_CONFLICT``，未知状态/参数非法抛 ``MERCHANT_INVALID``；
+        - 流转到 ``SHIPPED`` 必须提供合法 ``tracking_no``（v1 规则：4~64 位字母/数字/``-_.``），
+          ``carrier`` 可选；其它状态不允许携带物流字段；
+        - 自动写状态时间：PAID→``paid_at``、SHIPPED→``shipped_at``、COMPLETED→``completed_at``；
+        - 未知订单/跨租户一律 ``MERCHANT_NOT_FOUND``；``merchant_id`` 必填。
+        """
+        ...
+
 
 __all__ = ["MerchantRepository", "MerchantWriteRepository"]

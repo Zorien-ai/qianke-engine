@@ -655,12 +655,19 @@ def test_full_reserve_create_order_commit_flow(repo, writer, seed):
     assert repo.get_order("ORD-FLOW", merchant_id=merchant_id).source_ref == "quote-flow"
 
 
-# ==================== 8. 老库迁移（v1 无 source_ref / m_reservation） ====================
+# ==================== 8. 老库迁移（v1.1 无 source_ref / v1.2 无物流字段） ====================
 def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
-    """模拟 v1 老库：m_order 没有 source_ref、没有 m_reservation；升级后首次初始化应自动补。"""
+    """模拟老库：缺 source_ref / 物流字段 / m_reservation；升级后首次初始化应自动补齐。"""
     connection = sqlite3.connect(str(merchant_db))
     try:
-        connection.execute("ALTER TABLE m_order DROP COLUMN source_ref")
+        for column in (
+            "source_ref",
+            "tracking_no",
+            "carrier",
+            "shipped_at",
+            "completed_at",
+        ):
+            connection.execute(f"ALTER TABLE m_order DROP COLUMN {column}")
         connection.execute("DROP TABLE m_reservation")
         connection.commit()
     finally:
@@ -680,7 +687,9 @@ def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
             }
         finally:
             connection.close()
-        assert "source_ref" in columns
+        assert {
+            "source_ref", "tracking_no", "carrier", "shipped_at", "completed_at",
+        } <= columns
         assert "m_reservation" in tables
 
         merchant_id, sku = _pick_sku(seed, upgraded)
@@ -694,8 +703,290 @@ def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
             merchant_id, "RSV-MIGRATED", [{"sku": sku, "quantity": 1}]
         )
         assert reservation.status == "RESERVED"
+        # 迁移后的老库也能走完整状态机与物流字段
+        paid = upgraded.update_order_status(merchant_id, "ORD-MIGRATED", "PAID")
+        assert paid.paid_at
+        shipped = upgraded.update_order_status(
+            merchant_id, "ORD-MIGRATED", "SHIPPED",
+            tracking_no="SF1234567890", carrier="顺丰速运",
+        )
+        assert shipped.tracking_no == "SF1234567890" and shipped.shipped_at
+        completed = upgraded.update_order_status(merchant_id, "ORD-MIGRATED", "COMPLETED")
+        assert completed.completed_at
     finally:
         upgraded.close()
+
+
+# ==================== 9. 订单状态机 / 物流字段（task-45） ====================
+def _seed_order(seed, status: str):
+    for order in seed.orders:
+        if order.status == status:
+            return order
+    raise AssertionError(f"种子里没有 {status} 订单")
+
+
+def test_update_status_created_to_paid_sets_paid_at(repo, writer, seed):
+    order = _seed_order(seed, "CREATED")
+    before = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    assert before.paid_at is None
+
+    updated = writer.update_order_status(order.merchant_id, order.order_id, "PAID")
+
+    assert updated.status == "PAID"
+    assert updated.paid_at
+    assert updated.tracking_no is None and updated.carrier is None
+    assert updated.shipped_at is None and updated.completed_at is None
+    persisted = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    assert persisted.paid_at == updated.paid_at
+    payload = persisted.to_dict()
+    assert payload["status"] == "PAID"
+    assert payload["paid_at"] == updated.paid_at
+    assert payload["tracking_no"] is None and payload["completed_at"] is None
+
+
+def test_update_status_paid_to_shipped_requires_tracking(repo, writer, seed):
+    order = _seed_order(seed, "PAID")
+
+    # 缺少物流单号 → 失败关闭，状态不变
+    with pytest.raises(MerchantInvalidError) as excinfo:
+        writer.update_order_status(order.merchant_id, order.order_id, "SHIPPED")
+    assert "tracking_no" in excinfo.value.message
+    assert repo.get_order(order.order_id).status == "PAID"
+
+    updated = writer.update_order_status(
+        order.merchant_id, order.order_id, "SHIPPED",
+        tracking_no="SF1234567890", carrier="顺丰速运",
+    )
+    assert updated.status == "SHIPPED"
+    assert updated.tracking_no == "SF1234567890"
+    assert updated.carrier == "顺丰速运"
+    assert updated.shipped_at
+    assert updated.completed_at is None
+    payload = updated.to_dict()
+    assert payload["tracking_no"] == "SF1234567890"
+    assert payload["carrier"] == "顺丰速运"
+    assert payload["shipped_at"] == updated.shipped_at
+
+
+def test_update_status_shipped_to_completed_sets_completed_at(repo, writer, seed):
+    order = _seed_order(seed, "SHIPPED")
+    assert order.tracking_no and order.shipped_at
+
+    updated = writer.update_order_status(order.merchant_id, order.order_id, "COMPLETED")
+
+    assert updated.status == "COMPLETED"
+    assert updated.completed_at
+    assert updated.tracking_no == order.tracking_no
+    assert updated.carrier == order.carrier
+    assert updated.shipped_at == order.shipped_at
+    assert updated.completed_at >= updated.shipped_at
+
+
+def test_full_order_lifecycle_created_paid_shipped_completed(repo, writer, seed):
+    merchant_id, sku, quantity, total = _order_items(seed, repo)
+    created = writer.create_order(
+        merchant_id, "ORD-LIFECYCLE", "b_1",
+        [{"sku": sku, "quantity": quantity}], total,
+    )
+    assert created.status == "CREATED" and created.paid_at is None
+
+    paid = writer.update_order_status(merchant_id, "ORD-LIFECYCLE", "PAID")
+    assert paid.status == "PAID" and paid.paid_at
+    shipped = writer.update_order_status(
+        merchant_id, "ORD-LIFECYCLE", "SHIPPED",
+        tracking_no="YT1234567890", carrier="圆通速递",
+    )
+    assert shipped.status == "SHIPPED" and shipped.shipped_at
+    completed = writer.update_order_status(merchant_id, "ORD-LIFECYCLE", "COMPLETED")
+    assert completed.status == "COMPLETED" and completed.completed_at
+
+    assert completed.paid_at == paid.paid_at
+    assert completed.shipped_at == shipped.shipped_at
+    assert completed.tracking_no == "YT1234567890"
+    assert completed.total_amount == total
+    assert completed.item_count == quantity
+    from datetime import datetime as _datetime
+
+    assert (
+        _datetime.fromisoformat(completed.paid_at)
+        <= _datetime.fromisoformat(completed.shipped_at)
+        <= _datetime.fromisoformat(completed.completed_at)
+    )
+
+
+def test_same_status_replay_idempotent_does_not_rewrite_timestamps(repo, writer, seed):
+    order = _seed_order(seed, "PAID")
+    first = writer.update_order_status(order.merchant_id, order.order_id, "PAID")
+    paid_at = first.paid_at
+    second = writer.update_order_status(order.merchant_id, order.order_id, "PAID")
+    assert second.paid_at == paid_at  # 同状态幂等：不重写支付时间
+
+    shipped = writer.update_order_status(
+        order.merchant_id, order.order_id, "SHIPPED",
+        tracking_no="JD1234567890", carrier="京东物流",
+    )
+    replay = writer.update_order_status(
+        order.merchant_id, order.order_id, "SHIPPED",
+        tracking_no="JD1234567890", carrier="京东物流",
+    )
+    assert replay.shipped_at == shipped.shipped_at
+    assert replay.tracking_no == "JD1234567890"
+
+
+def test_shipped_replay_with_different_logistics_conflicts(repo, writer, seed):
+    order = _seed_order(seed, "SHIPPED")
+    with pytest.raises(MerchantConflictError):
+        writer.update_order_status(
+            order.merchant_id, order.order_id, "SHIPPED", tracking_no="OTHER1234567890"
+        )
+    with pytest.raises(MerchantConflictError):
+        writer.update_order_status(
+            order.merchant_id, order.order_id, "SHIPPED",
+            tracking_no=order.tracking_no, carrier="另一家快递",
+        )
+    replay = writer.update_order_status(
+        order.merchant_id, order.order_id, "SHIPPED",
+        tracking_no=order.tracking_no, carrier=order.carrier,
+    )
+    assert replay.shipped_at == order.shipped_at
+
+
+@pytest.mark.parametrize(
+    "current_status,target",
+    [
+        ("CREATED", "SHIPPED"),
+        ("CREATED", "COMPLETED"),
+        ("PAID", "COMPLETED"),
+        ("SHIPPED", "CANCELLED"),
+        ("SHIPPED", "PAID"),
+        ("COMPLETED", "PAID"),
+        ("COMPLETED", "CANCELLED"),
+        ("CANCELLED", "PAID"),
+        ("CANCELLED", "CREATED"),
+    ],
+)
+def test_invalid_transitions_conflict(repo, writer, seed, current_status, target):
+    order = _seed_order(seed, current_status)
+    kwargs = {"tracking_no": "SF1234567890"} if target == "SHIPPED" else {}
+    with pytest.raises(MerchantConflictError) as excinfo:
+        writer.update_order_status(order.merchant_id, order.order_id, target, **kwargs)
+    assert excinfo.value.code == "MERCHANT_CONFLICT"
+    assert repo.get_order(order.order_id).status == current_status
+
+
+def test_cancel_allowed_from_created_and_paid(repo, writer, seed):
+    created = _seed_order(seed, "CREATED")
+    cancelled = writer.update_order_status(created.merchant_id, created.order_id, "CANCELLED")
+    assert cancelled.status == "CANCELLED"
+    assert cancelled.paid_at is None
+
+    paid = _seed_order(seed, "PAID")
+    paid_at = paid.paid_at
+    cancelled_paid = writer.update_order_status(paid.merchant_id, paid.order_id, "CANCELLED")
+    assert cancelled_paid.status == "CANCELLED"
+    assert cancelled_paid.paid_at == paid_at  # 保留支付时间供对账
+
+
+def test_update_status_unknown_or_cross_tenant_not_found(repo, writer, seed):
+    order = _seed_order(seed, "CREATED")
+    other = _other_merchant(seed, order.merchant_id)
+    with pytest.raises(MerchantNotFoundError):
+        writer.update_order_status(other, order.order_id, "PAID")
+    with pytest.raises(MerchantNotFoundError):
+        writer.update_order_status(order.merchant_id, "ORD-MISSING", "PAID")
+    assert repo.get_order(order.order_id).status == "CREATED"
+
+
+def test_update_status_missing_merchant_and_invalid_status(writer, seed):
+    order = _seed_order(seed, "CREATED")
+    for merchant_id in ("", "   ", None):
+        with pytest.raises(MerchantDataError) as excinfo:
+            writer.update_order_status(merchant_id, order.order_id, "PAID")
+        assert excinfo.value.code == "MERCHANT_DATA"
+    for bad_status in ("", "   ", "REFUNDED", "PAIDX", None):
+        with pytest.raises(MerchantInvalidError):
+            writer.update_order_status(order.merchant_id, order.order_id, bad_status)
+
+
+@pytest.mark.parametrize(
+    "tracking",
+    ["abc", "SF 123456", "中文单号1234", "!@#$%^&*", "A" * 65],
+)
+def test_shipped_tracking_number_format_rules(repo, writer, seed, tracking):
+    order = _seed_order(seed, "PAID")
+    with pytest.raises(MerchantInvalidError) as excinfo:
+        writer.update_order_status(
+            order.merchant_id, order.order_id, "SHIPPED", tracking_no=tracking
+        )
+    assert "tracking_no" in excinfo.value.message
+    assert repo.get_order(order.order_id).status == "PAID"
+
+    # 合法格式仍可正常发货
+    if tracking == "A" * 65:
+        updated = writer.update_order_status(
+            order.merchant_id, order.order_id, "SHIPPED",
+            tracking_no="A" * 64, carrier="测试承运商",
+        )
+        assert updated.tracking_no == "A" * 64
+
+
+def test_valid_tracking_number_formats_accepted(writer, seed):
+    order = _seed_order(seed, "PAID")
+    updated = writer.update_order_status(
+        order.merchant_id, order.order_id, "SHIPPED",
+        tracking_no="JD-VA.001_2", carrier="京东物流",
+    )
+    assert updated.tracking_no == "JD-VA.001_2"
+
+
+def test_logistics_fields_rejected_for_non_shipped_targets(repo, writer, seed):
+    created = _seed_order(seed, "CREATED")
+    paid = _seed_order(seed, "PAID")
+    with pytest.raises(MerchantInvalidError):
+        writer.update_order_status(
+            created.merchant_id, created.order_id, "PAID",
+            tracking_no="SF1234567890",
+        )
+    with pytest.raises(MerchantInvalidError):
+        writer.update_order_status(
+            paid.merchant_id, paid.order_id, "CANCELLED", carrier="顺丰速运"
+        )
+    assert repo.get_order(created.order_id).status == "CREATED"
+    assert repo.get_order(paid.order_id).status == "PAID"
+
+
+def test_concurrent_same_transition_is_idempotent(repo, seed, merchant_db):
+    order = _seed_order(seed, "CREATED")
+    repositories = [_thread_repo(merchant_db) for _ in range(3)]
+
+    def attempt(instance):
+        return instance.update_order_status(order.merchant_id, order.order_id, "PAID")
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(pool.map(attempt, repositories))
+    finally:
+        for instance in repositories:
+            instance.close()
+
+    assert all(result.status == "PAID" for result in results)
+    assert len({result.paid_at for result in results}) == 1  # 只写一次支付时间
+    persisted = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    assert persisted.status == "PAID"
+    assert persisted.paid_at == results[0].paid_at
+
+
+def test_update_status_does_not_touch_order_lines_or_amount(repo, writer, seed):
+    order = _seed_order(seed, "PAID")
+    before = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    writer.update_order_status(
+        order.merchant_id, order.order_id, "SHIPPED",
+        tracking_no="SF1234567890", carrier="顺丰速运",
+    )
+    after = repo.get_order(order.order_id, merchant_id=order.merchant_id)
+    assert after.total_amount == before.total_amount
+    assert after.item_count == before.item_count
+    assert [item.sku for item in after.items] == [item.sku for item in before.items]
 
 
 def test_write_errors_are_structured(seed, repo):

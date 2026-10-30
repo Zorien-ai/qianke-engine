@@ -21,7 +21,7 @@ from typing import Any
 PRODUCT_STATUS_ACTIVE = "ACTIVE"
 PRODUCT_STATUS_INACTIVE = "INACTIVE"
 
-# ---------- 订单状态（常见值；v1 不强制白名单，真实 OMS 可能自有关单/退款态） ----------
+# ---------- 订单状态 ----------
 ORDER_STATUS_CREATED = "CREATED"
 ORDER_STATUS_PAID = "PAID"
 ORDER_STATUS_SHIPPED = "SHIPPED"
@@ -34,6 +34,18 @@ ORDER_STATUSES: tuple[str, ...] = (
     ORDER_STATUS_COMPLETED,
     ORDER_STATUS_CANCELLED,
 )
+
+# 订单状态机（合法迁移集合）：
+#   CREATED -> PAID -> SHIPPED -> COMPLETED
+#   CREATED/PAID -> CANCELLED
+# 终态 COMPLETED / CANCELLED 不再允许任何迁移（同状态重复调用是幂等重放，不在此表）。
+ORDER_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    ORDER_STATUS_CREATED: frozenset({ORDER_STATUS_PAID, ORDER_STATUS_CANCELLED}),
+    ORDER_STATUS_PAID: frozenset({ORDER_STATUS_SHIPPED, ORDER_STATUS_CANCELLED}),
+    ORDER_STATUS_SHIPPED: frozenset({ORDER_STATUS_COMPLETED}),
+    ORDER_STATUS_COMPLETED: frozenset(),
+    ORDER_STATUS_CANCELLED: frozenset(),
+}
 
 DEFAULT_CURRENCY = "CNY"
 
@@ -295,10 +307,17 @@ class OrderItem:
 
 @dataclass(frozen=True)
 class Order:
-    """商家订单（含订单行快照）。
+    """商家订单（含订单行快照与物流/生命周期时间字段）。
 
     ``source_ref``：可选来源引用（如 quote_id / agent action id），便于把订单追回到
     产生它的业务动作；真实 OMS 对接时应映射为对方的来源单号。
+
+    物流字段（task-45）：
+        tracking_no  物流单号（SHIPPED 及之后必有；v1 规则：4~64 位字母/数字/``-_.``）
+        carrier      承运商（可选，如「顺丰速运」）
+        paid_at      支付时间（CREATED→PAID 时写入）
+        shipped_at   发货时间（PAID→SHIPPED 时写入）
+        completed_at 完成时间（SHIPPED→COMPLETED 时写入）
     """
 
     merchant_id: str
@@ -312,6 +331,10 @@ class Order:
     paid_at: str | None = None
     items: tuple[OrderItem, ...] = ()
     source_ref: str | None = None
+    tracking_no: str | None = None
+    carrier: str | None = None
+    shipped_at: str | None = None
+    completed_at: str | None = None
 
     @property
     def item_count(self) -> int:
@@ -329,6 +352,10 @@ class Order:
             "channel": self.channel,
             "created_at": self.created_at,
             "paid_at": self.paid_at,
+            "shipped_at": self.shipped_at,
+            "completed_at": self.completed_at,
+            "tracking_no": self.tracking_no,
+            "carrier": self.carrier,
             "source_ref": self.source_ref,
             "item_count": self.item_count,
             "items": [item.to_dict() for item in self.items],
@@ -345,6 +372,7 @@ __all__ = [
     "ORDER_STATUS_CREATED",
     "ORDER_STATUS_PAID",
     "ORDER_STATUS_SHIPPED",
+    "ORDER_STATUS_TRANSITIONS",
     "Order",
     "OrderItem",
     "PRODUCT_STATUS_ACTIVE",
