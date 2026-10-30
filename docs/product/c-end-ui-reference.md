@@ -105,7 +105,7 @@ https://mobbin.com/apps/whats-app-ios-8738dbc9-e7a8-4fef-91e5-6afd1c9d092b
 成交必须由用户逐单确认
 ```
 
-初始种子对话、报价卡和图表是界面参考数据；快捷问题之后的链路会调用真实 C Agent。
+初始种子对话、报价卡和图表是界面参考数据；最近订单来自 `GET /api/c/orders`；快捷问题之后的链路会调用真实 C Agent。
 
 ![C 端真实 Agent 草稿与确认](F:/workspace/python/rag-demo/docs/screenshots/c-app-live.png)
 
@@ -152,6 +152,19 @@ WS   /api/c/ws/chat/store_demo
 - 点击「查看报价」进入商城逐单确认
 
 历史消息会做 emoji/感叹号清理后再展示，避免旧数据破坏新 UI 的克制风格。
+
+### 最近订单（真实数据）
+
+右侧「最近订单」不再写死演示条目，订单页同理：
+
+```text
+GET /api/c/orders?limit=3    # CApp 挂载 / 切回会话时刷新
+GET /api/c/orders?limit=50   # 订单页
+```
+
+- 订单页状态优先显示 `merchant_status`（CREATED / SHIPPED / COMPLETED / CANCELLED…），无该字段时回退旧字段 `status`；
+- 有 `merchant_order_id` 时在订单号下方显示「商家单号」；
+- 最近订单为空显示「还没有订单」；加载失败只做轻提示，不清空已加载的列表。
 
 ## 7. 会话持久化
 

@@ -1,8 +1,12 @@
-"""商家数据层的 Repository 接口（可替换适配器的唯一契约）。
+"""商家数据层的 Repository 接口（可替换适配器的契约）。
+
+本模块定义两个协议：
+- ``MerchantRepository``：**只读**查询（商品 / SKU / 库存 / 订单）；
+- ``MerchantWriteRepository``：**受控写入**（库存预占 + 订单写入，task-43）。
 
 为什么用 ``Protocol`` 而不是继承某个 SQLite 基类：
 - 未来接真实 OMS/PG 时，适配器**不需要**依赖本项目的 SQLite 实现或任何第三方基类，
-  只要「长得像」这个协议即可被注入（结构化鸭子类型）；
+  只要「长得像」对应协议即可被注入（结构化鸭子类型）；
 - 测试可以塞一个内存 Fake 进来验证业务层不绑死 SQLite；
 - ``runtime_checkable`` 只给测试做 isinstance 断言，运行期不靠它做安全判断。
 
@@ -12,7 +16,9 @@
    空值必须**失败关闭**（抛 ``MerchantDataError``），禁止退化成全表查询。
    ``get_*`` 的 ``merchant_id`` / ``buyer_id`` 是可选作用域，传入时必须同时匹配。
 2. **limit 钳制**：所有列表方法内部必须经过 :func:`rag_demo.merchant.limits.clamp_limit`。
-3. **只读**：v1 数据层不做 reservation/写入；真实 OMS 写操作必须走独立确认流程。
+3. **读写能力分离**：只读 adapter 只实现 ``MerchantRepository``；需要预占/订单写入的
+   adapter 额外实现 ``MerchantWriteRepository``。真实 OMS 写操作必须走独立确认流程，
+   不能把写权限给只读查询路径。
 4. **返回模型**：返回 :mod:`rag_demo.merchant.models` 里的 frozen dataclass（或 ``None``），
    不要返回裸 dict——模型是跨 adapter 的统一契约。
 5. **金额**：模型里是 ``Decimal``，adapter 不得用 float 中转。
@@ -22,12 +28,12 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from .limits import DEFAULT_LIST_LIMIT
-from .models import Inventory, Order, Product, SKU
+from .models import Inventory, Order, Product, Reservation, SKU
 
 
 @runtime_checkable
 class MerchantRepository(Protocol):
-    """商家商品/库存/订单查询接口（只读 v1）。"""
+    """商家商品/库存/订单查询接口（只读）。"""
 
     #: 后端标识（"sqlite" / "postgres" / "oms" …），用于日志与诊断
     backend: str
@@ -88,4 +94,73 @@ class MerchantRepository(Protocol):
         ...
 
 
-__all__ = ["MerchantRepository"]
+@runtime_checkable
+class MerchantWriteRepository(Protocol):
+    """商家数据层**写接口**（库存预占 + 订单写入，task-43）。
+
+    为什么与只读 ``MerchantRepository`` 分成两个协议：
+    - 只读消费者（C 端商品/订单查询）不需要、也不应该拿到写能力；
+    - 只读 adapter（或未来某些 OMS 的只读账号）可以不实现本协议，
+      :func:`rag_demo.merchant.factory.get_merchant_write_repository` 会明确拒绝；
+    - 调用方用 ``get_merchant_write_repository()`` 拿写能力，边界一眼可见。
+
+    写操作的硬约束（adapter 必须遵守）：
+    1. **事务化**：库存扣减/恢复与预占、订单记录必须在同一事务内，要么全成功要么全回滚；
+    2. **幂等**：同一 ``reservation_id`` / ``order_id`` 重复调用不能重复扣库存/重复写订单；
+    3. **失败关闭**：库存不足、参数非法、未知/过期预占必须抛结构化错误（见 errors.py），
+       不允许「部分成功」或静默降级；
+    4. **租户必填**：所有写的 ``merchant_id`` 必填；未知/其他租户的对象一律按不存在处理，
+       不泄露跨租户信息。``merchant_id`` 必须由上层从**已认证的会话**推导，不能来自用户输入；
+    5. **不是真实 OMS 写通道**：SQLite adapter 只是本地演示/测试实现，
+       真实交易写必须走 OMS 的受控接口 + 人工确认（见 docs/merchant-integration-v1.md）。
+    """
+
+    backend: str
+
+    def reserve_inventory(
+        self,
+        merchant_id: str,
+        reservation_id: str,
+        items: list[dict[str, Any]],
+        ttl_seconds: int = 900,
+        *,
+        buyer_id: str | None = None,
+    ) -> Reservation:
+        """按当前库存预占（available 扣减、reserved 增加）；库存不足抛 MERCHANT_STOCK。
+
+        items 每项至少包含 ``sku`` 或 ``product_id`` 与正整数 ``quantity``；
+        同一 SKU 不得重复出现。``buyer_id`` 可选（HITL 场景用于把预占绑定到买家）。
+        """
+        ...
+
+    def commit_reservation(
+        self,
+        merchant_id: str,
+        reservation_id: str,
+        order_id: str | None = None,
+    ) -> Reservation:
+        """把预占提交为订单占用：available 保持扣减、reserved 转出；幂等。"""
+        ...
+
+    def release_reservation(self, merchant_id: str, reservation_id: str) -> Reservation:
+        """释放预占并恢复库存；重复释放幂等，已提交的预占拒绝释放。"""
+        ...
+
+    def create_order(
+        self,
+        merchant_id: str,
+        order_id: str,
+        buyer_id: str,
+        items: list[dict[str, Any]],
+        total_amount: Any,
+        source_ref: str | None = None,
+    ) -> Order:
+        """幂等写入订单（同 order_id 返回已有订单）；校验订单行小计与总金额一致。
+
+        注意：create_order **只写订单记录，不改库存**。需要库存控制时先
+        ``reserve_inventory``，再 ``commit_reservation(..., order_id=...)``。
+        """
+        ...
+
+
+__all__ = ["MerchantRepository", "MerchantWriteRepository"]

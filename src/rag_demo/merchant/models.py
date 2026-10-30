@@ -37,6 +37,23 @@ ORDER_STATUSES: tuple[str, ...] = (
 
 DEFAULT_CURRENCY = "CNY"
 
+# ---------- 库存预占状态（task-43） ----------
+# RESERVED  : 预占中（available 已扣、reserved 已加），可 release 或 commit
+# COMMITTED : 已提交为订单（available 保持扣减，reserved 已转出）
+# RELEASED  : 已主动释放（库存已恢复）
+# EXPIRED   : 已过期（库存已恢复；由 commit/reserve/release 懒触发）
+RESERVATION_STATUS_RESERVED = "RESERVED"
+RESERVATION_STATUS_COMMITTED = "COMMITTED"
+RESERVATION_STATUS_RELEASED = "RELEASED"
+RESERVATION_STATUS_EXPIRED = "EXPIRED"
+RESERVATION_STATUSES: tuple[str, ...] = (
+    RESERVATION_STATUS_RESERVED,
+    RESERVATION_STATUS_COMMITTED,
+    RESERVATION_STATUS_RELEASED,
+    RESERVATION_STATUS_EXPIRED,
+)
+
+
 
 def money_text(value: Decimal) -> str:
     """Decimal 金额 → 十进制字符串（保留最小位数，例如 Decimal('298.00') → '298.00'）。"""
@@ -189,6 +206,72 @@ class Inventory:
 
 
 @dataclass(frozen=True)
+class ReservationItem:
+    """预占请求里的一行：SKU + 数量（商品由 SKU 反查）。"""
+
+    sku: str
+    product_id: str
+    quantity: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sku": self.sku,
+            "product_id": self.product_id,
+            "quantity": self.quantity,
+        }
+
+
+@dataclass(frozen=True)
+class ReservationAllocation:
+    """某个仓库被扣减的明细：释放/提交时按它精确回滚。"""
+
+    sku: str
+    warehouse_id: str
+    quantity: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sku": self.sku,
+            "warehouse_id": self.warehouse_id,
+            "quantity": self.quantity,
+        }
+
+
+@dataclass(frozen=True)
+class Reservation:
+    """库存预占记录（可提交为订单 / 主动释放 / 过期自动释放）。"""
+
+    merchant_id: str
+    reservation_id: str
+    status: str
+    expires_at: str
+    created_at: str
+    items: tuple[ReservationItem, ...] = ()
+    allocations: tuple[ReservationAllocation, ...] = ()
+    buyer_id: str | None = None
+    order_id: str | None = None
+
+    @property
+    def item_count(self) -> int:
+        """预占商品件数（各行 quantity 之和）。"""
+        return sum(item.quantity for item in self.items)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "merchant_id": self.merchant_id,
+            "reservation_id": self.reservation_id,
+            "buyer_id": self.buyer_id,
+            "status": self.status,
+            "expires_at": self.expires_at,
+            "created_at": self.created_at,
+            "order_id": self.order_id,
+            "item_count": self.item_count,
+            "items": [item.to_dict() for item in self.items],
+            "allocations": [allocation.to_dict() for allocation in self.allocations],
+        }
+
+
+@dataclass(frozen=True)
 class OrderItem:
     """订单行（下单那一刻的快照：标题/单价不会随商品后续改价而变）。"""
 
@@ -212,7 +295,11 @@ class OrderItem:
 
 @dataclass(frozen=True)
 class Order:
-    """商家订单（含订单行快照）。"""
+    """商家订单（含订单行快照）。
+
+    ``source_ref``：可选来源引用（如 quote_id / agent action id），便于把订单追回到
+    产生它的业务动作；真实 OMS 对接时应映射为对方的来源单号。
+    """
 
     merchant_id: str
     order_id: str
@@ -224,6 +311,7 @@ class Order:
     created_at: str = ""
     paid_at: str | None = None
     items: tuple[OrderItem, ...] = ()
+    source_ref: str | None = None
 
     @property
     def item_count(self) -> int:
@@ -241,6 +329,7 @@ class Order:
             "channel": self.channel,
             "created_at": self.created_at,
             "paid_at": self.paid_at,
+            "source_ref": self.source_ref,
             "item_count": self.item_count,
             "items": [item.to_dict() for item in self.items],
         }
@@ -261,6 +350,14 @@ __all__ = [
     "PRODUCT_STATUS_ACTIVE",
     "PRODUCT_STATUS_INACTIVE",
     "Product",
+    "RESERVATION_STATUSES",
+    "RESERVATION_STATUS_COMMITTED",
+    "RESERVATION_STATUS_EXPIRED",
+    "RESERVATION_STATUS_RELEASED",
+    "RESERVATION_STATUS_RESERVED",
+    "Reservation",
+    "ReservationAllocation",
+    "ReservationItem",
     "SKU",
     "WarehouseStock",
     "money_text",

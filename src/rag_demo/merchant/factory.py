@@ -18,10 +18,10 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from .errors import MerchantConfigurationError
-from .repository import MerchantRepository
+from .repository import MerchantRepository, MerchantWriteRepository
 from .sqlite_repository import SqliteMerchantRepository, default_db_path
 from .seeds import default_seed_dir
 
@@ -111,6 +111,33 @@ def get_merchant_repository(
         return repository
 
 
+def get_merchant_write_repository(
+    *,
+    backend: str | None = None,
+    db_path: str | Path | None = None,
+    seed: bool = True,
+    seed_dir: str | Path | None = None,
+) -> MerchantWriteRepository:
+    """按后端名取一个**带写能力**的商家 Repository（库存预占 / 订单写入）。
+
+    与 :func:`get_merchant_repository` 的区别只在于**能力边界**：只读 adapter 不实现
+    ``MerchantWriteRepository`` 时，这里会明确抛 ``MerchantConfigurationError``，
+    而不是让写调用在运行期才炸。真实 OMS 的只读账号应保持只读 adapter。
+
+    参数与环境变量同 :func:`get_merchant_repository`。
+    """
+    repository = get_merchant_repository(
+        backend=backend, db_path=db_path, seed=seed, seed_dir=seed_dir
+    )
+    if not isinstance(repository, MerchantWriteRepository):
+        backend_name = getattr(repository, "backend", backend or "unknown")
+        raise MerchantConfigurationError(
+            f"商家数据后端 {backend_name!r} 只读，未实现 MerchantWriteRepository；"
+            f"库存预占/订单写入需要可写 adapter（v1 仅内置 sqlite 支持）"
+        )
+    return cast(MerchantWriteRepository, repository)
+
+
 def reset_merchant_repository_cache() -> None:
     """关闭并清空缓存（测试/切换配置用；调用后的下一次 get 会重新初始化）。"""
     with _CACHE_LOCK:
@@ -131,6 +158,7 @@ __all__ = [
     "available_backends",
     "default_backend",
     "get_merchant_repository",
+    "get_merchant_write_repository",
     "register_repository_backend",
     "reset_merchant_repository_cache",
 ]

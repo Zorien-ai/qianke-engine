@@ -24,9 +24,26 @@ from typing import Any
 
 from rag_demo.c_end import persona as c_persona
 from rag_demo.config import BASE_DIR
+from rag_demo.merchant import (
+    MerchantError,
+    get_merchant_repository,
+    get_merchant_write_repository,
+)
 
 _DB_LOCK = threading.Lock()
 _DB_PATH: Path | None = None
+
+# C 端店宠/商城使用的商家数据域。真实接入时 merchant_id 必须由登录态推导，
+# 不允许从请求体传入；这里只有单一的联调店铺映射。
+_MERCHANT_ID = "m_gear_002"
+_MERCHANT_BUYER_IDS = {
+    "buyer_1": "b_2001",
+    "buyer_2": "b_2002",
+}
+
+
+def _merchant_buyer_id(buyer_id: str) -> str:
+    return _MERCHANT_BUYER_IDS.get(str(buyer_id or ""), str(buyer_id or ""))
 
 
 class CStoreError(Exception):
@@ -548,15 +565,56 @@ def _quote_discount(original: float, policy_ids: list[str]) -> float:
     return 0.0
 
 
+def _merchant_error(exc: MerchantError) -> CStoreError:
+    code = getattr(exc, "code", "MERCHANT_ERROR")
+    mapped = {
+        "MERCHANT_STOCK": "INSUFFICIENT_STOCK",
+        "MERCHANT_NOT_FOUND": "PRODUCT_NOT_FOUND",
+        "MERCHANT_EXPIRED": "MERCHANT_EXPIRED",
+        "MERCHANT_CONFLICT": "MERCHANT_CONFLICT",
+    }.get(code, "MERCHANT_UNAVAILABLE")
+    return CStoreError(mapped, getattr(exc, "message", str(exc)))
+
+
+def _reserve_merchant_stock(
+    draft_id: str,
+    buyer_id: str,
+    products: list[dict[str, Any]],
+) -> None:
+    """在商家库存域预占；失败时抛结构化 CStoreError，由调用方回滚 C 草稿。"""
+    try:
+        get_merchant_write_repository().reserve_inventory(
+            _MERCHANT_ID,
+            draft_id,
+            [
+                {"product_id": item["product_id"], "quantity": item["quantity"]}
+                for item in products
+            ],
+            ttl_seconds=900,
+            buyer_id=_merchant_buyer_id(buyer_id),
+        )
+    except MerchantError as exc:
+        raise _merchant_error(exc) from exc
+
+
+def _release_merchant_reservation(draft_id: str) -> None:
+    """取消草稿时尽力释放；已提交/已过期的预占不阻塞 C 端取消。"""
+    try:
+        get_merchant_write_repository().release_reservation(_MERCHANT_ID, draft_id)
+    except MerchantError:
+        pass
+
+
 def prepare_order(
     buyer_id: str,
     items: list[dict[str, Any]],
     *,
     quote_id: str | None = None,
 ) -> dict[str, Any]:
-    """生成待确认订单草稿；不扣库存。"""
+    """生成待确认订单草稿；不扣 C 端库存，同时预占商家库存。"""
     init()
     conn = _connect()
+    reservation_created = False
     try:
         conn.execute("BEGIN IMMEDIATE")
         policy_ids: list[str] = []
@@ -590,6 +648,11 @@ def prepare_order(
         order_id = f"draft_{uuid.uuid4().hex[:16]}"
         token = secrets.token_urlsafe(24)
         snapshot = _snapshot(products)
+
+        # C 端草稿和商家预占使用同一个 draft_id：确认/取消时可精确找回预占。
+        _reserve_merchant_stock(order_id, buyer_id, products)
+        reservation_created = True
+
         conn.execute(
             "INSERT INTO c_order(order_id, buyer_id, status, total_amount, original_amount, "
             "discount_amount, quote_id, policy_ids_json, confirmation_hash, snapshot_json, created_at) "
@@ -614,6 +677,8 @@ def prepare_order(
         conn.commit()
     except Exception:
         conn.rollback()
+        if reservation_created:
+            _release_merchant_reservation(order_id)
         raise
     finally:
         conn.close()
@@ -630,7 +695,8 @@ def prepare_order(
         "policy_ids": policy_ids,
         "confirmation_token": token,
         "confirmation_version": 1,
-        "message": "请确认订单内容后再提交；确认前不会扣库存。",
+        "merchant_reservation_id": order_id,
+        "message": "请确认订单内容后再提交；确认前商家库存已预占，C 端库存暂不扣减。",
     }
 
 
@@ -691,13 +757,35 @@ def confirm_order(
             if row["stock"] < item["quantity"]:
                 raise CStoreError("INSUFFICIENT_STOCK", f"库存不足：{row['title']}")
 
+        order_id = "order_" + uuid.uuid4().hex[:16]
+        merchant_total = round(float(draft["original_amount"] or draft["total_amount"]), 2)
+        try:
+            writer = get_merchant_write_repository()
+            writer.create_order(
+                _MERCHANT_ID,
+                order_id,
+                _merchant_buyer_id(buyer_id),
+                [
+                    {
+                        "product_id": item["product_id"],
+                        "quantity": item["quantity"],
+                        "unit_price": item["unit_price"],
+                    }
+                    for item in expected
+                ],
+                str(merchant_total),
+                source_ref=draft_id,
+            )
+            writer.commit_reservation(_MERCHANT_ID, draft_id, order_id=order_id)
+        except MerchantError as exc:
+            raise _merchant_error(exc) from exc
+
         for item in expected:
             conn.execute(
                 "UPDATE c_product SET stock = stock - ? WHERE product_id = ?",
                 (item["quantity"], item["product_id"]),
             )
 
-        order_id = "order_" + uuid.uuid4().hex[:16]
         conn.execute(
             "INSERT INTO c_order(order_id, buyer_id, status, total_amount, original_amount, "
             "discount_amount, quote_id, policy_ids_json, snapshot_json, idempotency_key, "
@@ -756,6 +844,15 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
             (order["order_id"],),
         ).fetchall()
     }
+    merchant_order = None
+    try:
+        merchant_order = get_merchant_repository().get_order(
+            order["order_id"],
+            merchant_id=_MERCHANT_ID,
+            buyer_id=_merchant_buyer_id(order["buyer_id"]),
+        )
+    except MerchantError:
+        merchant_order = None
     return {
         "order_id": order["order_id"],
         "status": order["status"],
@@ -778,6 +875,9 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         "source_order_id": order["source_order_id"],
         "created_at": order["created_at"],
         "confirmed_at": order["confirmed_at"],
+        "merchant_order_id": merchant_order.order_id if merchant_order else None,
+        "merchant_status": merchant_order.status if merchant_order else None,
+        "merchant_source": "merchant_v1" if merchant_order else None,
     }
 
 
@@ -816,6 +916,7 @@ def cancel_order_draft(buyer_id: str, draft_id: str) -> dict[str, Any]:
                 (row["quote_id"],),
             )
         conn.commit()
+        _release_merchant_reservation(draft_id)
         return {"order_id": draft_id, "status": "CANCELLED", "quote_id": row["quote_id"]}
     except Exception:
         conn.rollback()

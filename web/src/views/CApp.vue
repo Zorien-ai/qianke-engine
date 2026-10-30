@@ -122,6 +122,10 @@ const loadingOlderStore = ref(false);
 const storeHistoryHint = ref("");
 const agentBusy = ref(false);
 const agentError = ref("");
+// 右侧「最近订单」：真实订单，数据来自 GET /api/c/orders（只取最近 3 条）
+const recentOrders = ref([]);
+const recentOrdersLoading = ref(false);
+const recentOrdersError = ref("");
 const pendingRetry = ref(null);
 const lastStoreSend = ref(null);
 const copyTip = ref("");
@@ -784,6 +788,7 @@ async function deliverText(text, isRetry = false, clientId = null) {
     } else if (result.order) {
       liveOrder.value = result.order;
       liveThreadId.value = "";
+      loadRecentOrders();
     } else {
       liveThreadId.value = "";
     }
@@ -812,6 +817,7 @@ async function confirmLiveOrder() {
       : "订单已确认。";
     pushMessage({ role: "companion", text: replyText });
     await persistAppMessage("companion", replyText, { order_id: result.order?.order_id || null });
+    await loadRecentOrders();
   } catch (error) {
     agentError.value = error?.detail || error?.message || "订单确认失败";
   } finally {
@@ -834,6 +840,61 @@ async function sendPrompt(prompt) {
   await send();
 }
 
+/* ---------- 最近订单（真实数据，GET /api/c/orders?limit=3） ---------- */
+function orderStatusLabel(order) {
+  const raw = String(order?.merchant_status || order?.status || "").trim();
+  if (!raw) return "已确认";
+  const labels = {
+    CREATED: "已创建",
+    PENDING: "待确认",
+    CONFIRMED: "已确认",
+    PAID: "已支付",
+    SHIPPED: "已发货",
+    DELIVERING: "配送中",
+    COMPLETED: "已完成",
+    CANCELLED: "已取消",
+    CANCELED: "已取消",
+  };
+  return labels[raw.toUpperCase()] || raw;
+}
+
+/** 侧栏只有 304px：日期只到「几月几日」，完整时间留给订单页 */
+function orderDateLabel(value) {
+  const text = String(value || "");
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return text.slice(0, 10);
+  return `${Number(match[2])} 月 ${Number(match[3])} 日`;
+}
+
+function orderTitle(order) {
+  const first = Array.isArray(order?.items) ? order.items[0] : null;
+  return first?.title || first?.product_id || order?.merchant_order_id || order?.order_id || "订单";
+}
+
+function orderAmountLabel(order) {
+  const amount = Number(order?.total_amount || 0);
+  return Number.isInteger(amount) ? `¥${amount}` : `¥${amount.toFixed(2)}`;
+}
+
+/** 标记位：M = 有商家订单号，P = 平台模拟订单 */
+function orderMark(order) {
+  return order?.merchant_order_id ? "M" : "P";
+}
+
+async function loadRecentOrders() {
+  recentOrdersLoading.value = true;
+  try {
+    const data = await getJson("/api/c/orders?limit=3");
+    recentOrders.value = Array.isArray(data?.orders) ? data.orders : [];
+    recentOrdersError.value = "";
+  } catch (error) {
+    // 加载失败只做轻提示：保留上一次成功拿到的列表，不用空态覆盖历史
+    recentOrdersError.value = error?.detail || error?.message || "最近订单加载失败";
+  } finally {
+    recentOrdersLoading.value = false;
+  }
+}
+
 async function loadCompanion() {
   try {
     const data = await getJson("/api/c/companion");
@@ -851,6 +912,8 @@ async function switchThread(id) {
   lastStoreSend.value = null;
   activeId.value = id;
   showContext.value = false;
+  // 切回会话时刷新最近订单：订单可能在别的页面/商城刚创建，右侧栏不能停在旧数据
+  loadRecentOrders();
   if (id === "store_demo") {
     await loadStoreMessages();
     openStoreSocket();
@@ -898,7 +961,7 @@ function selectMobileThread(id) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCompanion(), loadCompanionMessages()]);
+  await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders()]);
   syncViewportHeight();
   window.visualViewport?.addEventListener("resize", onViewportResize);
   window.visualViewport?.addEventListener("scroll", onViewportResize);
@@ -1325,15 +1388,24 @@ onBeforeUnmount(() => {
 
           <section class="c-context-section">
             <header><span>最近订单</span><RouterLink to="/c/orders" class="c-context-link">全部</RouterLink></header>
-            <div class="c-order-row">
-              <span class="c-order-mark">P</span>
-              <span><strong>轻量跑鞋</strong><small>10 月 29 日 · 待确认</small></span>
-              <span class="c-order-amount">¥269</span>
-            </div>
-            <div class="c-order-row">
-              <span class="c-order-mark">P</span>
-              <span><strong>通勤双肩包</strong><small>10 月 24 日 · 已确认</small></span>
-              <span class="c-order-amount">¥199</span>
+            <p v-if="recentOrdersError" class="c-inline-error" role="status">{{ recentOrdersError }}</p>
+            <p v-if="recentOrdersLoading && !recentOrders.length" class="c-order-hint" role="status">
+              正在读取订单…
+            </p>
+            <p v-else-if="!recentOrders.length" class="c-order-hint">还没有订单</p>
+            <div v-for="order in recentOrders" :key="order.order_id" class="c-order-row">
+              <span
+                class="c-order-mark"
+                :title="order.merchant_order_id ? '商家订单' : '平台订单'"
+              >{{ orderMark(order) }}</span>
+              <span>
+                <strong :title="order.merchant_order_id || order.order_id">{{ orderTitle(order) }}</strong>
+                <small>
+                  {{ orderDateLabel(order.confirmed_at || order.created_at) }} ·
+                  {{ orderStatusLabel(order) }}
+                </small>
+              </span>
+              <span class="c-order-amount">{{ orderAmountLabel(order) }}</span>
             </div>
           </section>
 
@@ -1410,7 +1482,7 @@ onBeforeUnmount(() => {
             </button>
           </section>
 
-          <p class="c-context-note">演示数据 · 仅用于界面参考</p>
+          <p class="c-context-note">订单为实时数据 · 其余为界面参考</p>
         </div>
       </aside>
     </div>
@@ -2587,8 +2659,19 @@ onBeforeUnmount(() => {
 }
 
 .c-order-row small {
+  overflow: hidden;
   color: var(--c-text-3);
   font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-order-hint {
+  margin: 0;
+  padding: 7px 0;
+  color: var(--c-text-3);
+  font-size: 9px;
+  line-height: 1.5;
 }
 
 .c-order-amount {

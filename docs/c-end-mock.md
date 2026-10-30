@@ -135,10 +135,10 @@ C 端 Agent Graph：
 用户消息
   → recommend_products（商家真实商品/库存）
   → query_my_orders（当前买家自己的商家订单/物流状态，可选）
-  → prepare_order（只生成 DRAFT）
+  → prepare_order（生成 DRAFT，同时预占商家库存）
   → interrupt（返回草稿，等待用户确认）
-  → approved=true  → confirm_order（扣库存，生成正式模拟订单）
-  → approved=false → CANCELLED
+  → approved=true  → confirm_order（写入商家订单 + 扣 C 端库存）
+  → approved=false → CANCELLED（释放商家预占）
 ```
 
 API：
@@ -157,9 +157,10 @@ POST /api/c/agent/resume
 
 关键点：
 
-- `prepare_order` 不扣库存
+- `prepare_order` 不扣 C 端库存，但会预占商家库存 15 分钟（草稿取消/过期释放）
 - 用户在 interrupt 后确认
 - 确认绑定 prepare 返回的 draft/token
+- 确认时写入商家订单（`source_ref=draft_id`）并扣减 C 端库存
 - Agent 不能自行跳过确认创建订单
 
 ## 6. C 端页面

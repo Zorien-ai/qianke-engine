@@ -14,6 +14,37 @@ function shortDate(value) {
   return (value || "").replace("T", " ").slice(0, 19);
 }
 
+/**
+ * 状态显示：优先后端新增的 merchant_status（商家域状态），
+ * 没有时回退旧字段 status，保证老订单仍能正常展示。
+ */
+const STATUS_LABELS = {
+  CREATED: "已创建",
+  PENDING: "待确认",
+  CONFIRMED: "已确认",
+  PAID: "已支付",
+  SHIPPED: "已发货",
+  DELIVERING: "配送中",
+  COMPLETED: "已完成",
+  CANCELLED: "已取消",
+  CANCELED: "已取消",
+};
+
+function orderStatus(order) {
+  const raw = String(order?.merchant_status || order?.status || "").trim();
+  if (!raw) return "已确认";
+  return STATUS_LABELS[raw.toUpperCase()] || raw;
+}
+
+function orderStatusTone(order) {
+  const raw = String(order?.merchant_status || order?.status || "").toUpperCase();
+  if (raw === "CANCELLED" || raw === "CANCELED") return "is-cancelled";
+  if (raw === "CREATED" || raw === "PENDING") return "is-created";
+  if (raw === "SHIPPED" || raw === "DELIVERING") return "is-shipped";
+  if (raw === "COMPLETED") return "is-completed";
+  return "";
+}
+
 async function loadOrders() {
   loading.value = true;
   error.value = "";
@@ -55,8 +86,11 @@ onMounted(loadOrders);
           <div>
             <span class="order-id">{{ order.order_id }}</span>
             <p class="order-date">{{ shortDate(order.confirmed_at || order.created_at) }}</p>
+            <p v-if="order.merchant_order_id" class="order-merchant">
+              商家单号 <code>{{ order.merchant_order_id }}</code>
+            </p>
           </div>
-          <span class="order-status">已确认</span>
+          <span class="order-status" :class="orderStatusTone(order)">{{ orderStatus(order) }}</span>
         </div>
 
         <ul class="order-items">
@@ -176,6 +210,41 @@ onMounted(loadOrders);
   border-radius: 4px;
   background: var(--success-soft);
   color: var(--success);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.order-status.is-created {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.order-status.is-shipped {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.order-status.is-completed {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.order-status.is-cancelled {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.order-merchant {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.order-merchant code {
+  color: var(--text-2);
+  font-family: var(--mono);
   font-size: 10px;
 }
 
