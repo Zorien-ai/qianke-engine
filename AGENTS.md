@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.9.6 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.9.7 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.9.6 |
+| AGENTS.md | v1.9.7 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -504,3 +504,4 @@ IM 社交载体
 | 1.9.4 | 2026-10-31 | 对账任务：c_reconciliation_run 留痕、手动/定时对账 worker、运营台对账视图与历史 |
 | 1.9.5 | 2026-10-31 | mention 元数据/未读：c_mention + c_thread_read、会话未读/@通知 API、CApp 角标轮询与点击 @ 定位会话 |
 | 1.9.6 | 2026-10-31 | 群聊/多成员 @：默认周末徒步群、群消息 API、多 mention 触发多 Agent 回复、CApp 群会话与群内 @ 提醒 |
+| 1.9.7 | 2026-11-01 | P3 基础设施：PostgreSQL 连接池、Alembic 基线迁移、商家数据层默认切换 PostgreSQL（SQLite 显式回退） |

@@ -11,14 +11,15 @@
   受控接口 + 人工确认；
 - **psycopg2 延迟导入**：模块顶层不 import psycopg2；只有真正构造/连接 PG 时才导入，
   因此没装驱动或没配 PG 时不会阻断 SQLite 默认路径；
-- 连接不做连接池（每次操作短连接、事务结束即关闭，异常必 rollback），
-  并发写依赖 PostgreSQL 事务 + ``SELECT ... FOR UPDATE`` / 唯一约束；
+- 连接使用 ``psycopg2.pool.ThreadedConnectionPool``（默认 1..8，可用
+  ``QIANKE_MERCHANT_PG_POOL_MIN/MAX`` 调整），事务结束归还连接；不再每次短连接；
 - 金额与时间列沿用 SQLite 的 TEXT 存储（十进制字符串 / ISO-8601 文本），
   保证两个 adapter 的 Decimal/时间语义完全一致，不引入 float。
 
 配置（环境变量，``QIANKE_MERCHANT_PG_*`` 优先，其次 ``RAG_PG_*``，最后本机默认）
 ----------------------------------------------------------------------------------
 ``QIANKE_MERCHANT_PG_HOST`` / ``PORT`` / ``USER`` / ``PASSWORD`` / ``DBNAME`` / ``SCHEMA``
+``QIANKE_MERCHANT_PG_POOL_MIN`` / ``POOL_MAX``（连接池大小）
 对应回退 ``RAG_PG_HOST`` / ``RAG_PG_PORT`` / ``RAG_PG_USER`` / ``RAG_PG_PASSWORD``，
 dbname 默认 ``vec_db``、schema 默认 ``merchant_v1``。
 """
@@ -141,6 +142,13 @@ def _settings(
         raise MerchantConfigurationError(f"非法 PostgreSQL 端口: {port_text!r}") from None
     if not (1 <= port_number <= 65535):
         raise MerchantConfigurationError(f"非法 PostgreSQL 端口: {port_number}")
+    try:
+        pool_min = int(_env_value("POOL_MIN", None, "1"))
+        pool_max = int(_env_value("POOL_MAX", None, "8"))
+    except (TypeError, ValueError):
+        raise MerchantConfigurationError("PostgreSQL 连接池大小必须是整数") from None
+    if not (1 <= pool_min <= pool_max <= 32):
+        raise MerchantConfigurationError("PostgreSQL 连接池需满足 1 <= POOL_MIN <= POOL_MAX <= 32")
     return {
         "host": host or _env_value("HOST", "RAG_PG_HOST", "127.0.0.1"),
         "port": port_number,
@@ -149,6 +157,8 @@ def _settings(
         "dbname": dbname or _env_value("DBNAME", None, "vec_db"),
         "schema": resolved_schema,
         "connect_timeout": int(_env_value("CONNECT_TIMEOUT", None, "5")),
+        "pool_min": pool_min,
+        "pool_max": pool_max,
     }
 
 
@@ -203,7 +213,9 @@ class PostgresMerchantRepository:
         )
         self._lock = threading.RLock()
         self._closed = False
+        self._pool: Any = None
         with self._lock:
+            self._init_pool()
             self._init_schema()
             if seed:
                 self._ensure_seeded()
@@ -222,11 +234,15 @@ class PostgresMerchantRepository:
             f"/{settings['dbname']}#{self._schema}"
         )
 
-    def _connect(self):
+    def _init_pool(self) -> None:
         psycopg2, _, _ = _import_psycopg2()
+        from psycopg2 import pool as pg_pool
+
         settings = self._settings
         try:
-            conn = psycopg2.connect(
+            self._pool = pg_pool.ThreadedConnectionPool(
+                settings["pool_min"],
+                settings["pool_max"],
                 host=settings["host"],
                 port=settings["port"],
                 user=settings["user"],
@@ -240,6 +256,18 @@ class PostgresMerchantRepository:
                 f"无法连接 PostgreSQL 商家库（{settings['host']}:{settings['port']}"
                 f"/{settings['dbname']}）: {exc}"
             ) from exc
+
+    def _connect(self):
+        self._ensure_open()
+        if self._pool is None:
+            raise MerchantUnavailableError("PostgreSQL 连接池已关闭")
+        psycopg2, _, _ = _import_psycopg2()
+        try:
+            conn = self._pool.getconn()
+        except psycopg2.OperationalError as exc:
+            raise MerchantUnavailableError(f"从 PostgreSQL 连接池取连接失败: {exc}") from exc
+        except Exception as exc:  # psycopg2.pool.PoolError
+            raise MerchantUnavailableError(f"PostgreSQL 连接池不可用: {exc}") from exc
         conn.autocommit = False
         try:
             with conn.cursor() as cur:
@@ -248,9 +276,25 @@ class PostgresMerchantRepository:
                 )
             conn.commit()
         except BaseException:
-            conn.close()
+            self._release(conn, close=True)
             raise
         return conn
+
+    def _release(self, conn, *, close: bool = False) -> None:
+        pool = self._pool
+        if pool is None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        try:
+            pool.putconn(conn, close=close)
+        except Exception:  # noqa: BLE001 - 归还失败不应掩盖业务结果
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -259,8 +303,16 @@ class PostgresMerchantRepository:
             )
 
     def close(self) -> None:
-        """无持久连接；标记关闭，防止误用已释放实例（可重复调用）。"""
-        self._closed = True
+        """关闭连接池（可重复调用）。"""
+        with self._lock:
+            self._closed = True
+            pool = self._pool
+            self._pool = None
+        if pool is not None:
+            try:
+                pool.closeall()
+            except Exception:  # noqa: BLE001
+                pass
 
     def __enter__(self) -> "PostgresMerchantRepository":
         return self
@@ -277,7 +329,11 @@ class PostgresMerchantRepository:
             with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
                 yield cur
         finally:
-            conn.close()
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            self._release(conn)
 
     @contextmanager
     def _transaction(self) -> Iterator[Any]:
@@ -295,7 +351,7 @@ class PostgresMerchantRepository:
                 pass
             raise
         finally:
-            conn.close()
+            self._release(conn)
 
     # ---------- schema / 种子 ----------
     def _ddl(self) -> str:
@@ -439,7 +495,7 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             conn.rollback()
             raise
         finally:
-            conn.close()
+            self._release(conn)
 
     def _ensure_seeded(self) -> None:
         with self._read() as cur:

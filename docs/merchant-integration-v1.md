@@ -799,7 +799,55 @@ uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.p
 5. 入库后订单仍可退款（`refund_order`），但退款不会二次改变库存；
 6. 仍是本地实现，真实退货/逆向物流/质检由 OMS 负责。
 
-## 16. 变更记录
+## 16. 连接池 / Alembic / PostgreSQL 默认（P3）
+
+### 16.1 连接池
+
+- `PostgresMerchantRepository` 使用 `psycopg2.pool.ThreadedConnectionPool`；
+- 默认 `POOL_MIN=1`、`POOL_MAX=8`，可用 `QIANKE_MERCHANT_PG_POOL_MIN/MAX` 覆盖；
+- 读操作结束 `ROLLBACK` 后归还；写事务 commit/rollback 后归还；`close()` 关闭整个连接池；
+- 连接池按 adapter 实例持有，factory 缓存同一实例，不跨 schema 复用。
+
+```bash
+QIANKE_MERCHANT_PG_POOL_MIN=2
+QIANKE_MERCHANT_PG_POOL_MAX=16
+```
+
+### 16.2 Alembic
+
+```bash
+# 用与运行时相同的 QIANKE_MERCHANT_PG_* / RAG_PG_* 配置
+uv run alembic upgrade head
+```
+
+- `alembic.ini` + `alembic/env.py`；
+- 基线 `alembic/versions/0001_merchant_v1.py`：独立 schema（默认 `merchant_v1`，`QIANKE_MERCHANT_PG_SCHEMA` 覆盖）+ 7 张表 + 索引；
+- `alembic_version` 放在目标 schema，不写 public；
+- 只在明确执行时迁移；API 启动不会自动执行 `alembic upgrade`；
+- 旧库/已由 adapter 建表的 schema 使用 `IF NOT EXISTS`，可安全建立基线。
+
+### 16.3 默认后端
+
+```text
+QIANKE_MERCHANT_BACKEND 未设置 → postgres（默认）
+QIANKE_MERCHANT_BACKEND=sqlite → SQLite 本地/离线回退
+```
+
+- 测试隔离仍强制 SQLite（`tests/conftest.py`），PG 专项测试显式使用 `postgres`/唯一 schema；
+- 无 PG 环境请显式设置 `QIANKE_MERCHANT_BACKEND=sqlite`，不会静默回退；
+- C 端订单库仍是 SQLite；本切换只针对**商家数据层**。
+
+### 16.4 测试
+
+```bash
+pytest tests/test_merchant_postgres.py -q
+# 18 passed（真实 PG16，含连接池复用）
+
+pytest tests/ -q
+# 572 passed, 5 skipped
+```
+
+## 17. 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
@@ -810,3 +858,4 @@ uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.p
 | v1.4 | 2026-10-30 | 新增发货后售后退款与 `REFUNDED` 状态：状态机 `SHIPPED/COMPLETED→REFUNDED`、`refund_order(amount/request_id)`（部分/全额、默认全额、默认不恢复库存）、`m_order.refund_request_id` 唯一幂等键与老库自动迁移、`update_order_status(REFUNDED)` 拒绝；新增 10 例售后退款/金额/幂等/迁移测试（合计 127 例） |
 | v2.0 | 2026-10-31 | 新增 PostgreSQL 商家 adapter（P2-A）：`PostgresMerchantRepository` 实现同契约读写、独立 schema（`QIANKE_MERCHANT_PG_SCHEMA`，默认 `merchant_v1`）、幂等建表+种子、事务+`FOR UPDATE` 并发不超卖、psycopg2 延迟导入、factory 注册 `postgres`（SQLite 仍默认）；新增 13 例真实 PG16 集成测试（无 PG 自动 skip，离线 127 例不变） |
 | v2.1 | 2026-10-31 | 新增退货验收入库 `receive_return`：SHIPPED/COMPLETED 按该订单 COMMITTED allocations 恢复库存并标记 REVERSED、订单状态不变、写 `returned_at`/`restock_request_id`（唯一幂等键）、无预占 Conflict、REFUNDED/取消后拒绝；SQLite+PG 双 adapter + 幂等迁移；新增 10 例 SQLite + 4 例 PG 测试（三套合计 154 例） |
+| v2.2 | 2026-11-01 | P3：PostgreSQL 连接池（ThreadedConnectionPool，1..8 可配）、Alembic 基线迁移（独立 schema + alembic_version）、默认商家后端切为 PostgreSQL；SQLite 保留为显式回退；新增连接池测试与迁移实测（572 全量通过） |

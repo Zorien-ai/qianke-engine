@@ -2,14 +2,14 @@
 
 可替换性在这里落地
 ------------------
-- 内置 ``sqlite``（v1 默认）与 ``postgres``（P2-A，独立 schema）；
+- 内置 ``postgres``（P3 默认，独立 schema，连接池）与 ``sqlite``（本地/离线回退）；
   接真实 OMS 时写一个实现 :class:`rag_demo.merchant.repository.MerchantRepository`
   协议的类，调 :func:`register_repository_backend` 注册即可，**不用改调用方**；
-- 后端名默认读环境变量 ``QIANKE_MERCHANT_BACKEND``（缺省 ``sqlite``）；显式传参优先；
+- 后端名默认读环境变量 ``QIANKE_MERCHANT_BACKEND``（缺省 ``postgres``）；显式传参优先；
 - 缓存按「后端 + 数据库位置 + 种子配置」分键：同进程重复 get 不会反复初始化/重复灌种子；
   测试或切换配置时调 :func:`reset_merchant_repository_cache`。
 - **postgres 延迟导入**：只有真正选择 postgres 后端时才导入 ``postgres_repository``
-  / psycopg2；没装驱动或没配 PG 不会影响 SQLite 默认路径。
+  / psycopg2；离线/无 PG 环境可显式设 ``QIANKE_MERCHANT_BACKEND=sqlite``。
 
 自定义 adapter 工厂的签名约定：
     factory(*, db_path=None, seed=True, seed_dir=None) -> MerchantRepository
@@ -39,6 +39,8 @@ _PG_CACHE_ENV_KEYS = (
     "QIANKE_MERCHANT_PG_PORT",
     "QIANKE_MERCHANT_PG_USER",
     "QIANKE_MERCHANT_PG_DBNAME",
+    "QIANKE_MERCHANT_PG_POOL_MIN",
+    "QIANKE_MERCHANT_PG_POOL_MAX",
     "RAG_PG_HOST",
     "RAG_PG_PORT",
     "RAG_PG_USER",
@@ -71,9 +73,9 @@ def available_backends() -> list[str]:
 
 
 def default_backend() -> str:
-    """默认后端：``QIANKE_MERCHANT_BACKEND`` 或 ``sqlite``。"""
+    """默认后端：``QIANKE_MERCHANT_BACKEND`` 或 ``postgres``。"""
     raw = (os.environ.get(_ENV_BACKEND) or "").strip().lower()
-    return raw or "sqlite"
+    return raw or "postgres"
 
 
 def _cache_key(
@@ -104,7 +106,7 @@ def get_merchant_repository(
     """按后端名取一个商家数据 Repository（进程内缓存）。
 
     参数:
-        backend:  "sqlite"（默认）/ 已注册的自定义后端；None → 环境变量或 sqlite
+        backend:  "postgres"（默认）/ "sqlite" / 已注册的自定义后端；None → 环境变量或 postgres
         db_path:  SQLite 文件路径；None → ``QIANKE_MERCHANT_DB`` 或 var/merchant_v1.sqlite
         seed:     是否在初始化时灌入种子数据（生产接真实 OMS 时应传 False）
         seed_dir: 种子目录；None → ``QIANKE_MERCHANT_SEED_DIR`` 或 data/merchant
@@ -170,7 +172,7 @@ def reset_merchant_repository_cache() -> None:
             pass
 
 
-# 内置默认后端：SQLite（v1 默认）
+# 内置后端：PostgreSQL（默认）与 SQLite（本地/离线回退）
 register_repository_backend("sqlite", SqliteMerchantRepository)
 
 

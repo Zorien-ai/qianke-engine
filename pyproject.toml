@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "accelerate>=1.15.0",
+    "alembic>=1.20.1",
     "alibabacloud-oss-v2>=1.4.0",
     "argon2-cffi>=25.1.0",
     "datasets>=5.1.0",

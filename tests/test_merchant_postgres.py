@@ -92,6 +92,17 @@ def _pick_sku(seed, min_available: int = 3):
     raise AssertionError("种子中没有可用 SKU")
 
 
+def test_postgres_uses_connection_pool_and_closes(repo):
+    assert repo._pool is not None
+    assert repo._pool.maxconn <= repo._settings["pool_max"]
+    for _ in range(5):
+        assert repo.list_products("m_gear_002")
+    # 所有读连接都归还连接池，不应无限增长。
+    assert len(repo._pool._pool) <= repo._pool.maxconn
+    repo.close()
+    assert repo._pool is None
+
+
 def _sku_price(seed, sku: str) -> Decimal:
     return next(item.price for item in seed.skus if item.sku == sku)
 
@@ -409,10 +420,10 @@ def test_postgres_factory_env_switch(pg_schema, monkeypatch, seed):
         assert repository.stats() == seed.counts()
         writer = get_merchant_write_repository()
         assert writer is repository
-        # 环境变量缺省仍以 sqlite 为默认（显式指定 sqlite 不受影响）
+        # 环境变量缺省时 PostgreSQL 为默认
         monkeypatch.delenv("QIANKE_MERCHANT_BACKEND")
         reset_merchant_repository_cache()
-        assert default_backend() == "sqlite"
+        assert default_backend() == "postgres"
     finally:
         reset_merchant_repository_cache()
 
