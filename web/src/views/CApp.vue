@@ -111,6 +111,11 @@ function unreadOf(threadId) {
   return Number(unreadCounts.value[threadId] || 0);
 }
 
+function isKnownThread(threadId) {
+  const id = String(threadId || "");
+  return THREAD_IDS.includes(id) || groups.value.some((item) => item.group_id === id);
+}
+
 function mentionThreadId(token) {
   return MENTION_THREAD_MAP[String(token || "").trim()] || "";
 }
@@ -121,11 +126,11 @@ async function refreshUnread() {
   try {
     const data = await getJson("/api/c/threads/unread");
     const payload = data?.threads || {};
-    unreadCounts.value = {
-      companion: Number(payload.companion || 0),
-      store_demo: Number(payload.store_demo || 0),
-      friend_demo: Number(payload.friend_demo || 0),
-    };
+    const next = { companion: 0, store_demo: 0, friend_demo: 0 };
+    for (const [threadId, count] of Object.entries(payload)) {
+      next[threadId] = Number(count || 0);
+    }
+    unreadCounts.value = next;
     mentionUnread.value = Number(data?.mentions || 0);
   } catch {
     // 未读接口失败不打断会话，保留上一次成功的数据
@@ -135,7 +140,7 @@ async function refreshUnread() {
 /** 进入会话：先乐观清零角标，再 POST read 并刷新未读 */
 async function markThreadRead(threadId) {
   const id = String(threadId || "");
-  if (!THREAD_IDS.includes(id)) return;
+  if (!isKnownThread(id)) return;
   unreadCounts.value = { ...unreadCounts.value, [id]: 0 };
   try {
     await postJson(`/api/c/threads/${encodeURIComponent(id)}/read`, {});
@@ -215,9 +220,7 @@ async function openUnreadMentions() {
     await postJson("/api/c/mentions/read", {});
     mentionUnread.value = 0;
     unreadMentions.value = [];
-    const targetId = THREAD_IDS.includes(String(target?.thread_id || ""))
-      ? target.thread_id
-      : "";
+    const targetId = isKnownThread(target?.thread_id) ? target.thread_id : "";
     if (!targetId) {
       await refreshUnread();
     } else if (activeId.value === targetId) {

@@ -62,3 +62,23 @@ def test_create_custom_group(c_store):
     assert [member["member_id"] for member in created["members"]] == ["store_demo", "companion"]
     listed = group.list_groups("buyer_1")
     assert any(item["group_id"] == created["group_id"] for item in listed)
+
+
+def test_group_unread_and_mentions(c_store):
+    group.list_groups("buyer_1")
+    baseline = c_store.get_thread_unread("buyer_1")
+    assert baseline.get(group.DEFAULT_GROUP_ID) == 0
+
+    result = group.send_message("buyer_1", group.DEFAULT_GROUP_ID, "@小满 @我 明天几点集合")
+    assert result["replies"]
+    unread = c_store.get_thread_unread("buyer_1")
+    assert unread[group.DEFAULT_GROUP_ID] >= 1
+    mentions = c_store.list_mentions("buyer_1", unread_only=True)
+    assert any(item["thread_id"] == group.DEFAULT_GROUP_ID and item["target_id"] == "me" for item in mentions)
+
+    c_store.mark_thread_read("buyer_1", group.DEFAULT_GROUP_ID)
+    assert c_store.get_thread_unread("buyer_1")[group.DEFAULT_GROUP_ID] == 0
+    assert not any(
+        item["thread_id"] == group.DEFAULT_GROUP_ID
+        for item in c_store.list_mentions("buyer_1", unread_only=True)
+    )

@@ -2125,11 +2125,27 @@ def _ensure_thread_read(conn: sqlite3.Connection, owner_id: str, thread_id: str)
 
 
 def get_thread_unread(owner_id: str) -> dict[str, int]:
-    """返回各会话未读数；首次访问把当前历史视为已读。"""
+    """返回各会话（含群）未读数；首次访问把当前历史视为已读。"""
     init()
+    # social.init 确保 c_message/c_friend 存在；该函数可能在只初始化 store 的测试里单独调用。
+    from rag_demo.c_end import social
+
+    social.init()
     conn = _connect()
     try:
-        threads = {"companion": 0, "store_demo": 0, "friend_demo": 0}
+        threads: dict[str, int] = {"companion": 0, "store_demo": 0, "friend_demo": 0}
+        group_ids: list[str] = []
+        try:
+            group_ids = [
+                row["group_id"]
+                for row in conn.execute(
+                    "SELECT group_id FROM c_group WHERE owner_id = ?", (owner_id,)
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            group_ids = []
+        for group_id in group_ids:
+            threads[group_id] = 0
         conn.execute("BEGIN IMMEDIATE")
         for thread_id in threads:
             last_read = _ensure_thread_read(conn, owner_id, thread_id)
@@ -2138,6 +2154,12 @@ def get_thread_unread(owner_id: str) -> dict[str, int]:
                     "SELECT COUNT(*) AS n FROM c_app_message WHERE owner_id = ? AND thread_id = ? "
                     "AND role != 'user' AND created_at > ?",
                     (owner_id, thread_id, last_read),
+                ).fetchone()["n"]
+            elif thread_id in group_ids:
+                count = conn.execute(
+                    "SELECT COUNT(*) AS n FROM c_group_message WHERE owner_id = ? AND group_id = ? "
+                    "AND sender_id != ? AND created_at > ?",
+                    (owner_id, thread_id, owner_id, last_read),
                 ).fetchone()["n"]
             else:
                 count = conn.execute(
@@ -2157,11 +2179,19 @@ def get_thread_unread(owner_id: str) -> dict[str, int]:
 
 def mark_thread_read(owner_id: str, thread_id: str) -> dict[str, Any]:
     thread = str(thread_id or "").strip()
-    if thread not in {"companion", "store_demo", "friend_demo"}:
-        raise CStoreError("INVALID_THREAD", "会话 ID 不合法")
     init()
     conn = _connect()
     try:
+        if thread not in {"companion", "store_demo", "friend_demo"}:
+            try:
+                group_row = conn.execute(
+                    "SELECT 1 FROM c_group WHERE owner_id = ? AND group_id = ?",
+                    (owner_id, thread),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                group_row = None
+            if group_row is None:
+                raise CStoreError("INVALID_THREAD", "会话 ID 不合法")
         conn.execute("BEGIN IMMEDIATE")
         now = _now()
         conn.execute(

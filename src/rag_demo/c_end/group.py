@@ -222,6 +222,21 @@ def _insert_message(
         "content, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (message_id, owner_id, group_id, sender_id, sender_name, content, json.dumps(meta, ensure_ascii=False), created_at),
     )
+    for mention in mentions.extract_mentions(content):
+        conn.execute(
+            "INSERT OR IGNORE INTO c_mention(mention_id, owner_id, thread_id, message_id, token, "
+            "target_id, target_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"mn_{uuid.uuid4().hex[:20]}",
+                owner_id,
+                group_id,
+                message_id,
+                mention["token"],
+                mention["target_id"],
+                mention["name"],
+                created_at,
+            ),
+        )
     return {
         "message_id": message_id,
         "group_id": group_id,

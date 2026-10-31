@@ -90,11 +90,41 @@ tests/test_c_end_group.py
 创建自定义群
 ```
 
-## 5. 已知限制
+## 5. 群未读 / @ 通知
+
+群线程复用 `c_thread_read` 和 `c_mention`：
+
+```text
+GET  /api/c/threads/unread
+POST /api/c/threads/{group_id}/read
+GET  /api/c/mentions
+```
+
+真实 API：
+
+```text
+baseline: group_demo 0
+
+发送「@我 @小满 明天几点集合」并收到小满回复后：
+group_demo 1
+mentions 1
+
+POST /api/c/threads/group_demo/read 后：
+group_demo 0
+```
+
+真实 CApp：
+
+```text
+群会话显示未读角标 1
+顶部显示 @1
+点击 @1 → 打开群会话、@1 消失、群角标清零
+```
+
+## 6. 已知限制
 
 ```text
 只有一个默认群，群创建 API 可用但 UI 暂未提供创建入口
-群未读/群轮询暂未纳入
 群消息只走 HTTP，没有群 WebSocket 推送
 群 replies 的结构化 metadata（如报价卡）暂未在群聊渲染
 群内 @ 只做提醒，不切换会话
