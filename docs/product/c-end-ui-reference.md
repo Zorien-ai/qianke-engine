@@ -384,3 +384,20 @@ POST  /api/c/admin/after-sales/{ticket_id}/receive {accepted}
 - `OPEN + RETURN_REFUND` 显示「同意退货」（approved=true）与拒绝；`OPEN + REFUND_ONLY` 保持「通过/拒绝」；
 - `RETURN_PENDING / RETURN_SHIPPED` 显示「验收通过 / 拒收」（receive accepted true/false），成功后刷新；待寄回（RETURN_PENDING）只展示等待，验收按钮仅在 RETURN_SHIPPED 出现，避免跳过用户寄回。
 - 列表新增「退回运单 / 入库」列，展示退回运单、承运商与入库时间；错误统一 toast `detail.message`。
+
+## 13. 运营台对账
+
+商家运营台新增第 4 个视图「对账」（`web/src/views/CAdminAudit.vue`），只读比对 C 订单与商家订单，不会修改任何订单：
+
+```text
+GET  /api/c/admin/reconciliation?limit=200       → {checked, legacy, issues, ok}
+POST /api/c/admin/reconciliation/run?limit=200   → {run_id, trigger, started_at, finished_at, ok, checked, legacy, issue_count, issues}
+GET  /api/c/admin/reconciliation/runs?limit=20   → {runs:[同 run 结构]}
+```
+
+- 摘要卡：已核对（checked）/ 旧平台订单（legacy）/ 问题数 / 状态（正常 / 发现差异，绿色/红色）；
+- 当前问题列表：订单号 + 问题类型（商家订单缺失 / 状态不一致 / 金额不一致）+ 状态或金额差异详情；
+- 历史 runs 表：时间 / 触发（MANUAL 等）/ 已核对 / 旧平台 / 问题数 / 状态；
+- 「立即对账」调用 run 接口并 toast 结果，完成后刷新当前报告与历史；运行中禁用防重复；
+- 首次进入同时加载当前检查与历史；两者独立容错——历史接口失败时仍展示当前检查，错误 toast `detail.message`；
+- 白色极简，表格在移动端容器内横向滚动，页面不横向溢出。

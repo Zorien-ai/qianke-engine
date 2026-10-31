@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.9.3 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.9.4 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.9.3 |
+| AGENTS.md | v1.9.4 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -501,3 +501,4 @@ IM 社交载体
 | 1.9.1 | 2026-10-31 | CApp @ 提及：@ 按钮/输入触发成员选择器，键盘/触摸插入；店宠会话 @店宠 可实际唤醒 |
 | 1.9.2 | 2026-10-31 | CApp 消息气泡 @ 文本高亮；自己消息白字下划线，对方消息低饱和 accent |
 | 1.9.3 | 2026-10-31 | 退货物流验收入库：商家 receive_return 恢复库存；C 端寄回运单/运输中；运营台验收通过/拒收；C 订单退款与库存恢复 |
+| 1.9.4 | 2026-10-31 | 对账任务：c_reconciliation_run 留痕、手动/定时对账 worker、运营台对账视图与历史 |

@@ -19,11 +19,12 @@ const quoteStatus = ref("");
 const dateFrom = ref("");
 const dateTo = ref("");
 
-/* ---------- 运营台视图切换（交易审计 / 商家订单 / 售后工单） ---------- */
+/* ---------- 运营台视图切换（交易审计 / 商家订单 / 售后工单 / 对账） ---------- */
 const VIEWS = [
   { key: "audit", label: "交易审计" },
   { key: "merchant", label: "商家订单" },
   { key: "after-sales", label: "售后工单" },
+  { key: "reconciliation", label: "对账" },
 ];
 const activeView = ref("audit");
 
@@ -64,9 +65,19 @@ const afterSaleError = ref("");
 const afterSaleStatus = ref("");
 const afterSaleBusy = ref("");
 
+/* ---------- 对账（C 订单 ↔ 商家订单） ---------- */
+const reconciliation = ref(null);       // 当前实时检查报告 {checked, legacy, issues, ok}
+const reconciliationRuns = ref([]);     // 历史对账运行
+const reconciliationLoading = ref(false);
+const reconciliationRunning = ref(false);
+const reconciliationError = ref("");
+
 const activeLoading = computed(() => {
   if (activeView.value === "merchant") return merchantLoading.value;
   if (activeView.value === "after-sales") return afterSaleLoading.value;
+  if (activeView.value === "reconciliation") {
+    return reconciliationLoading.value || reconciliationRunning.value;
+  }
   return loading.value;
 });
 
@@ -433,17 +444,115 @@ async function receiveAfterSale(ticket, accepted) {
   }
 }
 
+/* ================= 对账 ================= */
+const RECON_ISSUE_LABELS = {
+  MERCHANT_ORDER_MISSING: "商家订单缺失",
+  STATUS_DIVERGENCE: "状态不一致",
+  AMOUNT_DIVERGENCE: "金额不一致",
+};
+
+function reconIssueLabel(issue) {
+  const key = String(issue?.issue || "").toUpperCase();
+  return RECON_ISSUE_LABELS[key] || issue?.issue || "未知问题";
+}
+
+function reconIssueDetail(issue) {
+  const key = String(issue?.issue || "").toUpperCase();
+  if (key === "STATUS_DIVERGENCE") {
+    return `C 端 ${issue.c_status || "—"} · 商家 ${issue.merchant_status || "—"}`;
+  }
+  if (key === "AMOUNT_DIVERGENCE") {
+    return `C 端 ${money(issue.c_amount)} · 商家 ${money(issue.merchant_amount)}`;
+  }
+  return "—";
+}
+
+function reconIssues(report) {
+  return Array.isArray(report?.issues) ? report.issues : [];
+}
+
+function reconIssueCount(report) {
+  if (!report) return 0;
+  if (Array.isArray(report.issues)) return report.issues.length;
+  return Number(report.issue_count || 0);
+}
+
+const reconciliationOk = computed(() => {
+  const report = reconciliation.value;
+  if (!report) return null;
+  return !!report.ok && reconIssueCount(report) === 0;
+});
+
+const reconciliationStatusText = computed(() => {
+  if (!reconciliation.value) return "—";
+  return reconciliationOk.value ? "正常" : "发现差异";
+});
+
+const latestReconciliationRun = computed(() => reconciliationRuns.value[0] || null);
+
+async function loadReconciliation() {
+  reconciliationLoading.value = true;
+  reconciliationError.value = "";
+  // 两个接口独立容错：历史接口暂不可用时仍展示当前检查结果
+  const [reportResult, runsResult] = await Promise.allSettled([
+    getJson("/api/c/admin/reconciliation?limit=200"),
+    getJson("/api/c/admin/reconciliation/runs?limit=20"),
+  ]);
+  const errors = [];
+  if (reportResult.status === "fulfilled") {
+    reconciliation.value = reportResult.value || null;
+  } else {
+    errors.push(errorMessage(reportResult.reason));
+  }
+  if (runsResult.status === "fulfilled") {
+    reconciliationRuns.value = Array.isArray(runsResult.value?.runs) ? runsResult.value.runs : [];
+  } else {
+    errors.push(errorMessage(runsResult.reason));
+  }
+  if (errors.length) {
+    reconciliationError.value = errors.join("；");
+    toast(reconciliationError.value, "error", 5000);
+  }
+  reconciliationLoading.value = false;
+}
+
+async function runReconciliation() {
+  if (reconciliationRunning.value) return;
+  reconciliationRunning.value = true;
+  reconciliationError.value = "";
+  try {
+    const result = await postJson("/api/c/admin/reconciliation/run?limit=200", {});
+    const checked = Number(result?.checked || 0);
+    const issueCount = Number(result?.issue_count ?? reconIssueCount(result));
+    toast(
+      result?.ok
+        ? `对账完成：检查 ${checked} 单，未发现问题`
+        : `对账完成：检查 ${checked} 单，发现 ${issueCount} 个问题`,
+      result?.ok ? "success" : "warn",
+      5000
+    );
+    await loadReconciliation();
+  } catch (e) {
+    reconciliationError.value = errorMessage(e);
+    toast(reconciliationError.value, "error", 5000);
+  } finally {
+    reconciliationRunning.value = false;
+  }
+}
+
 /* ================= 视图切换 ================= */
 function switchView(view) {
   if (activeView.value === view) return;
   activeView.value = view;
   if (view === "merchant") loadMerchantOrders();
   else if (view === "after-sales") loadAfterSales();
+  else if (view === "reconciliation") loadReconciliation();
 }
 
 function refreshActive() {
   if (activeView.value === "merchant") loadMerchantOrders();
   else if (activeView.value === "after-sales") loadAfterSales();
+  else if (activeView.value === "reconciliation") loadReconciliation();
   else load();
 }
 
@@ -806,7 +915,7 @@ onMounted(load);
     </template><!-- /视图二：商家订单 -->
 
     <!-- ========== 视图三：售后工单 ========== -->
-    <template v-else>
+    <template v-else-if="activeView === 'after-sales'">
       <section class="audit-filters" aria-label="售后工单筛选">
         <label>
           <span>工单状态</span>
@@ -944,6 +1053,125 @@ onMounted(load);
         </div>
       </section>
     </template><!-- /视图三：售后工单 -->
+
+    <!-- ========== 视图四：对账 ========== -->
+    <template v-else>
+      <div v-if="reconciliationError && !reconciliation" class="card">
+        <div class="empty-state">
+          <div class="empty-title">对账数据加载失败</div>
+          <div class="empty-desc">{{ reconciliationError }}</div>
+        </div>
+      </div>
+
+      <template v-else>
+        <section class="audit-filters" aria-label="对账操作">
+          <div class="recon-meta field-hint">
+            当前检查实时比对 C 订单与商家订单；对账只读，不会修改任何订单。
+            <template v-if="latestReconciliationRun">
+              <br />最近一次运行：{{ date(latestReconciliationRun.started_at) }} · {{ latestReconciliationRun.trigger }}
+            </template>
+          </div>
+          <div class="audit-filter-actions">
+            <button
+              type="button"
+              class="btn btn-ghost"
+              :disabled="reconciliationLoading || reconciliationRunning"
+              @click="loadReconciliation"
+            >刷新</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              :disabled="reconciliationLoading || reconciliationRunning"
+              @click="runReconciliation"
+            >{{ reconciliationRunning ? "对账中…" : "立即对账" }}</button>
+          </div>
+        </section>
+
+        <section v-if="reconciliationLoading && !reconciliation" class="card">
+          <div class="skeleton" style="height:100px"></div>
+        </section>
+        <section v-else class="audit-stats recon-stats">
+          <div class="audit-stat">
+            <span>已核对</span>
+            <strong>{{ reconciliation?.checked ?? 0 }}</strong>
+            <small>有商家订单号的订单</small>
+          </div>
+          <div class="audit-stat">
+            <span>旧平台订单</span>
+            <strong>{{ reconciliation?.legacy ?? 0 }}</strong>
+            <small>无 merchant_order_id，跳过对账</small>
+          </div>
+          <div class="audit-stat">
+            <span>问题数</span>
+            <strong>{{ reconIssueCount(reconciliation) }}</strong>
+            <small>缺失 / 状态 / 金额差异</small>
+          </div>
+          <div class="audit-stat">
+            <span>状态</span>
+            <strong
+              :class="reconciliationOk === false ? 'recon-bad' : reconciliationOk ? 'recon-good' : ''"
+            >{{ reconciliationStatusText }}</strong>
+            <small>{{ reconciliationOk === false ? "需要人工核查" : reconciliationOk ? "C 端与商家订单一致" : "尚未检查" }}</small>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="admin-section-head">
+            <strong>当前问题</strong>
+            <span class="field-hint">{{ reconIssues(reconciliation).length }} 个</span>
+          </div>
+          <div class="table-wrap op-table-wrap">
+            <table class="table op-table">
+              <thead>
+                <tr><th>订单</th><th>问题</th><th>详情</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(issue, index) in reconIssues(reconciliation)" :key="`${issue.order_id || 'issue'}-${index}`">
+                  <td class="mono">{{ issue.order_id || "—" }}</td>
+                  <td><span class="badge is-danger">{{ reconIssueLabel(issue) }}</span></td>
+                  <td class="op-cell-wrap">{{ reconIssueDetail(issue) }}</td>
+                </tr>
+                <tr v-if="!reconIssues(reconciliation).length">
+                  <td colspan="3" class="field-hint">未发现问题</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card" style="margin-top:16px">
+          <div class="admin-section-head">
+            <strong>对账历史</strong>
+            <span class="field-hint">最近 {{ reconciliationRuns.length }} 次</span>
+          </div>
+          <p v-if="reconciliationError" class="field-hint">历史加载失败：{{ reconciliationError }}</p>
+          <div class="table-wrap op-table-wrap">
+            <table class="table op-table">
+              <thead>
+                <tr><th>时间</th><th>触发</th><th>已核对</th><th>旧平台</th><th>问题数</th><th>状态</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="run in reconciliationRuns" :key="run.run_id">
+                  <td class="field-hint">{{ date(run.started_at) }}</td>
+                  <td>{{ run.trigger || "—" }}</td>
+                  <td>{{ run.checked ?? 0 }}</td>
+                  <td>{{ run.legacy ?? 0 }}</td>
+                  <td>{{ run.issue_count ?? 0 }}</td>
+                  <td>
+                    <span class="badge" :class="run.ok ? 'is-success' : 'is-danger'">
+                      {{ run.ok ? "正常" : "发现差异" }}
+                    </span>
+                  </td>
+                </tr>
+                <tr v-if="!reconciliationRuns.length">
+                  <td colspan="6" class="field-hint">还没有对账记录，点「立即对账」生成第一次记录。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </template>
+    </template><!-- /视图四：对账 -->
   </div>
 </template>
 
@@ -1103,6 +1331,24 @@ onMounted(load);
   font-size: 9px;
 }
 
+/* ---------- 对账视图 ---------- */
+.recon-meta {
+  flex: 1 1 320px;
+  line-height: 1.6;
+}
+
+.recon-stats .audit-stat:nth-child(4) strong {
+  font-size: 18px;
+}
+
+.recon-good {
+  color: var(--success) !important;
+}
+
+.recon-bad {
+  color: var(--danger) !important;
+}
+
 .audit-chip {
   display: inline-block;
   margin: 1px 3px 1px 0;
@@ -1125,9 +1371,14 @@ onMounted(load);
   gap: 16px;
 }
 
-/* ---------- 商家订单 / 售后工单操作 ---------- */
+/* ---------- 商家订单 / 售后工单 / 对账表格 ---------- */
 .op-table-wrap {
   margin-top: 12px;
+}
+
+/* 运营台表格列多，窄屏保留最小宽度靠容器横向滚动，避免把详情挤成逐字换行 */
+.op-table {
+  min-width: 640px;
 }
 
 .op-table td {

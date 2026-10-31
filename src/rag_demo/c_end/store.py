@@ -395,6 +395,21 @@ CREATE INDEX IF NOT EXISTS idx_c_after_sale_order
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_c_after_sale_open
     ON c_after_sale (order_id) WHERE status = 'OPEN';
+
+CREATE TABLE IF NOT EXISTS c_reconciliation_run (
+    run_id        TEXT PRIMARY KEY,
+    trigger       TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT NOT NULL,
+    ok            INTEGER NOT NULL,
+    checked       INTEGER NOT NULL,
+    legacy        INTEGER NOT NULL,
+    issue_count   INTEGER NOT NULL,
+    issues_json   TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_reconciliation_started
+    ON c_reconciliation_run (started_at DESC);
 """
 
 _SEED = (
@@ -1426,6 +1441,78 @@ def reconcile_orders(limit: int = 200) -> dict[str, Any]:
             "issues": issues,
             "ok": not issues,
         }
+    finally:
+        conn.close()
+
+
+def run_reconciliation(trigger: str = "MANUAL", limit: int = 200) -> dict[str, Any]:
+    """执行一次对账并留痕；不自动修改任何订单。"""
+    trigger = str(trigger or "MANUAL").strip().upper()[:32] or "MANUAL"
+    started_at = _now()
+    report = reconcile_orders(limit=limit)
+    finished_at = _now()
+    run_id = f"rec_{uuid.uuid4().hex[:16]}"
+    issues = report.get("issues") or []
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT INTO c_reconciliation_run(run_id, trigger, started_at, finished_at, ok, "
+            "checked, legacy, issue_count, issues_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                trigger,
+                started_at,
+                finished_at,
+                1 if report.get("ok") else 0,
+                int(report.get("checked") or 0),
+                int(report.get("legacy") or 0),
+                len(issues),
+                json.dumps(issues, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return {
+        "run_id": run_id,
+        "trigger": trigger,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "ok": bool(report.get("ok")),
+        "checked": int(report.get("checked") or 0),
+        "legacy": int(report.get("legacy") or 0),
+        "issue_count": len(issues),
+        "issues": issues,
+    }
+
+
+def list_reconciliation_runs(limit: int = 20) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_reconciliation_run ORDER BY started_at DESC, run_id DESC LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        ).fetchall()
+        return [
+            {
+                "run_id": row["run_id"],
+                "trigger": row["trigger"],
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
+                "ok": bool(row["ok"]),
+                "checked": int(row["checked"]),
+                "legacy": int(row["legacy"]),
+                "issue_count": int(row["issue_count"]),
+                "issues": json.loads(row["issues_json"] or "[]"),
+            }
+            for row in rows
+        ]
     finally:
         conn.close()
 

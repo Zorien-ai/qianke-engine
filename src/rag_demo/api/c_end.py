@@ -379,9 +379,22 @@ def save_app_message(req: AppMessageIn) -> dict:
 
 @router.get("/admin/reconciliation")
 def admin_reconciliation(limit: int = 200) -> dict:
-    """C 订单与商家订单对账（仅平台管理员）。"""
+    """C 订单与商家订单对账（仅平台管理员，只读）。"""
     _require_admin()
     return store.reconcile_orders(limit=limit)
+
+
+@router.post("/admin/reconciliation/run")
+def admin_run_reconciliation(limit: int = 200) -> dict:
+    """手动执行对账并留痕；不自动修改订单。"""
+    _require_admin()
+    return store.run_reconciliation("MANUAL", limit=limit)
+
+
+@router.get("/admin/reconciliation/runs")
+def admin_reconciliation_runs(limit: int = 20) -> dict:
+    _require_admin()
+    return {"runs": store.list_reconciliation_runs(limit=limit)}
 
 
 @router.get("/admin/audit")
