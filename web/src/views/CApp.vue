@@ -188,6 +188,21 @@ function messageAvatarLabel(role, message = null) {
   return name.slice(0, 1) || "系";
 }
 
+function messageSegments(text) {
+  const value = String(text || "");
+  const pattern = /(@(?:店宠|小鱼|小满))/g;
+  const parts = [];
+  let last = 0;
+  let match;
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > last) parts.push({ text: value.slice(last, match.index), mention: false });
+    parts.push({ text: match[0], mention: true });
+    last = match.index + match[0].length;
+  }
+  if (last < value.length) parts.push({ text: value.slice(last), mention: false });
+  return parts.length ? parts : [{ text: value, mention: false }];
+}
+
 // ---------------- 自定义头像（伙伴 / 我的） ----------------
 function avatarSrc(kind) {
   const preview = avatarPreview.value[kind] || "";
@@ -1432,7 +1447,11 @@ onBeforeUnmount(() => {
                   <time>{{ message.time }}</time>
                 </div>
                 <p class="c-bubble">
-                  {{ message.text }}
+                  <span
+                    v-for="(part, index) in messageSegments(message.text)"
+                    :key="index"
+                    :class="{ 'c-mention-token': part.mention }"
+                  >{{ part.text }}</span>
                   <time class="c-bubble-time">{{ message.time }}</time>
                 </p>
                 <div v-if="message.quote" class="c-quote-attachment">
@@ -3620,6 +3639,17 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: var(--c-text);
   color: var(--c-bg);
+}
+
+.c-app .c-mention-token {
+  color: var(--c-accent);
+  font-weight: 500;
+}
+
+.c-app .c-message.user .c-bubble .c-mention-token {
+  color: var(--c-bg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .c-app .c-message.user .c-bubble-time {
