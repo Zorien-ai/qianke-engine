@@ -88,6 +88,22 @@ const messagesByThread = ref({
 
 const activeId = ref("companion");
 const draft = ref("");
+const mentionOpen = ref(false);
+const mentionQuery = ref("");
+const mentionIndex = ref(0);
+
+const mentionOptions = computed(() => {
+  const query = mentionQuery.value.trim().toLowerCase();
+  const byThread = {
+    companion: [{ label: "小鱼", token: "@小鱼", desc: "你的购物伙伴" }],
+    store_demo: [{ label: "山野店宠", token: "@店宠", desc: "售前 / 售后 / 砍价" }],
+    friend_demo: [{ label: "小满", token: "@小满", desc: "好友 · 周末徒步" }],
+  };
+  return (byThread[activeId.value] || []).filter((item) => {
+    if (!query) return true;
+    return item.label.toLowerCase().includes(query) || item.token.toLowerCase().includes(query);
+  });
+});
 const typing = ref(false);
 const search = ref("");
 const showContext = ref(false);
@@ -412,6 +428,7 @@ function onComposerFocus() {
 
 function onComposerBlur() {
   composerFocused.value = false;
+  closeMention();
 }
 
 function syncViewportHeight() {
@@ -430,6 +447,93 @@ function resizeComposer(event) {
   if (!el || el.tagName !== "TEXTAREA") return;
   el.style.height = "auto";
   el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+}
+
+function closeMention() {
+  mentionOpen.value = false;
+  mentionQuery.value = "";
+  mentionIndex.value = 0;
+}
+
+function updateMention(input) {
+  if (!input) return;
+  const before = input.value.slice(0, input.selectionStart || 0);
+  const match = before.match(/(?:^|\s)@([^\s@]*)$/);
+  if (!match) {
+    closeMention();
+    return;
+  }
+  mentionOpen.value = true;
+  mentionQuery.value = match[1] || "";
+  mentionIndex.value = 0;
+}
+
+function onComposerInput(event) {
+  resizeComposer(event);
+  updateMention(event?.target);
+}
+
+function startMention() {
+  const input = document.getElementById("c-app-input");
+  if (!input) return;
+  const pos = input.selectionStart ?? draft.value.length;
+  const before = draft.value.slice(0, pos);
+  const after = draft.value.slice(pos);
+  const needsSpace = before && !/\s$/.test(before);
+  draft.value = `${before}${needsSpace ? " " : ""}@${after}`;
+  mentionOpen.value = true;
+  mentionQuery.value = "";
+  mentionIndex.value = 0;
+  window.requestAnimationFrame(() => {
+    input.focus();
+    const next = input.value.length - after.length;
+    input.setSelectionRange(next, next);
+  });
+}
+
+function selectMention(option) {
+  const input = document.getElementById("c-app-input");
+  if (!input || !option) return;
+  const pos = input.selectionStart ?? draft.value.length;
+  const before = draft.value.slice(0, pos);
+  const after = draft.value.slice(pos);
+  const replaced = before.replace(/@([^\s@]*)$/, `${option.token} `);
+  draft.value = `${replaced}${after}`;
+  closeMention();
+  window.requestAnimationFrame(() => {
+    input.focus();
+    input.setSelectionRange(replaced.length, replaced.length);
+    resizeComposer({ target: input });
+  });
+}
+
+function onComposerKeydown(event) {
+  if (mentionOpen.value && mentionOptions.value.length) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      mentionIndex.value = (mentionIndex.value + 1) % mentionOptions.value.length;
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      mentionIndex.value = (mentionIndex.value - 1 + mentionOptions.value.length) % mentionOptions.value.length;
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      selectMention(mentionOptions.value[mentionIndex.value]);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMention();
+      return;
+    }
+  }
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    send();
+  }
 }
 
 function pushMessage(message) {
@@ -703,6 +807,7 @@ async function persistAppMessage(role, content, metadata = {}) {
 async function send() {
   const text = draft.value.trim();
   if (!text || typing.value) return;
+  closeMention();
   const clientId = newClientMessageId();
   pushMessage({ role: "user", text });
   draft.value = "";
@@ -1381,6 +1486,22 @@ onBeforeUnmount(() => {
           </p>
 
           <form class="c-composer" @submit.prevent="send">
+            <div v-if="mentionOpen && mentionOptions.length" class="c-mention-pop" role="listbox" aria-label="选择提及对象">
+              <button
+                v-for="(option, index) in mentionOptions"
+                :key="option.token"
+                type="button"
+                class="c-mention-option"
+                :class="{ active: index === mentionIndex }"
+                role="option"
+                :aria-selected="index === mentionIndex"
+                @mousedown.prevent="selectMention(option)"
+                @mouseenter="mentionIndex = index"
+              >
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.token }} · {{ option.desc }}</small>
+              </button>
+            </div>
             <label class="sr-only" for="c-app-input">输入消息</label>
             <div class="c-composer-row">
               <button class="c-tool-btn" type="button" aria-label="添加附件" disabled>
@@ -1388,6 +1509,7 @@ onBeforeUnmount(() => {
                   <path d="M12 5v14M5 12h14" />
                 </svg>
               </button>
+              <button class="c-tool-btn c-mention-btn" type="button" aria-label="提及" @click="startMention">@</button>
               <textarea
                 id="c-app-input"
                 v-model="draft"
@@ -1395,8 +1517,8 @@ onBeforeUnmount(() => {
                 placeholder="问商品、活动或售后"
                 @focus="onComposerFocus"
                 @blur="onComposerBlur"
-                @input="resizeComposer"
-                @keydown.enter.exact.prevent="send"
+                @input="onComposerInput"
+                @keydown="onComposerKeydown"
               />
               <button type="submit" class="c-send-btn" :disabled="!draft.trim() || typing" aria-label="发送">
                 <span class="c-send-label">发送</span>
@@ -3304,6 +3426,66 @@ onBeforeUnmount(() => {
 .c-app .c-search,
 .c-app .c-composer {
   background: var(--c-panel);
+}
+
+.c-app .c-composer {
+  position: relative;
+}
+
+.c-app .c-mention-btn {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.c-app .c-mention-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 8;
+  display: grid;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-panel);
+  box-shadow: 0 8px 24px rgba(20, 20, 18, 0.08);
+}
+
+.c-app .c-mention-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.c-app .c-mention-option.active,
+.c-app .c-mention-option:hover {
+  background: var(--c-panel-2);
+}
+
+.c-app .c-mention-option strong {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.c-app .c-mention-option small {
+  overflow: hidden;
+  color: var(--c-text-3);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .c-app .c-search {
