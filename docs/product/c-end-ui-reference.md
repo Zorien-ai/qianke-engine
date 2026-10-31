@@ -382,5 +382,5 @@ POST  /api/c/admin/after-sales/{ticket_id}/receive {accepted}
 
 - 状态筛选补 `RETURN_PENDING / RETURN_SHIPPED`；
 - `OPEN + RETURN_REFUND` 显示「同意退货」（approved=true）与拒绝；`OPEN + REFUND_ONLY` 保持「通过/拒绝」；
-- `RETURN_PENDING / RETURN_SHIPPED` 显示「验收通过 / 拒收」（receive accepted true/false），成功后刷新；
+- `RETURN_PENDING / RETURN_SHIPPED` 显示「验收通过 / 拒收」（receive accepted true/false），成功后刷新；待寄回（RETURN_PENDING）只展示等待，验收按钮仅在 RETURN_SHIPPED 出现，避免跳过用户寄回。
 - 列表新增「退回运单 / 入库」列，展示退回运单、承运商与入库时间；错误统一 toast `detail.message`。

@@ -361,7 +361,8 @@ function isReturnTicket(ticket) {
 }
 
 function canReceiveTicket(ticket) {
-  return ["RETURN_PENDING", "RETURN_SHIPPED"].includes(afterSaleStatusKey(ticket));
+  // 只有用户已寄回（RETURN_SHIPPED）才能验收；待寄回阶段不能替用户确认物流。
+  return afterSaleStatusKey(ticket) === "RETURN_SHIPPED";
 }
 
 function afterSaleReturnText(ticket) {
