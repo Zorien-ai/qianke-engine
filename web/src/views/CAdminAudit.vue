@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
-import { apiFetch, ApiError, detailMessage, getJson, readBody } from "../api";
+import { apiFetch, ApiError, detailMessage, getJson, patchJson, readBody } from "../api";
 import { toast, toastError } from "../store";
 
 const PAGE_SIZE = 20;
@@ -18,6 +18,51 @@ const buyerId = ref("");
 const quoteStatus = ref("");
 const dateFrom = ref("");
 const dateTo = ref("");
+
+/* ---------- 运营台视图切换（交易审计 / 商家订单 / 售后工单） ---------- */
+const VIEWS = [
+  { key: "audit", label: "交易审计" },
+  { key: "merchant", label: "商家订单" },
+  { key: "after-sales", label: "售后工单" },
+];
+const activeView = ref("audit");
+
+/* ---------- 商家订单运营 ---------- */
+const MERCHANT_STATUS_LABELS = {
+  CREATED: "待支付",
+  PAID: "已支付",
+  SHIPPED: "已发货",
+  COMPLETED: "已完成",
+  CANCELLED: "已取消",
+  REFUNDED: "已退款",
+};
+const MERCHANT_STATUS_OPTIONS = ["CREATED", "PAID", "SHIPPED", "COMPLETED", "CANCELLED", "REFUNDED"];
+
+const merchantOrders = ref([]);
+const merchantLoading = ref(false);
+const merchantError = ref("");
+const merchantStatus = ref("");
+const merchantBusy = ref("");
+const shipFormId = ref("");
+const shipTracking = ref("");
+const shipCarrier = ref("");
+const shipError = ref("");
+
+/* ---------- 售后工单审批 ---------- */
+const AFTER_SALE_STATUS_LABELS = { OPEN: "待处理", APPROVED: "已通过", REJECTED: "已拒绝" };
+const AFTER_SALE_TYPE_LABELS = { REFUND_ONLY: "仅退款", RETURN_REFUND: "退货退款" };
+
+const afterSales = ref([]);
+const afterSaleLoading = ref(false);
+const afterSaleError = ref("");
+const afterSaleStatus = ref("");
+const afterSaleBusy = ref("");
+
+const activeLoading = computed(() => {
+  if (activeView.value === "merchant") return merchantLoading.value;
+  if (activeView.value === "after-sales") return afterSaleLoading.value;
+  return loading.value;
+});
 
 function money(value) {
   return `¥${Number(value || 0).toFixed(2)}`;
@@ -144,6 +189,211 @@ function resetFilters() {
   load();
 }
 
+/* ================= 商家订单 ================= */
+function merchantStatusLabel(status) {
+  return MERCHANT_STATUS_LABELS[String(status || "").toUpperCase()] || status || "—";
+}
+
+function merchantStatusBadge(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === "PAID" || key === "SHIPPED") return "is-primary";
+  if (key === "COMPLETED") return "is-success";
+  if (key === "CANCELLED") return "is-danger";
+  if (key === "REFUNDED") return "is-warn";
+  return "";
+}
+
+function merchantItemSummary(order) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  return items.map((item) => `${item.title || item.product_id} ×${item.quantity}`).join("、") || "—";
+}
+
+function canMarkPaid(order) {
+  return String(order?.status || "").toUpperCase() === "CREATED";
+}
+function canShip(order) {
+  return String(order?.status || "").toUpperCase() === "PAID";
+}
+function canComplete(order) {
+  return String(order?.status || "").toUpperCase() === "SHIPPED";
+}
+function canCancelOrder(order) {
+  return ["CREATED", "PAID"].includes(String(order?.status || "").toUpperCase());
+}
+function hasMerchantActions(order) {
+  return canMarkPaid(order) || canShip(order) || canComplete(order) || canCancelOrder(order);
+}
+
+/** 后端 detail 可能是字符串，也可能是 {code,message}（MerchantError / HTTPException）。 */
+function errorMessage(e) {
+  const detail = e?.payload?.detail;
+  if (detail && typeof detail === "object") {
+    return detail.message || detail.code || "操作失败";
+  }
+  return e?.detail || e?.message || "操作失败";
+}
+
+async function loadMerchantOrders() {
+  merchantLoading.value = true;
+  merchantError.value = "";
+  try {
+    const params = new URLSearchParams({ limit: "100" });
+    if (merchantStatus.value) params.set("status", merchantStatus.value);
+    const data = await getJson(`/api/c/admin/merchant/orders?${params.toString()}`);
+    merchantOrders.value = data?.orders || [];
+  } catch (e) {
+    merchantError.value = errorMessage(e);
+    toast(merchantError.value, "error", 5000);
+  } finally {
+    merchantLoading.value = false;
+  }
+}
+
+function openShipForm(order) {
+  if (!canShip(order) || merchantBusy.value) return;
+  shipFormId.value = order.order_id;
+  shipTracking.value = order.tracking_no || "";
+  shipCarrier.value = order.carrier || "";
+  shipError.value = "";
+}
+
+function closeShipForm() {
+  if (merchantBusy.value) return;
+  shipFormId.value = "";
+  shipError.value = "";
+}
+
+async function patchOrderStatus(order, status, extra = {}) {
+  if (!order || merchantBusy.value) return;
+  merchantBusy.value = order.order_id;
+  shipError.value = "";
+  try {
+    await patchJson(`/api/c/admin/merchant/orders/${encodeURIComponent(order.order_id)}/status`, {
+      status,
+      ...extra,
+    });
+    toast(`订单 ${order.order_id} 已更新为 ${merchantStatusLabel(status)}`, "success");
+    shipFormId.value = "";
+    await loadMerchantOrders();
+  } catch (e) {
+    const message = errorMessage(e);
+    if (shipFormId.value === order.order_id) shipError.value = message;
+    toast(message, "error", 5000);
+  } finally {
+    merchantBusy.value = "";
+  }
+}
+
+function markOrderPaid(order) {
+  return patchOrderStatus(order, "PAID");
+}
+
+function completeMerchantOrder(order) {
+  return patchOrderStatus(order, "COMPLETED");
+}
+
+function cancelMerchantOrder(order) {
+  return patchOrderStatus(order, "CANCELLED");
+}
+
+function submitShip(order) {
+  const tracking = shipTracking.value.trim();
+  if (!tracking) {
+    shipError.value = "请填写物流单号";
+    return;
+  }
+  if (tracking.length < 4) {
+    shipError.value = "物流单号至少 4 位";
+    return;
+  }
+  return patchOrderStatus(order, "SHIPPED", {
+    tracking_no: tracking,
+    carrier: shipCarrier.value.trim() || null,
+  });
+}
+
+/** 发货表单在表格外：按当前展开的订单号找回订单再提交 */
+function submitShipForPending() {
+  const order = merchantOrders.value.find((item) => item.order_id === shipFormId.value);
+  if (!order) {
+    shipFormId.value = "";
+    return;
+  }
+  return submitShip(order);
+}
+
+/* ================= 售后工单 ================= */
+function afterSaleStatusLabel(status) {
+  return AFTER_SALE_STATUS_LABELS[String(status || "").toUpperCase()] || status || "—";
+}
+
+function afterSaleStatusBadge(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === "APPROVED") return "is-success";
+  if (key === "REJECTED") return "is-danger";
+  return "is-warn";
+}
+
+function afterSaleTypeLabel(type) {
+  return AFTER_SALE_TYPE_LABELS[String(type || "").toUpperCase()] || type || "—";
+}
+
+function afterSaleRefundText(ticket) {
+  return ticket?.refund_amount === null || ticket?.refund_amount === undefined
+    ? "—"
+    : money(ticket.refund_amount);
+}
+
+async function loadAfterSales() {
+  afterSaleLoading.value = true;
+  afterSaleError.value = "";
+  try {
+    const params = new URLSearchParams();
+    if (afterSaleStatus.value) params.set("status", afterSaleStatus.value);
+    const query = params.toString();
+    const data = await getJson(`/api/c/admin/after-sales${query ? `?${query}` : ""}`);
+    afterSales.value = data?.tickets || [];
+  } catch (e) {
+    afterSaleError.value = errorMessage(e);
+    toast(afterSaleError.value, "error", 5000);
+  } finally {
+    afterSaleLoading.value = false;
+  }
+}
+
+async function resolveAfterSale(ticket, approved) {
+  if (!ticket || afterSaleBusy.value) return;
+  afterSaleBusy.value = ticket.ticket_id;
+  try {
+    await patchJson(`/api/c/admin/after-sales/${encodeURIComponent(ticket.ticket_id)}`, { approved });
+    toast(
+      approved
+        ? `已通过工单 ${ticket.ticket_id}，退款已写入订单`
+        : `已拒绝工单 ${ticket.ticket_id}`,
+      "success"
+    );
+    await loadAfterSales();
+  } catch (e) {
+    toast(errorMessage(e), "error", 5000);
+  } finally {
+    afterSaleBusy.value = "";
+  }
+}
+
+/* ================= 视图切换 ================= */
+function switchView(view) {
+  if (activeView.value === view) return;
+  activeView.value = view;
+  if (view === "merchant") loadMerchantOrders();
+  else if (view === "after-sales") loadAfterSales();
+}
+
+function refreshActive() {
+  if (activeView.value === "merchant") loadMerchantOrders();
+  else if (activeView.value === "after-sales") loadAfterSales();
+  else load();
+}
+
 onMounted(load);
 </script>
 
@@ -151,18 +401,21 @@ onMounted(load);
   <div class="page admin-page">
     <div class="admin-hero">
       <div>
-        <div class="monitor-kicker">C-END AUDIT</div>
+        <div class="monitor-kicker">C-END OPS</div>
         <div class="admin-title-line">
-          <h2>C 端交易审计</h2>
+          <h2>商家运营台</h2>
           <span class="badge is-warn">系统管理员</span>
         </div>
         <p class="card-sub">
-          查看聊天报价、订单和活动政策的绑定关系；只读，不提供改价或改单入口。
+          交易审计只读；商家订单与售后工单为平台管理员的受控操作入口，操作后立即刷新列表。
         </p>
       </div>
       <div class="audit-hero-actions">
-        <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">刷新</button>
+        <button type="button" class="btn btn-ghost" :disabled="activeLoading" @click="refreshActive">
+          刷新
+        </button>
         <button
+          v-if="activeView === 'audit'"
           type="button"
           class="btn btn-primary"
           :disabled="exporting || loading"
@@ -171,6 +424,21 @@ onMounted(load);
       </div>
     </div>
 
+    <div class="op-tabs" role="tablist" aria-label="运营台视图">
+      <button
+        v-for="view in VIEWS"
+        :key="view.key"
+        type="button"
+        role="tab"
+        class="op-tab"
+        :class="{ 'is-active': activeView === view.key }"
+        :aria-selected="activeView === view.key"
+        @click="switchView(view.key)"
+      >{{ view.label }}</button>
+    </div>
+
+    <!-- ========== 视图一：交易审计（原有功能全部保留） ========== -->
+    <template v-if="activeView === 'audit'">
     <section class="audit-filters" aria-label="审计筛选">
       <label>
         <span>买家</span>
@@ -336,10 +604,320 @@ onMounted(load);
         >下一页</button>
       </section>
     </template>
+    </template><!-- /视图一：交易审计 -->
+
+    <!-- ========== 视图二：商家订单 ========== -->
+    <template v-else-if="activeView === 'merchant'">
+      <section class="audit-filters" aria-label="商家订单筛选">
+        <label>
+          <span>订单状态</span>
+          <select v-model="merchantStatus" :disabled="merchantLoading" @change="loadMerchantOrders">
+            <option value="">全部</option>
+            <option v-for="status in MERCHANT_STATUS_OPTIONS" :key="status" :value="status">
+              {{ merchantStatusLabel(status) }}（{{ status }}）
+            </option>
+          </select>
+        </label>
+        <div class="audit-filter-actions">
+          <button type="button" class="btn btn-primary" :disabled="merchantLoading" @click="loadMerchantOrders">
+            {{ merchantLoading ? "刷新中…" : "刷新" }}
+          </button>
+        </div>
+      </section>
+
+      <div v-if="merchantLoading && !merchantOrders.length" class="card">
+        <div class="skeleton" style="height:100px"></div>
+      </div>
+      <div v-else-if="merchantError" class="card">
+        <div class="empty-state">
+          <div class="empty-title">商家订单加载失败</div>
+          <div class="empty-desc">{{ merchantError }}</div>
+        </div>
+      </div>
+
+      <section v-else class="card">
+        <div class="admin-section-head">
+          <strong>商家订单</strong>
+          <span class="field-hint">
+            共 {{ merchantOrders.length }} 条 · 当前筛选 {{ merchantStatus ? merchantStatusLabel(merchantStatus) : "全部" }} · 每次操作后自动刷新
+          </span>
+        </div>
+        <div class="table-wrap op-table-wrap">
+          <table class="table op-table">
+            <thead>
+              <tr>
+                <th>订单</th>
+                <th>买家</th>
+                <th>状态</th>
+                <th>商品</th>
+                <th>金额</th>
+                <th>物流</th>
+                <th>时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="order in merchantOrders" :key="order.order_id">
+                <tr>
+                  <td class="mono">{{ order.order_id }}</td>
+                  <td>{{ order.buyer_id }}</td>
+                  <td>
+                    <span class="badge" :class="merchantStatusBadge(order.status)">
+                      {{ merchantStatusLabel(order.status) }}
+                    </span>
+                  </td>
+                  <td class="op-cell-wrap">{{ merchantItemSummary(order) }}</td>
+                  <td>{{ money(order.total_amount) }}</td>
+                  <td>
+                    <template v-if="order.tracking_no">
+                      <span class="mono">{{ order.tracking_no }}</span>
+                      <br />
+                      <span class="field-hint">{{ order.carrier || "—" }}</span>
+                    </template>
+                    <span v-else class="field-hint">—</span>
+                  </td>
+                  <td class="field-hint">
+                    {{ date(order.shipped_at || order.paid_at || order.created_at) }}
+                  </td>
+                  <td>
+                    <div class="op-actions">
+                      <button
+                        v-if="canMarkPaid(order)"
+                        type="button"
+                        class="btn btn-primary op-btn"
+                        :disabled="!!merchantBusy"
+                        @click="markOrderPaid(order)"
+                      >标记已支付</button>
+                      <button
+                        v-if="canShip(order)"
+                        type="button"
+                        class="btn btn-ghost op-btn"
+                        :disabled="!!merchantBusy"
+                        @click="openShipForm(order)"
+                      >发货</button>
+                      <button
+                        v-if="canComplete(order)"
+                        type="button"
+                        class="btn btn-ghost op-btn"
+                        :disabled="!!merchantBusy"
+                        @click="completeMerchantOrder(order)"
+                      >标记完成</button>
+                      <button
+                        v-if="canCancelOrder(order)"
+                        type="button"
+                        class="btn btn-ghost op-btn is-danger"
+                        :disabled="!!merchantBusy"
+                        @click="cancelMerchantOrder(order)"
+                      >取消</button>
+                      <span v-if="!hasMerchantActions(order)" class="field-hint">—</span>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <tr v-if="!merchantOrders.length">
+                <td colspan="8" class="field-hint">暂无商家订单</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 发货表单不放在表格里：移动端跟随页面宽度，而不是被宽表横向撑开 -->
+        <div v-if="shipFormId" class="ship-form-panel">
+          <p class="ship-form-title">
+            发货 · <span class="mono">{{ shipFormId }}</span>
+          </p>
+          <div class="ship-form">
+            <label>
+              <span>物流单号（必填）</span>
+              <input v-model="shipTracking" type="text" maxlength="64" placeholder="如 SF1234567890" />
+            </label>
+            <label>
+              <span>承运商（可选）</span>
+              <input v-model="shipCarrier" type="text" maxlength="64" placeholder="如 顺丰速运" />
+            </label>
+            <p v-if="shipError" class="op-error">{{ shipError }}</p>
+            <div class="op-actions">
+              <button type="button" class="btn btn-ghost" :disabled="!!merchantBusy" @click="closeShipForm">
+                取消
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                :disabled="!!merchantBusy"
+                @click="submitShipForPending"
+              >{{ merchantBusy === shipFormId ? "提交中…" : "确认发货" }}</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </template><!-- /视图二：商家订单 -->
+
+    <!-- ========== 视图三：售后工单 ========== -->
+    <template v-else>
+      <section class="audit-filters" aria-label="售后工单筛选">
+        <label>
+          <span>工单状态</span>
+          <select v-model="afterSaleStatus" :disabled="afterSaleLoading" @change="loadAfterSales">
+            <option value="">全部</option>
+            <option value="OPEN">待处理（OPEN）</option>
+            <option value="APPROVED">已通过（APPROVED）</option>
+            <option value="REJECTED">已拒绝（REJECTED）</option>
+          </select>
+        </label>
+        <div class="audit-filter-actions">
+          <button type="button" class="btn btn-primary" :disabled="afterSaleLoading" @click="loadAfterSales">
+            {{ afterSaleLoading ? "刷新中…" : "刷新" }}
+          </button>
+        </div>
+      </section>
+
+      <div v-if="afterSaleLoading && !afterSales.length" class="card">
+        <div class="skeleton" style="height:100px"></div>
+      </div>
+      <div v-else-if="afterSaleError" class="card">
+        <div class="empty-state">
+          <div class="empty-title">售后工单加载失败</div>
+          <div class="empty-desc">{{ afterSaleError }}</div>
+        </div>
+      </div>
+
+      <section v-else class="card">
+        <div class="admin-section-head">
+          <strong>售后工单</strong>
+          <span class="field-hint">
+            共 {{ afterSales.length }} 条 · 当前筛选 {{ afterSaleStatus ? afterSaleStatusLabel(afterSaleStatus) : "全部" }} · 通过后自动退款并刷新
+          </span>
+        </div>
+        <div class="table-wrap op-table-wrap">
+          <table class="table op-table">
+            <thead>
+              <tr>
+                <th>工单</th>
+                <th>订单</th>
+                <th>买家</th>
+                <th>类型</th>
+                <th>状态</th>
+                <th>退款金额</th>
+                <th>原因</th>
+                <th>创建 / 处理时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="ticket in afterSales" :key="ticket.ticket_id">
+                <td class="mono">{{ ticket.ticket_id }}</td>
+                <td class="mono">{{ ticket.order_id }}</td>
+                <td>{{ ticket.buyer_id }}</td>
+                <td>{{ afterSaleTypeLabel(ticket.type) }}</td>
+                <td>
+                  <span class="badge" :class="afterSaleStatusBadge(ticket.status)">
+                    {{ afterSaleStatusLabel(ticket.status) }}
+                  </span>
+                </td>
+                <td>{{ afterSaleRefundText(ticket) }}</td>
+                <td class="op-cell-wrap">{{ ticket.reason || "—" }}</td>
+                <td class="field-hint">
+                  {{ date(ticket.created_at) }}
+                  <template v-if="ticket.resolved_at"> · {{ date(ticket.resolved_at) }}</template>
+                </td>
+                <td>
+                  <div class="op-actions">
+                    <template v-if="String(ticket.status || '').toUpperCase() === 'OPEN'">
+                      <button
+                        type="button"
+                        class="btn btn-primary op-btn"
+                        :disabled="!!afterSaleBusy"
+                        @click="resolveAfterSale(ticket, true)"
+                      >通过</button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost op-btn is-danger"
+                        :disabled="!!afterSaleBusy"
+                        @click="resolveAfterSale(ticket, false)"
+                      >拒绝</button>
+                    </template>
+                    <span v-else class="field-hint">—</span>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!afterSales.length">
+                <td colspan="9" class="field-hint">暂无售后工单</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template><!-- /视图三：售后工单 -->
   </div>
 </template>
 
 <style scoped>
+.admin-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.monitor-kicker {
+  color: var(--primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.admin-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.admin-title-line h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+/* 视图切换：白底细边框胶囊 */
+.op-tabs {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.op-tab {
+  height: 30px;
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.op-tab:hover {
+  color: var(--text);
+}
+
+.op-tab.is-active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+
 .audit-hero-actions {
   display: flex;
   flex-shrink: 0;
@@ -451,9 +1029,128 @@ onMounted(load);
   gap: 16px;
 }
 
+/* ---------- 商家订单 / 售后工单操作 ---------- */
+.op-table-wrap {
+  margin-top: 12px;
+}
+
+.op-table td {
+  vertical-align: middle;
+}
+
+.op-cell-wrap {
+  max-width: 280px;
+  white-space: normal;
+  word-break: break-word;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.op-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.op-btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 10px;
+}
+
+.btn.op-btn.is-danger,
+.op-btn.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.op-expand-row td {
+  background: var(--surface-2);
+}
+
+.ship-form-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--primary-soft) 24%, var(--surface));
+}
+
+.ship-form-title {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.ship-form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.ship-form label {
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.ship-form input {
+  width: 220px;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.op-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 10px;
+}
+
 @media (max-width: 820px) {
   .audit-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .op-tabs {
+    width: 100%;
+  }
+
+  .op-tabs .op-tab {
+    flex: 1;
+    padding: 0 8px;
+  }
+
+  .ship-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ship-form label {
+    min-width: 0;
+  }
+
+  .ship-form input {
+    width: 100%;
+  }
+
+  .audit-hero-actions {
+    width: 100%;
   }
 }
 </style>

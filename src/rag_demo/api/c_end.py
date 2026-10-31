@@ -735,6 +735,32 @@ def create_order_after_sale(order_id: str, req: AfterSaleIn) -> dict:
         raise _http_error(exc) from exc
 
 
+@router.get("/admin/merchant/orders")
+def admin_merchant_orders(
+    status: str | None = None,
+    buyer_id: str | None = None,
+    limit: int = 100,
+) -> dict:
+    """平台管理员查看商家订单运营台（全部买家）。"""
+    _require_admin()
+    merchant_buyer = (
+        store_agent.merchant_buyer_id(buyer_id) if buyer_id and buyer_id.startswith("buyer_") else buyer_id
+    )
+    try:
+        orders = get_merchant_repository().list_orders(
+            store_agent.STORE_MERCHANT_ID,
+            buyer_id=merchant_buyer,
+            status=status,
+            limit=limit,
+        )
+    except MerchantError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": getattr(exc, "code", "MERCHANT_ERROR"), "message": str(exc)},
+        ) from exc
+    return {"source": "merchant_v1", "orders": [order.to_dict() for order in orders]}
+
+
 @router.get("/admin/after-sales")
 def admin_after_sales(status: str | None = None, limit: int = 100) -> dict:
     _require_admin()

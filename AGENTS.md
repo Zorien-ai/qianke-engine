@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.8.8 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 1.8.9 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.8.8 |
+| AGENTS.md | v1.8.9 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -496,3 +496,4 @@ IM 社交载体
 | 1.8.6 | 2026-10-30 | P1-B 取消/退款：商家订单取消与模拟退款/库存补偿、C 端取消 API/UI、C/商家订单对账接口；补取消退款与对账测试 |
 | 1.8.7 | 2026-10-30 | P1-C 售后：商家 REFUNDED 售后退款、C 端售后工单申请/查询/管理员审批、订单页售后状态与退款展示 |
 | 1.8.8 | 2026-10-31 | P2-A PostgreSQL 商家 adapter：读写全契约、独立 schema/seed、FOR UPDATE 并发、真实 PG16 测试；SQLite 仍默认 |
+| 1.8.9 | 2026-10-31 | P2-B 商家运营台：管理员商家订单列表 API；CAdminAudit 扩展交易审计/商家订单/售后工单三视图，支持状态推进与售后审批 |

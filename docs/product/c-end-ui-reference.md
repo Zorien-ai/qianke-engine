@@ -318,3 +318,19 @@ web/public/manifest.webmanifest
 web/public/sw.js
 web/public/icons/
 ```
+
+## 10. 商家运营台（管理员）
+
+`/v2/#/admin/c-end`（`web/src/views/CAdminAudit.vue`）顶部三个视图切换：交易审计 / 商家订单 / 售后工单；交易审计原有筛选、分页、统计与 CSV 导出全部保留，商家订单与售后工单为受控操作入口，操作成功后自动刷新。
+
+```text
+GET   /api/c/admin/merchant/orders?limit=100&status=&buyer_id=
+PATCH /api/c/admin/merchant/orders/{order_id}/status   {status, tracking_no?, carrier?}
+GET   /api/c/admin/after-sales?status=&limit=
+PATCH /api/c/admin/after-sales/{ticket_id}             {approved}
+```
+
+- 商家订单：状态筛选（CREATED/PAID/SHIPPED/COMPLETED/CANCELLED/REFUNDED）；行内操作按状态机给出——CREATED→标记已支付/取消、PAID→发货（行内表单填物流单号，承运商可选）/取消、SHIPPED→标记完成；物流单号前端必填且至少 4 位，最终以后端校验为准；
+- 售后工单：状态筛选（OPEN/APPROVED/REJECTED）；待处理工单可「通过 / 拒绝」，通过后工单变为已通过并显示退款金额；
+- 所有写操作错误以 toast 展示后端 `detail.message`（兼容字符串与 `{code,message}`），列表数据不被清空；
+- 白色极简：与既有管理页共用 `.card/.table/.btn` 样式，表格在移动端容器内横向滚动，页面本身不横向溢出。
