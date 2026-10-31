@@ -418,3 +418,20 @@ POST /api/c/mentions/read             → {read}
 - 消息气泡中的 `@小鱼 / @店宠 / @小满` 渲染为可聚焦的 `span role=button`，点击/回车切换到对应会话（companion / store_demo / friend_demo）；`@我` 保持普通文本不跳转；
 - 未读 @ 通知：`mentions > 0` 时在顶部栏/会话头部/移动端消息列表显示 `@N` 胶囊；点击先 `GET /mentions?unread_only=1` 取最近一条未读提及，POST `/mentions/read` 标读并打开其所在会话，无未读时隐藏；
 - 白色极简、低饱和描边胶囊；移动端头部/消息列表不溢出。
+
+## 15. CApp 群聊与多成员 @
+
+CApp（`web/src/views/CApp.vue`）支持群聊会话与群内多成员 @：
+
+```text
+GET  /api/c/groups                                → {groups:[{group_id,name,members:[{member_id,name,kind}],created_at}]}
+GET  /api/c/groups/{group_id}/messages?limit=30   → {messages:[{message_id,sender_id,sender_name,content,metadata,created_at}]}
+POST /api/c/groups/{group_id}/messages            → {message, replies:[{message_id,sender_id,sender_name,content,created_at}]}
+```
+
+- 挂载拉取群列表，群会话排在单聊之前，显示「群」标识与成员数（默认进入「周末徒步群」）；
+- 点进群按群 ID 加载群消息，消息显示发送者名称（sender_name），自己的消息沿用「我」气泡；
+- 群内点 @ 按钮或输入 `@` 弹出全部群成员（小鱼/山野店宠/小满，token 分别为 @小鱼/@店宠/@小满），可连续插入多个 @；
+- 发送后按接口 `replies` 顺序逐条上屏，作者名取 `sender_name`，不伪造内容；
+- 群消息 @ 文本复用既有高亮；群内点击 @ 只显示轻提示「只作提醒，不切换会话」，单聊点击 @ 仍切换到对应会话；
+- 群聊暂不纳入未读角标/20s 轮询；白色极简、移动端不溢出。

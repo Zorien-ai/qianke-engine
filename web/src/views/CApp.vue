@@ -186,10 +186,14 @@ function onVisibilityChange() {
   startUnreadPolling();
 }
 
-/** 点击消息里的 @ 文本：切到对应会话；@我 不跳转 */
+/** 点击消息里的 @ 文本：单聊切到对应会话；群聊内只做高亮提醒不切走 */
 async function openMentionThread(token) {
   const id = mentionThreadId(token);
   if (!id) return;
+  if (isGroupThread(activeId.value)) {
+    showGroupMentionHint(token);
+    return;
+  }
   if (activeId.value === id) {
     await markThreadRead(id);
     return;
@@ -230,12 +234,24 @@ async function openUnreadMentions() {
 
 const mentionOptions = computed(() => {
   const query = mentionQuery.value.trim().toLowerCase();
-  const byThread = {
-    companion: [{ label: "小鱼", token: "@小鱼", desc: "你的购物伙伴" }],
-    store_demo: [{ label: "山野店宠", token: "@店宠", desc: "售前 / 售后 / 砍价" }],
-    friend_demo: [{ label: "小满", token: "@小满", desc: "好友 · 周末徒步" }],
-  };
-  return (byThread[activeId.value] || []).filter((item) => {
+  const thread = allThreads.value.find((item) => item.id === activeId.value) || null;
+  let options;
+  if (thread?.kind === "group") {
+    // 群聊：选择器列出全部群成员，可多次插入（再点 @ / 输入 @ 即可继续）
+    options = (thread.members || []).map((member) => ({
+      label: member.name,
+      token: GROUP_MENTION_TOKENS[member.member_id] || `@${member.name}`,
+      desc: GROUP_MEMBER_KIND_LABELS[member.kind] || member.kind || "成员",
+    }));
+  } else {
+    const byThread = {
+      companion: [{ label: "小鱼", token: "@小鱼", desc: "你的购物伙伴" }],
+      store_demo: [{ label: "山野店宠", token: "@店宠", desc: "售前 / 售后 / 砍价" }],
+      friend_demo: [{ label: "小满", token: "@小满", desc: "好友 · 周末徒步" }],
+    };
+    options = byThread[activeId.value] || [];
+  }
+  return options.filter((item) => {
     if (!query) return true;
     return item.label.toLowerCase().includes(query) || item.token.toLowerCase().includes(query);
   });
@@ -300,12 +316,56 @@ let copyTipTimer = null;
 let messagePressTimer = null;
 let messagePressPoint = null;
 
-const activeThread = computed(() => threads.value.find((item) => item.id === activeId.value) || threads.value[0]);
+/* ---------- 群聊：GET /api/c/groups，群消息按群 ID 独立缓存 ---------- */
+const groups = ref([]);
+const groupsError = ref("");
+const groupMessagesLoading = ref(false);
+const groupMentionHint = ref("");
+let groupMentionHintTimer = null;
+
+const GROUP_MENTION_TOKENS = {
+  companion: "@小鱼",
+  store_demo: "@店宠",
+  friend_demo: "@小满",
+};
+const GROUP_MEMBER_KIND_LABELS = {
+  companion: "伙伴",
+  merchant: "商家",
+  friend: "好友",
+};
+
+const groupThreads = computed(() =>
+  groups.value.map((item) => ({
+    id: item.group_id,
+    name: item.name,
+    kind: "group",
+    preview: "群聊",
+    time: "",
+    unread: 0,
+    members: Array.isArray(item.members) ? item.members : [],
+  }))
+);
+
+/** 群会话在前，单聊保持原有顺序 */
+const allThreads = computed(() => [...groupThreads.value, ...threads.value]);
+
+function threadMemberCount(thread) {
+  return thread?.kind === "group" ? thread.members?.length || 0 : 0;
+}
+
+function isGroupThread(threadId) {
+  return allThreads.value.find((item) => item.id === threadId)?.kind === "group";
+}
+
+const activeThread = computed(() => allThreads.value.find((item) => item.id === activeId.value) || allThreads.value[0]);
 const messages = computed(() => messagesByThread.value[activeId.value] || []);
 const filteredThreads = computed(() => {
   const keyword = search.value.trim();
-  if (!keyword) return threads.value;
-  return threads.value.filter((item) => item.name.includes(keyword) || item.preview.includes(keyword));
+  if (!keyword) return allThreads.value;
+  return allThreads.value.filter((item) => {
+    const memberNames = (item.members || []).map((member) => member.name).join(" ");
+    return item.name.includes(keyword) || item.preview.includes(keyword) || memberNames.includes(keyword);
+  });
 });
 const isCompanion = computed(() => activeId.value === "companion");
 const planLabel = computed(() => `L${companion.value.level || 4}`);
@@ -456,6 +516,9 @@ async function resetAvatar(kind) {
   }
 }
 const statusText = computed(() => {
+  if (activeThread.value.kind === "group") {
+    return `群聊 · ${threadMemberCount(activeThread.value)} 人`;
+  }
   if (activeThread.value.kind === "companion") return "在线";
   if (activeThread.value.kind === "merchant") {
     if (storeSocketState.value === "online") return "店宠在线";
@@ -889,6 +952,75 @@ function handleStoreSocket(event) {
   }
 }
 
+/* ---------- 群聊数据（GET /api/c/groups、GET /api/c/groups/{id}/messages） ---------- */
+function groupErrorMessage(error) {
+  const detail = error?.payload?.detail;
+  if (detail && typeof detail === "object") {
+    return detail.message || detail.code || "群聊暂时不可用，请稍后再试";
+  }
+  return error?.detail || error?.message || "群聊暂时不可用，请稍后再试";
+}
+
+function mapGroupMessage(message) {
+  const senderName = String(message?.sender_name || "").trim() || "群成员";
+  const own =
+    senderName === "我" || String(message?.sender_id || "").startsWith("buyer_");
+  return {
+    id: message?.message_id || `gmsg_local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    role: own ? "user" : "merchant",
+    author: senderName,
+    text: cleanReply(message?.content),
+    time: (message?.created_at || "").slice(11, 16),
+    createdAt: message?.created_at || "",
+    group: true,
+  };
+}
+
+async function loadGroupMessages(groupId) {
+  groupMessagesLoading.value = true;
+  groupsError.value = "";
+  try {
+    const data = await getJson(
+      `/api/c/groups/${encodeURIComponent(groupId)}/messages?limit=30`
+    );
+    messagesByThread.value[groupId] = (Array.isArray(data?.messages) ? data.messages : []).map(
+      mapGroupMessage
+    );
+  } catch (error) {
+    groupsError.value = groupErrorMessage(error);
+  } finally {
+    groupMessagesLoading.value = false;
+    scrollToBottom();
+  }
+}
+
+/** 挂载时拉群列表；默认进入「周末徒步群」 */
+async function loadGroups() {
+  try {
+    const data = await getJson("/api/c/groups");
+    groups.value = Array.isArray(data?.groups) ? data.groups : [];
+    groupsError.value = "";
+    const preferred =
+      groups.value.find((item) => item.name === "周末徒步群") || groups.value[0];
+    if (preferred && activeId.value === "companion") {
+      await switchThread(preferred.group_id);
+    }
+  } catch (error) {
+    groups.value = [];
+    groupsError.value = groupErrorMessage(error);
+  }
+}
+
+function showGroupMentionHint(token) {
+  const name = String(token || "").replace(/^@/, "");
+  groupMentionHint.value = `群聊内 @${name} 只作提醒，不切换会话`;
+  if (groupMentionHintTimer) clearTimeout(groupMentionHintTimer);
+  groupMentionHintTimer = window.setTimeout(() => {
+    groupMentionHint.value = "";
+    groupMentionHintTimer = null;
+  }, 2200);
+}
+
 async function loadCompanionMessages() {
   try {
     const data = await getJson("/api/c/app/messages?thread_id=companion&limit=30");
@@ -993,6 +1125,36 @@ function clearRetry() {
 }
 
 async function deliverText(text, isRetry = false, clientId = null) {
+  if (isGroupThread(activeId.value)) {
+    typing.value = true;
+    agentError.value = "";
+    try {
+      const result = await postJson(
+        `/api/c/groups/${encodeURIComponent(activeId.value)}/messages`,
+        { content: text }
+      );
+      // 发送后按接口 replies 顺序逐条上屏，作者名取 sender_name（不伪造）
+      for (const reply of Array.isArray(result?.replies) ? result.replies : []) {
+        const replyText = cleanReply(reply?.content);
+        if (!replyText) continue;
+        pushMessage({
+          role: "merchant",
+          author: String(reply?.sender_name || "").trim() || "群成员",
+          text: replyText,
+          group: true,
+        });
+      }
+      pendingRetry.value = null;
+    } catch (error) {
+      agentError.value = groupErrorMessage(error);
+      pendingRetry.value = { threadId: activeId.value, text, clientId };
+    } finally {
+      typing.value = false;
+      scrollToBottom();
+    }
+    return;
+  }
+
   if (activeId.value === "store_demo") {
     if (storeSocket && storeSocket.readyState === WebSocket.OPEN) {
       typing.value = true;
@@ -1273,11 +1435,17 @@ async function switchThread(id) {
   showContext.value = false;
   // 切回会话时刷新最近订单：订单可能在别的页面/商城刚创建，右侧栏不能停在旧数据
   loadRecentOrders();
-  // 进入会话即标记已读并把角标清零，之后以后端未读接口为准
-  markThreadRead(id);
-  if (id === "store_demo") {
-    await loadStoreMessages();
-    openStoreSocket();
+  const target = allThreads.value.find((item) => item.id === id);
+  if (target?.kind === "group") {
+    // 群聊暂不纳入未读角标/轮询，进入群只加载消息
+    await loadGroupMessages(id);
+  } else {
+    // 进入会话即标记已读并把角标清零，之后以后端未读接口为准
+    markThreadRead(id);
+    if (id === "store_demo") {
+      await loadStoreMessages();
+      openStoreSocket();
+    }
   }
   scrollToBottom();
 }
@@ -1338,12 +1506,14 @@ onMounted(async () => {
     installHint.value = "Safari：分享 → 添加到主屏幕";
     showInstall.value = true;
   }
+  await loadGroups();
   scrollToBottom();
 });
 
 onBeforeUnmount(() => {
   if (copyTipTimer) clearTimeout(copyTipTimer);
   if (messagePressTimer) clearTimeout(messagePressTimer);
+  if (groupMentionHintTimer) clearTimeout(groupMentionHintTimer);
   stopUnreadPolling();
   if (unreadRefreshTimer) {
     clearTimeout(unreadRefreshTimer);
@@ -1442,8 +1612,11 @@ onBeforeUnmount(() => {
               <template v-else>{{ thread.name.slice(0, 1) }}</template>
             </span>
             <span class="c-thread-copy">
-              <strong>{{ thread.name }}</strong>
-              <small>{{ thread.preview }}</small>
+              <strong>
+                {{ thread.name }}<span v-if="thread.kind === 'group'" class="c-group-tag">群</span>
+              </strong>
+              <small v-if="thread.kind === 'group'">{{ threadMemberCount(thread) }} 人 · {{ thread.preview }}</small>
+              <small v-else>{{ thread.preview }}</small>
             </span>
             <span class="c-thread-meta">
               <time>{{ thread.time }}</time>
@@ -1649,7 +1822,7 @@ onBeforeUnmount(() => {
             </article>
             <div v-if="typing" class="c-typing" role="status">
               <i /><i /><i />
-              <span>{{ activeThread.name }}正在输入</span>
+              <span>{{ activeThread.kind === 'group' ? '群成员正在输入' : `${activeThread.name}正在输入` }}</span>
             </div>
           </div>
 
@@ -1672,7 +1845,7 @@ onBeforeUnmount(() => {
             <button type="button" class="c-retry-dismiss" @click="clearRetry">忽略</button>
           </div>
 
-          <div class="c-prompt-row">
+          <div v-if="activeThread.kind !== 'group'" class="c-prompt-row">
             <button type="button" class="c-prompt" @click="sendPrompt('看 500 元以内的跑鞋')">看 500 元以内的跑鞋</button>
             <button type="button" class="c-prompt" @click="sendPrompt('查平台活动')">查平台活动</button>
             <button type="button" class="c-prompt" @click="sendPrompt('问店宠售后')">问店宠售后</button>
@@ -1685,6 +1858,12 @@ onBeforeUnmount(() => {
           </div>
           <p v-if="negotiateError" class="c-inline-error c-negotiate-error" role="status">
             {{ negotiateError }}
+          </p>
+          <p v-if="groupMentionHint" class="c-group-mention-hint" role="status">
+            {{ groupMentionHint }}
+          </p>
+          <p v-if="groupsError && activeThread.kind === 'group'" class="c-inline-error" role="status">
+            {{ groupsError }}
           </p>
 
           <form class="c-composer" @submit.prevent="send">
@@ -1716,7 +1895,7 @@ onBeforeUnmount(() => {
                 id="c-app-input"
                 v-model="draft"
                 rows="1"
-                placeholder="问商品、活动或售后"
+                :placeholder="activeThread.kind === 'group' ? `在${activeThread.name}里发消息，可 @ 成员` : '问商品、活动或售后'"
                 @focus="onComposerFocus"
                 @blur="onComposerBlur"
                 @input="onComposerInput"
@@ -1972,10 +2151,13 @@ onBeforeUnmount(() => {
           </span>
           <span class="c-mobile-thread-copy">
             <span>
-              <strong>{{ thread.name }}</strong>
+              <strong>
+                {{ thread.name }}<span v-if="thread.kind === 'group'" class="c-group-tag">群</span>
+              </strong>
               <time>{{ thread.time }}</time>
             </span>
-            <small>{{ thread.preview }}</small>
+            <small v-if="thread.kind === 'group'">{{ threadMemberCount(thread) }} 人 · {{ thread.preview }}</small>
+            <small v-else>{{ thread.preview }}</small>
           </span>
           <span v-if="unreadOf(thread.id)" class="c-unread">{{ unreadOf(thread.id) }}</span>
         </button>
@@ -2253,6 +2435,20 @@ onBeforeUnmount(() => {
 .c-thread-copy small {
   color: var(--c-text-3);
   font-size: 10px;
+}
+
+/* 群会话标识：低饱和胶囊，不打断会话列表节奏 */
+.c-group-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--c-bg-soft);
+  color: var(--c-text-3);
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 14px;
+  vertical-align: 1px;
 }
 
 .c-thread-meta {
@@ -2763,6 +2959,15 @@ onBeforeUnmount(() => {
 .c-negotiate-error {
   margin: 0;
   padding: 0 0 6px;
+}
+
+/* 群内点击 @ 的轻提示：只做一次短暂反馈，不占聊天空间 */
+.c-group-mention-hint {
+  margin: 0;
+  padding: 0 0 6px;
+  color: var(--c-text-3);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .c-composer {

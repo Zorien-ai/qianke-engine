@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, idempotency, negotiation, persona as c_persona, social, store, store_agent
+from rag_demo.c_end import companion_agent, group, idempotency, negotiation, persona as c_persona, social, store, store_agent
 from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
@@ -120,6 +120,15 @@ class AppMessageIn(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class GroupCreateIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=40)
+    member_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class GroupMessageIn(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000)
+
+
 def _last_ai_text(messages: list) -> str:
     for msg in reversed(messages or []):
         if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
@@ -130,9 +139,9 @@ def _last_ai_text(messages: list) -> str:
 def _http_error(exc: store.CStoreError) -> HTTPException:
     if exc.code == "AVATAR_TOO_LARGE":
         status = 413
-    elif exc.code in {"AVATAR_NOT_FOUND", "AFTER_SALE_NOT_FOUND", "ORDER_NOT_FOUND"}:
+    elif exc.code in {"AVATAR_NOT_FOUND", "AFTER_SALE_NOT_FOUND", "ORDER_NOT_FOUND", "GROUP_NOT_FOUND"}:
         status = 404
-    elif exc.code in {"AFTER_SALE_FORBIDDEN", "ORDER_FORBIDDEN"}:
+    elif exc.code in {"AFTER_SALE_FORBIDDEN", "ORDER_FORBIDDEN", "GROUP_FORBIDDEN"}:
         status = 403
     else:
         status = 409 if exc.code in {
@@ -373,6 +382,41 @@ def save_app_message(req: AppMessageIn) -> dict:
             req.content,
             metadata=req.metadata,
         )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/groups")
+def list_groups() -> dict:
+    buyer_id, _ = _buyer()
+    return {"groups": group.list_groups(buyer_id)}
+
+
+@router.post("/groups")
+def create_group(req: GroupCreateIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return group.create_group(buyer_id, req.name, req.member_ids)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/groups/{group_id}/messages")
+def list_group_messages(group_id: str, limit: int = 30, before: str | None = None) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return {
+            "messages": group.list_messages(buyer_id, group_id, limit=limit, before=before),
+        }
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/groups/{group_id}/messages")
+def send_group_message(group_id: str, req: GroupMessageIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return group.send_message(buyer_id, group_id, req.content)
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
 

@@ -283,6 +283,11 @@ GET  /api/c/threads/unread
 POST /api/c/threads/{thread_id}/read
 GET  /api/c/mentions
 POST /api/c/mentions/read
+GET  /api/c/groups
+POST /api/c/groups
+GET  /api/c/groups/{group_id}/messages
+POST /api/c/groups/{group_id}/messages
+  → 群内多成员 @，按 mention 顺序触发多个回复
 GET  /api/c/merchant/products
 GET  /api/c/merchant/inventory/{sku}
 GET  /api/c/merchant/orders
