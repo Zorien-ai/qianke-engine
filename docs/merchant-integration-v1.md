@@ -31,7 +31,8 @@ src/rag_demo/merchant/
 ├── errors.py              结构化错误（稳定 code：CONFIG / SEED / DATA / STOCK / CONFLICT…）
 ├── repository.py          MerchantRepository（只读）+ MerchantWriteRepository（写）协议
 ├── seeds.py               data/merchant/*.csv 读取 + 校验 + 规模下限
-├── sqlite_repository.py   默认 SQLite 实现（只读查询 + 事务化库存预占/订单写入）
+├── sqlite_repository.py   默认 SQLite 实现（只读查询 + 事务化库存预占/订单写入/状态机/取消退款）
+├── postgres_repository.py PostgreSQL 实现（同一契约；独立 schema；P2-A / task-51）
 └── factory.py             后端注册 / 选择 / 进程内缓存 / 写能力检查
 data/merchant/
 ├── products.csv  skus.csv  inventory.csv  orders.csv  order_items.csv
@@ -60,8 +61,16 @@ print(order.total_amount, order.item_count)
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `QIANKE_MERCHANT_DB` | `<仓库根>/var/merchant_v1.sqlite` | SQLite 文件位置；`var/` 已被 `.gitignore` 忽略 |
-| `QIANKE_MERCHANT_BACKEND` | `sqlite` | 默认后端名；接真实 OMS 时改为注册过的名字 |
+| `QIANKE_MERCHANT_BACKEND` | `sqlite` | 默认后端名：`sqlite` / `postgres` / 已注册的自定义后端 |
 | `QIANKE_MERCHANT_SEED_DIR` | `<仓库根>/data/merchant` | 种子目录（测试/临时环境可覆盖） |
+| `QIANKE_MERCHANT_PG_HOST` | `RAG_PG_HOST` → `127.0.0.1` | PostgreSQL host（§14） |
+| `QIANKE_MERCHANT_PG_PORT` | `RAG_PG_PORT` → `5432` | PostgreSQL 端口 |
+| `QIANKE_MERCHANT_PG_USER` | `RAG_PG_USER` → `postgres` | PostgreSQL 用户 |
+| `QIANKE_MERCHANT_PG_PASSWORD` | `RAG_PG_PASSWORD` → `123456` | PostgreSQL 密码（生产必须用密钥管理注入） |
+| `QIANKE_MERCHANT_PG_DBNAME` | `vec_db` | PostgreSQL 业务库 |
+| `QIANKE_MERCHANT_PG_SCHEMA` | `merchant_v1` | 商家表独立 schema（绝不写 public/其他业务表） |
+
+> PostgreSQL 连接细节与测试见 §14；默认仍是 SQLite，没装 psycopg2/没配 PG 不影响离线路径。
 
 > 种子数据属于「数据」：商品数量、库存记录数、订单数都来自 CSV，业务代码里没有写死。
 > 代码只强制**验收下限**：≥8 商品、≥20 条库存记录、≥5 订单（见 `seeds.py` 常量）。
@@ -128,6 +137,9 @@ print(order.total_amount, order.item_count)
 
 ## 7. 替换为真实 OMS / PostgreSQL（生产接入）
 
+> 内置 PostgreSQL adapter 已在 P2-A（task-51）落地，见 §14；本节仍以「接真实 OMS」为例，
+> 说明 adapter 协议与硬约束。
+
 数据层通过 `MerchantRepository` 协议解耦，迁移步骤：
 
 ```python
@@ -157,8 +169,8 @@ repo = get_merchant_repository(backend="oms", seed=False)
 1. **租户隔离**：`merchant_id` 由调用方从登录态推导后传入；数据层空值失败关闭；
    OMS adapter 不能信任请求体里的商家 ID；
 2. **只读与写能力分离**：查询实现 `MerchantRepository`；库存预占/订单写入实现
-   `MerchantWriteRepository`（SQLite adapter 两者都实现）。真实 OMS 的写操作必须走 OMS 的
-   受控接口 + 人工确认——**不要把 OMS 写权限给只读查询 adapter**；
+   `MerchantWriteRepository`（内置 SQLite / PostgreSQL adapter 两者都实现）。真实 OMS 的写操作
+   必须走 OMS 的受控接口 + 人工确认——**不要把 OMS 写权限给只读查询 adapter**；
 3. **limit 钳制**：内部必须 `clamp_limit`，不能把调用方 limit 直接拼进 SQL；
 4. **参数化查询**：禁止字符串拼 SQL（种子/搜索关键词都可能是外部输入）；
 5. **金额 Decimal**、时间 ISO-8601、返回模型而不是裸 dict；
@@ -191,6 +203,9 @@ repo = get_merchant_repository(backend="oms", seed=False)
 ```bash
 uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py -q
 # 结果：127 passed（45 只读/种子用例 + 82 写接口/状态机/取消/售后退款用例；离线，约 11s）
+
+uv run python -m pytest tests/test_merchant_postgres.py -q
+# 结果：13 passed（真实 PostgreSQL 16，独立 schema，约 10s；无 PG 时自动 skip）
 ```
 
 覆盖：
@@ -217,20 +232,27 @@ uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.p
   （有已提交预占也不动）、金额边界（>0/<=total/最多 2 位小数/NaN/Inf/布尔拒绝）、
   重复退款幂等与金额/`request_id` 冲突、非法状态（CREATED/PAID 引导 cancel_order、
   CANCELLED 拒绝、REFUNDED 终态）、`update_order_status(REFUNDED)` 拒绝、跨租户/未知订单、
-  并发同 request_id 只写一次、状态筛选与 `to_dict()` 输出、老库迁移后售后退款可用。
+  并发同 request_id 只写一次、状态筛选与 `to_dict()` 输出、老库迁移后售后退款可用；
+- PostgreSQL adapter（task-51）：真实 PG16 独立 schema（自动 DROP 清理）、种子/describe/
+  stats、商品/SKU/库存/订单读、租户隔离与 limit、reserve 幂等/commit/release/库存不足、
+  create_order 幂等/金额校验、状态机、取消退款库存补偿、售后退款幂等、
+  **并发预占不超卖**（SELECT FOR UPDATE）、seed(force=True) 重置、factory env 切换、
+  schema 表清单隔离；无 PG/无 psycopg2 时整模块 skip。
 - 另：`tests/test_c_end_store_agent_merchant.py`、`tests/test_c_end_agent_merchant.py`
   覆盖 C 端只读接入（由对应改动方负责，本任务未修改）。
 
 ## 9. 已知限制（v1，明确不是真实 OMS）
 
 1. **不是真实 OMS 对接**：没有商家侧鉴权/签名/支付/对账；种子是工作区里的静态样例数据；
-2. **写通道仅本地 SQLite**：reserve/commit/release/create_order 事务化、幂等、失败关闭，
-   但它是**本地演示/测试实现**，不是真实库存/交易系统；真实写必须接 OMS 受控接口 + 人工确认；
+2. **写通道是本地 SQLite / PostgreSQL adapter**：reserve/commit/release/create_order 事务化、
+   幂等、失败关闭，但它们是**本地演示/集成实现**，不是真实库存/交易系统；
+   真实写必须接 OMS 受控接口 + 人工确认；
 3. **无分页游标 / 时间范围过滤**：列表只有 limit + 买家/状态过滤；大商家需要补 offset/cursor；
 4. **无价格历史 / 库存流水**：模型只有当前快照；经营分析若需要「改价/补货历史」要另建表；
 5. **无多语言/多币种**：种子仅 CNY；模型保留了 currency 字段但无汇率逻辑；
-6. **SQLite 单文件**：只适合开发/演示；并发写、备份、权限需由 PG adapter 承担
-   （写事务用 `BEGIN IMMEDIATE` + 10s busy timeout，只保证**单机单写者**语义）；
+6. **SQLite 适合开发/演示，PG adapter 用于单机/共享集成**：SQLite 只保证单机单写者语义
+   （`BEGIN IMMEDIATE` + busy timeout）；PostgreSQL adapter 用事务 + `SELECT ... FOR UPDATE`
+   + 唯一索引，支持多连接并发预占不超卖，但**仍不是高可用/分库分表方案**（§14）；
 7. **已接 API / Agent，但真实交易仍受控**：店宠与 C 端只读 API、C 商城下单写商家订单
    已接（1.8.4）；本地写层（§10/§12）具备预占、订单写入、状态流转、取消退款能力，
    但**不是真实 OMS/支付网关**，真实交易需 OMS 写通道 + 用户确认；
@@ -567,9 +589,120 @@ refunded = writer.refund_order(
 2. 每个订单最多一次退款动作（`REFUNDED` 终态）；如需多次部分退款需新增退款流水表与状态扩展；
 3. 不恢复库存、不改预占；退货验收入库/逆向物流由 OMS 独立流程负责；
 4. 没有退款原因/操作人/审核人审计字段；`request_id` 只做幂等键，不代表操作身份；
-5. 并发保证仍是 SQLite 单机单写者语义；PG/OMS adapter 需实现同等事务、幂等与唯一约束。
+5. 并发保证：SQLite 为单机单写者语义；PostgreSQL adapter 已实现事务 + `FOR UPDATE`
+   同等语义（§14）；真实 OMS adapter 仍需自行实现同等事务、幂等与唯一约束。
 
-## 14. 变更记录
+## 14. PostgreSQL 商家 adapter（v2.0 / task-51）
+
+> **仍然不是真实 OMS**：PostgreSQL adapter 只是把同一份商家数据层契约落到 PG 上，
+> 用于本地/集成环境的多连接并发验证；真实交易、支付、库存对账仍必须接 OMS 受控接口。
+
+### 14.1 定位与使用
+
+- 新增 `PostgresMerchantRepository`（`src/rag_demo/merchant/postgres_repository.py`），
+  同时实现 `MerchantRepository` + `MerchantWriteRepository`，方法与语义与 SQLite adapter 一致：
+  商品/SKU/库存读、订单读、reserve/commit/release、create_order、update_order_status、
+  cancel_order（含库存补偿）、refund_order（默认不恢复库存）；
+- 默认后端仍是 SQLite；工厂注册 backend `"postgres"`，用环境变量切换；
+- **psycopg2 延迟导入**：模块顶层不 import psycopg2，只有真正构造 PG adapter 时才导入，
+  未安装驱动/未配置 PG 不会阻断 SQLite 默认路径。
+
+```python
+from rag_demo.merchant import PostgresMerchantRepository, get_merchant_repository
+
+# 方式一：直接构造（可显式指定 schema，便于测试/多环境隔离）
+repo = PostgresMerchantRepository(schema="merchant_v1", seed=True)
+
+# 方式二：走统一工厂（推荐业务代码只依赖工厂）
+#   QIANKE_MERCHANT_BACKEND=postgres
+#   QIANKE_MERCHANT_PG_SCHEMA=merchant_v1
+repo = get_merchant_repository()                     # 只读入口
+from rag_demo.merchant import get_merchant_write_repository
+writer = get_merchant_write_repository()             # 写入口（同一 PG adapter）
+```
+
+### 14.2 配置
+
+`QIANKE_MERCHANT_PG_*` 优先，其次复用项目既有 `RAG_PG_*`，最后本机默认（§4 表）：
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `QIANKE_MERCHANT_PG_HOST` | `RAG_PG_HOST` → `127.0.0.1` | PG host |
+| `QIANKE_MERCHANT_PG_PORT` | `RAG_PG_PORT` → `5432` | PG 端口 |
+| `QIANKE_MERCHANT_PG_USER` | `RAG_PG_USER` → `postgres` | 账号 |
+| `QIANKE_MERCHANT_PG_PASSWORD` | `RAG_PG_PASSWORD` → `123456` | 密码（生产用密钥管理，不写文档/代码） |
+| `QIANKE_MERCHANT_PG_DBNAME` | `vec_db` | 业务库 |
+| `QIANKE_MERCHANT_PG_SCHEMA` | `merchant_v1` | 独立 schema；严格白名单校验，不污染 public |
+
+本机 PG16 实测：`127.0.0.1:5432 postgres/******`，业务库 `vec_db`。
+
+### 14.3 schema / 种子 / 迁移语义
+
+- 初始化时执行 `CREATE SCHEMA IF NOT EXISTS` + 7 张表 + 索引（幂等，可重复初始化）；
+  所有表名与 SQLite 相同：`m_product / m_sku / m_inventory / m_order / m_order_item /
+  m_meta / m_reservation`，只在独立 schema 内可见；
+- 表结构、约束、索引与 SQLite 版本对齐：
+  - 金额/时间列用 `TEXT` 存十进制字符串 / ISO-8601 文本，**两个 adapter 的 Decimal/时间语义一致**；
+    数量/库存用 `INTEGER`；主键/外键/PK 与 SQLite 相同；
+  - `m_order` 含 `source_ref`、物流/生命周期字段、取消/退款字段，以及
+    `cancel_request_id` / `refund_request_id` 两个**部分唯一索引**（幂等键）；
+- 种子复用 `data/merchant/*.csv` + `load_seed_data()` 校验，初始化时幂等灌入；
+  `seed(force=True)` 清空 m_* 后重灌；`m_meta` 记录 seed_version/seeded_at/文件 sha256；
+- **没有 SQLite 老库迁移概念**（PG 是新 schema）；后续 PG 自己的表结构演进仍建议显式迁移脚本，
+  adapter 只保证 `CREATE ... IF NOT EXISTS` 幂等。
+
+### 14.4 事务 / 并发 / 幂等
+
+- 每次操作短连接：读操作连接用完即关；写操作在显式事务中执行，异常 `ROLLBACK`、结束即 `CLOSE`；
+- 并发预占：`SELECT warehouse_id, available_qty ... FOR UPDATE` 锁住库存行后再扣减，
+  两个并发预占竞争同一库存时**只有一个成功，另一个 `MERCHANT_STOCK`，不会超卖**；
+- 状态机/取消/退款：`SELECT ... FOR UPDATE` 锁订单行；同状态幂等、非法迁移结构化错误；
+- `request_id` 幂等键：部分唯一索引兜底并发重复写；同 key 跨订单 → `MERCHANT_CONFLICT`；
+- reserve 同 reservation_id / create_order 同 order_id 并发插入：捕获唯一冲突后重试，
+  重试路径会命中幂等分支（不会重复扣库存/重复写订单）。
+
+### 14.5 测试
+
+```bash
+# 真实 PG（本机 PG16）；无 PG/无 psycopg2 时整模块 skip
+uv run python -m pytest tests/test_merchant_postgres.py -q
+# 结果：13 passed
+
+# 离线 SQLite 套件不受影响
+uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py -q
+# 结果：127 passed
+
+# task 验收组合命令
+uv run python -m pytest tests/test_merchant_postgres.py tests/test_merchant_store.py tests/test_merchant_write.py -q
+```
+
+测试隔离：每个用例创建唯一 schema `qianke_merchant_test_<uuid>`，结束 `DROP SCHEMA CASCADE`；
+覆盖种子/describe/stats、读接口与租户隔离/limit、reserve/commit/release、create_order、
+状态机、取消退款库存补偿、售后退款幂等、seed(force=True)、factory env 切换、
+schema 表清单隔离、**并发预占不超卖**。
+
+### 14.6 实现说明 / 限制
+
+1. **不是真实 OMS / 不是高可用方案**：没有连接池、读写分离、主从切换、分布式事务、
+   跨库分片；短连接适合本地/低并发集成，生产高并发需连接池与超时/重试治理；
+2. schema 由 adapter 初始化；生产建议用迁移工具（Alembic/Flyway 等）管理 DDL、
+   使用受限账号，并显式授权目标 schema；
+3. 一个 adapter 实例绑定一个 schema；多租户/多环境请用不同 schema 或不同实例；
+4. 金额/时间用 TEXT 与 SQLite 对齐，便于同一套测试与模型复用；若直接接 BI/审计，
+   可后续加 NUMERIC/TIMESTAMPTZ 视图（当前不做，避免语义分叉）；
+5. 仍无库存流水/价格历史/退款流水表；订单行/商品标题是快照；
+6. 凭证从环境变量读取；生产必须用密钥管理，不要把明文密码写进代码/文档/日志；
+7. 真实 OMS 接入仍需受控写接口 + 人工确认；本 adapter 只是标准 PG 落地。
+
+### 14.7 复用与代码边界
+
+- PG adapter 复用 SQLite 模块中的**纯校验/时间/幂等辅助函数**
+  （items/金额/物流单号/TTL/request_id 规则，见 `sqlite_repository.py` 底部），
+  避免两个 adapter 规则漂移；SQL/事务/行锁实现各自独立；
+- factory 采用**延迟导入** `postgres_repository`，SQLite 默认路径不依赖 psycopg2；
+- 新增 adapter 不影响既有 C 端/API/Agent 调用（它们只依赖协议与工厂）。
+
+## 15. 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
@@ -578,3 +711,4 @@ refunded = writer.refund_order(
 | v1.2 | 2026-10-30 | 新增订单状态机与物流字段：`update_order_status`、`Order.tracking_no/carrier/shipped_at/completed_at`、`m_order` 四列与老库自动迁移、种子 SHIPPED/COMPLETED 物流数据与校验；新增 31 例状态机/物流/迁移测试（合计 101 例） |
 | v1.3 | 2026-10-30 | 新增订单取消与模拟退款：`cancel_order(..., request_id)`、`Order.cancelled_at/refund_amount/refunded_at`、`m_order` 取消/退款列 + `cancel_request_id` 唯一幂等键与老库自动迁移、按已提交预占 allocations 恢复库存并标记 `REVERSED`、`update_order_status(CANCELLED)` 同语义；新增 16 例取消/退款/库存补偿测试（合计 117 例） |
 | v1.4 | 2026-10-30 | 新增发货后售后退款与 `REFUNDED` 状态：状态机 `SHIPPED/COMPLETED→REFUNDED`、`refund_order(amount/request_id)`（部分/全额、默认全额、默认不恢复库存）、`m_order.refund_request_id` 唯一幂等键与老库自动迁移、`update_order_status(REFUNDED)` 拒绝；新增 10 例售后退款/金额/幂等/迁移测试（合计 127 例） |
+| v2.0 | 2026-10-31 | 新增 PostgreSQL 商家 adapter（P2-A）：`PostgresMerchantRepository` 实现同契约读写、独立 schema（`QIANKE_MERCHANT_PG_SCHEMA`，默认 `merchant_v1`）、幂等建表+种子、事务+`FOR UPDATE` 并发不超卖、psycopg2 延迟导入、factory 注册 `postgres`（SQLite 仍默认）；新增 13 例真实 PG16 集成测试（无 PG 自动 skip，离线 127 例不变） |

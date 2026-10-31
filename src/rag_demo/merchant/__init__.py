@@ -90,6 +90,8 @@ from .models import (
 )
 from .repository import MerchantRepository, MerchantWriteRepository
 from .seeds import SeedData, default_seed_dir, load_seed_data
+from .postgres_repository import DEFAULT_SCHEMA as DEFAULT_PG_SCHEMA
+from .postgres_repository import PostgresMerchantRepository
 from .sqlite_repository import (
     DEFAULT_DB_FILENAME,
     DEFAULT_RESERVATION_TTL_SECONDS,
@@ -103,6 +105,7 @@ __all__ = [
     "DEFAULT_CURRENCY",
     "DEFAULT_DB_FILENAME",
     "DEFAULT_LIST_LIMIT",
+    "DEFAULT_PG_SCHEMA",
     "DEFAULT_RESERVATION_TTL_SECONDS",
     "MAX_LIST_LIMIT",
     "MAX_RESERVATION_TTL_SECONDS",
@@ -133,6 +136,7 @@ __all__ = [
     "MerchantWriteRepository",
     "Order",
     "OrderItem",
+    "PostgresMerchantRepository",
     "Product",
     "Reservation",
     "ReservationAllocation",
