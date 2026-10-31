@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, idempotency, persona as c_persona, social, store, store_agent
+from rag_demo.c_end import companion_agent, idempotency, negotiation, persona as c_persona, social, store, store_agent
 from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
@@ -98,6 +98,12 @@ class MerchantOrderStatusIn(BaseModel):
     carrier: str | None = Field(default=None, max_length=64)
 
 
+class NegotiationIn(BaseModel):
+    need: str = Field(..., min_length=1, max_length=80)
+    budget: float = Field(..., gt=0, le=100000)
+    quantity: int = Field(default=1, ge=1, le=20)
+
+
 class AppMessageIn(BaseModel):
     thread_id: str = Field(..., min_length=1, max_length=64)
     role: str = Field(..., pattern="^(user|companion|assistant|system)$")
@@ -137,6 +143,24 @@ def _http_error(exc: store.CStoreError) -> HTTPException:
             "AFTER_SALE_EXISTS",
         } else 400
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
+
+
+@router.post("/negotiations")
+def negotiate(req: NegotiationIn) -> dict:
+    """C 伙伴与商家店宠的受控谈判；只生成 PENDING 报价，不自动下单。"""
+    buyer_id, _ = _buyer()
+    try:
+        return negotiation.run_negotiation(
+            buyer_id,
+            need=req.need,
+            budget=req.budget,
+            quantity=req.quantity,
+        )
+    except negotiation.NegotiationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
 
 
 @router.get("/products")

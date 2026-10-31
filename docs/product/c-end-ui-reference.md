@@ -334,3 +334,20 @@ PATCH /api/c/admin/after-sales/{ticket_id}             {approved}
 - 售后工单：状态筛选（OPEN/APPROVED/REJECTED）；待处理工单可「通过 / 拒绝」，通过后工单变为已通过并显示退款金额；
 - 所有写操作错误以 toast 展示后端 `detail.message`（兼容字符串与 `{code,message}`），列表数据不被清空；
 - 白色极简：与既有管理页共用 `.card/.table/.btn` 样式，表格在移动端容器内横向滚动，页面本身不横向溢出。
+
+## 11. 双宠谈判（CApp）
+
+CApp 快捷问题区新增「让小鱼去砍价」入口（`web/src/views/CApp.vue`）：
+
+```text
+POST /api/c/negotiations
+body {need: "跑鞋", budget: 500, quantity: 1}
+→ {status: "ACCEPTED"|"REJECTED", transcript: [{actor: "c_pet"|"b_pet", name, text}], quote|null, reason?}
+```
+
+- 默认按当前 companion 会话发起：need=跑鞋、budget=500、quantity=1；若当前停在其它会话会先切回 companion；
+- `transcript` 按 actor 映射为对话消息：`c_pet`→companion、`b_pet`→merchant（作者名取 transcript.name），谈判过程可见，不伪造内容；
+- `ACCEPTED`：把返回的 quote 写入 `storeQuote`，复用既有「来自店宠的结构化报价」卡与「查看报价」链接，成交仍需用户在商城逐单确认；
+- `REJECTED`：不生成报价卡（同时隐藏初始静态演示报价卡，待确认计数归零），只追加一条基于 `reason` 的伙伴解释消息；
+- 调用中按钮禁用、`typing` 同时阻断发送与重复点击；失败在入口下方显示轻提示（兼容 `detail` 字符串与 `{code,message}`），不打断会话；
+- 白色极简、移动端快捷问题行可横向滚动，消息气泡与报价卡不溢出。

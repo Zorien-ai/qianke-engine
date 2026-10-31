@@ -113,6 +113,10 @@ const liveThreadId = ref("");
 const liveDraft = ref(null);
 const liveOrder = ref(null);
 const storeQuote = ref(null);
+// 双宠谈判：negotiating 防重复调用；negotiationRejected 用于隐藏静态演示报价卡
+const negotiating = ref(false);
+const negotiateError = ref("");
+const negotiationRejected = ref(false);
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
@@ -154,15 +158,17 @@ const filteredThreads = computed(() => {
 const isCompanion = computed(() => activeId.value === "companion");
 const planLabel = computed(() => `L${companion.value.level || 4}`);
 
-function messageAuthor(role) {
+function messageAuthor(role, message = null) {
+  const custom = String(message?.author || "").trim();
+  if (custom) return custom;
   if (role === "user") return "我";
   if (role === "companion") return companion.value.name;
   if (role === "merchant") return activeThread.value.name;
   return "系统";
 }
 
-function messageAvatarLabel(role) {
-  const name = messageAuthor(role);
+function messageAvatarLabel(role, message = null) {
+  const name = messageAuthor(role, message);
   return name.slice(0, 1) || "系";
 }
 
@@ -297,7 +303,8 @@ const threadDotClass = computed(() =>
 );
 const pendingCount = computed(() => {
   if (liveDraft.value || storeQuote.value) return 1;
-  if (liveOrder.value) return 0;
+  // 已拒绝：不生成报价卡，计数归零；初始静态演示卡仍算 1
+  if (liveOrder.value || negotiationRejected.value) return 0;
   return 1;
 });
 
@@ -840,6 +847,73 @@ async function sendPrompt(prompt) {
   await send();
 }
 
+/* ---------- 双宠谈判（C 伙伴 ↔ 商家店宠，受控报价） ---------- */
+const NEGOTIATION_DEFAULT = { need: "跑鞋", budget: 500, quantity: 1 };
+const NEGOTIATION_REASON_LABELS = {
+  BUDGET_TOO_LOW: "预算内没有可成交的方案，小鱼建议等平台活动或换个商品再试。",
+  MERCHANT_NO_MATCH: "店里暂时没有匹配且有库存的商品，小鱼建议换个关键词再试。",
+};
+
+function negotiationErrorMessage(error) {
+  const detail = error?.payload?.detail;
+  if (detail && typeof detail === "object") {
+    return detail.message || detail.code || "双宠谈判暂时不可用，请稍后再试";
+  }
+  return error?.detail || error?.message || "双宠谈判暂时不可用，请稍后再试";
+}
+
+async function runNegotiation() {
+  // 调用中禁止重复点击；typing 同时会禁用发送按钮/回车提交
+  if (negotiating.value || typing.value) return;
+  negotiateError.value = "";
+  // 谈判过程固定落在 companion 会话里；当前在别的会话时先切回
+  if (activeId.value !== "companion") await switchThread("companion");
+  negotiating.value = true;
+  typing.value = true;
+  negotiationRejected.value = false;
+  pushMessage({
+    role: "user",
+    text: `让小鱼去砍价：${NEGOTIATION_DEFAULT.need}，预算 ¥${NEGOTIATION_DEFAULT.budget}`,
+  });
+  scrollToBottom();
+  try {
+    const data = await postJson("/api/c/negotiations", {
+      need: NEGOTIATION_DEFAULT.need,
+      budget: NEGOTIATION_DEFAULT.budget,
+      quantity: NEGOTIATION_DEFAULT.quantity,
+    });
+    const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
+    for (const item of transcript) {
+      const text = cleanReply(item?.text);
+      if (!text) continue;
+      pushMessage({
+        role: item?.actor === "b_pet" ? "merchant" : "companion",
+        text,
+        author: String(item?.name || "").trim() || undefined,
+      });
+    }
+    if (String(data?.status || "").toUpperCase() === "ACCEPTED" && data?.quote) {
+      // 复用既有结构化报价卡 / 查看报价链接；成交仍由用户在商城逐单确认
+      storeQuote.value = data.quote;
+      negotiationRejected.value = false;
+    } else {
+      // 拒绝时不生成报价卡，只补一条伙伴解释（原因码映射为界面文案）
+      negotiationRejected.value = true;
+      const reasonText = NEGOTIATION_REASON_LABELS[String(data?.reason || "").toUpperCase()];
+      pushMessage({
+        role: "companion",
+        text: reasonText || "这次没有谈成，小鱼建议稍后再试。",
+      });
+    }
+  } catch (error) {
+    negotiateError.value = negotiationErrorMessage(error);
+  } finally {
+    negotiating.value = false;
+    typing.value = false;
+    scrollToBottom();
+  }
+}
+
 /* ---------- 最近订单（真实数据，GET /api/c/orders?limit=3） ---------- */
 function orderStatusLabel(order) {
   // 售后工单已退款 / 商家订单已退款：最近订单同样显示「已退款」
@@ -1239,17 +1313,17 @@ onBeforeUnmount(() => {
                   alt=""
                   @error="onAvatarError(avatarSrc(message.role === 'user' ? 'user' : 'companion'))"
                 />
-                <template v-else>{{ messageAvatarLabel(message.role) }}</template>
+                <template v-else>{{ messageAvatarLabel(message.role, message) }}</template>
               </button>
               <span
                 v-else
                 class="c-msg-avatar"
                 :class="message.role"
                 aria-hidden="true"
-              >{{ messageAvatarLabel(message.role) }}</span>
+              >{{ messageAvatarLabel(message.role, message) }}</span>
               <div class="c-message-content">
                 <div class="c-message-meta">
-                  <span>{{ messageAuthor(message.role) }}</span>
+                  <span>{{ messageAuthor(message.role, message) }}</span>
                   <time>{{ message.time }}</time>
                 </div>
                 <p class="c-bubble">
@@ -1295,7 +1369,16 @@ onBeforeUnmount(() => {
             <button type="button" class="c-prompt" @click="sendPrompt('看 500 元以内的跑鞋')">看 500 元以内的跑鞋</button>
             <button type="button" class="c-prompt" @click="sendPrompt('查平台活动')">查平台活动</button>
             <button type="button" class="c-prompt" @click="sendPrompt('问店宠售后')">问店宠售后</button>
+            <button
+              type="button"
+              class="c-prompt is-negotiate"
+              :disabled="negotiating || typing"
+              @click="runNegotiation"
+            >{{ negotiating ? "双宠谈判中…" : "让小鱼去砍价" }}</button>
           </div>
+          <p v-if="negotiateError" class="c-inline-error c-negotiate-error" role="status">
+            {{ negotiateError }}
+          </p>
 
           <form class="c-composer" @submit.prevent="send">
             <label class="sr-only" for="c-app-input">输入消息</label>
@@ -1395,7 +1478,7 @@ onBeforeUnmount(() => {
                 查看报价 <span>→</span>
               </RouterLink>
             </div>
-            <div v-else class="c-quote-card">
+            <div v-else-if="!negotiationRejected" class="c-quote-card">
               <div class="c-quote-card-top">
                 <span class="c-quote-card-label">来自店宠的报价</span>
                 <span class="c-dot waiting" />
@@ -2291,6 +2374,27 @@ onBeforeUnmount(() => {
 .c-prompt:hover {
   border-color: var(--c-text-3);
   color: var(--c-text);
+}
+
+.c-prompt:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 双宠谈判入口：低饱和强调色，和普通快捷问题区分但不抢视觉 */
+.c-prompt.is-negotiate {
+  border-color: color-mix(in srgb, var(--c-accent) 45%, var(--c-line));
+  color: var(--c-accent);
+}
+
+.c-prompt.is-negotiate:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  color: var(--c-text);
+}
+
+.c-negotiate-error {
+  margin: 0;
+  padding: 0 0 6px;
 }
 
 .c-composer {

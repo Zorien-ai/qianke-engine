@@ -279,14 +279,15 @@ GET  /api/c/merchant/products
 GET  /api/c/merchant/inventory/{sku}
 GET  /api/c/merchant/orders
 GET  /api/c/merchant/orders/{order_id}
+POST /api/c/negotiations
 GET  /api/c/quotes/{quote_id}
 POST /api/c/quotes/{quote_id}/prepare
 ```
 
 当前限制：
 
-- 店宠商品/库存/订单已接商家数据层 `merchant_v1`；C 商城下单仍用 mock `c_product/c_order`，商家库存只读参考
-- 店宠没有真实优惠/改价授权，砍价只能说明需商家确认
+- 店宠商品/库存/订单已接商家数据层；C 商城下单已联动商家预占/订单/取消/售后
+- 双宠谈判只在平台满减规则内协商，店宠没有改价/发券权限
 - C 伙伴只有锐评，不做自主谈判
 - 报价商品数量默认 1，用户可在商城重新准备
 - 只有 platform_full_reduce 活动被确定性应用；其他优惠仍需商家确认
