@@ -401,3 +401,20 @@ GET  /api/c/admin/reconciliation/runs?limit=20   → {runs:[同 run 结构]}
 - 「立即对账」调用 run 接口并 toast 结果，完成后刷新当前报告与历史；运行中禁用防重复；
 - 首次进入同时加载当前检查与历史；两者独立容错——历史接口失败时仍展示当前检查，错误 toast `detail.message`；
 - 白色极简，表格在移动端容器内横向滚动，页面不横向溢出。
+
+## 14. CApp 未读与 @ 提及定位
+
+CApp（`web/src/views/CApp.vue`）的会话未读角标与 @ 提及全部来自接口，不再使用前端硬编码：
+
+```text
+GET  /api/c/threads/unread            → {threads:{companion,store_demo,friend_demo}, mentions}
+POST /api/c/threads/{thread_id}/read  → {thread_id, read_at}
+GET  /api/c/mentions?unread_only=&limit= → {mentions:[{mention_id,thread_id,message_id,token,target_id,target_name,created_at,read_at}], unread}
+POST /api/c/mentions/read             → {read}
+```
+
+- 会话列表角标取 `threads.unread`；进入会话先乐观清零并 POST read，然后刷新未读；发送消息后刷新未读；收到消息（含店宠 HTTP/WS 回包、小鱼回复）后刷新未读，当前打开的会话节流标记已读；
+- 挂载时拉取一次未读并每 20s 轮询；`visibilitychange` 为 hidden 时清除定时器暂停轮询，回到前台立即刷新并恢复；
+- 消息气泡中的 `@小鱼 / @店宠 / @小满` 渲染为可聚焦的 `span role=button`，点击/回车切换到对应会话（companion / store_demo / friend_demo）；`@我` 保持普通文本不跳转；
+- 未读 @ 通知：`mentions > 0` 时在顶部栏/会话头部/移动端消息列表显示 `@N` 胶囊；点击先 `GET /mentions?unread_only=1` 取最近一条未读提及，POST `/mentions/read` 标读并打开其所在会话，无未读时隐藏；
+- 白色极简、低饱和描边胶囊；移动端头部/消息列表不溢出。

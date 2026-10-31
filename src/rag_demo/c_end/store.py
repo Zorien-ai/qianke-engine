@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from rag_demo.c_end import mentions
 from rag_demo.c_end import persona as c_persona
 from rag_demo.config import BASE_DIR
 from rag_demo.merchant import (
@@ -410,6 +411,28 @@ CREATE TABLE IF NOT EXISTS c_reconciliation_run (
 
 CREATE INDEX IF NOT EXISTS idx_c_reconciliation_started
     ON c_reconciliation_run (started_at DESC);
+
+CREATE TABLE IF NOT EXISTS c_mention (
+    mention_id  TEXT PRIMARY KEY,
+    owner_id    TEXT NOT NULL,
+    thread_id   TEXT NOT NULL,
+    message_id  TEXT NOT NULL,
+    token       TEXT NOT NULL,
+    target_id   TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    read_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_mention_owner_target
+    ON c_mention (owner_id, target_id, created_at);
+
+CREATE TABLE IF NOT EXISTS c_thread_read (
+    owner_id     TEXT NOT NULL,
+    thread_id    TEXT NOT NULL,
+    last_read_at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, thread_id)
+);
 """
 
 _SEED = (
@@ -1952,6 +1975,32 @@ def update_companion(
         conn.close()
 
 
+def _record_mentions(
+    conn: sqlite3.Connection,
+    *,
+    owner_id: str,
+    thread_id: str,
+    message_id: str,
+    text: str,
+    created_at: str,
+) -> None:
+    for mention in mentions.extract_mentions(text):
+        conn.execute(
+            "INSERT OR IGNORE INTO c_mention(mention_id, owner_id, thread_id, message_id, token, "
+            "target_id, target_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"mn_{uuid.uuid4().hex[:20]}",
+                owner_id,
+                thread_id,
+                message_id,
+                mention["token"],
+                mention["target_id"],
+                mention["name"],
+                created_at,
+            ),
+        )
+
+
 def save_app_message(
     owner_id: str,
     thread_id: str,
@@ -1970,7 +2019,7 @@ def save_app_message(
         raise CStoreError("EMPTY_MESSAGE", "消息不能为空")
     if len(text) > 2000:
         raise CStoreError("MESSAGE_TOO_LONG", "消息不能超过 2000 字")
-    meta = metadata or {}
+    meta = mentions.attach_metadata(metadata, text)
     init()
     message_id = f"appmsg_{uuid.uuid4().hex[:20]}"
     created_at = _next_message_time()
@@ -1980,6 +2029,14 @@ def save_app_message(
             "INSERT INTO c_app_message(message_id, owner_id, thread_id, role, content, metadata_json, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (message_id, owner_id, thread, role, text, json.dumps(meta, ensure_ascii=False), created_at),
+        )
+        _record_mentions(
+            conn,
+            owner_id=owner_id,
+            thread_id=thread,
+            message_id=message_id,
+            text=text,
+            created_at=created_at,
         )
         conn.commit()
     finally:
@@ -2042,8 +2099,145 @@ def clear_app_messages(owner_id: str, thread_id: str) -> int:
             "DELETE FROM c_app_message WHERE owner_id = ? AND thread_id = ?",
             (owner_id, str(thread_id)),
         )
+        conn.execute(
+            "DELETE FROM c_mention WHERE owner_id = ? AND thread_id = ?",
+            (owner_id, str(thread_id)),
+        )
         conn.commit()
         return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def _ensure_thread_read(conn: sqlite3.Connection, owner_id: str, thread_id: str) -> str:
+    row = conn.execute(
+        "SELECT last_read_at FROM c_thread_read WHERE owner_id = ? AND thread_id = ?",
+        (owner_id, thread_id),
+    ).fetchone()
+    if row is not None:
+        return row["last_read_at"]
+    now = _now()
+    conn.execute(
+        "INSERT OR IGNORE INTO c_thread_read(owner_id, thread_id, last_read_at) VALUES (?, ?, ?)",
+        (owner_id, thread_id, now),
+    )
+    return now
+
+
+def get_thread_unread(owner_id: str) -> dict[str, int]:
+    """返回各会话未读数；首次访问把当前历史视为已读。"""
+    init()
+    conn = _connect()
+    try:
+        threads = {"companion": 0, "store_demo": 0, "friend_demo": 0}
+        conn.execute("BEGIN IMMEDIATE")
+        for thread_id in threads:
+            last_read = _ensure_thread_read(conn, owner_id, thread_id)
+            if thread_id == "companion":
+                count = conn.execute(
+                    "SELECT COUNT(*) AS n FROM c_app_message WHERE owner_id = ? AND thread_id = ? "
+                    "AND role != 'user' AND created_at > ?",
+                    (owner_id, thread_id, last_read),
+                ).fetchone()["n"]
+            else:
+                count = conn.execute(
+                    "SELECT COUNT(*) AS n FROM c_message WHERE owner_id = ? AND friend_id = ? "
+                    "AND sender_id != ? AND created_at > ?",
+                    (owner_id, thread_id, owner_id, last_read),
+                ).fetchone()["n"]
+            threads[thread_id] = int(count)
+        conn.commit()
+        return threads
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def mark_thread_read(owner_id: str, thread_id: str) -> dict[str, Any]:
+    thread = str(thread_id or "").strip()
+    if thread not in {"companion", "store_demo", "friend_demo"}:
+        raise CStoreError("INVALID_THREAD", "会话 ID 不合法")
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        now = _now()
+        conn.execute(
+            "INSERT INTO c_thread_read(owner_id, thread_id, last_read_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(owner_id, thread_id) DO UPDATE SET last_read_at = excluded.last_read_at",
+            (owner_id, thread, now),
+        )
+        # 进入会话即视为读掉该会话里的 @ 提及。
+        conn.execute(
+            "UPDATE c_mention SET read_at = ? WHERE owner_id = ? AND thread_id = ? AND read_at IS NULL",
+            (now, owner_id, thread),
+        )
+        conn.commit()
+        return {"thread_id": thread, "read_at": now}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def list_mentions(owner_id: str, *, unread_only: bool = False, limit: int = 50) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        where = "owner_id = ?"
+        params: list[Any] = [owner_id]
+        if unread_only:
+            where += " AND read_at IS NULL"
+        params.append(max(1, min(int(limit), 100)))
+        rows = conn.execute(
+            f"SELECT * FROM c_mention WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [
+            {
+                "mention_id": row["mention_id"],
+                "thread_id": row["thread_id"],
+                "message_id": row["message_id"],
+                "token": row["token"],
+                "target_id": row["target_id"],
+                "target_name": row["target_name"],
+                "created_at": row["created_at"],
+                "read_at": row["read_at"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def unread_mention_count(owner_id: str) -> int:
+    init()
+    conn = _connect()
+    try:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM c_mention WHERE owner_id = ? AND target_id = 'me' "
+                "AND read_at IS NULL",
+                (owner_id,),
+            ).fetchone()["n"]
+        )
+    finally:
+        conn.close()
+
+
+def mark_all_mentions_read(owner_id: str) -> int:
+    init()
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE c_mention SET read_at = ? WHERE owner_id = ? AND read_at IS NULL",
+            (_now(), owner_id),
+        )
+        conn.commit()
+        return int(cursor.rowcount)
     finally:
         conn.close()
 

@@ -279,6 +279,10 @@ POST /api/c/friends/{friend_id}/messages
   → content + client_message_id（可选，幂等键）
 WS   /api/c/ws/chat/{friend_id}
   → client_message_id（可选，幂等键）
+GET  /api/c/threads/unread
+POST /api/c/threads/{thread_id}/read
+GET  /api/c/mentions
+POST /api/c/mentions/read
 GET  /api/c/merchant/products
 GET  /api/c/merchant/inventory/{sku}
 GET  /api/c/merchant/orders

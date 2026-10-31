@@ -15,7 +15,7 @@ import re
 import uuid
 from typing import Any, Callable
 
-from rag_demo.c_end import store
+from rag_demo.c_end import mentions, store
 
 # 与 store._now() 产出的 ISO 时间戳对齐（毫秒/微秒、时区后缀都可选）。
 _ISO_TS_RE = re.compile(
@@ -50,6 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_c_message_owner_friend
 
 
 def init() -> None:
+    store.init()
     with store._DB_LOCK:
         conn = store._connect()
         try:
@@ -189,12 +190,27 @@ def _insert_message(
 ) -> dict[str, Any]:
     message_id = f"msg_{uuid.uuid4().hex[:20]}"
     created_at = store._next_message_time()
-    meta = metadata or {}
+    meta = mentions.attach_metadata(metadata, content)
     conn.execute(
         "INSERT INTO c_message(message_id, owner_id, friend_id, sender_id, receiver_id, content, metadata_json, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (message_id, owner_id, friend_id, sender_id, receiver_id, content, json.dumps(meta, ensure_ascii=False), created_at),
     )
+    for mention in mentions.extract_mentions(content):
+        conn.execute(
+            "INSERT OR IGNORE INTO c_mention(mention_id, owner_id, thread_id, message_id, token, "
+            "target_id, target_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"mn_{uuid.uuid4().hex[:20]}",
+                owner_id,
+                friend_id,
+                message_id,
+                mention["token"],
+                mention["target_id"],
+                mention["name"],
+                created_at,
+            ),
+        )
     return {
         "message_id": message_id,
         "owner_id": owner_id,

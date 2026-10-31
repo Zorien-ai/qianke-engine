@@ -18,7 +18,7 @@ const threads = ref([
     kind: "merchant",
     preview: "满减活动已更新",
     time: "09:18",
-    unread: 2,
+    unread: 0,
   },
   {
     id: "friend_demo",
@@ -91,6 +91,142 @@ const draft = ref("");
 const mentionOpen = ref(false);
 const mentionQuery = ref("");
 const mentionIndex = ref(0);
+
+/* ---------- 未读 / @ 提及（全部以接口数据为准） ---------- */
+const THREAD_IDS = ["companion", "store_demo", "friend_demo"];
+const MENTION_THREAD_MAP = {
+  "@小鱼": "companion",
+  "@店宠": "store_demo",
+  "@小满": "friend_demo",
+};
+const unreadCounts = ref({ companion: 0, store_demo: 0, friend_demo: 0 });
+const mentionUnread = ref(0);
+const mentionBusy = ref(false);
+const unreadMentions = ref([]);
+let unreadTimer = null;
+let unreadRefreshTimer = null;
+let incomingReadTimer = null;
+
+function unreadOf(threadId) {
+  return Number(unreadCounts.value[threadId] || 0);
+}
+
+function mentionThreadId(token) {
+  return MENTION_THREAD_MAP[String(token || "").trim()] || "";
+}
+
+/** 拉取各会话未读数 + 未读 @ 数；页面隐藏时跳过 */
+async function refreshUnread() {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+  try {
+    const data = await getJson("/api/c/threads/unread");
+    const payload = data?.threads || {};
+    unreadCounts.value = {
+      companion: Number(payload.companion || 0),
+      store_demo: Number(payload.store_demo || 0),
+      friend_demo: Number(payload.friend_demo || 0),
+    };
+    mentionUnread.value = Number(data?.mentions || 0);
+  } catch {
+    // 未读接口失败不打断会话，保留上一次成功的数据
+  }
+}
+
+/** 进入会话：先乐观清零角标，再 POST read 并刷新未读 */
+async function markThreadRead(threadId) {
+  const id = String(threadId || "");
+  if (!THREAD_IDS.includes(id)) return;
+  unreadCounts.value = { ...unreadCounts.value, [id]: 0 };
+  try {
+    await postJson(`/api/c/threads/${encodeURIComponent(id)}/read`, {});
+  } catch {
+    // 失败交给下一次轮询/进入会话校正
+  }
+  await refreshUnread();
+}
+
+/** 收到消息后合并刷新，避免每条消息都打一次未读接口 */
+function scheduleUnreadRefresh() {
+  if (unreadRefreshTimer) return;
+  unreadRefreshTimer = window.setTimeout(() => {
+    unreadRefreshTimer = null;
+    refreshUnread();
+  }, 400);
+}
+
+/** 消息落在当前打开的会话里：节流标记已读，避免自己的活跃会话出现未读角标 */
+function scheduleIncomingRead() {
+  if (incomingReadTimer) return;
+  incomingReadTimer = window.setTimeout(() => {
+    incomingReadTimer = null;
+    if (document.visibilityState === "hidden") return;
+    markThreadRead(activeId.value);
+  }, 500);
+}
+
+function startUnreadPolling() {
+  stopUnreadPolling();
+  unreadTimer = window.setInterval(refreshUnread, 20000);
+}
+
+function stopUnreadPolling() {
+  if (unreadTimer) {
+    clearInterval(unreadTimer);
+    unreadTimer = null;
+  }
+}
+
+/** 页面隐藏暂停轮询，回到前台立即刷新并恢复 */
+function onVisibilityChange() {
+  if (document.visibilityState === "hidden") {
+    stopUnreadPolling();
+    return;
+  }
+  refreshUnread();
+  startUnreadPolling();
+}
+
+/** 点击消息里的 @ 文本：切到对应会话；@我 不跳转 */
+async function openMentionThread(token) {
+  const id = mentionThreadId(token);
+  if (!id) return;
+  if (activeId.value === id) {
+    await markThreadRead(id);
+    return;
+  }
+  await switchThread(id);
+}
+
+/** 点击 @N 通知：标记全部提及已读，并打开最近一条未读提及所在会话 */
+async function openUnreadMentions() {
+  if (mentionBusy.value) return;
+  mentionBusy.value = true;
+  try {
+    let target = unreadMentions.value[0] || null;
+    if (!target) {
+      const data = await getJson("/api/c/mentions?unread_only=1&limit=20");
+      unreadMentions.value = Array.isArray(data?.mentions) ? data.mentions : [];
+      target = unreadMentions.value[0] || null;
+    }
+    await postJson("/api/c/mentions/read", {});
+    mentionUnread.value = 0;
+    unreadMentions.value = [];
+    const targetId = THREAD_IDS.includes(String(target?.thread_id || ""))
+      ? target.thread_id
+      : "";
+    if (!targetId) {
+      await refreshUnread();
+    } else if (activeId.value === targetId) {
+      await markThreadRead(targetId);
+    } else {
+      await switchThread(targetId);
+    }
+  } catch {
+    // 标记失败时保留 @N，等用户重试或轮询恢复
+  } finally {
+    mentionBusy.value = false;
+  }
+}
 
 const mentionOptions = computed(() => {
   const query = mentionQuery.value.trim().toLowerCase();
@@ -558,6 +694,11 @@ function pushMessage(message) {
     time: nowTime(),
     ...message,
   });
+  // 收到（非自己发送的）消息后刷新未读；当前会话内的消息同时节流标记已读
+  if (message.role !== "user") {
+    scheduleUnreadRefresh();
+    scheduleIncomingRead();
+  }
 }
 
 function localReply(text) {
@@ -831,6 +972,8 @@ async function send() {
   pendingRetry.value = null;
   scrollToBottom();
   await deliverText(text, false, clientId);
+  // 发送后刷新未读（其它会话可能有新消息），当前会话保持已读
+  await refreshUnread();
 }
 
 async function retrySend() {
@@ -1130,6 +1273,8 @@ async function switchThread(id) {
   showContext.value = false;
   // 切回会话时刷新最近订单：订单可能在别的页面/商城刚创建，右侧栏不能停在旧数据
   loadRecentOrders();
+  // 进入会话即标记已读并把角标清零，之后以后端未读接口为准
+  markThreadRead(id);
   if (id === "store_demo") {
     await loadStoreMessages();
     openStoreSocket();
@@ -1178,6 +1323,9 @@ function selectMobileThread(id) {
 
 onMounted(async () => {
   await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders()]);
+  await refreshUnread();
+  startUnreadPolling();
+  document.addEventListener("visibilitychange", onVisibilityChange);
   syncViewportHeight();
   window.visualViewport?.addEventListener("resize", onViewportResize);
   window.visualViewport?.addEventListener("scroll", onViewportResize);
@@ -1196,6 +1344,16 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (copyTipTimer) clearTimeout(copyTipTimer);
   if (messagePressTimer) clearTimeout(messagePressTimer);
+  stopUnreadPolling();
+  if (unreadRefreshTimer) {
+    clearTimeout(unreadRefreshTimer);
+    unreadRefreshTimer = null;
+  }
+  if (incomingReadTimer) {
+    clearTimeout(incomingReadTimer);
+    incomingReadTimer = null;
+  }
+  document.removeEventListener("visibilitychange", onVisibilityChange);
   for (const url of avatarPreviewUrls) URL.revokeObjectURL(url);
   avatarPreviewUrls.clear();
   window.visualViewport?.removeEventListener("resize", onViewportResize);
@@ -1289,7 +1447,7 @@ onBeforeUnmount(() => {
             </span>
             <span class="c-thread-meta">
               <time>{{ thread.time }}</time>
-              <span v-if="thread.unread" class="c-unread">{{ thread.unread }}</span>
+              <span v-if="unreadOf(thread.id)" class="c-unread">{{ unreadOf(thread.id) }}</span>
             </span>
           </button>
         </section>
@@ -1320,6 +1478,15 @@ onBeforeUnmount(() => {
             <span class="c-topbar-crumb">对话</span>
           </div>
           <div class="c-topbar-right">
+            <button
+              v-if="mentionUnread > 0"
+              type="button"
+              class="c-mention-notif"
+              :disabled="mentionBusy"
+              :aria-label="`${mentionUnread} 条未读 @ 提及`"
+              title="未读 @：点击标记已读并打开会话"
+              @click="openUnreadMentions"
+            >@{{ mentionUnread }}</button>
             <span class="c-plan"><i class="c-dot plan" />{{ planLabel }}</span>
             <button class="c-icon-btn" type="button" aria-label="打开当前会话信息" @click="toggleContext">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -1374,6 +1541,15 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="c-chat-actions">
+              <button
+                v-if="mentionUnread > 0"
+                type="button"
+                class="c-mention-notif"
+                :disabled="mentionBusy"
+                :aria-label="`${mentionUnread} 条未读 @ 提及`"
+                title="未读 @：点击标记已读并打开会话"
+                @click="openUnreadMentions"
+              >@{{ mentionUnread }}</button>
               <button class="c-icon-btn" type="button" aria-label="当前会话信息" @click="toggleContext">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
                   <circle cx="12" cy="12" r="9" />
@@ -1451,6 +1627,13 @@ onBeforeUnmount(() => {
                     v-for="(part, index) in messageSegments(message.text)"
                     :key="index"
                     :class="{ 'c-mention-token': part.mention }"
+                    :role="part.mention ? 'button' : null"
+                    :tabindex="part.mention ? 0 : null"
+                    :title="part.mention ? '切换到该会话' : null"
+                    @click="part.mention && openMentionThread(part.text)"
+                    @keydown.enter.prevent="part.mention && openMentionThread(part.text)"
+                    @keydown.space.prevent="part.mention && openMentionThread(part.text)"
+                    @pointerdown="part.mention && $event.stopPropagation()"
                   >{{ part.text }}</span>
                   <time class="c-bubble-time">{{ message.time }}</time>
                 </p>
@@ -1746,11 +1929,22 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <h1>消息</h1>
-        <button type="button" class="c-icon-btn" aria-label="新建会话" disabled>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
+        <div class="c-mobile-thread-actions">
+          <button
+            v-if="mentionUnread > 0"
+            type="button"
+            class="c-mention-notif"
+            :disabled="mentionBusy"
+            :aria-label="`${mentionUnread} 条未读 @ 提及`"
+            title="未读 @：点击标记已读并打开会话"
+            @click="openUnreadMentions"
+          >@{{ mentionUnread }}</button>
+          <button type="button" class="c-icon-btn" aria-label="新建会话" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        </div>
       </header>
       <label class="c-mobile-search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -1783,7 +1977,7 @@ onBeforeUnmount(() => {
             </span>
             <small>{{ thread.preview }}</small>
           </span>
-          <span v-if="thread.unread" class="c-unread">{{ thread.unread }}</span>
+          <span v-if="unreadOf(thread.id)" class="c-unread">{{ unreadOf(thread.id) }}</span>
         </button>
       </div>
     </div>
@@ -2300,6 +2494,39 @@ onBeforeUnmount(() => {
 .c-chat-actions {
   display: flex;
   gap: 4px;
+}
+
+/* @ 未读通知：低饱和描边胶囊，不抢对话视觉 */
+.c-mention-notif {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 45%, var(--c-line));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-accent);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.c-mention-notif:hover:not(:disabled) {
+  border-color: var(--c-accent);
+}
+
+.c-mention-notif:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.c-mobile-thread-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .c-thread {
@@ -3644,6 +3871,18 @@ onBeforeUnmount(() => {
 .c-app .c-mention-token {
   color: var(--c-accent);
   font-weight: 500;
+}
+
+/* 可点击的 @ 文本：保留既有高亮，只补交互态 */
+.c-app .c-mention-token[role="button"] {
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.c-app .c-mention-token[role="button"]:hover,
+.c-app .c-mention-token[role="button"]:focus-visible {
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  outline: none;
 }
 
 .c-app .c-message.user .c-bubble .c-mention-token {

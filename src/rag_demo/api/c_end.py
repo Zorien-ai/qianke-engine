@@ -377,6 +377,39 @@ def save_app_message(req: AppMessageIn) -> dict:
         raise _http_error(exc) from exc
 
 
+@router.get("/threads/unread")
+def thread_unread() -> dict:
+    buyer_id, _ = _buyer()
+    return {
+        "threads": store.get_thread_unread(buyer_id),
+        "mentions": store.unread_mention_count(buyer_id),
+    }
+
+
+@router.post("/threads/{thread_id}/read")
+def mark_thread_read(thread_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.mark_thread_read(buyer_id, thread_id)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/mentions")
+def list_mentions(unread_only: bool = False, limit: int = 50) -> dict:
+    buyer_id, _ = _buyer()
+    return {
+        "mentions": store.list_mentions(buyer_id, unread_only=unread_only, limit=limit),
+        "unread": store.unread_mention_count(buyer_id),
+    }
+
+
+@router.post("/mentions/read")
+def read_mentions() -> dict:
+    buyer_id, _ = _buyer()
+    return {"read": store.mark_all_mentions_read(buyer_id)}
+
+
 @router.get("/admin/reconciliation")
 def admin_reconciliation(limit: int = 200) -> dict:
     """C 订单与商家订单对账（仅平台管理员，只读）。"""
