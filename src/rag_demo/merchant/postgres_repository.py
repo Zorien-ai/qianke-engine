@@ -361,19 +361,17 @@ CREATE TABLE IF NOT EXISTS {schema}.m_order (
     refund_amount TEXT,
     refunded_at  TEXT,
     cancel_request_id TEXT,
-    refund_request_id TEXT
+    refund_request_id TEXT,
+    returned_at  TEXT,
+    restock_request_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_m_order_merchant
     ON {schema}.m_order (merchant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_m_order_buyer
     ON {schema}.m_order (buyer_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_cancel_request
-    ON {schema}.m_order (cancel_request_id)
-    WHERE cancel_request_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_refund_request
-    ON {schema}.m_order (refund_request_id)
-    WHERE refund_request_id IS NOT NULL;
+-- request_id 部分唯一索引由 _init_schema 的幂等迁移统一创建：
+-- 旧 schema 可能还没有对应列，必须先 ALTER 补列再建索引，避免 CREATE INDEX 失败。
 
 CREATE TABLE IF NOT EXISTS {schema}.m_order_item (
     order_id    TEXT NOT NULL REFERENCES {schema}.m_order (order_id) ON DELETE CASCADE,
@@ -414,6 +412,28 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
         try:
             with conn.cursor() as cur:
                 cur.execute(self._ddl())
+                # 幂等迁移：已存在的旧 schema 可能缺 task-54 的退货入库列/索引。
+                # （search_path 已指向目标 schema，故这里用非限定名。）
+                cur.execute("ALTER TABLE m_order ADD COLUMN IF NOT EXISTS returned_at TEXT")
+                cur.execute(
+                    "ALTER TABLE m_order ADD COLUMN IF NOT EXISTS restock_request_id TEXT"
+                )
+                # 三个 request_id 幂等键统一在这里创建（老 schema 先补列，再建部分唯一索引）
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_cancel_request "
+                    "ON m_order (cancel_request_id) "
+                    "WHERE cancel_request_id IS NOT NULL"
+                )
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_refund_request "
+                    "ON m_order (refund_request_id) "
+                    "WHERE refund_request_id IS NOT NULL"
+                )
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_restock_request "
+                    "ON m_order (restock_request_id) "
+                    "WHERE restock_request_id IS NOT NULL"
+                )
             conn.commit()
         except BaseException:
             conn.rollback()
@@ -741,8 +761,8 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
         sql = (
             "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
             "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
-            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at "
-            "FROM m_order WHERE merchant_id = %s"
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE merchant_id = %s"
         )
         params: list[Any] = [merchant]
         buyer = _clean_optional(buyer_id)
@@ -774,8 +794,8 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
         sql = (
             "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
             "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
-            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at "
-            "FROM m_order WHERE order_id = %s"
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE order_id = %s"
         )
         params: list[Any] = [order]
         merchant = _clean_optional(merchant_id)
@@ -1343,6 +1363,102 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
                 "request_id 已被其他退款请求占用，请重试或换用新的 request_id"
             ) from exc
 
+    def receive_return(
+        self,
+        merchant_id: str,
+        order_id: str,
+        request_id: str | None = None,
+    ) -> Order:
+        """退货验收入库：按已提交预占 allocations 恢复库存；订单状态不变；幂等。
+
+        业务规则与 SQLite adapter 完全一致（task-54）：
+        - 只允许 SHIPPED/COMPLETED；其他状态 Conflict；
+        - 只按该订单 COMMITTED 预占的仓库 allocations 恢复 available；
+          没有可恢复预占 → Conflict（不猜仓库、不凭空补库存）；
+        - 写 returned_at / restock_request_id；订单状态不变；退款由 refund_order 负责；
+        - request_id 幂等（同 key 同订单重放返回同一结果，跨订单 Conflict）。
+        """
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        order = _required_text(order_id, "order_id")
+        request = request_id
+        if request is not None:
+            request = _required_text(request, "request_id", max_length=128)
+
+        try:
+            with self._lock, self._transaction() as cur:
+                now = _now()
+                if request is not None:
+                    cur.execute(
+                        "SELECT * FROM m_order WHERE restock_request_id = %s",
+                        (request,),
+                    )
+                    bound = cur.fetchone()
+                    if bound is not None:
+                        if (
+                            str(bound["order_id"]) != order
+                            or str(bound["merchant_id"]) != merchant
+                        ):
+                            raise MerchantConflictError(
+                                "request_id 已被用于其他订单的退货入库，不能跨订单复用"
+                            )
+                        return self._hydrate_orders(cur, [bound])[0]
+
+                cur.execute(
+                    "SELECT * FROM m_order WHERE order_id = %s FOR UPDATE", (order,)
+                )
+                row = cur.fetchone()
+                if row is None or str(row["merchant_id"]) != merchant:
+                    raise MerchantNotFoundError(f"订单不存在: {order}")
+                if row["returned_at"] is not None:
+                    return self._hydrate_orders(cur, [row])[0]
+                current = str(row["status"]).upper()
+                if current not in (ORDER_STATUS_SHIPPED, ORDER_STATUS_COMPLETED):
+                    raise MerchantConflictError(
+                        f"当前状态 {current} 不允许退货入库（仅 SHIPPED/COMPLETED；"
+                        f"未发货请走 cancel_order，已退款订单不能再入库）"
+                    )
+
+                cur.execute(
+                    "SELECT * FROM m_reservation "
+                    "WHERE order_id = %s AND merchant_id = %s AND status = %s "
+                    "FOR UPDATE",
+                    (order, merchant, RESERVATION_STATUS_COMMITTED),
+                )
+                reservation_rows = cur.fetchall()
+                if not reservation_rows:
+                    raise MerchantConflictError(
+                        "订单没有可恢复的已提交预占（COMMITTED allocation），"
+                        "不能退货入库；不猜测仓库、不凭空补库存"
+                    )
+                for reservation_row in reservation_rows:
+                    reservation = self._reservation_from_row(reservation_row)
+                    self._restore_committed_allocations(cur, reservation, now)
+                    cur.execute(
+                        "UPDATE m_reservation SET status = %s, updated_at = %s "
+                        "WHERE reservation_id = %s",
+                        (RESERVATION_STATUS_REVERSED, now, reservation.reservation_id),
+                    )
+
+                assignments: dict[str, Any] = {"returned_at": now}
+                if request is not None:
+                    assignments["restock_request_id"] = request
+                set_sql = ", ".join(f"{column} = %s" for column in assignments)
+                cur.execute(
+                    f"UPDATE m_order SET {set_sql} WHERE order_id = %s AND merchant_id = %s",
+                    (*assignments.values(), order, merchant),
+                )
+                if cur.rowcount != 1:
+                    raise MerchantNotFoundError(f"订单不存在: {order}")
+                cur.execute("SELECT * FROM m_order WHERE order_id = %s", (order,))
+                return self._hydrate_orders(cur, [cur.fetchone()])[0]
+        except BaseException as exc:  # noqa: BLE001 request_id 唯一索引并发兜底
+            if not self._unique_violation(exc):
+                raise
+            raise MerchantConflictError(
+                "request_id 已被其他退货入库请求占用，请重试或换用新的 request_id"
+            ) from exc
+
     # ---------- 写路径：内部辅助 ----------
     def _resolve_write_lines(
         self,
@@ -1732,6 +1848,7 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
                         else None
                     ),
                     refunded_at=row.get("refunded_at"),
+                    returned_at=row.get("returned_at"),
                 )
             )
         return orders

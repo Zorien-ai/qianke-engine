@@ -68,6 +68,15 @@ class AfterSaleResolveIn(BaseModel):
     approved: bool
 
 
+class ReturnShipmentIn(BaseModel):
+    tracking_no: str = Field(..., min_length=1, max_length=64)
+    carrier: str | None = Field(default=None, max_length=64)
+
+
+class AfterSaleReceiveIn(BaseModel):
+    accepted: bool
+
+
 class CAgentRunIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     thread_id: str | None = Field(default=None, max_length=128)
@@ -141,6 +150,7 @@ def _http_error(exc: store.CStoreError) -> HTTPException:
             "MERCHANT_EXPIRED",
             "AFTER_SALE_NOT_ALLOWED",
             "AFTER_SALE_EXISTS",
+            "AFTER_SALE_NOT_RETURNABLE",
         } else 400
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
 
@@ -785,6 +795,23 @@ def admin_merchant_orders(
     return {"source": "merchant_v1", "orders": [order.to_dict() for order in orders]}
 
 
+@router.post("/orders/{order_id}/after-sales/{ticket_id}/return-shipment")
+def submit_return_shipment(order_id: str, ticket_id: str, req: ReturnShipmentIn) -> dict:
+    buyer_id, _ = _buyer()
+    ticket = store.get_after_sale(ticket_id, buyer_id)
+    if ticket["order_id"] != order_id:
+        raise HTTPException(status_code=404, detail="售后工单不属于该订单")
+    try:
+        return store.submit_return_shipment(
+            buyer_id,
+            ticket_id,
+            tracking_no=req.tracking_no,
+            carrier=req.carrier,
+        )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.get("/admin/after-sales")
 def admin_after_sales(status: str | None = None, limit: int = 100) -> dict:
     _require_admin()
@@ -800,6 +827,15 @@ def admin_resolve_after_sale(ticket_id: str, req: AfterSaleResolveIn) -> dict:
     _require_admin()
     try:
         return store.resolve_after_sale(ticket_id, approved=req.approved)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/admin/after-sales/{ticket_id}/receive")
+def admin_receive_after_sale(ticket_id: str, req: AfterSaleReceiveIn) -> dict:
+    _require_admin()
+    try:
+        return store.receive_after_sale(ticket_id, accepted=req.accepted)
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
 

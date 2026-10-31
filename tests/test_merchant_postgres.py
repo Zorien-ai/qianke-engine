@@ -460,3 +460,165 @@ def test_postgres_concurrent_reservations_no_oversell(pg_schema, seed):
     finally:
         for repository in repositories:
             repository.close()
+
+
+# ==================== 退货验收入库 receive_return（task-54） ====================
+def _setup_pg_shipped_order(repo, seed, *, tag: str, complete: bool = False) -> dict:
+    merchant_id, sku = _pick_sku(seed)
+    price = _sku_price(seed, sku)
+    baseline_available = _available(repo, sku)
+    baseline_reserved = _reserved(repo, sku)
+    repo.reserve_inventory(
+        merchant_id, f"RSV-{tag}", [{"sku": sku, "quantity": 2}], buyer_id="b_pg"
+    )
+    repo.create_order(
+        merchant_id, f"ORD-{tag}", "b_pg",
+        [{"sku": sku, "quantity": 2}], str(price * 2),
+    )
+    repo.commit_reservation(merchant_id, f"RSV-{tag}", order_id=f"ORD-{tag}")
+    repo.update_order_status(merchant_id, f"ORD-{tag}", "PAID")
+    repo.update_order_status(
+        merchant_id, f"ORD-{tag}", "SHIPPED",
+        tracking_no="SF1234567890", carrier="顺丰速运",
+    )
+    if complete:
+        repo.update_order_status(merchant_id, f"ORD-{tag}", "COMPLETED")
+    return {
+        "merchant_id": merchant_id,
+        "sku": sku,
+        "baseline_available": baseline_available,
+        "baseline_reserved": baseline_reserved,
+        "reservation_id": f"RSV-{tag}",
+        "order_id": f"ORD-{tag}",
+        "final_status": "COMPLETED" if complete else "SHIPPED",
+    }
+
+
+def test_postgres_receive_return_restores_stock(repo, seed):
+    setup = _setup_pg_shipped_order(repo, seed, tag="PG-RETURN")
+    assert _available(repo, setup["sku"]) == setup["baseline_available"] - 2
+
+    returned = repo.receive_return(setup["merchant_id"], setup["order_id"])
+
+    assert returned.status == "SHIPPED"
+    assert returned.returned_at
+    assert returned.refund_amount is None
+    assert _available(repo, setup["sku"]) == setup["baseline_available"]
+    assert _reserved(repo, setup["sku"]) == setup["baseline_reserved"]
+    assert (
+        _scalar(
+            repo.schema,
+            "SELECT status FROM {schema}.m_reservation WHERE reservation_id = %s",
+            (setup["reservation_id"],),
+        )
+        == "REVERSED"
+    )
+    # 幂等：重复调用不重复恢复库存
+    replay = repo.receive_return(setup["merchant_id"], setup["order_id"])
+    assert replay.returned_at == returned.returned_at
+    assert _available(repo, setup["sku"]) == setup["baseline_available"]
+
+    completed = _setup_pg_shipped_order(repo, seed, tag="PG-RETURN-COMPLETE", complete=True)
+    result = repo.receive_return(completed["merchant_id"], completed["order_id"])
+    assert result.status == "COMPLETED"  # 订单状态不变
+
+
+def test_postgres_receive_return_request_id_conflict(repo, seed):
+    first = _setup_pg_shipped_order(repo, seed, tag="PG-RETURN-X1")
+    second = _setup_pg_shipped_order(repo, seed, tag="PG-RETURN-X2")
+
+    repo.receive_return(
+        first["merchant_id"], first["order_id"], request_id="req-pg-return"
+    )
+    with pytest.raises(MerchantConflictError):
+        repo.receive_return(
+            second["merchant_id"], second["order_id"], request_id="req-pg-return"
+        )
+    assert repo.get_order(second["order_id"]).returned_at is None
+    assert (
+        _scalar(
+            repo.schema,
+            "SELECT status FROM {schema}.m_reservation WHERE reservation_id = %s",
+            (second["reservation_id"],),
+        )
+        == "COMMITTED"
+    )
+    result = repo.receive_return(
+        second["merchant_id"], second["order_id"], request_id="req-pg-return-2"
+    )
+    assert result.returned_at
+    assert _available(repo, second["sku"]) == first["baseline_available"]
+
+
+def test_postgres_receive_return_invalid_states_and_no_reservation(repo, seed):
+    before = {record.sku: _available(repo, record.sku) for record in seed.inventory_records}
+    for status in ("SHIPPED", "COMPLETED"):
+        order = _seed_order(seed, status)
+        with pytest.raises(MerchantConflictError):
+            repo.receive_return(order.merchant_id, order.order_id)
+        assert repo.get_order(order.order_id).returned_at is None
+    assert {
+        record.sku: _available(repo, record.sku) for record in seed.inventory_records
+    } == before
+
+    created = _seed_order(seed, "CREATED")
+    with pytest.raises(MerchantConflictError):
+        repo.receive_return(created.merchant_id, created.order_id)
+
+    # REFUNDED 后拒绝（推荐顺序：receive_return → refund_order）
+    setup = _setup_pg_shipped_order(repo, seed, tag="PG-RETURN-REFUNDED")
+    repo.refund_order(setup["merchant_id"], setup["order_id"], amount=Decimal("10.00"))
+    with pytest.raises(MerchantConflictError):
+        repo.receive_return(setup["merchant_id"], setup["order_id"])
+
+
+def test_postgres_receive_return_migration_and_tenant(repo, seed):
+    # 模拟旧 schema：删掉 task-54 两列与索引后重新初始化，迁移应幂等补回
+    conn = _admin_connect()
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                f'DROP INDEX IF EXISTS "{repo.schema}".idx_m_order_restock_request'
+            )
+            cur.execute(
+                f'ALTER TABLE "{repo.schema}".m_order DROP COLUMN returned_at'
+            )
+            cur.execute(
+                f'ALTER TABLE "{repo.schema}".m_order DROP COLUMN restock_request_id'
+            )
+    finally:
+        conn.close()
+
+    upgraded = PostgresMerchantRepository(schema=repo.schema, seed=False)
+    try:
+        conn = _admin_connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = %s AND table_name = 'm_order'",
+                    (repo.schema,),
+                )
+                columns = {row[0] for row in cur.fetchall()}
+        finally:
+            conn.close()
+        assert {"returned_at", "restock_request_id"} <= columns
+
+        setup = _setup_pg_shipped_order(upgraded, seed, tag="PG-RETURN-MIGRATED")
+        returned = upgraded.receive_return(
+            setup["merchant_id"], setup["order_id"], request_id="req-pg-return-migrated"
+        )
+        assert returned.returned_at
+
+        # 租户隔离 / 未知订单 / merchant_id 必填
+        other = "m_tea_001" if setup["merchant_id"] != "m_tea_001" else "m_gear_002"
+        with pytest.raises(MerchantNotFoundError):
+            upgraded.receive_return(other, setup["order_id"])
+        with pytest.raises(MerchantNotFoundError):
+            upgraded.receive_return(setup["merchant_id"], "ORD-PG-MISSING")
+        for merchant_id in ("", "   ", None):
+            with pytest.raises(MerchantDataError):
+                upgraded.receive_return(merchant_id, setup["order_id"])
+    finally:
+        upgraded.close()

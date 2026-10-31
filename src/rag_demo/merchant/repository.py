@@ -202,8 +202,9 @@ class MerchantWriteRepository(Protocol):
           且 ``<= total_amount``；非法金额 ``MERCHANT_INVALID``；
         - 写 ``refund_amount = amount``、``refunded_at = now``；保留已有时序字段
           （``paid_at/shipped_at/completed_at``、物流字段）与 ``cancelled_at=None``；
-        - **默认不恢复库存**：售后退货验收入库是独立流程，本方法不改库存/预占
-          （即使订单有 COMMITTED 预占也不动，避免把未验收商品凭空加回可售库存）；
+        - **默认不恢复库存**：售后入库由 :meth:`receive_return` 单独负责（退货验收后才入库）；
+          本方法不改库存/预占，避免把未验收商品凭空加回可售库存；推荐流程
+          ``receive_return → refund_order``；
         - 重复退款幂等：已 ``REFUNDED`` 时，同 ``request_id``（或未传 request_id 且金额相同）
           返回已有订单，不重复写时间/金额；金额或 request_id 不匹配 → ``MERCHANT_CONFLICT``；
         - ``request_id`` 幂等键：同 key 跨订单 → ``MERCHANT_CONFLICT``；空白/超长 →
@@ -232,6 +233,31 @@ class MerchantWriteRepository(Protocol):
         - 事务化（`BEGIN IMMEDIATE`）；``request_id`` 作为幂等键：同 request_id 重放返回同一结果，
           同 request_id 用于取消其他订单 → ``MERCHANT_CONFLICT``；
         - ``merchant_id`` 必填、租户隔离（未知/跨租户 `MERCHANT_NOT_FOUND`）。
+        """
+        ...
+
+    def receive_return(
+        self,
+        merchant_id: str,
+        order_id: str,
+        request_id: str | None = None,
+    ) -> Order:
+        """退货验收入库（按已提交预占 allocations 恢复库存；订单状态不变；幂等）。
+
+        业务规则（task-54）：
+        - 只允许 ``SHIPPED`` / ``COMPLETED`` 订单（已发货/已完成）退货验收；
+          ``CREATED`` / ``PAID`` / ``CANCELLED`` / ``REFUNDED`` → ``MERCHANT_CONFLICT``；
+        - 库存恢复：只按 ``m_reservation.order_id`` 指向本订单且状态 ``COMMITTED`` 的
+          allocations 逐仓 ``available_qty += q``（reserved 不变），随后预占标记 ``REVERSED``；
+          **没有可恢复预占**（如种子订单 / 直接 create_order）→ ``MERCHANT_CONFLICT``，
+          绝不猜测仓库或凭空补库存；
+        - **订单状态不变**（SHIPPED 仍是 SHIPPED、COMPLETED 仍是 COMPLETED）：
+          退款由 :meth:`refund_order` 单独负责；推荐流程 ``receive_return → refund_order``
+          （先验收退货入库，再退款；``REFUNDED`` 是终态，不能反向再入库）；
+        - 写 ``returned_at = now``（公共模型输出）与内部幂等键 ``restock_request_id``；
+        - 幂等：同一订单重复调用返回已有订单（不重复恢复库存）；``request_id`` 同 key 重放
+          返回同一结果，同 key 跨订单 → ``MERCHANT_CONFLICT``，空白/超长 → ``MERCHANT_INVALID``；
+        - 事务化、租户隔离（未知/跨租户 ``MERCHANT_NOT_FOUND``）、``merchant_id`` 必填。
         """
         ...
 

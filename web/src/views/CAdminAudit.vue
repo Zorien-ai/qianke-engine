@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
-import { apiFetch, ApiError, detailMessage, getJson, patchJson, readBody } from "../api";
+import { apiFetch, ApiError, detailMessage, getJson, patchJson, postJson, readBody } from "../api";
 import { toast, toastError } from "../store";
 
 const PAGE_SIZE = 20;
@@ -49,7 +49,13 @@ const shipCarrier = ref("");
 const shipError = ref("");
 
 /* ---------- 售后工单审批 ---------- */
-const AFTER_SALE_STATUS_LABELS = { OPEN: "待处理", APPROVED: "已通过", REJECTED: "已拒绝" };
+const AFTER_SALE_STATUS_LABELS = {
+  OPEN: "待处理",
+  RETURN_PENDING: "待寄回",
+  RETURN_SHIPPED: "退货运输中",
+  APPROVED: "已通过",
+  REJECTED: "已拒绝",
+};
 const AFTER_SALE_TYPE_LABELS = { REFUND_ONLY: "仅退款", RETURN_REFUND: "退货退款" };
 
 const afterSales = ref([]);
@@ -331,6 +337,7 @@ function afterSaleStatusBadge(status) {
   const key = String(status || "").toUpperCase();
   if (key === "APPROVED") return "is-success";
   if (key === "REJECTED") return "is-danger";
+  if (key === "RETURN_SHIPPED") return "is-primary";
   return "is-warn";
 }
 
@@ -342,6 +349,26 @@ function afterSaleRefundText(ticket) {
   return ticket?.refund_amount === null || ticket?.refund_amount === undefined
     ? "—"
     : money(ticket.refund_amount);
+}
+
+function afterSaleStatusKey(ticket) {
+  return String(ticket?.status || "").toUpperCase();
+}
+
+/** 退货退款：OPEN 时是「同意退货」，寄回后进入验收 */
+function isReturnTicket(ticket) {
+  return String(ticket?.type || "").toUpperCase() === "RETURN_REFUND";
+}
+
+function canReceiveTicket(ticket) {
+  return ["RETURN_PENDING", "RETURN_SHIPPED"].includes(afterSaleStatusKey(ticket));
+}
+
+function afterSaleReturnText(ticket) {
+  const tracking = String(ticket?.return_tracking_no || "").trim();
+  if (!tracking) return "—";
+  const carrier = String(ticket?.return_carrier || "").trim();
+  return carrier ? `${carrier} · ${tracking}` : tracking;
 }
 
 async function loadAfterSales() {
@@ -368,8 +395,33 @@ async function resolveAfterSale(ticket, approved) {
     await patchJson(`/api/c/admin/after-sales/${encodeURIComponent(ticket.ticket_id)}`, { approved });
     toast(
       approved
-        ? `已通过工单 ${ticket.ticket_id}，退款已写入订单`
+        ? isReturnTicket(ticket)
+          ? `已同意退货工单 ${ticket.ticket_id}，等待用户寄回`
+          : `已通过工单 ${ticket.ticket_id}，退款已写入订单`
         : `已拒绝工单 ${ticket.ticket_id}`,
+      "success"
+    );
+    await loadAfterSales();
+  } catch (e) {
+    toast(errorMessage(e), "error", 5000);
+  } finally {
+    afterSaleBusy.value = "";
+  }
+}
+
+/** 退货验收入库：accepted=true 退款并恢复库存；false = 拒收 */
+async function receiveAfterSale(ticket, accepted) {
+  if (!ticket || afterSaleBusy.value) return;
+  afterSaleBusy.value = ticket.ticket_id;
+  try {
+    await postJson(
+      `/api/c/admin/after-sales/${encodeURIComponent(ticket.ticket_id)}/receive`,
+      { accepted }
+    );
+    toast(
+      accepted
+        ? `工单 ${ticket.ticket_id} 验收通过，退款与库存已恢复`
+        : `工单 ${ticket.ticket_id} 已拒收`,
       "success"
     );
     await loadAfterSales();
@@ -760,6 +812,8 @@ onMounted(load);
           <select v-model="afterSaleStatus" :disabled="afterSaleLoading" @change="loadAfterSales">
             <option value="">全部</option>
             <option value="OPEN">待处理（OPEN）</option>
+            <option value="RETURN_PENDING">待寄回（RETURN_PENDING）</option>
+            <option value="RETURN_SHIPPED">退货运输中（RETURN_SHIPPED）</option>
             <option value="APPROVED">已通过（APPROVED）</option>
             <option value="REJECTED">已拒绝（REJECTED）</option>
           </select>
@@ -785,7 +839,7 @@ onMounted(load);
         <div class="admin-section-head">
           <strong>售后工单</strong>
           <span class="field-hint">
-            共 {{ afterSales.length }} 条 · 当前筛选 {{ afterSaleStatus ? afterSaleStatusLabel(afterSaleStatus) : "全部" }} · 通过后自动退款并刷新
+            共 {{ afterSales.length }} 条 · 当前筛选 {{ afterSaleStatus ? afterSaleStatusLabel(afterSaleStatus) : "全部" }} · 退货工单需用户寄回后验收
           </span>
         </div>
         <div class="table-wrap op-table-wrap">
@@ -800,6 +854,7 @@ onMounted(load);
                 <th>退款金额</th>
                 <th>原因</th>
                 <th>创建 / 处理时间</th>
+                <th>退回运单 / 入库</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -820,28 +875,68 @@ onMounted(load);
                   {{ date(ticket.created_at) }}
                   <template v-if="ticket.resolved_at"> · {{ date(ticket.resolved_at) }}</template>
                 </td>
+                <td class="field-hint">
+                  <template v-if="ticket.return_tracking_no">
+                    <span class="mono">{{ ticket.return_carrier || "物流" }}</span>
+                    <br />{{ ticket.return_tracking_no }}
+                  </template>
+                  <template v-else>—</template>
+                  <template v-if="ticket.received_at">
+                    <br />入库 {{ date(ticket.received_at) }}
+                  </template>
+                </td>
                 <td>
                   <div class="op-actions">
-                    <template v-if="String(ticket.status || '').toUpperCase() === 'OPEN'">
+                    <template v-if="afterSaleStatusKey(ticket) === 'OPEN'">
+                      <template v-if="isReturnTicket(ticket)">
+                        <button
+                          type="button"
+                          class="btn btn-primary op-btn"
+                          :disabled="!!afterSaleBusy"
+                          @click="resolveAfterSale(ticket, true)"
+                        >同意退货</button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost op-btn is-danger"
+                          :disabled="!!afterSaleBusy"
+                          @click="resolveAfterSale(ticket, false)"
+                        >拒绝</button>
+                      </template>
+                      <template v-else>
+                        <button
+                          type="button"
+                          class="btn btn-primary op-btn"
+                          :disabled="!!afterSaleBusy"
+                          @click="resolveAfterSale(ticket, true)"
+                        >通过</button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost op-btn is-danger"
+                          :disabled="!!afterSaleBusy"
+                          @click="resolveAfterSale(ticket, false)"
+                        >拒绝</button>
+                      </template>
+                    </template>
+                    <template v-else-if="canReceiveTicket(ticket)">
                       <button
                         type="button"
                         class="btn btn-primary op-btn"
                         :disabled="!!afterSaleBusy"
-                        @click="resolveAfterSale(ticket, true)"
-                      >通过</button>
+                        @click="receiveAfterSale(ticket, true)"
+                      >验收通过</button>
                       <button
                         type="button"
                         class="btn btn-ghost op-btn is-danger"
                         :disabled="!!afterSaleBusy"
-                        @click="resolveAfterSale(ticket, false)"
-                      >拒绝</button>
+                        @click="receiveAfterSale(ticket, false)"
+                      >拒收</button>
                     </template>
                     <span v-else class="field-hint">—</span>
                   </div>
                 </td>
               </tr>
               <tr v-if="!afterSales.length">
-                <td colspan="9" class="field-hint">暂无售后工单</td>
+                <td colspan="10" class="field-hint">暂无售后工单</td>
               </tr>
             </tbody>
           </table>

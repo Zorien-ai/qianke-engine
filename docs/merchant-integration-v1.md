@@ -202,10 +202,14 @@ repo = get_merchant_repository(backend="oms", seed=False)
 
 ```bash
 uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py -q
-# 结果：127 passed（45 只读/种子用例 + 82 写接口/状态机/取消/售后退款用例；离线，约 11s）
+# 结果：137 passed（45 只读/种子用例 + 92 写接口/状态机/取消/退款/退货入库用例；离线，约 13s）
 
 uv run python -m pytest tests/test_merchant_postgres.py -q
-# 结果：13 passed（真实 PostgreSQL 16，独立 schema，约 10s；无 PG 时自动 skip）
+# 结果：17 passed（真实 PostgreSQL 16，独立 schema，约 22s；无 PG 时自动 skip）
+
+# task 验收组合命令
+uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py tests/test_merchant_postgres.py -q
+# 结果：154 passed
 ```
 
 覆盖：
@@ -233,6 +237,10 @@ uv run python -m pytest tests/test_merchant_postgres.py -q
   重复退款幂等与金额/`request_id` 冲突、非法状态（CREATED/PAID 引导 cancel_order、
   CANCELLED 拒绝、REFUNDED 终态）、`update_order_status(REFUNDED)` 拒绝、跨租户/未知订单、
   并发同 request_id 只写一次、状态筛选与 `to_dict()` 输出、老库迁移后售后退款可用；
+- 退货验收入库（task-54）：SHIPPED/COMPLETED 退货入库按 COMMITTED allocations 恢复库存、
+  订单状态不变、`returned_at` 写入、重复幂等不重复恢复、`request_id` 跨订单冲突、
+  无预占订单 Conflict（种子订单）、CREATED/PAID/CANCELLED/REFUNDED 拒绝、
+  租户隔离、取消后/退款后拒绝、SQLite 老库迁移 + PG schema 迁移幂等、并发同 request_id 只恢复一次；
 - PostgreSQL adapter（task-51）：真实 PG16 独立 schema（自动 DROP 清理）、种子/describe/
   stats、商品/SKU/库存/订单读、租户隔离与 limit、reserve 幂等/commit/release/库存不足、
   create_order 幂等/金额校验、状态机、取消退款库存补偿、售后退款幂等、
@@ -315,6 +323,7 @@ writer.commit_reservation("m_tea_001", held.reservation_id, order_id=order.order
 | `update_order_status(merchant_id, order_id, status, tracking_no=None, carrier=None)` | 订单状态机流转（见 §11）：写状态时间与物流字段；`CANCELLED` 与 §12 的取消语义一致；返回 `Order` | 非法迁移 `MERCHANT_CONFLICT`；未知状态/物流字段非法 `MERCHANT_INVALID`；未知/跨租户 `MERCHANT_NOT_FOUND` |
 | `cancel_order(merchant_id, order_id, request_id=None)` | 取消订单（见 §12）：CREATED/PAID→CANCELLED、PAID 写模拟退款、按已提交预占恢复库存；幂等；返回 `Order` | 非法状态 `MERCHANT_CONFLICT`；`request_id` 冲突/参数非法 `MERCHANT_CONFLICT`/`MERCHANT_INVALID`；未知/跨租户 `MERCHANT_NOT_FOUND` |
 | `refund_order(merchant_id, order_id, amount=None, request_id=None)` | 售后退款（见 §13）：SHIPPED/COMPLETED→REFUNDED、部分/全额、默认不恢复库存；幂等；返回 `Order` | 非发货状态/终态 `MERCHANT_CONFLICT`；金额非法/`update_order_status(REFUNDED)` `MERCHANT_INVALID`；`request_id` 冲突 `MERCHANT_CONFLICT`；未知/跨租户 `MERCHANT_NOT_FOUND` |
+| `receive_return(merchant_id, order_id, request_id=None)` | 退货验收入库（见 §15）：SHIPPED/COMPLETED 按 COMMITTED allocations 恢复库存、订单状态不变、写 returned_at；幂等；返回 `Order` | 非发货状态/无预占 `MERCHANT_CONFLICT`；`request_id` 冲突 `MERCHANT_CONFLICT`；参数非法 `MERCHANT_INVALID`；未知/跨租户 `MERCHANT_NOT_FOUND` |
 
 ### 10.3 状态机与库存账目口径
 
@@ -363,8 +372,9 @@ reserve ──> RESERVED ──commit──> COMMITTED   (available 保持 -q，
   `allocations`（实际扣减的仓库明细），释放/提交按它精确回滚；
 - `m_order` 新增 `source_ref`（来源引用）与 v1.2 的 `tracking_no / carrier / shipped_at / completed_at`
   物流/生命周期列；v1.3 增加 `cancelled_at / refund_amount / refunded_at` 与内部幂等键
-  `cancel_request_id`；v1.4 增加内部幂等键 `refund_request_id`；三个 request_id/退款列
-  均走部分唯一索引（允许多个 NULL）；全部允许 NULL（历史订单没有这些信息是正常状态）；
+  `cancel_request_id`；v1.4 增加内部幂等键 `refund_request_id`；v1.5 增加
+  `returned_at` 与内部幂等键 `restock_request_id`；request_id/退货列均走部分唯一索引
+  （允许多个 NULL）；全部允许 NULL（历史订单没有这些信息是正常状态）；
 - **老库自动迁移**：初始化时用 `PRAGMA table_info` 检查并 `ALTER TABLE` 补列（幂等），
   v1/v1.1/v1.2/v1.3 的 `var/merchant_v1.sqlite` 不需要手工重建；
 - `seed(force=True)` 会连同 `m_reservation` 一起重置（仅本地调试，不对外暴露）。
@@ -587,7 +597,8 @@ refunded = writer.refund_order(
 1. 不是真实支付网关：没有退款单号、支付流水、通道回调、多次/部分累计退款；
    `refund_amount` 只是本地模拟账目；
 2. 每个订单最多一次退款动作（`REFUNDED` 终态）；如需多次部分退款需新增退款流水表与状态扩展；
-3. 不恢复库存、不改预占；退货验收入库/逆向物流由 OMS 独立流程负责；
+3. refund_order 本身**不恢复库存、不改预占**；退货验收入库由 `receive_return` 单独负责
+   （见 §15，验收入库后才恢复可售库存）；真实逆向物流/退货质检仍由 OMS 负责；
 4. 没有退款原因/操作人/审核人审计字段；`request_id` 只做幂等键，不代表操作身份；
 5. 并发保证：SQLite 为单机单写者语义；PostgreSQL adapter 已实现事务 + `FOR UPDATE`
    同等语义（§14）；真实 OMS adapter 仍需自行实现同等事务、幂等与唯一约束。
@@ -602,7 +613,7 @@ refunded = writer.refund_order(
 - 新增 `PostgresMerchantRepository`（`src/rag_demo/merchant/postgres_repository.py`），
   同时实现 `MerchantRepository` + `MerchantWriteRepository`，方法与语义与 SQLite adapter 一致：
   商品/SKU/库存读、订单读、reserve/commit/release、create_order、update_order_status、
-  cancel_order（含库存补偿）、refund_order（默认不恢复库存）；
+  cancel_order（含库存补偿）、refund_order（默认不恢复库存）、receive_return（退货入库恢复库存）；
 - 默认后端仍是 SQLite；工厂注册 backend `"postgres"`，用环境变量切换；
 - **psycopg2 延迟导入**：模块顶层不 import psycopg2，只有真正构造 PG adapter 时才导入，
   未安装驱动/未配置 PG 不会阻断 SQLite 默认路径。
@@ -644,8 +655,8 @@ writer = get_merchant_write_repository()             # 写入口（同一 PG ada
 - 表结构、约束、索引与 SQLite 版本对齐：
   - 金额/时间列用 `TEXT` 存十进制字符串 / ISO-8601 文本，**两个 adapter 的 Decimal/时间语义一致**；
     数量/库存用 `INTEGER`；主键/外键/PK 与 SQLite 相同；
-  - `m_order` 含 `source_ref`、物流/生命周期字段、取消/退款字段，以及
-    `cancel_request_id` / `refund_request_id` 两个**部分唯一索引**（幂等键）；
+  - `m_order` 含 `source_ref`、物流/生命周期字段、取消/退款/退货入库字段，以及
+    `cancel_request_id` / `refund_request_id` / `restock_request_id` 三个**部分唯一索引**（幂等键）；
 - 种子复用 `data/merchant/*.csv` + `load_seed_data()` 校验，初始化时幂等灌入；
   `seed(force=True)` 清空 m_* 后重灌；`m_meta` 记录 seed_version/seeded_at/文件 sha256；
 - **没有 SQLite 老库迁移概念**（PG 是新 schema）；后续 PG 自己的表结构演进仍建议显式迁移脚本，
@@ -656,7 +667,8 @@ writer = get_merchant_write_repository()             # 写入口（同一 PG ada
 - 每次操作短连接：读操作连接用完即关；写操作在显式事务中执行，异常 `ROLLBACK`、结束即 `CLOSE`；
 - 并发预占：`SELECT warehouse_id, available_qty ... FOR UPDATE` 锁住库存行后再扣减，
   两个并发预占竞争同一库存时**只有一个成功，另一个 `MERCHANT_STOCK`，不会超卖**；
-- 状态机/取消/退款：`SELECT ... FOR UPDATE` 锁订单行；同状态幂等、非法迁移结构化错误；
+- 状态机/取消/退款/退货入库：`SELECT ... FOR UPDATE` 锁订单行与预占行；
+  同状态幂等、非法迁移结构化错误；
 - `request_id` 幂等键：部分唯一索引兜底并发重复写；同 key 跨订单 → `MERCHANT_CONFLICT`；
 - reserve 同 reservation_id / create_order 同 order_id 并发插入：捕获唯一冲突后重试，
   重试路径会命中幂等分支（不会重复扣库存/重复写订单）。
@@ -666,20 +678,21 @@ writer = get_merchant_write_repository()             # 写入口（同一 PG ada
 ```bash
 # 真实 PG（本机 PG16）；无 PG/无 psycopg2 时整模块 skip
 uv run python -m pytest tests/test_merchant_postgres.py -q
-# 结果：13 passed
+# 结果：17 passed
 
 # 离线 SQLite 套件不受影响
 uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py -q
-# 结果：127 passed
+# 结果：137 passed
 
 # task 验收组合命令
 uv run python -m pytest tests/test_merchant_postgres.py tests/test_merchant_store.py tests/test_merchant_write.py -q
+# 结果：154 passed
 ```
 
 测试隔离：每个用例创建唯一 schema `qianke_merchant_test_<uuid>`，结束 `DROP SCHEMA CASCADE`；
 覆盖种子/describe/stats、读接口与租户隔离/limit、reserve/commit/release、create_order、
-状态机、取消退款库存补偿、售后退款幂等、seed(force=True)、factory env 切换、
-schema 表清单隔离、**并发预占不超卖**。
+状态机、取消退款库存补偿、售后退款幂等、退货验收入库（库存恢复/幂等/无预占拒绝/迁移）、
+seed(force=True)、factory env 切换、schema 表清单隔离、**并发预占不超卖**。
 
 ### 14.6 实现说明 / 限制
 
@@ -702,7 +715,91 @@ schema 表清单隔离、**并发预占不超卖**。
 - factory 采用**延迟导入** `postgres_repository`，SQLite 默认路径不依赖 psycopg2；
 - 新增 adapter 不影响既有 C 端/API/Agent 调用（它们只依赖协议与工厂）。
 
-## 15. 变更记录
+## 15. 退货验收入库 receive_return（v2.1 / task-54）
+
+> **仍然不是真实 OMS/质检系统**：本节的“验收”是确定性数据动作（核对已提交预占 +
+> 按原仓库恢复库存 + 记录入库时间），真实退货质检、逆向物流与退款通道仍由 OMS/支付负责。
+
+### 15.1 方法契约
+
+```python
+# 退货验收入库（订单状态保持不变）；request_id 可选，作为幂等键
+returned = writer.receive_return("m_gear_002", "ORD-20261004-0004")
+returned = writer.receive_return(
+    "m_gear_002", "ORD-20261004-0004", request_id="return-req-20261031-01",
+)
+```
+
+| 参数/规则 | 说明 |
+| --- | --- |
+| 允许状态 | 只允许 `SHIPPED` / `COMPLETED`；`CREATED`/`PAID`（未发货，走 `cancel_order`）、`CANCELLED`、`REFUNDED` → `MERCHANT_CONFLICT` |
+| 库存恢复 | 只按该订单 `m_reservation.order_id` 关联且状态 `COMMITTED` 的 allocations 逐仓 `available_qty += q`（reserved 不变），随后预占标记 `REVERSED`；**没有可恢复预占 → `MERCHANT_CONFLICT`**，不猜仓库、不凭空补库存 |
+| 订单状态 | **不变**（SHIPPED 仍是 SHIPPED、COMPLETED 仍是 COMPLETED）；退款由 `refund_order` 单独负责 |
+| 写入字段 | `returned_at = now`（`Order.to_dict()` 输出）；内部幂等键 `restock_request_id`（部分唯一索引） |
+| 幂等 | 同订单重复调用返回已有订单（不重复恢复库存）；`request_id` 同 key 重放返回同一结果，同 key 跨订单 → `MERCHANT_CONFLICT`；空白/超长 → `MERCHANT_INVALID` |
+| 业务顺序 | 推荐 `receive_return`（验收入库，恢复库存）→ `refund_order`（退款）；`REFUNDED` 是终态，退款后不能再入库 |
+| 事务 / 租户 | SQLite `BEGIN IMMEDIATE`；PG 事务 + `SELECT ... FOR UPDATE`；`merchant_id` 必填，未知/跨租户 → `MERCHANT_NOT_FOUND` |
+| 错误结构化 | `MERCHANT_CONFLICT` / `MERCHANT_INVALID` / `MERCHANT_NOT_FOUND` / `MERCHANT_DATA` |
+
+### 15.2 库存口径
+
+```text
+commit:        available -q, reserved 转出
+refund_order:  写退款字段，不改库存/预占
+receive_return: available +q（按 allocations 原仓库）, 预占 COMMITTED -> REVERSED
+```
+
+- commit 后 `available` 已扣减、`reserved` 已转出；退货入库只加 `available`，不再动 `reserved`；
+- 恢复按预占时记录的**仓库扣减明细**精确恢复，不按当前库存重算；
+- 预占标记 `REVERSED` 后不能再次 `commit`；`release_reservation` 对 `REVERSED` 幂等返回；
+- 无预占的订单（种子订单 / 直接 `create_order`）不能入库——这是有意的失败关闭：
+  没有仓库扣减明细就无法知道该入哪个仓、入多少，不能猜；
+- 退款（`refund_order`）**不恢复库存**：先验收退货入库再退款，避免把未验收商品加回可售。
+
+### 15.3 幂等 / 并发 / 安全
+
+- 订单 `returned_at` 天然幂等：重复调用直接返回已有订单，绝不二次恢复库存；
+- `request_id` 落在 `m_order.restock_request_id`（部分唯一索引）：同 key 跨订单 Conflict，
+  并发同 key/同订单只有一次真正恢复；
+- SQLite 单写者事务；PG 订单行 + COMMITTED 预占行 `FOR UPDATE`，唯一索引兜底；
+- 租户隔离、`merchant_id` 必填、全部参数化 SQL。
+
+### 15.4 模型 / 表字段 / 迁移
+
+- `Order` 新增 `returned_at`（可空；`to_dict()` 同步输出，未入库为 None）；
+  内部 `restock_request_id` 不进公共模型；
+- SQLite / PG `m_order` 新增 `returned_at TEXT`、`restock_request_id TEXT` 与部分唯一索引
+  `idx_m_order_restock_request (restock_request_id) WHERE restock_request_id IS NOT NULL`；
+- **迁移幂等**：SQLite `PRAGMA + ALTER TABLE` 补列再建索引；PG `ALTER TABLE ... ADD COLUMN
+  IF NOT EXISTS` 补列后再 `CREATE UNIQUE INDEX IF NOT EXISTS`（先补列后建索引，
+  旧 schema 不会因索引引用缺列而失败）；两个 adapter 都可重复初始化；
+- 种子 CSV 不变（历史订单 `returned_at` 为 NULL）。
+
+### 15.5 测试
+
+```bash
+# SQLite + PostgreSQL 三套（task 验收命令）
+uv run python -m pytest tests/test_merchant_store.py tests/test_merchant_write.py tests/test_merchant_postgres.py -q
+# 结果：154 passed（45 store + 92 write + 17 PG；PG 部分无 PG 时自动 skip）
+```
+
+覆盖：SHIPPED/COMPLETED 入库恢复库存、订单状态不变、重复幂等不重复恢复、request_id 跨订单冲突、
+无预占种子订单 Conflict、CREATED/PAID/CANCELLED/REFUNDED 拒绝、退款后拒绝、取消后拒绝、
+租户隔离、`to_dict().returned_at`、接收后订单字段/行不变、先入库后退款流程、
+并发同 request_id 只恢复一次、SQLite 老库迁移、PG schema 迁移（删列后重新初始化补列+索引）。
+
+### 15.6 限制
+
+1. 不是真实质检/逆向物流：只保证“按预占恢复库存 + 记录入库时间”，没有质检结果、
+   不良品、部分入库/多批次入库；这些属于 OMS/售后系统；
+2. 每个订单最多一次整单入库（`returned_at` 标记）；部分退货/多次入库需后续扩展
+   line-level return ledger；
+3. 只允许 SHIPPED/COMPLETED；REFUNDED 终态后拒绝（若先退款，需人工/OMS 特殊处理）；
+4. 必须存在该订单的 COMMITTED 预占（C 端下单链路）；种子/直接 `create_order` 无预占 → 拒绝；
+5. 入库后订单仍可退款（`refund_order`），但退款不会二次改变库存；
+6. 仍是本地实现，真实退货/逆向物流/质检由 OMS 负责。
+
+## 16. 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
@@ -712,3 +809,4 @@ schema 表清单隔离、**并发预占不超卖**。
 | v1.3 | 2026-10-30 | 新增订单取消与模拟退款：`cancel_order(..., request_id)`、`Order.cancelled_at/refund_amount/refunded_at`、`m_order` 取消/退款列 + `cancel_request_id` 唯一幂等键与老库自动迁移、按已提交预占 allocations 恢复库存并标记 `REVERSED`、`update_order_status(CANCELLED)` 同语义；新增 16 例取消/退款/库存补偿测试（合计 117 例） |
 | v1.4 | 2026-10-30 | 新增发货后售后退款与 `REFUNDED` 状态：状态机 `SHIPPED/COMPLETED→REFUNDED`、`refund_order(amount/request_id)`（部分/全额、默认全额、默认不恢复库存）、`m_order.refund_request_id` 唯一幂等键与老库自动迁移、`update_order_status(REFUNDED)` 拒绝；新增 10 例售后退款/金额/幂等/迁移测试（合计 127 例） |
 | v2.0 | 2026-10-31 | 新增 PostgreSQL 商家 adapter（P2-A）：`PostgresMerchantRepository` 实现同契约读写、独立 schema（`QIANKE_MERCHANT_PG_SCHEMA`，默认 `merchant_v1`）、幂等建表+种子、事务+`FOR UPDATE` 并发不超卖、psycopg2 延迟导入、factory 注册 `postgres`（SQLite 仍默认）；新增 13 例真实 PG16 集成测试（无 PG 自动 skip，离线 127 例不变） |
+| v2.1 | 2026-10-31 | 新增退货验收入库 `receive_return`：SHIPPED/COMPLETED 按该订单 COMMITTED allocations 恢复库存并标记 REVERSED、订单状态不变、写 `returned_at`/`restock_request_id`（唯一幂等键）、无预占 Conflict、REFUNDED/取消后拒绝；SQLite+PG 双 adapter + 幂等迁移；新增 10 例 SQLite + 4 例 PG 测试（三套合计 154 例） |

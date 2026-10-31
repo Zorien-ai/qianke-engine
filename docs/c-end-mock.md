@@ -131,10 +131,11 @@ POST /api/c/orders/{order_id}/after-sales
   → 仅 SHIPPED/COMPLETED 可申请
   → 工单 OPEN
 GET  /api/c/orders/{order_id}/after-sales
+POST /api/c/orders/{order_id}/after-sales/{ticket_id}/return-shipment
 GET  /api/c/admin/after-sales
 PATCH /api/c/admin/after-sales/{ticket_id} {"approved":true}
-  → 商家 refund_order → REFUNDED
-  → C 订单 REFUNDED
+POST /api/c/admin/after-sales/{ticket_id}/receive {"accepted":true}
+  → 退货退款：同意 → 用户寄回 → 验收 → 退款 + 恢复库存
 ```
 
 ## 3. 强制约束

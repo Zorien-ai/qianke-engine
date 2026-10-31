@@ -268,3 +268,62 @@ def test_after_sale_rejected_keeps_order(c_store):
     assert payload["status"] == "CONFIRMED"
     assert payload["merchant_status"] == "SHIPPED"
     assert payload["can_after_sale"] is True
+
+
+def test_return_refund_requires_shipment_and_restocks_on_receipt(c_store):
+    writer = get_merchant_write_repository()
+    stock_before = writer.get_inventory("SKU-GEAR-P001-STD", merchant_id="m_gear_002").available_qty
+    order = _shipped_order(c_store, "req_c_return_001")
+    assert writer.get_inventory("SKU-GEAR-P001-STD", merchant_id="m_gear_002").available_qty == stock_before - 1
+
+    ticket = c_store.create_after_sale(
+        "buyer_1",
+        order["order_id"],
+        sale_type="RETURN_REFUND",
+        reason="尺码不合适，想退货",
+    )
+    approved = c_store.resolve_after_sale(ticket["ticket_id"], approved=True)
+    assert approved["status"] == "RETURN_PENDING"
+    assert approved["refund_amount"] is None
+    assert c_store.get_order(order["order_id"])["status"] == "CONFIRMED"
+
+    shipped = c_store.submit_return_shipment(
+        "buyer_1",
+        ticket["ticket_id"],
+        tracking_no="YT9876543210",
+        carrier="圆通速递",
+    )
+    assert shipped["status"] == "RETURN_SHIPPED"
+    assert shipped["return_tracking_no"] == "YT9876543210"
+
+    received = c_store.receive_after_sale(ticket["ticket_id"], accepted=True)
+    assert received["status"] == "APPROVED"
+    assert received["restocked_at"]
+    assert received["refund_amount"] == 299.0
+    payload = c_store.get_order(order["order_id"])
+    assert payload["status"] == "REFUNDED"
+    assert payload["merchant_status"] == "REFUNDED"
+    assert payload["merchant_refund_amount"] == 299.0
+    assert writer.get_inventory("SKU-GEAR-P001-STD", merchant_id="m_gear_002").available_qty == stock_before
+    products = {item["product_id"]: item for item in c_store.list_products()}
+    assert products["P001"]["stock"] == 20
+
+
+def test_return_refund_rejected_at_receipt_keeps_order(c_store):
+    writer = get_merchant_write_repository()
+    stock_before = writer.get_inventory("SKU-GEAR-P001-STD", merchant_id="m_gear_002").available_qty
+    order = _shipped_order(c_store, "req_c_return_002")
+    ticket = c_store.create_after_sale(
+        "buyer_1",
+        order["order_id"],
+        sale_type="RETURN_REFUND",
+        reason="商品有瑕疵",
+    )
+    c_store.resolve_after_sale(ticket["ticket_id"], approved=True)
+    c_store.submit_return_shipment("buyer_1", ticket["ticket_id"], tracking_no="SF1111222233")
+    received = c_store.receive_after_sale(ticket["ticket_id"], accepted=False)
+    assert received["status"] == "REJECTED"
+    payload = c_store.get_order(order["order_id"])
+    assert payload["status"] == "CONFIRMED"
+    assert payload["merchant_status"] == "SHIPPED"
+    assert writer.get_inventory("SKU-GEAR-P001-STD", merchant_id="m_gear_002").available_qty == stock_before - 1

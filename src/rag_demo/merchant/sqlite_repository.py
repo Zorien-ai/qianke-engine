@@ -8,8 +8,8 @@
 - 所有查询**参数化**、所有列表查询统一过 ``clamp_limit``；多租户查询缺 merchant_id
   时失败关闭（``MerchantDataError``），绝不退化成全表读。
 - 写操作（``reserve_inventory`` / ``commit_reservation`` / ``release_reservation`` /
-  ``create_order`` / ``update_order_status`` / ``cancel_order`` / ``refund_order``）
-  全部走 ``BEGIN IMMEDIATE`` 事务：
+  ``create_order`` / ``update_order_status`` / ``cancel_order`` / ``refund_order`` /
+  ``receive_return``）全部走 ``BEGIN IMMEDIATE`` 事务：
   库存扣减/恢复与预占记录同事务，订单状态与物流/时间字段同事务；
   幂等、参数化、租户必填；库存不足/非法迁移等异常整体回滚。**这不是真实 OMS 写通道**。
 
@@ -144,7 +144,9 @@ CREATE TABLE IF NOT EXISTS m_order (
     refund_amount TEXT,
     refunded_at  TEXT,
     cancel_request_id TEXT,
-    refund_request_id TEXT
+    refund_request_id TEXT,
+    returned_at  TEXT,
+    restock_request_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_m_order_merchant ON m_order (merchant_id, created_at);
@@ -294,11 +296,12 @@ class SqliteMerchantRepository:
 
         老库（v1 已上线/本地 var 库）需要补：
             m_order.source_ref / tracking_no / carrier / shipped_at / completed_at /
-            cancelled_at / refund_amount / refunded_at / cancel_request_id / refund_request_id
+            cancelled_at / refund_amount / refunded_at / cancel_request_id /
+            refund_request_id / returned_at / restock_request_id
         新库在建表时已包含这些列；这里用 PRAGMA 检查逐列 ALTER，幂等可重复执行。
         """
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(m_order)")}
-        # 列名 → SQL 类型；全部允许 NULL（历史订单没有物流/取消/退款信息是正常状态）
+        # 列名 → SQL 类型；全部允许 NULL（历史订单没有物流/取消/退款/退货信息是正常状态）
         missing_columns = {
             "source_ref": "TEXT",
             "tracking_no": "TEXT",
@@ -310,6 +313,8 @@ class SqliteMerchantRepository:
             "refunded_at": "TEXT",
             "cancel_request_id": "TEXT",
             "refund_request_id": "TEXT",
+            "returned_at": "TEXT",
+            "restock_request_id": "TEXT",
         }
         for name, sql_type in missing_columns.items():
             if name not in columns:
@@ -322,6 +327,10 @@ class SqliteMerchantRepository:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_refund_request "
             "ON m_order (refund_request_id) WHERE refund_request_id IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_m_order_restock_request "
+            "ON m_order (restock_request_id) WHERE restock_request_id IS NOT NULL"
         )
 
     def _ensure_open(self) -> None:
@@ -624,8 +633,8 @@ class SqliteMerchantRepository:
         sql = (
             "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
             "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
-            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at "
-            "FROM m_order WHERE merchant_id = ?"
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE merchant_id = ?"
         )
         params: list[Any] = [merchant]
         buyer = _clean_optional(buyer_id)
@@ -658,8 +667,8 @@ class SqliteMerchantRepository:
         sql = (
             "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
             "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
-            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at "
-            "FROM m_order WHERE order_id = ?"
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE order_id = ?"
         )
         params: list[Any] = [order]
         merchant = _clean_optional(merchant_id)
@@ -1266,6 +1275,100 @@ class SqliteMerchantRepository:
                 ) from exc
             raise MerchantInternalError(f"退款订单事务失败: {exc}") from exc
 
+    def receive_return(
+        self,
+        merchant_id: str,
+        order_id: str,
+        request_id: str | None = None,
+    ) -> Order:
+        """退货验收入库：按已提交预占 allocations 恢复库存；订单状态不变；幂等。
+
+        业务规则（task-54）：
+        - 只允许 SHIPPED/COMPLETED（已发货/已完成）；CREATED/PAID/CANCELLED/REFUNDED → Conflict；
+        - 只按 ``m_reservation.order_id`` 关联且状态 COMMITTED 的仓库 allocations
+          逐仓 ``available_qty += q``（reserved 不变），随后预占标记 REVERSED；
+        - 没有可恢复预占（种子订单/直接 create_order）→ Conflict（不猜仓库、不凭空补库存）；
+        - 写 returned_at 与内部幂等键 restock_request_id；**订单状态不变**（退款由 refund_order 负责）；
+        - 幂等：同订单重复调用返回已有订单；request_id 同 key 重放返回同一结果，跨订单 Conflict。
+        """
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        order = _required_text(order_id, "order_id")
+        request = request_id
+        if request is not None:
+            request = _required_text(request, "request_id", max_length=128)
+
+        try:
+            with self._lock, self._transaction() as conn:
+                now = _now()
+                if request is not None:
+                    bound = conn.execute(
+                        "SELECT * FROM m_order WHERE restock_request_id = ?", (request,)
+                    ).fetchone()
+                    if bound is not None:
+                        if (
+                            str(bound["order_id"]) != order
+                            or str(bound["merchant_id"]) != merchant
+                        ):
+                            raise MerchantConflictError(
+                                "request_id 已被用于其他订单的退货入库，不能跨订单复用"
+                            )
+                        return self._hydrate_orders(conn, [bound])[0]
+
+                row = conn.execute(
+                    "SELECT * FROM m_order WHERE order_id = ?", (order,)
+                ).fetchone()
+                if row is None or str(row["merchant_id"]) != merchant:
+                    raise MerchantNotFoundError(f"订单不存在: {order}")
+                if row["returned_at"] is not None:
+                    return self._hydrate_orders(conn, [row])[0]  # 幂等：不重复恢复库存
+                current = str(row["status"]).upper()
+                if current not in (ORDER_STATUS_SHIPPED, ORDER_STATUS_COMPLETED):
+                    raise MerchantConflictError(
+                        f"当前状态 {current} 不允许退货入库（仅 SHIPPED/COMPLETED；"
+                        f"未发货请走 cancel_order，已退款订单不能再入库）"
+                    )
+
+                reservation_rows = conn.execute(
+                    "SELECT * FROM m_reservation "
+                    "WHERE order_id = ? AND merchant_id = ? AND status = ?",
+                    (order, merchant, RESERVATION_STATUS_COMMITTED),
+                ).fetchall()
+                if not reservation_rows:
+                    raise MerchantConflictError(
+                        "订单没有可恢复的已提交预占（COMMITTED allocation），"
+                        "不能退货入库；不猜测仓库、不凭空补库存"
+                    )
+                for reservation_row in reservation_rows:
+                    reservation = self._reservation_from_row(reservation_row)
+                    self._restore_committed_allocations(conn, reservation, now)
+                    conn.execute(
+                        "UPDATE m_reservation SET status = ?, updated_at = ? "
+                        "WHERE reservation_id = ?",
+                        (RESERVATION_STATUS_REVERSED, now, reservation.reservation_id),
+                    )
+
+                assignments: dict[str, Any] = {"returned_at": now}
+                if request is not None:
+                    assignments["restock_request_id"] = request
+                set_sql = ", ".join(f"{column} = ?" for column in assignments)
+                cursor = conn.execute(
+                    f"UPDATE m_order SET {set_sql} WHERE order_id = ? AND merchant_id = ?",
+                    (*assignments.values(), order, merchant),
+                )
+                if cursor.rowcount != 1:
+                    raise MerchantNotFoundError(f"订单不存在: {order}")
+                updated = conn.execute(
+                    "SELECT * FROM m_order WHERE order_id = ?", (order,)
+                ).fetchone()
+                return self._hydrate_orders(conn, [updated])[0]
+        except sqlite3.IntegrityError as exc:  # request_id 唯一索引并发兜底
+            if "restock_request_id" in str(exc):
+                raise MerchantConflictError(
+                    "request_id 已被其他退货入库请求占用，请重试或换用新的 request_id"
+                ) from exc
+            raise MerchantInternalError(f"退货入库事务失败: {exc}") from exc
+
     # ---------- 写操作：内部辅助 ----------
     def _resolve_write_lines(
         self,
@@ -1720,6 +1823,9 @@ class SqliteMerchantRepository:
                     ),
                     refunded_at=(
                         row["refunded_at"] if "refunded_at" in row.keys() else None
+                    ),
+                    returned_at=(
+                        row["returned_at"] if "returned_at" in row.keys() else None
                     ),
                 )
             )

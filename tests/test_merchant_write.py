@@ -655,13 +655,14 @@ def test_full_reserve_create_order_commit_flow(repo, writer, seed):
     assert repo.get_order("ORD-FLOW", merchant_id=merchant_id).source_ref == "quote-flow"
 
 
-# ==================== 8. 老库迁移（v1.1 source_ref / v1.2 物流 / v1.3 取消 / v1.4 售后退款） ====================
+# ==================== 8. 老库迁移（v1.1 source_ref / v1.2 物流 / v1.3 取消 / v1.4 退款 / v1.5 退货） ====================
 def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
-    """模拟老库：缺 source_ref / 物流 / 取消 / 退款字段与 m_reservation；初始化应自动补齐。"""
+    """模拟老库：缺 source_ref/物流/取消/退款/退货字段与 m_reservation；初始化应自动补齐。"""
     connection = sqlite3.connect(str(merchant_db))
     try:
         connection.execute("DROP INDEX IF EXISTS idx_m_order_cancel_request")
         connection.execute("DROP INDEX IF EXISTS idx_m_order_refund_request")
+        connection.execute("DROP INDEX IF EXISTS idx_m_order_restock_request")
         for column in (
             "source_ref",
             "tracking_no",
@@ -673,6 +674,8 @@ def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
             "refunded_at",
             "cancel_request_id",
             "refund_request_id",
+            "returned_at",
+            "restock_request_id",
         ):
             connection.execute(f"ALTER TABLE m_order DROP COLUMN {column}")
         connection.execute("DROP TABLE m_reservation")
@@ -697,7 +700,7 @@ def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
         assert {
             "source_ref", "tracking_no", "carrier", "shipped_at", "completed_at",
             "cancelled_at", "refund_amount", "refunded_at", "cancel_request_id",
-            "refund_request_id",
+            "refund_request_id", "returned_at", "restock_request_id",
         } <= columns
         assert "m_reservation" in tables
 
@@ -746,6 +749,28 @@ def test_old_database_is_migrated_on_init(repo, writer, seed, merchant_db):
         assert refunded.refund_amount == Decimal("1.00")
         assert refunded.refunded_at
         assert refunded.completed_at  # 已有时序字段保留
+
+        # 迁移后的老库也能退货验收入库：reserve→create→commit→SHIPPED→receive_return
+        upgraded.reserve_inventory(
+            merchant_id, "RSV-MIGRATED-RETURN", [{"sku": sku, "quantity": 1}]
+        )
+        upgraded.create_order(
+            merchant_id, "ORD-MIGRATED-RETURN", "b_1",
+            [{"sku": sku, "quantity": 1}], sku_row.price,
+        )
+        upgraded.commit_reservation(
+            merchant_id, "RSV-MIGRATED-RETURN", order_id="ORD-MIGRATED-RETURN"
+        )
+        upgraded.update_order_status(merchant_id, "ORD-MIGRATED-RETURN", "PAID")
+        upgraded.update_order_status(
+            merchant_id, "ORD-MIGRATED-RETURN", "SHIPPED",
+            tracking_no="SF1234567890", carrier="顺丰速运",
+        )
+        returned = upgraded.receive_return(
+            merchant_id, "ORD-MIGRATED-RETURN", request_id="req-migrated-return"
+        )
+        assert returned.returned_at
+        assert returned.status == "SHIPPED"  # 退货入库不改订单状态
     finally:
         upgraded.close()
 
@@ -1524,6 +1549,261 @@ def test_refund_concurrent_same_request_id_writes_once(repo, seed, merchant_db):
     persisted = repo.get_order(order.order_id, merchant_id=order.merchant_id)
     assert persisted.status == "REFUNDED"
     assert persisted.refund_amount == Decimal("100.00")
+
+
+# ==================== 12. 退货验收入库 receive_return（task-54） ====================
+def _order_column(merchant_db, order_id: str, column: str):
+    connection = sqlite3.connect(str(merchant_db))
+    connection.row_factory = sqlite3.Row
+    try:
+        row = connection.execute(
+            f"SELECT {column} AS value FROM m_order WHERE order_id = ?", (order_id,)
+        ).fetchone()
+    finally:
+        connection.close()
+    return None if row is None else row["value"]
+
+
+def _setup_shipped_committed_order(
+    repo, writer, seed, *, tag: str, complete: bool = False
+) -> dict:
+    setup = _setup_committed_order(repo, writer, seed, tag=tag)
+    writer.update_order_status(setup["merchant_id"], setup["order_id"], "PAID")
+    writer.update_order_status(
+        setup["merchant_id"], setup["order_id"], "SHIPPED",
+        tracking_no="SF1234567890", carrier="顺丰速运",
+    )
+    if complete:
+        writer.update_order_status(
+            setup["merchant_id"], setup["order_id"], "COMPLETED"
+        )
+    setup["final_status"] = "COMPLETED" if complete else "SHIPPED"
+    return setup
+
+
+def test_receive_return_restores_stock_and_keeps_shipped_status(
+    repo, writer, seed, merchant_db
+):
+    setup = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-SHIPPED")
+    sku = setup["sku"]
+    assert _stock(repo, sku).available_qty == (
+        setup["baseline_available"] - setup["quantity"]
+    )
+
+    returned = writer.receive_return(setup["merchant_id"], setup["order_id"])
+
+    assert returned.status == "SHIPPED"  # 订单状态不变
+    assert returned.returned_at
+    assert returned.refund_amount is None and returned.refunded_at is None
+    assert returned.tracking_no == "SF1234567890"
+    assert returned.to_dict()["returned_at"] == returned.returned_at
+    _assert_stock(
+        repo, sku,
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+    assert _reservation_status(merchant_db, setup["reservation_id"]) == "REVERSED"
+    assert _order_column(merchant_db, setup["order_id"], "restock_request_id") is None
+
+
+def test_receive_return_completed_order_keeps_completed_status(repo, writer, seed):
+    setup = _setup_shipped_committed_order(
+        repo, writer, seed, tag="RETURN-COMPLETED", complete=True
+    )
+    returned = writer.receive_return(setup["merchant_id"], setup["order_id"])
+    assert returned.status == "COMPLETED"
+    assert returned.returned_at
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+
+
+def test_receive_return_without_reservation_conflicts(repo, writer, seed):
+    """种子订单没有 COMMITTED 预占 → 冲突，不得猜测仓库/凭空补库存。"""
+    before = _inventory_snapshot(repo, seed)
+    for status in ("SHIPPED", "COMPLETED"):
+        order = _seed_order(seed, status)
+        with pytest.raises(MerchantConflictError) as excinfo:
+            writer.receive_return(order.merchant_id, order.order_id)
+        assert excinfo.value.code == "MERCHANT_CONFLICT"
+        assert repo.get_order(order.order_id).returned_at is None
+    assert _inventory_snapshot(repo, seed) == before
+
+
+def test_receive_return_idempotent_with_request_id(repo, writer, seed, merchant_db):
+    setup = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-IDEMPOTENT")
+    first = writer.receive_return(
+        setup["merchant_id"], setup["order_id"], request_id="req-return-1"
+    )
+    stock_after_first = _stock(repo, setup["sku"])
+
+    replay = writer.receive_return(
+        setup["merchant_id"], setup["order_id"], request_id="req-return-1"
+    )
+    replay_without_key = writer.receive_return(
+        setup["merchant_id"], setup["order_id"]
+    )
+
+    for result in (replay, replay_without_key):
+        assert result.returned_at == first.returned_at
+        assert result.status == "SHIPPED"
+    # 不重复恢复库存
+    assert _stock(repo, setup["sku"]) == stock_after_first
+    assert (
+        _order_column(merchant_db, setup["order_id"], "restock_request_id")
+        == "req-return-1"
+    )
+    # 非法 request_id
+    other = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-BADREQ")
+    for bad_request_id in ("", "   ", "x" * 129):
+        with pytest.raises(MerchantInvalidError):
+            writer.receive_return(
+                other["merchant_id"], other["order_id"], request_id=bad_request_id
+            )
+
+
+def test_receive_return_request_id_cross_order_conflict(repo, writer, seed, merchant_db):
+    first = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-X1")
+    second = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-X2")
+    writer.receive_return(
+        first["merchant_id"], first["order_id"], request_id="req-return-cross"
+    )
+    with pytest.raises(MerchantConflictError):
+        writer.receive_return(
+            second["merchant_id"], second["order_id"],
+            request_id="req-return-cross",
+        )
+    # 第二个订单仍未入库/恢复库存，预占仍 COMMITTED；换新 request_id 可以成功
+    assert repo.get_order(second["order_id"]).returned_at is None
+    assert _reservation_status(merchant_db, second["reservation_id"]) == "COMMITTED"
+    result = writer.receive_return(
+        second["merchant_id"], second["order_id"], request_id="req-return-cross-2"
+    )
+    assert result.returned_at
+    _assert_stock(
+        repo, second["sku"],
+        available=first["baseline_available"],
+        reserved=first["baseline_reserved"],
+    )
+
+
+def test_receive_return_invalid_statuses_rejected(repo, writer, seed):
+    created = _seed_order(seed, "CREATED")
+    paid = _seed_order(seed, "PAID")
+    cancelled = _seed_order(seed, "CANCELLED")
+    for order in (created, paid, cancelled):
+        with pytest.raises(MerchantConflictError):
+            writer.receive_return(order.merchant_id, order.order_id)
+
+    # REFUNDED 是终态：先退款后不能再入库（业务顺序应为 receive_return → refund_order）
+    setup = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-REFUNDED")
+    writer.refund_order(setup["merchant_id"], setup["order_id"], amount=Decimal("10.00"))
+    with pytest.raises(MerchantConflictError):
+        writer.receive_return(setup["merchant_id"], setup["order_id"])
+    # 退款不会恢复库存，入库被拒后库存仍保持已扣减
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"] - setup["quantity"],
+        reserved=setup["baseline_reserved"],
+    )
+
+    # 取消后的订单也不能退货入库
+    created_for_cancel = _seed_order(seed, "CREATED")
+    writer.cancel_order(created_for_cancel.merchant_id, created_for_cancel.order_id)
+    with pytest.raises(MerchantConflictError):
+        writer.receive_return(
+            created_for_cancel.merchant_id, created_for_cancel.order_id
+        )
+
+
+def test_receive_return_tenant_isolation_and_missing_merchant(repo, writer, seed):
+    setup = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-TENANT")
+    other = _other_merchant(seed, setup["merchant_id"])
+    with pytest.raises(MerchantNotFoundError):
+        writer.receive_return(other, setup["order_id"])
+    with pytest.raises(MerchantNotFoundError):
+        writer.receive_return(setup["merchant_id"], "ORD-MISSING")
+    for merchant_id in ("", "   ", None):
+        with pytest.raises(MerchantDataError) as excinfo:
+            writer.receive_return(merchant_id, setup["order_id"])
+        assert excinfo.value.code == "MERCHANT_DATA"
+    with pytest.raises(MerchantInvalidError):
+        writer.receive_return(setup["merchant_id"], "   ")
+    assert repo.get_order(setup["order_id"]).returned_at is None
+
+
+def test_receive_return_preserves_order_lines_and_fields(repo, writer, seed):
+    setup = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-FIELDS")
+    before = repo.get_order(setup["order_id"], merchant_id=setup["merchant_id"])
+    writer.receive_return(setup["merchant_id"], setup["order_id"])
+    after = repo.get_order(setup["order_id"], merchant_id=setup["merchant_id"])
+    assert after.status == before.status
+    assert after.total_amount == before.total_amount
+    assert after.paid_at == before.paid_at
+    assert after.shipped_at == before.shipped_at
+    assert after.tracking_no == before.tracking_no
+    assert [item.sku for item in after.items] == [item.sku for item in before.items]
+    assert after.returned_at and after.cancelled_at is None
+
+
+def test_receive_return_then_refund_flow(repo, writer, seed):
+    """推荐顺序：先退货验收入库（恢复库存），再 refund_order（退款不重复恢复库存）。"""
+    setup = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-THEN-REFUND")
+    returned = writer.receive_return(
+        setup["merchant_id"], setup["order_id"], request_id="req-return-then-refund"
+    )
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+
+    refunded = writer.refund_order(
+        setup["merchant_id"], setup["order_id"], amount=Decimal("50.00")
+    )
+    assert refunded.status == "REFUNDED"
+    # 退款不恢复库存；库存保持 receive_return 后的值
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
+    # 退款后再重复 receive_return 是幂等重放（不因 REFUNDED 状态报冲突）
+    replay = writer.receive_return(
+        setup["merchant_id"], setup["order_id"], request_id="req-return-then-refund"
+    )
+    assert replay.returned_at == returned.returned_at
+    assert replay.status == "REFUNDED"
+
+
+def test_receive_return_concurrent_same_request_id_restores_once(
+    repo, writer, seed, merchant_db
+):
+    setup = _setup_shipped_committed_order(repo, writer, seed, tag="RETURN-CONCURRENT")
+    instances = [_thread_repo(merchant_db) for _ in range(3)]
+
+    def attempt(instance):
+        return instance.receive_return(
+            setup["merchant_id"], setup["order_id"],
+            request_id="req-return-concurrent",
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            results = list(pool.map(attempt, instances))
+    finally:
+        for instance in instances:
+            instance.close()
+
+    assert all(result.returned_at for result in results)
+    assert len({result.returned_at for result in results}) == 1
+    _assert_stock(
+        repo, setup["sku"],
+        available=setup["baseline_available"],
+        reserved=setup["baseline_reserved"],
+    )
 
 
 def test_write_errors_are_structured(seed, repo):

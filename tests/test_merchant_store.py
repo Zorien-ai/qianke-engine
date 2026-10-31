@@ -558,15 +558,18 @@ def test_order_model_exposes_cancellation_fields(repo, seed):
     assert "cancelled_at" in payload
     assert "refund_amount" in payload
     assert "refunded_at" in payload
+    assert "returned_at" in payload
     assert payload["cancelled_at"] is None
     assert payload["refund_amount"] is None
     assert payload["refunded_at"] is None
+    assert payload["returned_at"] is None
 
     paid = next(order for order in seed.orders if order.status == "PAID")
     paid_payload = repo.get_order(paid.order_id, merchant_id=paid.merchant_id).to_dict()
     assert paid_payload["cancelled_at"] is None
     assert paid_payload["refund_amount"] is None
     assert paid_payload["refunded_at"] is None
+    assert paid_payload["returned_at"] is None
 
 
 def test_seed_orders_parse_without_cancellation_columns(tmp_path):

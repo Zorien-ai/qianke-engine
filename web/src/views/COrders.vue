@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import { getJson, postJson } from "../api";
+import { toast } from "../store";
 
 const orders = ref([]);
 const loading = ref(true);
@@ -149,9 +150,9 @@ function isCancelled(order) {
   return raw === "CANCELLED" || raw === "CANCELED" || !!order?.merchant_cancelled_at;
 }
 
-/** 只对后端明确允许取消的订单显示入口；已取消/已退款的不能再取消 */
+/** 只对后端明确允许取消的订单显示入口；已取消/已退款/售后处理中的不能再取消 */
 function canCancel(order) {
-  return !!order?.can_cancel && !isCancelled(order) && !isRefunded(order);
+  return !!order?.can_cancel && !isCancelled(order) && !isRefunded(order) && !isAfterSaleOpen(order);
 }
 
 function cancelAt(order) {
@@ -221,6 +222,8 @@ const AFTER_SALE_STATUS_LABELS = {
   OPEN: "待处理",
   PENDING: "待处理",
   PROCESSING: "待处理",
+  RETURN_PENDING: "请寄回",
+  RETURN_SHIPPED: "退货运输中",
   APPROVED: "已通过",
   ACCEPTED: "已通过",
   REJECTED: "已拒绝",
@@ -247,13 +250,20 @@ function isRefunded(order) {
   );
 }
 
-/** 有未结束的售后工单时不允许重复申请（后端唯一索引也只允许一个 OPEN） */
+/** 有未结束的售后工单时不允许重复申请（后端唯一索引也只允许一个未结案工单） */
 function isAfterSaleOpen(order) {
-  return ["OPEN", "PENDING", "PROCESSING"].includes(afterSaleStatus(order));
+  return ["OPEN", "PENDING", "PROCESSING", "RETURN_PENDING", "RETURN_SHIPPED"].includes(
+    afterSaleStatus(order)
+  );
 }
 
 function canApplyAfterSale(order) {
   return !!order?.can_after_sale && !isRefunded(order) && !isAfterSaleOpen(order);
+}
+
+/** 退货退款：等待用户寄回 */
+function canSubmitReturnShipment(order) {
+  return afterSaleStatus(order) === "RETURN_PENDING" && afterSaleOf(order)?.type === "RETURN_REFUND";
 }
 
 function afterSaleStatusLabel(order) {
@@ -266,6 +276,8 @@ function afterSaleTone(order) {
   if (status === "REFUNDED") return "is-refunded";
   if (status === "APPROVED" || status === "ACCEPTED") return "is-approved";
   if (status === "REJECTED") return "is-rejected";
+  if (status === "RETURN_PENDING") return "is-return-pending";
+  if (status === "RETURN_SHIPPED") return "is-return-shipped";
   return "is-open";
 }
 
@@ -284,6 +296,66 @@ function afterSaleRefundAmount(order) {
     return Number(order.merchant_refund_amount);
   }
   return null;
+}
+
+function afterSaleResolvedLabel(order) {
+  const status = afterSaleStatus(order);
+  return status === "APPROVED" || status === "REFUNDED" ? "退款于" : "处理于";
+}
+
+/* ---------- 退货物流：RETURN_PENDING 填写退回运单 ---------- */
+const returnBusy = ref("");
+const returnDrafts = ref({});
+
+function returnTicketId(order) {
+  return String(afterSaleOf(order)?.ticket_id || "");
+}
+
+/** 每张退货工单独立草稿，避免多个待寄回订单共用同一份输入 */
+function returnDraft(ticketId) {
+  const key = String(ticketId || "");
+  if (!key) return { tracking: "", carrier: "", error: "" };
+  if (!returnDrafts.value[key]) {
+    returnDrafts.value[key] = { tracking: "", carrier: "", error: "" };
+  }
+  return returnDrafts.value[key];
+}
+
+function returnTrackingNo(order) {
+  return String(afterSaleOf(order)?.return_tracking_no || "");
+}
+
+function returnCarrier(order) {
+  return String(afterSaleOf(order)?.return_carrier || "");
+}
+
+async function submitReturnShipment(order) {
+  const ticketId = returnTicketId(order);
+  if (!ticketId || !canSubmitReturnShipment(order) || returnBusy.value) return;
+  const draft = returnDraft(ticketId);
+  const tracking = String(draft.tracking || "").trim();
+  draft.error = "";
+  if (!tracking) {
+    draft.error = "请填写退回运单号";
+    return;
+  }
+  returnBusy.value = ticketId;
+  try {
+    await postJson(
+      `/api/c/orders/${encodeURIComponent(order.order_id)}/after-sales/${encodeURIComponent(ticketId)}/return-shipment`,
+      { tracking_no: tracking, carrier: String(draft.carrier || "").trim() || null }
+    );
+    draft.tracking = "";
+    draft.carrier = "";
+    toast("退回运单已提交，等待商家验收入库", "success");
+    await loadOrders();
+  } catch (e) {
+    const message = apiErrorMessage(e, "退回运单提交失败");
+    draft.error = message;
+    toast(message, "error", 5000);
+  } finally {
+    returnBusy.value = "";
+  }
 }
 
 function openAfterSale(order) {
@@ -506,9 +578,62 @@ onMounted(loadOrders);
             <span v-if="afterSaleOf(order).created_at">
               申请于 {{ shortMinute(afterSaleOf(order).created_at) }}
             </span>
-            <span v-if="afterSaleOf(order).resolved_at">
-              处理于 {{ shortMinute(afterSaleOf(order).resolved_at) }}
+            <span v-if="afterSaleOf(order).return_shipped_at">
+              寄回于 {{ shortMinute(afterSaleOf(order).return_shipped_at) }}
             </span>
+            <span v-if="afterSaleOf(order).received_at">
+              入库于 {{ shortMinute(afterSaleOf(order).received_at) }}
+            </span>
+            <span v-if="afterSaleOf(order).resolved_at">
+              {{ afterSaleResolvedLabel(order) }} {{ shortMinute(afterSaleOf(order).resolved_at) }}
+            </span>
+          </div>
+
+          <!-- RETURN_SHIPPED：退货运输中，展示退回运单 -->
+          <div v-if="afterSaleStatus(order) === 'RETURN_SHIPPED'" class="return-ship-status">
+            <span class="return-ship-tag">退货运输中</span>
+            <template v-if="returnTrackingNo(order)">
+              <span>退回运单</span>
+              <code>{{ returnCarrier(order) || "物流" }} · {{ returnTrackingNo(order) }}</code>
+            </template>
+            <span v-else class="field-hint">等待物流信息</span>
+          </div>
+
+          <!-- RETURN_PENDING：请寄回 + 退回运单表单（单号必填、承运商可选） -->
+          <div v-if="canSubmitReturnShipment(order)" class="return-ship-block">
+            <p class="return-ship-hint">请将商品寄回，并填写退回运单；商家验收入库后退款。</p>
+            <div class="return-ship-fields">
+              <label class="return-ship-field">
+                <span>退回运单号（必填）</span>
+                <input
+                  v-model="returnDraft(returnTicketId(order)).tracking"
+                  type="text"
+                  maxlength="64"
+                  placeholder="如 SF1234567890"
+                  @input="returnDraft(returnTicketId(order)).error = ''"
+                />
+              </label>
+              <label class="return-ship-field">
+                <span>承运商（可选）</span>
+                <input
+                  v-model="returnDraft(returnTicketId(order)).carrier"
+                  type="text"
+                  maxlength="64"
+                  placeholder="如 顺丰速运"
+                />
+              </label>
+            </div>
+            <p v-if="returnDraft(returnTicketId(order)).error" class="after-sale-error" role="alert">
+              {{ returnDraft(returnTicketId(order)).error }}
+            </p>
+            <div class="return-ship-actions">
+              <button
+                type="button"
+                class="order-cancel-btn is-primary"
+                :disabled="!!returnBusy"
+                @click="submitReturnShipment(order)"
+              >{{ returnBusy === returnTicketId(order) ? "提交中…" : "提交退回运单" }}</button>
+            </div>
           </div>
         </div>
         <div v-else-if="isRefunded(order)" class="order-after-sale is-refunded">
@@ -839,6 +964,16 @@ onMounted(loadOrders);
   background: color-mix(in srgb, var(--warn-soft) 34%, var(--surface));
 }
 
+.order-after-sale.is-return-pending {
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--border));
+  background: color-mix(in srgb, var(--warn-soft) 40%, var(--surface));
+}
+
+.order-after-sale.is-return-shipped {
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  background: color-mix(in srgb, var(--primary-soft) 30%, var(--surface));
+}
+
 .order-after-sale.is-approved,
 .order-after-sale.is-refunded {
   border-color: color-mix(in srgb, var(--success) 28%, var(--border));
@@ -869,6 +1004,14 @@ onMounted(loadOrders);
   color: var(--warn);
 }
 
+.order-after-sale.is-return-pending .after-sale-tag {
+  color: var(--warn);
+}
+
+.order-after-sale.is-return-shipped .after-sale-tag {
+  color: var(--primary);
+}
+
 .order-after-sale.is-approved .after-sale-tag,
 .order-after-sale.is-refunded .after-sale-tag {
   color: var(--success);
@@ -892,6 +1035,83 @@ onMounted(loadOrders);
   color: var(--muted);
   font-size: 10px;
   line-height: 1.55;
+}
+
+/* ---------- 退货物流 / 验收入库 ---------- */
+.return-ship-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.return-ship-tag {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+}
+
+.return-ship-status code {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.return-ship-block {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.return-ship-hint {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.return-ship-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.return-ship-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.return-ship-field input {
+  width: 220px;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.return-ship-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .order-id {
@@ -1243,6 +1463,19 @@ onMounted(loadOrders);
 
   .after-sale-reason {
     flex-basis: auto;
+  }
+
+  .return-ship-fields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .return-ship-field input {
+    width: 100%;
+  }
+
+  .return-ship-actions {
+    justify-content: flex-end;
   }
 
   .timeline-step {

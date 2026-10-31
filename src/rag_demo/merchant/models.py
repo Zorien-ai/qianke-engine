@@ -331,6 +331,10 @@ class Order:
         refund_amount  模拟退款金额：PAID 取消 = total_amount；CREATED 取消 = 0；
                        未取消/历史种子订单为 None
         refunded_at    模拟退款时间：PAID 取消时写入；CREATED 取消/未退款为 None
+
+    退货验收入库字段（task-54）：
+        returned_at    退货验收入库时间（receive_return 写入；订单状态不变）
+                       未退货入库为 None；内部 restock_request_id 不入公共模型
     """
 
     merchant_id: str
@@ -351,6 +355,7 @@ class Order:
     cancelled_at: str | None = None
     refund_amount: Decimal | None = None
     refunded_at: str | None = None
+    returned_at: str | None = None
 
     @property
     def item_count(self) -> int:
@@ -379,6 +384,7 @@ class Order:
                 else None
             ),
             "refunded_at": self.refunded_at,
+            "returned_at": self.returned_at,
             "source_ref": self.source_ref,
             "item_count": self.item_count,
             "items": [item.to_dict() for item in self.items],

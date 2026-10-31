@@ -356,3 +356,31 @@ body {need: "跑鞋", budget: 500, quantity: 1}
 - `REJECTED`：不生成报价卡（同时隐藏初始静态演示报价卡，待确认计数归零），只追加一条基于 `reason` 的伙伴解释消息；
 - 调用中按钮禁用、`typing` 同时阻断发送与重复点击；失败在入口下方显示轻提示（兼容 `detail` 字符串与 `{code,message}`），不打断会话；
 - 白色极简、移动端快捷问题行可横向滚动，消息气泡与报价卡不溢出。
+
+## 12. 退货物流与验收入库
+
+售后状态机新增 `RETURN_PENDING`（待用户寄回）与 `RETURN_SHIPPED`（退货运输中），与 `OPEN / APPROVED / REJECTED` 并存。
+
+C 端订单页（`web/src/views/COrders.vue`）：
+
+```text
+POST /api/c/orders/{order_id}/after-sales/{ticket_id}/return-shipment
+body {tracking_no, carrier?}
+```
+
+- `OPEN`：售后 · 待处理；
+- `RETURN_PENDING`：显示「售后 · 请寄回」+ 退回运单表单（运单号必填、承运商可选）；提交成功 toast 并刷新为「退货运输中」，失败 toast `detail.message` 且保留输入；
+- `RETURN_SHIPPED`：显示「退货运输中」+ 退回运单（承运商 · 单号）与寄回时间；
+- `APPROVED / REFUNDED`：显示退款金额与退款时间、入库时间；售后处理中的订单不再显示取消/申请入口。
+
+商家运营台售后工单（`web/src/views/CAdminAudit.vue`）：
+
+```text
+PATCH /api/c/admin/after-sales/{ticket_id}          {approved}
+POST  /api/c/admin/after-sales/{ticket_id}/receive {accepted}
+```
+
+- 状态筛选补 `RETURN_PENDING / RETURN_SHIPPED`；
+- `OPEN + RETURN_REFUND` 显示「同意退货」（approved=true）与拒绝；`OPEN + REFUND_ONLY` 保持「通过/拒绝」；
+- `RETURN_PENDING / RETURN_SHIPPED` 显示「验收通过 / 拒收」（receive accepted true/false），成功后刷新；
+- 列表新增「退回运单 / 入库」列，展示退回运单、承运商与入库时间；错误统一 toast `detail.message`。

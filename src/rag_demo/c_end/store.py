@@ -378,6 +378,11 @@ CREATE TABLE IF NOT EXISTS c_after_sale (
     reason         TEXT NOT NULL,
     status         TEXT NOT NULL DEFAULT 'OPEN',
     refund_amount  REAL,
+    return_tracking_no TEXT,
+    return_carrier TEXT,
+    return_shipped_at TEXT,
+    received_at    TEXT,
+    restocked_at   TEXT,
     created_at     TEXT NOT NULL,
     resolved_at    TEXT
 );
@@ -407,6 +412,18 @@ def init() -> None:
         conn = _connect()
         try:
             conn.executescript(_SCHEMA)
+            after_sale_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(c_after_sale)").fetchall()
+            }
+            for name, ddl in (
+                ("return_tracking_no", "TEXT"),
+                ("return_carrier", "TEXT"),
+                ("return_shipped_at", "TEXT"),
+                ("received_at", "TEXT"),
+                ("restocked_at", "TEXT"),
+            ):
+                if name not in after_sale_columns:
+                    conn.execute(f"ALTER TABLE c_after_sale ADD COLUMN {name} {ddl}")
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(c_order)").fetchall()}
             for name, ddl in (
                 ("source_order_id", "TEXT"),
@@ -925,7 +942,12 @@ def create_after_sale(
         raise CStoreError("ORDER_FORBIDDEN", "不能为其他用户的订单申请售后")
     if order["status"] != "CONFIRMED" or order.get("merchant_status") not in {"SHIPPED", "COMPLETED"}:
         raise CStoreError("AFTER_SALE_NOT_ALLOWED", "只有已发货或已完成的订单可以申请售后")
-    if order.get("after_sale") and order["after_sale"]["status"] in {"OPEN", "APPROVED"}:
+    if order.get("after_sale") and order["after_sale"]["status"] in {
+        "OPEN",
+        "RETURN_PENDING",
+        "RETURN_SHIPPED",
+        "APPROVED",
+    }:
         raise CStoreError("AFTER_SALE_EXISTS", "该订单已有处理中或已通过的售后")
 
     ticket_id = f"as_{uuid.uuid4().hex[:16]}"
@@ -1028,6 +1050,23 @@ def resolve_after_sale(ticket_id: str, *, approved: bool) -> dict[str, Any]:
             conn.close()
         return get_after_sale(ticket_id)
 
+    if ticket["type"] == "RETURN_REFUND":
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE c_after_sale SET status = 'RETURN_PENDING' "
+                "WHERE ticket_id = ? AND status = 'OPEN'",
+                (ticket_id,),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return get_after_sale(ticket_id)
+
     try:
         merchant_order = get_merchant_write_repository().refund_order(
             _MERCHANT_ID,
@@ -1058,6 +1097,130 @@ def resolve_after_sale(ticket_id: str, *, approved: bool) -> dict[str, Any]:
     return get_after_sale(ticket_id)
 
 
+def submit_return_shipment(
+    buyer_id: str,
+    ticket_id: str,
+    *,
+    tracking_no: str,
+    carrier: str | None = None,
+) -> dict[str, Any]:
+    """用户提交退货物流：仅 RETURN_PENDING 的退货退款工单可提交。"""
+    tracking_no = str(tracking_no or "").strip()
+    carrier = str(carrier or "").strip()
+    if not tracking_no or len(tracking_no) > 64:
+        raise CStoreError("RETURN_SHIPMENT_INVALID", "退回运单号不能为空且不能超过 64 字")
+    if len(carrier) > 64:
+        raise CStoreError("RETURN_SHIPMENT_INVALID", "承运商不能超过 64 字")
+    ticket = get_after_sale(ticket_id, buyer_id)
+    if ticket["type"] != "RETURN_REFUND":
+        raise CStoreError("AFTER_SALE_NOT_RETURNABLE", "该售后不是退货退款，无需寄回")
+    if ticket["status"] == "RETURN_SHIPPED":
+        return ticket
+    if ticket["status"] != "RETURN_PENDING":
+        raise CStoreError("AFTER_SALE_NOT_RETURNABLE", "当前售后状态不能提交退回物流")
+
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE c_after_sale SET status = 'RETURN_SHIPPED', return_tracking_no = ?, "
+            "return_carrier = ?, return_shipped_at = ? WHERE ticket_id = ? AND status = 'RETURN_PENDING'",
+            (tracking_no, carrier or None, _now(), ticket_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_after_sale(ticket_id, buyer_id)
+
+
+def receive_after_sale(ticket_id: str, *, accepted: bool) -> dict[str, Any]:
+    """商家验收入库：通过时先恢复商家库存再退款，并恢复 C 库存。"""
+    init()
+    conn = _connect()
+    try:
+        ticket = conn.execute("SELECT * FROM c_after_sale WHERE ticket_id = ?", (ticket_id,)).fetchone()
+        if ticket is None:
+            raise CStoreError("AFTER_SALE_NOT_FOUND", "售后工单不存在")
+        if ticket["type"] != "RETURN_REFUND":
+            raise CStoreError("AFTER_SALE_NOT_RETURNABLE", "该售后不是退货退款，无需验收入库")
+        if ticket["status"] == "APPROVED":
+            return _after_sale_payload(ticket)
+        if ticket["status"] != "RETURN_SHIPPED":
+            raise CStoreError("AFTER_SALE_NOT_RETURNABLE", "退货物流尚未寄回，不能验收")
+        order = conn.execute("SELECT * FROM c_order WHERE order_id = ?", (ticket["order_id"],)).fetchone()
+        if order is None:
+            raise CStoreError("ORDER_NOT_FOUND", "订单不存在")
+    finally:
+        conn.close()
+
+    if not accepted:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE c_after_sale SET status = 'REJECTED', received_at = ?, resolved_at = ? "
+                "WHERE ticket_id = ? AND status = 'RETURN_SHIPPED'",
+                (_now(), _now(), ticket_id),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return get_after_sale(ticket_id)
+
+    try:
+        merchant_order = get_merchant_write_repository().receive_return(
+            _MERCHANT_ID,
+            order["order_id"],
+            request_id=f"return_{ticket_id}",
+        )
+        merchant_order = get_merchant_write_repository().refund_order(
+            _MERCHANT_ID,
+            order["order_id"],
+            request_id=f"after_sale_{ticket_id}",
+        )
+    except MerchantError as exc:
+        raise _merchant_error(exc) from exc
+
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        received_at = _now()
+        conn.execute(
+            "UPDATE c_after_sale SET status = 'APPROVED', refund_amount = ?, received_at = ?, "
+            "restocked_at = ?, resolved_at = ? WHERE ticket_id = ? AND status = 'RETURN_SHIPPED'",
+            (
+                float(merchant_order.refund_amount or 0),
+                received_at,
+                received_at,
+                received_at,
+                ticket_id,
+            ),
+        )
+        conn.execute("UPDATE c_order SET status = 'REFUNDED' WHERE order_id = ?", (order["order_id"],))
+        items = conn.execute(
+            "SELECT product_id, quantity FROM c_order_item WHERE order_id = ?",
+            (order["order_id"],),
+        ).fetchall()
+        for item in items:
+            conn.execute(
+                "UPDATE c_product SET stock = stock + ? WHERE product_id = ?",
+                (item["quantity"], item["product_id"]),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_after_sale(ticket_id)
+
+
 def _after_sale_payload(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "ticket_id": row["ticket_id"],
@@ -1067,6 +1230,11 @@ def _after_sale_payload(row: sqlite3.Row) -> dict[str, Any]:
         "reason": row["reason"],
         "status": row["status"],
         "refund_amount": float(row["refund_amount"]) if row["refund_amount"] is not None else None,
+        "return_tracking_no": row["return_tracking_no"],
+        "return_carrier": row["return_carrier"],
+        "return_shipped_at": row["return_shipped_at"],
+        "received_at": row["received_at"],
+        "restocked_at": row["restocked_at"],
         "created_at": row["created_at"],
         "resolved_at": row["resolved_at"],
     }
@@ -1122,7 +1290,12 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         order["status"] == "CONFIRMED"
         and merchant_order is not None
         and merchant_order.status in {"SHIPPED", "COMPLETED"}
-        and (after_sale is None or after_sale["status"] not in {"OPEN", "APPROVED"})
+        and (after_sale is None or after_sale["status"] not in {
+            "OPEN",
+            "RETURN_PENDING",
+            "RETURN_SHIPPED",
+            "APPROVED",
+        })
     )
     return {
         "order_id": order["order_id"],
