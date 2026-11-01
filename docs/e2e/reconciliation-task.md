@@ -130,6 +130,7 @@ C 订单 CONFIRMED，商家订单被取消为 CANCELLED
 QIANKE_ALERT_WEBHOOK_URL=https://example.com/hook
 QIANKE_ALERT_WEBHOOK_TOKEN=optional-bearer-token
 QIANKE_ALERT_WEBHOOK_TIMEOUT_SECONDS=3
+QIANKE_ALERT_WEBHOOK_FORMAT=generic   # generic | wecom | dingtalk
 ```
 
 行为：
@@ -139,7 +140,27 @@ QIANKE_ALERT_WEBHOOK_TIMEOUT_SECONDS=3
 Authorization: Bearer <token>（配置 token 时）
 推送失败只写日志，不影响对账/告警落库
 URL 未配置时不发请求
-只允许 http/https；URL/Token 只从环境变量读取
+只允许 http/https；URL/Token/格式只从环境变量读取
+```
+
+格式：
+
+```text
+generic    原始 JSON（默认，适合自建/n8n/webhook.site）
+wecom      企业微信群机器人 markdown
+dingtalk   钉钉群机器人 markdown
+```
+
+企业微信 payload：
+
+```json
+{"msgtype":"markdown","markdown":{"content":"### 千客对账告警\n> run ..."}}
+```
+
+钉钉 payload：
+
+```json
+{"msgtype":"markdown","markdown":{"title":"千客对账告警","text":"### 千客对账告警..."}}
 ```
 
 payload：
@@ -173,7 +194,7 @@ alerts 1
 
 ```bash
 pytest tests/ -q
-# 579 passed, 5 skipped, 1 warning
+# 582 passed, 5 skipped, 1 warning
 
 npm run build
 # ✓ built in 5.14s
@@ -183,7 +204,7 @@ npm run build
 
 ```text
 tests/test_c_end_reconciliation_runs.py   5 passed
-tests/test_c_end_alerts_webhook.py        4 passed
+tests/test_c_end_alerts_webhook.py        7 passed
 ```
 
 ## 9. 已知限制
@@ -195,4 +216,5 @@ tests/test_c_end_alerts_webhook.py        4 passed
 单商家 m_gear_002；多商家需扩展
 worker 是独立脚本，不在 API 进程内常驻
 Webhook 只支持单 URL，不做重试队列/签名校验
+企业微信/钉钉使用 markdown 消息，不支持交互卡片
 ```

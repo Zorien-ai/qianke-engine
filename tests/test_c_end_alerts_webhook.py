@@ -78,3 +78,49 @@ def test_webhook_rejects_non_http_url(c_store, monkeypatch):
     report = c_store.run_reconciliation("MANUAL")
     assert report["webhook"]["sent"] is False
     assert report["webhook"]["reason"] == "INVALID_URL"
+
+
+def _capture(monkeypatch):
+    captured: dict = {}
+
+    def fake_post(url, token, payload):
+        captured["payload"] = payload
+        return True, 200, ""
+
+    monkeypatch.setattr(alerts, "_post_webhook", fake_post)
+    monkeypatch.setenv(alerts.WEBHOOK_URL_ENV, "http://127.0.0.1:9/hook")
+    return captured
+
+
+def test_wecom_webhook_format(c_store, monkeypatch):
+    captured = _capture(monkeypatch)
+    monkeypatch.setenv(alerts.WEBHOOK_FORMAT_ENV, "wecom")
+    order = _divergence(c_store)
+    report = c_store.run_reconciliation("MANUAL")
+    payload = captured["payload"]
+    assert report["webhook"]["format"] == "wecom"
+    assert payload["msgtype"] == "markdown"
+    content = payload["markdown"]["content"]
+    assert "千客对账告警" in content
+    assert order["order_id"] in content
+    assert "人工确认" in content
+
+
+def test_dingtalk_webhook_format(c_store, monkeypatch):
+    captured = _capture(monkeypatch)
+    monkeypatch.setenv(alerts.WEBHOOK_FORMAT_ENV, "dingtalk")
+    _divergence(c_store)
+    report = c_store.run_reconciliation("MANUAL")
+    payload = captured["payload"]
+    assert report["webhook"]["format"] == "dingtalk"
+    assert payload["msgtype"] == "markdown"
+    assert payload["markdown"]["title"] == "千客对账告警"
+    assert "千客对账告警" in payload["markdown"]["text"]
+
+
+def test_unknown_webhook_format_falls_back_to_generic(c_store, monkeypatch):
+    captured = _capture(monkeypatch)
+    monkeypatch.setenv(alerts.WEBHOOK_FORMAT_ENV, "unknown-robot")
+    _divergence(c_store)
+    c_store.run_reconciliation("MANUAL")
+    assert captured["payload"]["event"] == "reconciliation.alert"

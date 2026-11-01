@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 WEBHOOK_URL_ENV = "QIANKE_ALERT_WEBHOOK_URL"
 WEBHOOK_TOKEN_ENV = "QIANKE_ALERT_WEBHOOK_TOKEN"
 WEBHOOK_TIMEOUT_ENV = "QIANKE_ALERT_WEBHOOK_TIMEOUT_SECONDS"
+WEBHOOK_FORMAT_ENV = "QIANKE_ALERT_WEBHOOK_FORMAT"
+
+_FORMATS = {"generic", "wecom", "dingtalk"}
+
+
+def _format_name() -> str:
+    name = (os.environ.get(WEBHOOK_FORMAT_ENV) or "generic").strip().lower()
+    return name if name in _FORMATS else "generic"
 
 
 def _timeout() -> float:
@@ -61,6 +69,34 @@ def build_payload(
     }
 
 
+def _markdown_text(payload: dict[str, Any]) -> str:
+    lines = [
+        "### 千客对账告警",
+        f"> run `{payload.get('run_id')}` / {payload.get('trigger')} / "
+        f"检查 {payload.get('checked')} 单 / 问题 {payload.get('issue_count')} 个",
+    ]
+    for item in (payload.get("alerts") or [])[:10]:
+        severity = item.get("severity") or "WARNING"
+        lines.append(f"- **{severity}** `{item.get('order_id')}`：{item.get('message')}")
+        suggestion = str(item.get("suggestion") or "").strip()
+        if suggestion:
+            lines.append(f"  建议：{suggestion}")
+    return "\n".join(lines)[:3800]
+
+
+def format_payload(payload: dict[str, Any], fmt: str) -> dict[str, Any]:
+    """把通用 payload 转成目标机器人格式；未知格式回退 generic。"""
+    name = fmt if fmt in _FORMATS else "generic"
+    if name == "wecom":
+        return {"msgtype": "markdown", "markdown": {"content": _markdown_text(payload)}}
+    if name == "dingtalk":
+        return {
+            "msgtype": "markdown",
+            "markdown": {"title": "千客对账告警", "text": _markdown_text(payload)},
+        }
+    return payload
+
+
 def _post_webhook(url: str, token: str | None, payload: dict[str, Any]) -> tuple[bool, int, str]:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json; charset=utf-8"}
@@ -93,13 +129,17 @@ def deliver_reconciliation_alerts(
         return {"sent": False, "reason": "INVALID_URL"}
     if not alerts:
         return {"sent": False, "reason": "NO_ALERTS"}
-    payload = build_payload(
-        run_id=run_id,
-        trigger=trigger,
-        checked=checked,
-        legacy=legacy,
-        issues=issues,
-        alerts=alerts,
+    fmt = _format_name()
+    payload = format_payload(
+        build_payload(
+            run_id=run_id,
+            trigger=trigger,
+            checked=checked,
+            legacy=legacy,
+            issues=issues,
+            alerts=alerts,
+        ),
+        fmt,
     )
     okay, status, error = _post_webhook(
         url,
@@ -107,7 +147,13 @@ def deliver_reconciliation_alerts(
         payload,
     )
     if okay:
-        logger.info("对账告警已推送 run=%s alerts=%s status=%s", run_id, len(alerts), status)
-        return {"sent": True, "status": status, "alert_count": len(alerts)}
-    logger.warning("对账告警推送失败 run=%s error=%s", run_id, error)
-    return {"sent": False, "reason": "DELIVERY_FAILED", "error": error}
+        logger.info(
+            "对账告警已推送 run=%s alerts=%s format=%s status=%s",
+            run_id,
+            len(alerts),
+            fmt,
+            status,
+        )
+        return {"sent": True, "status": status, "alert_count": len(alerts), "format": fmt}
+    logger.warning("对账告警推送失败 run=%s format=%s error=%s", run_id, fmt, error)
+    return {"sent": False, "reason": "DELIVERY_FAILED", "error": error, "format": fmt}
