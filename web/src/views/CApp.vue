@@ -181,14 +181,19 @@ function stopUnreadPolling() {
   }
 }
 
-/** 页面隐藏暂停轮询，回到前台立即刷新并恢复 */
+/** 页面隐藏暂停未读轮询与群重连，回到前台立即刷新并恢复 */
 function onVisibilityChange() {
   if (document.visibilityState === "hidden") {
     stopUnreadPolling();
+    if (groupReconnectTimer) {
+      clearTimeout(groupReconnectTimer);
+      groupReconnectTimer = null;
+    }
     return;
   }
   refreshUnread();
   startUnreadPolling();
+  resumeGroupSocket();
 }
 
 /** 点击消息里的 @ 文本：单聊切到对应会话；群聊内只做高亮提醒不切走 */
@@ -325,6 +330,15 @@ const groupsError = ref("");
 const groupMessagesLoading = ref(false);
 const groupMentionHint = ref("");
 let groupMentionHintTimer = null;
+
+/* ---------- 群聊 WebSocket：优先实时链路，HTTP POST 保留回退 ---------- */
+const groupSocketState = ref("offline"); // offline | connecting | online | reconnecting | fallback
+const groupSocketAttempts = ref(0);
+const groupSocketGroupId = ref("");
+const lastGroupSend = ref(null);
+let groupSocket = null;
+let groupReconnectTimer = null;
+let groupManualClose = false;
 
 const GROUP_MENTION_TOKENS = {
   companion: "@小鱼",
@@ -518,9 +532,17 @@ async function resetAvatar(kind) {
     avatarBusy.value = "";
   }
 }
+const groupSocketStatusLabel = computed(() => {
+  if (groupSocketState.value === "online") return "在线";
+  if (groupSocketState.value === "connecting") return "连接中";
+  if (groupSocketState.value === "reconnecting") return "重连中";
+  if (groupSocketState.value === "fallback") return "HTTP 回退";
+  return "离线";
+});
+
 const statusText = computed(() => {
   if (activeThread.value.kind === "group") {
-    return `群聊 · ${threadMemberCount(activeThread.value)} 人`;
+    return `群聊 · ${threadMemberCount(activeThread.value)} 人 · ${groupSocketStatusLabel.value}`;
   }
   if (activeThread.value.kind === "companion") return "在线";
   if (activeThread.value.kind === "merchant") {
@@ -531,9 +553,14 @@ const statusText = computed(() => {
   }
   return "好友";
 });
-const threadDotClass = computed(() =>
-  activeThread.value.kind === "merchant" && storeSocketState.value !== "online" ? "connecting" : "online"
-);
+const threadDotClass = computed(() => {
+  if (activeThread.value.kind === "group") {
+    return groupSocketState.value === "online" ? "online" : "connecting";
+  }
+  return activeThread.value.kind === "merchant" && storeSocketState.value !== "online"
+    ? "connecting"
+    : "online";
+});
 const pendingCount = computed(() => {
   if (liveDraft.value || storeQuote.value) return 1;
   // 已拒绝：不生成报价卡，计数归零；初始静态演示卡仍算 1
@@ -1024,6 +1051,165 @@ function showGroupMentionHint(token) {
   }, 2200);
 }
 
+/** 群 replies 按接口顺序逐条上屏；自己的 message 已在本地展示，不重复渲染 */
+function appendGroupReplies(replies, threadId = activeId.value) {
+  const targetId = String(threadId || activeId.value);
+  const list =
+    messagesByThread.value[targetId] ||
+    (messagesByThread.value[targetId] = []);
+  for (const reply of Array.isArray(replies) ? replies : []) {
+    const text = cleanReply(reply?.content);
+    if (!text) continue;
+    list.push({
+      id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      role: "merchant",
+      author: String(reply?.sender_name || "").trim() || "群成员",
+      text,
+      time: nowTime(),
+      group: true,
+    });
+  }
+  scheduleUnreadRefresh();
+  if (activeId.value === targetId) {
+    scheduleIncomingRead();
+    scrollToBottom();
+  }
+}
+
+function closeGroupSocket() {
+  groupManualClose = true;
+  if (groupReconnectTimer) {
+    clearTimeout(groupReconnectTimer);
+    groupReconnectTimer = null;
+  }
+  if (groupSocket) {
+    groupSocket.onclose = null;
+    groupSocket.close();
+    groupSocket = null;
+  }
+  groupSocketState.value = "offline";
+  groupSocketGroupId.value = "";
+}
+
+function scheduleGroupReconnect() {
+  if (!isGroupThread(activeId.value)) return;
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    // 页面隐藏暂停重连，回到前台由 onVisibilityChange 恢复
+    groupSocketState.value = "reconnecting";
+    return;
+  }
+  if (groupSocketAttempts.value >= 5) {
+    groupSocketState.value = "offline";
+    return;
+  }
+  groupSocketAttempts.value += 1;
+  groupSocketState.value = "reconnecting";
+  const delay = Math.min(1000 * 2 ** (groupSocketAttempts.value - 1), 8000);
+  groupReconnectTimer = setTimeout(() => {
+    groupReconnectTimer = null;
+    if (
+      isGroupThread(activeId.value) &&
+      document.visibilityState !== "hidden"
+    ) {
+      openGroupSocket(activeId.value, true);
+    }
+  }, delay);
+}
+
+function openGroupSocket(groupId, isReconnect = false) {
+  if (!isGroupThread(groupId)) return;
+  if (
+    groupSocket &&
+    groupSocketGroupId.value === groupId &&
+    [WebSocket.CONNECTING, WebSocket.OPEN].includes(groupSocket.readyState)
+  ) {
+    return;
+  }
+  if (groupReconnectTimer) {
+    clearTimeout(groupReconnectTimer);
+    groupReconnectTimer = null;
+  }
+  if (groupSocket) {
+    groupSocket.onclose = null;
+    groupSocket.close();
+    groupSocket = null;
+  }
+  groupManualClose = false;
+  if (!isReconnect) groupSocketAttempts.value = 0;
+  groupSocketGroupId.value = groupId;
+  let socket;
+  try {
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    socket = new WebSocket(
+      `${scheme}://${window.location.host}/api/c/ws/group/${encodeURIComponent(groupId)}`
+    );
+  } catch {
+    groupSocketState.value = "fallback";
+    return;
+  }
+  groupSocket = socket;
+  groupSocketState.value = "connecting";
+  socket.onopen = () => {
+    if (groupSocket !== socket) return;
+    groupSocketAttempts.value = 0;
+    groupSocketState.value = "online";
+  };
+  socket.onmessage = handleGroupSocket;
+  socket.onerror = () => {
+    if (groupSocket === socket) groupSocketState.value = "reconnecting";
+  };
+  socket.onclose = () => {
+    if (groupSocket === socket) groupSocket = null;
+    if (groupManualClose) return;
+    if (activeId.value !== groupId || !isGroupThread(activeId.value)) {
+      groupSocketState.value = "offline";
+      return;
+    }
+    scheduleGroupReconnect();
+  };
+}
+
+function handleGroupSocket(event) {
+  let payload;
+  try {
+    payload = JSON.parse(event.data);
+  } catch {
+    return;
+  }
+  if (!payload || !isGroupThread(activeId.value)) return;
+  if (groupSocketGroupId.value !== activeId.value) return;
+  if (payload.type === "group_chat") {
+    typing.value = false;
+    lastGroupSend.value = null;
+    pendingRetry.value = null;
+    agentError.value = "";
+    appendGroupReplies(payload.replies, groupSocketGroupId.value);
+  } else if (payload.type === "error") {
+    typing.value = false;
+    agentError.value = payload.error?.message || "群消息发送失败";
+    if (lastGroupSend.value) {
+      pendingRetry.value = {
+        threadId: activeId.value,
+        text: lastGroupSend.value.text,
+        clientId: lastGroupSend.value.clientId,
+      };
+      lastGroupSend.value = null;
+    }
+  }
+}
+
+/** 回到前台时若群 socket 不在线则恢复连接 */
+function resumeGroupSocket() {
+  if (!isGroupThread(activeId.value)) return;
+  if (
+    groupSocket &&
+    [WebSocket.CONNECTING, WebSocket.OPEN].includes(groupSocket.readyState)
+  ) {
+    return;
+  }
+  openGroupSocket(activeId.value, true);
+}
+
 async function loadCompanionMessages() {
   try {
     const data = await getJson("/api/c/app/messages?thread_id=companion&limit=30");
@@ -1131,29 +1317,41 @@ async function deliverText(text, isRetry = false, clientId = null) {
   if (isGroupThread(activeId.value)) {
     typing.value = true;
     agentError.value = "";
+    const groupId = activeId.value;
+    const socket = groupSocket;
+    // 优先 WebSocket：用户消息已在 send() 本地展示，这里只等服务端 group_chat
+    if (
+      socket &&
+      socket.readyState === WebSocket.OPEN &&
+      groupSocketGroupId.value === groupId
+    ) {
+      lastGroupSend.value = { text, clientId };
+      try {
+        socket.send(JSON.stringify({ content: text }));
+        return;
+      } catch {
+        // 发送失败：断开后回退 HTTP，不重复上屏用户消息
+        lastGroupSend.value = null;
+        closeGroupSocket();
+      }
+    }
     try {
       const result = await postJson(
-        `/api/c/groups/${encodeURIComponent(activeId.value)}/messages`,
+        `/api/c/groups/${encodeURIComponent(groupId)}/messages`,
         { content: text }
       );
-      // 发送后按接口 replies 顺序逐条上屏，作者名取 sender_name（不伪造）
-      for (const reply of Array.isArray(result?.replies) ? result.replies : []) {
-        const replyText = cleanReply(reply?.content);
-        if (!replyText) continue;
-        pushMessage({
-          role: "merchant",
-          author: String(reply?.sender_name || "").trim() || "群成员",
-          text: replyText,
-          group: true,
-        });
-      }
+      // HTTP 回退同样按接口 replies 顺序逐条上屏，作者名取 sender_name（不伪造）
+      appendGroupReplies(result?.replies, groupId);
       pendingRetry.value = null;
+      lastGroupSend.value = null;
     } catch (error) {
       agentError.value = groupErrorMessage(error);
-      pendingRetry.value = { threadId: activeId.value, text, clientId };
+      pendingRetry.value = { threadId: groupId, text, clientId };
     } finally {
-      typing.value = false;
-      scrollToBottom();
+      if (activeId.value === groupId) {
+        typing.value = false;
+        scrollToBottom();
+      }
     }
     return;
   }
@@ -1432,16 +1630,22 @@ async function loadCompanion() {
 }
 
 async function switchThread(id) {
+  const leavingGroup = isGroupThread(activeId.value);
+  closeGroupSocket();
   closeStoreSocket();
   lastStoreSend.value = null;
+  lastGroupSend.value = null;
+  if (leavingGroup) typing.value = false;
   activeId.value = id;
   showContext.value = false;
   // 切回会话时刷新最近订单：订单可能在别的页面/商城刚创建，右侧栏不能停在旧数据
   loadRecentOrders();
   const target = allThreads.value.find((item) => item.id === id);
   if (target?.kind === "group") {
-    // 群聊暂不纳入未读角标/轮询，进入群只加载消息
+    // 进入群：标记已读、加载历史消息并建立群 WebSocket
+    markThreadRead(id);
     await loadGroupMessages(id);
+    openGroupSocket(id);
   } else {
     // 进入会话即标记已读并把角标清零，之后以后端未读接口为准
     markThreadRead(id);
@@ -1534,6 +1738,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+  closeGroupSocket();
   closeStoreSocket();
 });
 </script>

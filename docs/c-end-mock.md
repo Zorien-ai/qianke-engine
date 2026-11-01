@@ -287,6 +287,7 @@ GET  /api/c/groups
 POST /api/c/groups
 GET  /api/c/groups/{group_id}/messages
 POST /api/c/groups/{group_id}/messages
+WS   /api/c/ws/group/{group_id}
   → 群内多成员 @，按 mention 顺序触发多个回复
 GET  /api/c/merchant/products
 GET  /api/c/merchant/inventory/{sku}

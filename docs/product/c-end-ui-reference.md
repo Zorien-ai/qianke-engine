@@ -434,4 +434,20 @@ POST /api/c/groups/{group_id}/messages            → {message, replies:[{messag
 - 群内点 @ 按钮或输入 `@` 弹出全部群成员（小鱼/山野店宠/小满，token 分别为 @小鱼/@店宠/@小满），可连续插入多个 @；
 - 发送后按接口 `replies` 顺序逐条上屏，作者名取 `sender_name`，不伪造内容；
 - 群消息 @ 文本复用既有高亮；群内点击 @ 只显示轻提示「只作提醒，不切换会话」，单聊点击 @ 仍切换到对应会话；
-- 群聊暂不纳入未读角标/20s 轮询；白色极简、移动端不溢出。
+- 群会话已纳入未读角标（`threads.unread` 动态 key），进入群 POST `threads/{group_id}/read` 清角标；白色极简、移动端不溢出。
+
+## 16. CApp 群聊 WebSocket
+
+群聊实时链路优先 WebSocket、HTTP POST 保留回退（`web/src/views/CApp.vue`）：
+
+```text
+WS   /api/c/ws/group/{group_id}
+发送 {"content": "..."}
+接收 {"type":"group_chat", message:{...}, replies:[{message_id,sender_id,sender_name,content,...}]}
+```
+
+- 进入群会话建立连接，离开/切换会话与页面卸载关闭；单聊店宠 WS 与群 WS 互不影响；
+- 发送优先走已连接的群 WS；socket 未连接或 `send` 抛错时回退现有 HTTP POST，用户消息只在本地展示一次、不重复上屏；
+- 收到 `group_chat` 后按接口 `replies` 顺序逐条上屏（作者名取 `sender_name`），自己的 `message` 已在本地展示则不重复；
+- 群头部轻量展示连接状态：在线 / 连接中 / 重连中 / 离线；异常断开按 1s→2s→4s→8s 退避重连（最多 5 次），页面隐藏暂停重连、回到前台立即恢复；
+- `type:"error"` 时显示错误并保留重试入口；白色极简、移动端不溢出。

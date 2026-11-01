@@ -798,6 +798,42 @@ async def chat_websocket(websocket: WebSocket, friend_id: str) -> None:
         return
 
 
+@router.websocket("/ws/group/{group_id}")
+async def group_chat_websocket(websocket: WebSocket, group_id: str) -> None:
+    token = websocket.cookies.get(auth.SESSION_COOKIE)
+    account = auth.resolve_session(token) if token else None
+    if account is None or account.get("status") != auth.STATUS_ACTIVE:
+        await websocket.close(code=1008)
+        return
+    if account.get("is_demo"):
+        await websocket.close(code=1008)
+        return
+    if not _THREAD_RE.fullmatch(group_id or ""):
+        await websocket.close(code=1008)
+        return
+    buyer_id = f"buyer_{account['id']}"
+    await websocket.accept()
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            content = str(payload.get("content") or "").strip()
+            try:
+                result = await asyncio.to_thread(
+                    group.send_message,
+                    buyer_id,
+                    group_id,
+                    content,
+                )
+                await websocket.send_json({"type": "group_chat", **result})
+            except store.CStoreError as exc:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": {"code": exc.code, "message": exc.message},
+                })
+    except WebSocketDisconnect:
+        return
+
+
 @router.post("/orders/prepare")
 def prepare_order(req: PrepareOrderIn) -> dict:
     buyer_id, _ = _buyer()

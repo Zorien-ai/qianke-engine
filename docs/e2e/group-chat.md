@@ -121,11 +121,40 @@ group_demo 0
 点击 @1 → 打开群会话、@1 消失、群角标清零
 ```
 
-## 6. 已知限制
+## 6. 群 WebSocket
+
+```text
+WS /api/c/ws/group/{group_id}
+客户端 → {"content":"..."}
+服务端 → {"type":"group_chat","message":{...},"replies":[...]}
+```
+
+真实 Python WS 客户端：
+
+```text
+发送「@小满 WS 链路测试」
+→ type group_chat
+→ message「@小满 WS 链路测试」/ 我
+→ replies [小满：收到，等你们聊完我补充。]
+```
+
+真实 CApp：
+
+```text
+群头部显示「群聊 · 3 人 · 在线」
+发送「@小满 实时群消息测试」
+→ 用户消息上屏一次
+→ 小满回复实时上屏
+```
+
+CApp 发送优先 WS；socket 未连接/发送失败回退 HTTP，用户消息不重复。
+断线按 1s→2s→4s→8s 退避重连，页面隐藏暂停。
+
+## 7. 已知限制
 
 ```text
 只有一个默认群，群创建 API 可用但 UI 暂未提供创建入口
-群消息只走 HTTP，没有群 WebSocket 推送
+群 WebSocket 是单连接直发，不向其他客户端广播
 群 replies 的结构化 metadata（如报价卡）暂未在群聊渲染
 群内 @ 只做提醒，不切换会话
 没有 @全体、撤回、群管理
