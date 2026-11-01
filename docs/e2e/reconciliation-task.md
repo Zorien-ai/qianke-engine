@@ -122,11 +122,58 @@ C 订单 CONFIRMED，商家订单被取消为 CANCELLED
 
 告警不会自动修改订单；下一次对账发现该问题消失后，自动标记 `resolved_at`。
 
-## 7. 测试与构建
+## 7. 外部 Webhook
+
+配置：
+
+```bash
+QIANKE_ALERT_WEBHOOK_URL=https://example.com/hook
+QIANKE_ALERT_WEBHOOK_TOKEN=optional-bearer-token
+QIANKE_ALERT_WEBHOOK_TIMEOUT_SECONDS=3
+```
+
+行为：
+
+```text
+对账产生未解决告警 → POST JSON 到 URL
+Authorization: Bearer <token>（配置 token 时）
+推送失败只写日志，不影响对账/告警落库
+URL 未配置时不发请求
+只允许 http/https；URL/Token 只从环境变量读取
+```
+
+payload：
+
+```json
+{
+  "event": "reconciliation.alert",
+  "run_id": "rec_...",
+  "trigger": "SCHEDULED",
+  "issue_count": 1,
+  "alerts": [{
+    "order_id": "order_...",
+    "issue": "STATUS_DIVERGENCE",
+    "severity": "WARNING",
+    "message": "状态不一致...",
+    "suggestion": "人工确认以哪一侧为准..."
+  }]
+}
+```
+
+真实接收端实测：
+
+```text
+webhook {'sent': True, 'status': 200, 'alert_count': 1}
+auth Bearer test-token
+event reconciliation.alert
+alerts 1
+```
+
+## 8. 测试与构建
 
 ```bash
 pytest tests/ -q
-# 575 passed, 5 skipped, 1 warning
+# 579 passed, 5 skipped, 1 warning
 
 npm run build
 # ✓ built in 5.14s
@@ -135,11 +182,11 @@ npm run build
 新增：
 
 ```text
-tests/test_c_end_reconciliation_runs.py
-5 passed
+tests/test_c_end_reconciliation_runs.py   5 passed
+tests/test_c_end_alerts_webhook.py        4 passed
 ```
 
-## 8. 已知限制
+## 9. 已知限制
 
 ```text
 只检测 + 告警 + 修复建议，不自动修复订单
@@ -147,5 +194,5 @@ tests/test_c_end_reconciliation_runs.py
 旧平台订单只计 legacy，无法核对
 单商家 m_gear_002；多商家需扩展
 worker 是独立脚本，不在 API 进程内常驻
-没有外部告警通道（Webhook/邮件）；告警在运营台内展示
+Webhook 只支持单 URL，不做重试队列/签名校验
 ```

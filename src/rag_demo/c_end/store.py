@@ -1597,6 +1597,22 @@ def run_reconciliation(trigger: str = "MANUAL", limit: int = 200) -> dict[str, A
         raise
     finally:
         conn.close()
+    webhook_result: dict[str, Any] = {"sent": False, "reason": "NO_ALERTS"}
+    if issues:
+        try:
+            from rag_demo.c_end import alerts as alert_notifier
+
+            alert_rows = list_reconciliation_alerts(run_id=run_id, limit=200)
+            webhook_result = alert_notifier.deliver_reconciliation_alerts(
+                run_id=run_id,
+                trigger=trigger,
+                checked=int(report.get("checked") or 0),
+                legacy=int(report.get("legacy") or 0),
+                issues=issues,
+                alerts=alert_rows,
+            )
+        except Exception:  # noqa: BLE001 - 外部通道失败不影响对账结果
+            webhook_result = {"sent": False, "reason": "DELIVERY_ERROR"}
     return {
         "run_id": run_id,
         "trigger": trigger,
@@ -1608,6 +1624,7 @@ def run_reconciliation(trigger: str = "MANUAL", limit: int = 200) -> dict[str, A
         "issue_count": len(issues),
         "alert_count": open_alert_count,
         "issues": issues,
+        "webhook": webhook_result,
     }
 
 
@@ -1641,17 +1658,23 @@ def list_reconciliation_alerts(
     *,
     unread_only: bool = False,
     limit: int = 50,
+    run_id: str | None = None,
 ) -> list[dict[str, Any]]:
     init()
     where = "resolved_at IS NULL"
+    params: list[Any] = []
     if unread_only:
         where += " AND read_at IS NULL"
+    if run_id:
+        where += " AND run_id = ?"
+        params.append(str(run_id))
+    params.append(max(1, min(int(limit), 200)))
     conn = _connect()
     try:
         rows = conn.execute(
             f"SELECT * FROM c_reconciliation_alert WHERE {where} "
             "ORDER BY last_seen_at DESC, alert_id DESC LIMIT ?",
-            (max(1, min(int(limit), 200)),),
+            params,
         ).fetchall()
         return [
             {
