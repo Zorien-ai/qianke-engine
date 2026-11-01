@@ -412,6 +412,23 @@ CREATE TABLE IF NOT EXISTS c_reconciliation_run (
 CREATE INDEX IF NOT EXISTS idx_c_reconciliation_started
     ON c_reconciliation_run (started_at DESC);
 
+CREATE TABLE IF NOT EXISTS c_reconciliation_alert (
+    alert_id    TEXT PRIMARY KEY,
+    run_id      TEXT NOT NULL,
+    order_id    TEXT NOT NULL,
+    issue       TEXT NOT NULL,
+    severity    TEXT NOT NULL DEFAULT 'WARNING',
+    message     TEXT NOT NULL,
+    suggestion  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    read_at     TEXT,
+    resolved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_reconciliation_alert_open
+    ON c_reconciliation_alert (resolved_at, read_at, last_seen_at DESC);
+
 CREATE TABLE IF NOT EXISTS c_mention (
     mention_id  TEXT PRIMARY KEY,
     owner_id    TEXT NOT NULL,
@@ -1468,6 +1485,82 @@ def reconcile_orders(limit: int = 200) -> dict[str, Any]:
         conn.close()
 
 
+def _alert_content(issue: dict[str, Any]) -> tuple[str, str, str]:
+    """返回 (severity, message, suggestion)。只给建议，不自动改订单。"""
+    order_id = str(issue.get("order_id") or "")
+    kind = str(issue.get("issue") or "UNKNOWN")
+    if kind == "MERCHANT_ORDER_MISSING":
+        return (
+            "CRITICAL",
+            f"商家订单缺失：{order_id}",
+            "到商家后台/OMS 核对订单是否存在，必要时人工补单或取消 C 订单；不要直接改库。",
+        )
+    if kind == "STATUS_DIVERGENCE":
+        c_status = issue.get("c_status") or "?"
+        m_status = issue.get("merchant_status") or "?"
+        return (
+            "WARNING",
+            f"状态不一致：C={c_status} / 商家={m_status}（{order_id}）",
+            "人工确认以哪一侧为准；取消/退款必须走受控接口，避免二次退款。",
+        )
+    if kind == "AMOUNT_DIVERGENCE":
+        c_amount = issue.get("c_amount")
+        m_amount = issue.get("merchant_amount")
+        return (
+            "WARNING",
+            f"金额不一致：C={c_amount} / 商家={m_amount}（{order_id}）",
+            "人工核对原始金额与成交金额，禁止直接改库；确认后再走补差/退款流程。",
+        )
+    return ("WARNING", f"对账问题：{kind}（{order_id}）", "人工核查该订单。")
+
+
+def _alert_id(order_id: str, issue: str) -> str:
+    key = f"{order_id}|{issue}".encode("utf-8")
+    return f"al_{hashlib.sha1(key).hexdigest()[:20]}"
+
+
+def _sync_reconciliation_alerts(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    issues: list[dict[str, Any]],
+    now: str,
+) -> int:
+    """按 (order_id, issue) 去重；未再出现的问题自动标记 resolved。"""
+    keys: list[str] = []
+    for issue in issues:
+        order_id = str(issue.get("order_id") or "")
+        kind = str(issue.get("issue") or "UNKNOWN")
+        alert_id = _alert_id(order_id, kind)
+        keys.append(alert_id)
+        severity, message, suggestion = _alert_content(issue)
+        conn.execute(
+            "INSERT INTO c_reconciliation_alert(alert_id, run_id, order_id, issue, severity, "
+            "message, suggestion, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(alert_id) DO UPDATE SET run_id = excluded.run_id, "
+            "message = excluded.message, suggestion = excluded.suggestion, "
+            "last_seen_at = excluded.last_seen_at, read_at = NULL, resolved_at = NULL",
+            (alert_id, run_id, order_id, kind, severity, message, suggestion, now, now),
+        )
+    if keys:
+        placeholders = ",".join("?" for _ in keys)
+        conn.execute(
+            f"UPDATE c_reconciliation_alert SET resolved_at = ? "
+            f"WHERE resolved_at IS NULL AND alert_id NOT IN ({placeholders})",
+            (now, *keys),
+        )
+    else:
+        conn.execute(
+            "UPDATE c_reconciliation_alert SET resolved_at = ? WHERE resolved_at IS NULL",
+            (now,),
+        )
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) AS n FROM c_reconciliation_alert WHERE resolved_at IS NULL"
+        ).fetchone()["n"]
+    )
+
+
 def run_reconciliation(trigger: str = "MANUAL", limit: int = 200) -> dict[str, Any]:
     """执行一次对账并留痕；不自动修改任何订单。"""
     trigger = str(trigger or "MANUAL").strip().upper()[:32] or "MANUAL"
@@ -1495,6 +1588,9 @@ def run_reconciliation(trigger: str = "MANUAL", limit: int = 200) -> dict[str, A
                 json.dumps(issues, ensure_ascii=False),
             ),
         )
+        open_alert_count = _sync_reconciliation_alerts(
+            conn, run_id=run_id, issues=issues, now=finished_at
+        )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -1510,6 +1606,7 @@ def run_reconciliation(trigger: str = "MANUAL", limit: int = 200) -> dict[str, A
         "checked": int(report.get("checked") or 0),
         "legacy": int(report.get("legacy") or 0),
         "issue_count": len(issues),
+        "alert_count": open_alert_count,
         "issues": issues,
     }
 
@@ -1536,6 +1633,70 @@ def list_reconciliation_runs(limit: int = 20) -> list[dict[str, Any]]:
             }
             for row in rows
         ]
+    finally:
+        conn.close()
+
+
+def list_reconciliation_alerts(
+    *,
+    unread_only: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    init()
+    where = "resolved_at IS NULL"
+    if unread_only:
+        where += " AND read_at IS NULL"
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM c_reconciliation_alert WHERE {where} "
+            "ORDER BY last_seen_at DESC, alert_id DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+        return [
+            {
+                "alert_id": row["alert_id"],
+                "run_id": row["run_id"],
+                "order_id": row["order_id"],
+                "issue": row["issue"],
+                "severity": row["severity"],
+                "message": row["message"],
+                "suggestion": row["suggestion"],
+                "created_at": row["created_at"],
+                "last_seen_at": row["last_seen_at"],
+                "read_at": row["read_at"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def unread_reconciliation_alert_count() -> int:
+    init()
+    conn = _connect()
+    try:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM c_reconciliation_alert "
+                "WHERE resolved_at IS NULL AND read_at IS NULL"
+            ).fetchone()["n"]
+        )
+    finally:
+        conn.close()
+
+
+def mark_reconciliation_alerts_read() -> int:
+    init()
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE c_reconciliation_alert SET read_at = ? "
+            "WHERE resolved_at IS NULL AND read_at IS NULL",
+            (_now(),),
+        )
+        conn.commit()
+        return int(cursor.rowcount)
     finally:
         conn.close()
 

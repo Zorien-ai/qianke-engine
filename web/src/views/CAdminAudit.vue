@@ -68,9 +68,15 @@ const afterSaleBusy = ref("");
 /* ---------- 对账（C 订单 ↔ 商家订单） ---------- */
 const reconciliation = ref(null);       // 当前实时检查报告 {checked, legacy, issues, ok}
 const reconciliationRuns = ref([]);     // 历史对账运行
+const reconciliationAlerts = ref([]);   // 未解决的对账告警
+const reconciliationAlertUnread = ref(0);
 const reconciliationLoading = ref(false);
 const reconciliationRunning = ref(false);
-const reconciliationError = ref("");
+const reconciliationAlertsLoading = ref(false);
+const reconciliationReadBusy = ref(false);
+const reconciliationReportError = ref("");
+const reconciliationRunsError = ref("");
+const reconciliationAlertsError = ref("");
 
 const activeLoading = computed(() => {
   if (activeView.value === "merchant") return merchantLoading.value;
@@ -490,36 +496,96 @@ const reconciliationStatusText = computed(() => {
 
 const latestReconciliationRun = computed(() => reconciliationRuns.value[0] || null);
 
+/* ---------- 对账告警 ---------- */
+const ALERT_SEVERITY_LABELS = { CRITICAL: "严重", WARNING: "警告" };
+
+function alertSeverityLabel(severity) {
+  const key = String(severity || "").toUpperCase();
+  return ALERT_SEVERITY_LABELS[key] || severity || "告警";
+}
+
+function alertSeverityTone(severity) {
+  return String(severity || "").toUpperCase() === "CRITICAL" ? "is-critical" : "is-warning";
+}
+
+function alertSeverityBadge(severity) {
+  return String(severity || "").toUpperCase() === "CRITICAL" ? "is-danger" : "is-warn";
+}
+
+function reconAlertIssue(alert) {
+  return reconIssueLabel({ issue: alert?.issue });
+}
+
+/** 只刷新告警区域；与报告/历史独立容错 */
+async function loadReconciliationAlerts() {
+  reconciliationAlertsLoading.value = true;
+  reconciliationAlertsError.value = "";
+  try {
+    const data = await getJson("/api/c/admin/reconciliation/alerts?limit=50");
+    reconciliationAlerts.value = Array.isArray(data?.alerts) ? data.alerts : [];
+    reconciliationAlertUnread.value = Number(data?.unread || 0);
+  } catch (e) {
+    reconciliationAlertsError.value = errorMessage(e);
+    toast(reconciliationAlertsError.value, "error", 5000);
+  } finally {
+    reconciliationAlertsLoading.value = false;
+  }
+}
+
+async function markReconciliationAlertsRead() {
+  if (reconciliationReadBusy.value || reconciliationAlertUnread.value === 0) return;
+  reconciliationReadBusy.value = true;
+  try {
+    const result = await postJson("/api/c/admin/reconciliation/alerts/read", {});
+    toast(`已标记 ${Number(result?.read ?? 0)} 条对账告警为已读`, "success");
+    await loadReconciliationAlerts();
+  } catch (e) {
+    toast(errorMessage(e), "error", 5000);
+  } finally {
+    reconciliationReadBusy.value = false;
+  }
+}
+
 async function loadReconciliation() {
   reconciliationLoading.value = true;
-  reconciliationError.value = "";
-  // 两个接口独立容错：历史接口暂不可用时仍展示当前检查结果
-  const [reportResult, runsResult] = await Promise.allSettled([
+  // 当前报告 / 历史 / 告警三路独立容错：任一接口不可用仍展示其余数据
+  const [reportResult, runsResult, alertsResult] = await Promise.allSettled([
     getJson("/api/c/admin/reconciliation?limit=200"),
     getJson("/api/c/admin/reconciliation/runs?limit=20"),
+    getJson("/api/c/admin/reconciliation/alerts?limit=50"),
   ]);
   const errors = [];
   if (reportResult.status === "fulfilled") {
     reconciliation.value = reportResult.value || null;
+    reconciliationReportError.value = "";
   } else {
-    errors.push(errorMessage(reportResult.reason));
+    reconciliationReportError.value = errorMessage(reportResult.reason);
+    errors.push(reconciliationReportError.value);
   }
   if (runsResult.status === "fulfilled") {
     reconciliationRuns.value = Array.isArray(runsResult.value?.runs) ? runsResult.value.runs : [];
+    reconciliationRunsError.value = "";
   } else {
-    errors.push(errorMessage(runsResult.reason));
+    reconciliationRunsError.value = errorMessage(runsResult.reason);
+    errors.push(reconciliationRunsError.value);
   }
-  if (errors.length) {
-    reconciliationError.value = errors.join("；");
-    toast(reconciliationError.value, "error", 5000);
+  if (alertsResult.status === "fulfilled") {
+    reconciliationAlerts.value = Array.isArray(alertsResult.value?.alerts)
+      ? alertsResult.value.alerts
+      : [];
+    reconciliationAlertUnread.value = Number(alertsResult.value?.unread || 0);
+    reconciliationAlertsError.value = "";
+  } else {
+    reconciliationAlertsError.value = errorMessage(alertsResult.reason);
+    errors.push(reconciliationAlertsError.value);
   }
+  if (errors.length) toast(errors.join("；"), "error", 5000);
   reconciliationLoading.value = false;
 }
 
 async function runReconciliation() {
   if (reconciliationRunning.value) return;
   reconciliationRunning.value = true;
-  reconciliationError.value = "";
   try {
     const result = await postJson("/api/c/admin/reconciliation/run?limit=200", {});
     const checked = Number(result?.checked || 0);
@@ -531,10 +597,11 @@ async function runReconciliation() {
       result?.ok ? "success" : "warn",
       5000
     );
+    // 立即对账后同时刷新报告/历史/告警
     await loadReconciliation();
   } catch (e) {
-    reconciliationError.value = errorMessage(e);
-    toast(reconciliationError.value, "error", 5000);
+    reconciliationReportError.value = errorMessage(e);
+    toast(reconciliationReportError.value, "error", 5000);
   } finally {
     reconciliationRunning.value = false;
   }
@@ -1056,10 +1123,10 @@ onMounted(load);
 
     <!-- ========== 视图四：对账 ========== -->
     <template v-else>
-      <div v-if="reconciliationError && !reconciliation" class="card">
+      <div v-if="reconciliationReportError && !reconciliation" class="card">
         <div class="empty-state">
           <div class="empty-title">对账数据加载失败</div>
-          <div class="empty-desc">{{ reconciliationError }}</div>
+          <div class="empty-desc">{{ reconciliationReportError }}</div>
         </div>
       </div>
 
@@ -1115,6 +1182,45 @@ onMounted(load);
           </div>
         </section>
 
+        <section class="card recon-alert-card">
+          <div class="admin-section-head">
+            <strong>对账告警</strong>
+            <span class="recon-alert-head-actions">
+              <span class="field-hint">
+                未读 <strong class="recon-alert-unread">{{ reconciliationAlertUnread }}</strong> 条
+              </span>
+              <button
+                type="button"
+                class="btn btn-ghost"
+                :disabled="reconciliationReadBusy || reconciliationAlertUnread === 0"
+                @click="markReconciliationAlertsRead"
+              >{{ reconciliationReadBusy ? "标记中…" : "全部标记已读" }}</button>
+            </span>
+          </div>
+          <p v-if="reconciliationAlertsError" class="field-hint">告警加载失败：{{ reconciliationAlertsError }}</p>
+          <div v-if="reconciliationAlertsLoading && !reconciliationAlerts.length" class="skeleton" style="height:72px"></div>
+          <template v-else>
+            <div v-if="reconciliationAlerts.length" class="recon-alert-list">
+              <article
+                v-for="alert in reconciliationAlerts"
+                :key="alert.alert_id"
+                class="recon-alert"
+                :class="[alertSeverityTone(alert.severity), { 'is-read': !!alert.read_at }]"
+              >
+                <header class="recon-alert-head">
+                  <span class="badge" :class="alertSeverityBadge(alert.severity)">{{ alertSeverityLabel(alert.severity) }}</span>
+                  <span class="badge is-warn">{{ reconAlertIssue(alert) }}</span>
+                  <code class="recon-alert-order">{{ alert.order_id || "—" }}</code>
+                  <time>{{ date(alert.last_seen_at || alert.created_at) }}</time>
+                </header>
+                <p class="recon-alert-message">{{ alert.message || "对账告警" }}</p>
+                <p class="recon-alert-suggestion">建议：{{ alert.suggestion || "—" }}</p>
+              </article>
+            </div>
+            <div v-else-if="!reconciliationAlertsError" class="recon-alert-empty">未发现未解决告警</div>
+          </template>
+        </section>
+
         <section class="card">
           <div class="admin-section-head">
             <strong>当前问题</strong>
@@ -1144,7 +1250,7 @@ onMounted(load);
             <strong>对账历史</strong>
             <span class="field-hint">最近 {{ reconciliationRuns.length }} 次</span>
           </div>
-          <p v-if="reconciliationError" class="field-hint">历史加载失败：{{ reconciliationError }}</p>
+          <p v-if="reconciliationRunsError" class="field-hint">历史加载失败：{{ reconciliationRunsError }}</p>
           <div class="table-wrap op-table-wrap">
             <table class="table op-table">
               <thead>
@@ -1349,6 +1455,99 @@ onMounted(load);
   color: var(--danger) !important;
 }
 
+/* ---------- 对账告警：低饱和红/黄细边框，只做提示不弹窗 ---------- */
+.recon-alert-card {
+  margin-top: 16px;
+}
+
+.recon-alert-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.recon-alert-unread {
+  color: var(--danger);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.recon-alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.recon-alert {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.recon-alert.is-critical {
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+  border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger-soft) 16%, var(--surface));
+}
+
+.recon-alert.is-warning {
+  border-color: color-mix(in srgb, var(--warn) 34%, var(--border));
+  border-left-color: var(--warn);
+  background: color-mix(in srgb, var(--warn-soft) 16%, var(--surface));
+}
+
+.recon-alert.is-read {
+  opacity: 0.72;
+}
+
+.recon-alert-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.recon-alert-order {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.recon-alert-head time {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.recon-alert-message {
+  margin: 6px 0 2px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.recon-alert-suggestion {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.recon-alert-empty {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
 .audit-chip {
   display: inline-block;
   margin: 1px 3px 1px 0;
@@ -1481,6 +1680,26 @@ onMounted(load);
   .op-tabs .op-tab {
     flex: 1;
     padding: 0 8px;
+  }
+
+  .recon-alert-head {
+    align-items: flex-start;
+  }
+
+  .recon-alert-card .admin-section-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .recon-alert-head time {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .recon-alert-head-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .ship-form {

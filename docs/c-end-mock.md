@@ -124,6 +124,8 @@ GET /api/c/admin/reconciliation
   → 检查 C/商家订单状态与原始金额，旧平台订单单独计数
 POST /api/c/admin/reconciliation/run
 GET  /api/c/admin/reconciliation/runs
+GET  /api/c/admin/reconciliation/alerts
+POST /api/c/admin/reconciliation/alerts/read
   → 对账运行留痕；定时 worker scripts/reconciliation_scheduler.py
 ```
 

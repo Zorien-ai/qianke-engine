@@ -55,3 +55,49 @@ def test_list_reconciliation_runs_limit_and_order(c_store):
     assert runs[0]["run_id"] in {first["run_id"], second["run_id"]}
     all_runs = c_store.list_reconciliation_runs(limit=10)
     assert len(all_runs) >= 2
+
+
+def _create_divergence(c_store, request_id: str):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id=request_id,
+    )
+    get_merchant_write_repository().cancel_order("m_gear_002", order["order_id"])
+    return order
+
+
+def test_reconciliation_alerts_are_created_and_deduped(c_store):
+    order = _create_divergence(c_store, "req_reconcile_alert_001")
+    report = c_store.run_reconciliation("MANUAL")
+    assert report["alert_count"] >= 1
+    alerts = c_store.list_reconciliation_alerts()
+    assert len(alerts) == 1
+    assert alerts[0]["order_id"] == order["order_id"]
+    assert alerts[0]["issue"] == "STATUS_DIVERGENCE"
+    assert "人工确认" in alerts[0]["suggestion"]
+    assert c_store.unread_reconciliation_alert_count() == 1
+
+    # 同一问题重复对账不新增第二条告警。
+    second = c_store.run_reconciliation("SCHEDULED")
+    assert second["alert_count"] == 1
+    assert len(c_store.list_reconciliation_alerts()) == 1
+
+    assert c_store.mark_reconciliation_alerts_read() == 1
+    assert c_store.unread_reconciliation_alert_count() == 0
+    assert c_store.list_reconciliation_alerts(unread_only=True) == []
+
+
+def test_reconciliation_alert_resolves_when_issue_disappears(c_store):
+    order = _create_divergence(c_store, "req_reconcile_alert_002")
+    c_store.run_reconciliation("MANUAL")
+    assert len(c_store.list_reconciliation_alerts()) == 1
+
+    # 把 C 侧也取消，状态重新一致后，下一次对账应把告警标记 resolved。
+    c_store.cancel_confirmed_order("buyer_1", order["order_id"], request_id="req_alert_fix_001")
+    report = c_store.run_reconciliation("MANUAL")
+    assert report["ok"] is True
+    assert report["alert_count"] == 0
+    assert c_store.list_reconciliation_alerts() == []

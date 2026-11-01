@@ -474,6 +474,21 @@ def admin_reconciliation_runs(limit: int = 20) -> dict:
     return {"runs": store.list_reconciliation_runs(limit=limit)}
 
 
+@router.get("/admin/reconciliation/alerts")
+def admin_reconciliation_alerts(unread_only: bool = False, limit: int = 50) -> dict:
+    _require_admin()
+    return {
+        "alerts": store.list_reconciliation_alerts(unread_only=unread_only, limit=limit),
+        "unread": store.unread_reconciliation_alert_count(),
+    }
+
+
+@router.post("/admin/reconciliation/alerts/read")
+def admin_read_reconciliation_alerts() -> dict:
+    _require_admin()
+    return {"read": store.mark_reconciliation_alerts_read()}
+
+
 @router.get("/admin/audit")
 def c_end_admin_audit(
     limit: int = 50,

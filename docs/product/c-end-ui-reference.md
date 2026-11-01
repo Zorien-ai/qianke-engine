@@ -391,16 +391,20 @@ POST  /api/c/admin/after-sales/{ticket_id}/receive {accepted}
 
 ```text
 GET  /api/c/admin/reconciliation?limit=200       → {checked, legacy, issues, ok}
-POST /api/c/admin/reconciliation/run?limit=200   → {run_id, trigger, started_at, finished_at, ok, checked, legacy, issue_count, issues}
+POST /api/c/admin/reconciliation/run?limit=200   → {run_id, trigger, started_at, finished_at, ok, checked, legacy, issue_count, issues, alert_count}
 GET  /api/c/admin/reconciliation/runs?limit=20   → {runs:[同 run 结构]}
+GET  /api/c/admin/reconciliation/alerts?unread_only=&limit=50 → {alerts, unread}
+POST /api/c/admin/reconciliation/alerts/read     → {read}
 ```
 
 - 摘要卡：已核对（checked）/ 旧平台订单（legacy）/ 问题数 / 状态（正常 / 发现差异，绿色/红色）；
+- 对账告警卡片：未读数、告警列表（严重程度 严重/警告、订单、问题类型、问题 message、修复建议 suggestion、最近发现时间）、「全部标记已读」；无告警显示空态「未发现未解决告警」；
+- 严重告警用低饱和红细边框、警告用低饱和黄细边框，只做提示不弹窗；标读成功后未读归零、按钮置灰、已读行降低强调；
 - 当前问题列表：订单号 + 问题类型（商家订单缺失 / 状态不一致 / 金额不一致）+ 状态或金额差异详情；
 - 历史 runs 表：时间 / 触发（MANUAL 等）/ 已核对 / 旧平台 / 问题数 / 状态；
-- 「立即对账」调用 run 接口并 toast 结果，完成后刷新当前报告与历史；运行中禁用防重复；
-- 首次进入同时加载当前检查与历史；两者独立容错——历史接口失败时仍展示当前检查，错误 toast `detail.message`；
-- 白色极简，表格在移动端容器内横向滚动，页面不横向溢出。
+- 「立即对账」调用 run 接口并 toast 结果，完成后同时刷新当前报告、历史与告警；运行中禁用防重复；
+- 首次进入并行加载当前检查 / 历史 / 告警，三者**独立容错**：任一接口失败时其余区域仍展示，失败区域给出行内提示并 toast `detail.message`；
+- 白色极简，表格在移动端容器内横向滚动，告警卡片自适应宽度，页面不横向溢出。
 
 ## 14. CApp 未读与 @ 提及定位
 

@@ -92,30 +92,60 @@ legacy                  无 merchant_order_id 的旧平台订单，单独计数
 
 单测构造「只取消商家侧」后，对账返回 `ok=False`，`STATUS_DIVERGENCE` 正确落库。
 
-## 6. 测试与构建
+## 6. 对账告警
+
+新增 `c_reconciliation_alert`，按 `(order_id, issue)` 去重：
+
+```text
+alert_id / run_id / order_id / issue / severity
+message / suggestion / created_at / last_seen_at
+read_at / resolved_at
+```
+
+接口：
+
+```text
+GET  /api/c/admin/reconciliation/alerts?unread_only=&limit=50
+POST /api/c/admin/reconciliation/alerts/read
+```
+
+真实流程：
+
+```text
+C 订单 CONFIRMED，商家订单被取消为 CANCELLED
+→ 对账 run：issue_count=1，alert_count=1
+→ 未读告警：STATUS_DIVERGENCE / WARNING
+→ 建议：人工确认以哪一侧为准；取消/退款必须走受控接口
+→ 点击「全部标记已读」
+→ 未读 0、按钮置灰
+```
+
+告警不会自动修改订单；下一次对账发现该问题消失后，自动标记 `resolved_at`。
+
+## 7. 测试与构建
 
 ```bash
 pytest tests/ -q
-# 561 passed, 5 skipped, 1 warning
+# 575 passed, 5 skipped, 1 warning
 
 npm run build
-# ✓ built in 4.51s
+# ✓ built in 5.14s
 ```
 
 新增：
 
 ```text
 tests/test_c_end_reconciliation_runs.py
-3 passed
+5 passed
 ```
 
-## 7. 已知限制
+## 8. 已知限制
 
 ```text
-只检测，不自动修复；修复仍需人工/后续自动化策略
+只检测 + 告警 + 修复建议，不自动修复订单
 一次最多 200 单，无全量分页扫描
 旧平台订单只计 legacy，无法核对
 单商家 m_gear_002；多商家需扩展
 worker 是独立脚本，不在 API 进程内常驻
-没有告警/通知；问题仅写 run 记录和日志
+没有外部告警通道（Webhook/邮件）；告警在运营台内展示
 ```
