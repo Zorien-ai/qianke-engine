@@ -300,6 +300,8 @@ async def approval_card_submit(work_item_id: str, request: Request) -> HTMLRespo
         decision=decision,
         tracking_no=str(form.get("tracking_no") or ""),
         carrier=str(form.get("carrier") or ""),
+        amount=str(form.get("amount") or ""),
+        reason=str(form.get("reason") or ""),
     )
     if success:
         return HTMLResponse(sa_approval_card.render_result("审批已提交", message))

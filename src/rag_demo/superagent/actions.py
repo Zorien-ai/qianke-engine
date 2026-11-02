@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from rag_demo.c_end import store
@@ -26,6 +27,7 @@ ALLOWED_ACTIONS = {
     "REFUND_AFTER_SALE",
     "RECEIVE_RETURN",
     "REJECT_AFTER_SALE",
+    "ISSUE_COMPENSATION",
 }
 
 
@@ -133,6 +135,25 @@ def _execute(action: dict[str, Any], merchant_id: str) -> dict[str, Any]:
             ticket["ticket_id"], approved=False, merchant_id=merchant_id
         )
         return {"action_type": action_type, "order_id": order_id, "ticket": rejected}
+
+    if action_type == "ISSUE_COMPENSATION":
+        try:
+            amount = float(action.get("amount") or 0)
+        except (TypeError, ValueError):
+            raise ActionError("INVALID_ACTION", "补偿金额必须是数字") from None
+        cap = float(os.environ.get("QIANKE_COMPENSATION_MAX_AMOUNT") or "50")
+        if amount <= 0 or amount > cap:
+            raise ActionError("INVALID_ACTION", f"补偿金额必须在 0~{cap:g} 元之间")
+        reason = str(action.get("reason") or "Super-agent 售后补偿").strip()[:300]
+        compensation = store.create_compensation(
+            order_id=order_id,
+            buyer_id=buyer_id,
+            merchant_id=merchant_id,
+            amount=amount,
+            reason=reason,
+            work_item_id=str(action.get("work_item_id") or ""),
+        )
+        return {"action_type": action_type, "order_id": order_id, "compensation": compensation}
 
     raise ActionError("ACTION_NOT_ALLOWED", action_type)
 

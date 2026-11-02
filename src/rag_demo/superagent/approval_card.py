@@ -99,6 +99,7 @@ def build_card(item: dict[str, Any]) -> dict[str, Any] | None:
         "REFUND_AFTER_SALE": "待审批：售后退款",
         "RECEIVE_RETURN": "待审批：退货入库",
         "REJECT_AFTER_SALE": "待审批：驳回售后",
+        "ISSUE_COMPENSATION": "待审批：发放补偿",
     }
     title = title_map.get(action_type, "待审批：Super-agent 动作")
     summary = str((item.get("result") or {}).get("summary") or "").strip()[:120]
@@ -174,6 +175,15 @@ def render_page(item: dict[str, Any], token: str, error: str = "") -> str:
             '<label class="muted">承运商（可选）</label><input type="text" name="carrier" placeholder="顺丰">'
             '<button class="ok" type="submit">确认发货</button></form>'
         )
+    elif action_type == "ISSUE_COMPENSATION":
+        forms.append(
+            f'<form method="post" action="/api/superagent/approval-card/{html.escape(item["work_item_id"])}">'
+            f'<input type="hidden" name="token" value="{html.escape(token)}">'
+            f'<input type="hidden" name="decision" value="approve:COMPENSATION">'
+            '<label class="muted">补偿金额（元，上限由服务端配置）</label><input type="text" name="amount" required placeholder="20">'
+            '<label class="muted">补偿原因</label><input type="text" name="reason" required placeholder="物流延迟补偿">'
+            '<button class="ok" type="submit">确认发放</button></form>'
+        )
     else:
         forms.append(
             f'<form method="post" action="/api/superagent/approval-card/{html.escape(item["work_item_id"])}" style="display:inline">'
@@ -209,6 +219,8 @@ def approve_from_card(
     decision: str,
     tracking_no: str = "",
     carrier: str = "",
+    amount: str = "",
+    reason: str = "",
 ) -> tuple[bool, str]:
     item = sa_store.get_work_item(work_item_id)
     if item is None:
@@ -234,6 +246,16 @@ def approve_from_card(
             params["tracking_no"] = tracking_no.strip()
             if carrier.strip():
                 params["carrier"] = carrier.strip()
+        elif action_type == "ISSUE_COMPENSATION":
+            try:
+                value_amount = float(amount or 0)
+            except ValueError:
+                return False, "补偿金额必须是数字"
+            if value_amount <= 0:
+                return False, "补偿金额必须大于 0"
+            params["amount"] = value_amount
+            if reason.strip():
+                params["reason"] = reason.strip()[:300]
     elif action_type == "CREATE_AFTER_SALE":
         return False, "售后审批必须选择仅退款或退货退款"
     try:

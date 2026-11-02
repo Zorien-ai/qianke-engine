@@ -68,6 +68,7 @@ const ACTION_LABELS = {
   REFUND_AFTER_SALE: "售后退款",
   RECEIVE_RETURN: "退货验收入库",
   REJECT_AFTER_SALE: "驳回售后",
+  ISSUE_COMPENSATION: "发放补偿",
 };
 
 const ACTION_SALE_TYPE_LABELS = {
@@ -485,14 +486,18 @@ function actionParamsText(action) {
 /** 每个工作项的人工补充参数；SHIP_ORDER 预填动作已有值，CREATE_AFTER_SALE 必须由人选择 */
 function getActionParamsState(item) {
   const id = String(item?.work_item_id || "");
-  if (!id) return { sale_type: "", tracking_no: "", carrier: "" };
+  if (!id) return { sale_type: "", tracking_no: "", carrier: "", amount: "", reason: "" };
   if (!state.actionParams[id]) {
     const action = workItemAction(item);
-    const isShip = String(action?.action_type || "").toUpperCase() === "SHIP_ORDER";
+    const type = String(action?.action_type || "").toUpperCase();
+    const isShip = type === "SHIP_ORDER";
+    const isCompensation = type === "ISSUE_COMPENSATION";
     state.actionParams[id] = {
       sale_type: "",
       tracking_no: isShip ? String(action?.tracking_no || "") : "",
       carrier: isShip ? String(action?.carrier || "") : "",
+      amount: isCompensation && Number(action?.amount) > 0 ? String(action.amount) : "",
+      reason: isCompensation ? String(action?.reason || "") : "",
     };
   }
   return state.actionParams[id];
@@ -505,6 +510,9 @@ function actionParamsValid(action, params) {
   }
   if (type === "SHIP_ORDER") {
     return String(params?.tracking_no || "").trim().length > 0;
+  }
+  if (type === "ISSUE_COMPENSATION") {
+    return Number(params?.amount) > 0;
   }
   return true;
 }
@@ -520,16 +528,36 @@ function actionParamsForPost(action, params) {
     if (carrier) post.carrier = carrier;
     return post;
   }
+  if (type === "ISSUE_COMPENSATION") {
+    return {
+      amount: Number(params?.amount || 0),
+      reason: String(params?.reason || "").trim(),
+    };
+  }
   return {};
 }
 
 function actionParamsMarkup(item, action) {
   const type = String(action?.action_type || "").toUpperCase();
-  if (type !== "CREATE_AFTER_SALE" && type !== "SHIP_ORDER") return "";
+  if (type !== "CREATE_AFTER_SALE" && type !== "SHIP_ORDER" && type !== "ISSUE_COMPENSATION") return "";
   const id = String(item?.work_item_id || "");
   const params = getActionParamsState(item);
   const valid = actionParamsValid(action, params);
 
+  if (type === "ISSUE_COMPENSATION") {
+    return `<div class="b-param-card">
+      <p class="b-param-title">审批参数</p>
+      <div class="b-param-fields">
+        <label class="b-param-field">补偿金额（元）
+          <input id="b-param-amount-${escapeHtml(id)}" data-param-amount="${escapeHtml(id)}" value="${escapeHtml(params.amount)}" placeholder="如 20" inputmode="decimal" autocomplete="off" />
+        </label>
+        <label class="b-param-field">补偿原因
+          <input id="b-param-reason-${escapeHtml(id)}" data-param-reason="${escapeHtml(id)}" value="${escapeHtml(params.reason)}" placeholder="如 物流延迟补偿" autocomplete="off" />
+        </label>
+      </div>
+      ${valid ? "" : `<p class="b-param-hint">请填写大于 0 的补偿金额后再通过并执行</p>`}
+    </div>`;
+  }
   if (type === "CREATE_AFTER_SALE") {
     const saleType = String(params.sale_type || "").toUpperCase();
     return `<div class="b-param-card">
@@ -1953,16 +1981,31 @@ function bindEvents() {
     }
     if (
       target instanceof HTMLInputElement &&
-      (target.matches("[data-param-tracking]") || target.matches("[data-param-carrier]"))
+      (target.matches("[data-param-tracking]") ||
+        target.matches("[data-param-carrier]") ||
+        target.matches("[data-param-amount]") ||
+        target.matches("[data-param-reason]"))
     ) {
-      const workItemId = target.dataset.paramTracking || target.dataset.paramCarrier;
+      const workItemId =
+        target.dataset.paramTracking ||
+        target.dataset.paramCarrier ||
+        target.dataset.paramAmount ||
+        target.dataset.paramReason;
       const item = state.workItems.find((candidate) => candidate.work_item_id === workItemId);
       const params = item
         ? getActionParamsState(item)
         : (state.actionParams[workItemId] =
-            state.actionParams[workItemId] || { sale_type: "", tracking_no: "", carrier: "" });
+            state.actionParams[workItemId] || {
+              sale_type: "",
+              tracking_no: "",
+              carrier: "",
+              amount: "",
+              reason: "",
+            });
       if (target.matches("[data-param-tracking]")) params.tracking_no = target.value;
-      else params.carrier = target.value;
+      else if (target.matches("[data-param-carrier]")) params.carrier = target.value;
+      else if (target.matches("[data-param-amount]")) params.amount = target.value;
+      else params.reason = target.value;
       render();
     }
   });

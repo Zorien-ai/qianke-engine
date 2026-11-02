@@ -443,6 +443,18 @@ CREATE TABLE IF NOT EXISTS c_merchant_tenant (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_compensation (
+    compensation_id TEXT PRIMARY KEY,
+    order_id        TEXT NOT NULL,
+    buyer_id        TEXT NOT NULL,
+    merchant_id     TEXT NOT NULL,
+    work_item_id    TEXT NOT NULL DEFAULT '',
+    amount          REAL NOT NULL,
+    reason          TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    UNIQUE(order_id)
+);
+
 CREATE TABLE IF NOT EXISTS c_mention (
     mention_id  TEXT PRIMARY KEY,
     owner_id    TEXT NOT NULL,
@@ -659,6 +671,89 @@ def unbind_merchant_member(account_id: int) -> bool:
         )
         conn.commit()
         return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def create_compensation(
+    *,
+    order_id: str,
+    buyer_id: str,
+    merchant_id: str,
+    amount: float,
+    reason: str,
+    work_item_id: str = "",
+) -> dict[str, Any]:
+    """记录一笔模拟补偿（优惠券/现金补偿），一个订单只能有一笔。"""
+    amount = float(amount or 0)
+    reason = str(reason or "").strip()
+    if amount <= 0 or amount > 1000:
+        raise CStoreError("INVALID_COMPENSATION_AMOUNT", "补偿金额必须在 0~1000 元之间")
+    if not reason or len(reason) > 300:
+        raise CStoreError("INVALID_COMPENSATION_REASON", "补偿原因不能为空且不能超过 300 字")
+    order = get_order(order_id)
+    if order is None:
+        raise CStoreError("ORDER_NOT_FOUND", "订单不存在")
+    if order["buyer_id"] != buyer_id:
+        raise CStoreError("ORDER_FORBIDDEN", "订单不属于当前买家")
+    if get_merchant_repository().get_order(order_id, merchant_id=merchant_id) is None:
+        raise CStoreError("ORDER_FORBIDDEN", "订单不属于当前商家")
+    init()
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute(
+            "SELECT 1 FROM c_compensation WHERE order_id = ?", (order_id,)
+        ).fetchone():
+            raise CStoreError("COMPENSATION_EXISTS", "该订单已经发放过补偿")
+        compensation_id = f"cmp_{uuid.uuid4().hex[:16]}"
+        conn.execute(
+            "INSERT INTO c_compensation(compensation_id, order_id, buyer_id, merchant_id, "
+            "work_item_id, amount, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                compensation_id,
+                order_id,
+                buyer_id,
+                merchant_id,
+                work_item_id,
+                amount,
+                reason,
+                _now(),
+            ),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_compensation(order_id) or {}
+
+
+def get_compensation(order_id: str) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_compensation WHERE order_id = ?", (order_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_compensations(merchant_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    init()
+    where = "WHERE merchant_id = ?" if merchant_id else ""
+    params: list[Any] = [merchant_id] if merchant_id else []
+    params.append(max(1, min(int(limit), 200)))
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM c_compensation {where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 

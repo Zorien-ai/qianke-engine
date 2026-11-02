@@ -26,6 +26,7 @@ COMPLETE_ORDER      标记商家订单完成
 REFUND_AFTER_SALE   审批已有售后工单：仅退款直接退款，退货退款进入待寄回
 RECEIVE_RETURN      退货物流已寄回后验收入库并退款
 REJECT_AFTER_SALE   驳回已有 OPEN 售后工单
+ISSUE_COMPENSATION  发放模拟补偿（优惠券/现金），单订单唯一，金额有上限
 ```
 
 不在白名单内的动作返回 `ACTION_NOT_ALLOWED`，不执行。
@@ -54,6 +55,26 @@ Worker 建议 CREATE_AFTER_SALE / sale_type=RETURN_REFUND
     "ticket_id": "as_xxx"
   }
 }
+```
+
+补偿动作额外参数：
+
+```json
+{
+  "approved": true,
+  "action_params": {
+    "amount": 25,
+    "reason": "物流延迟补偿"
+  }
+}
+```
+
+补偿约束：
+
+```text
+单订单只能发一笔
+金额 > 0 且 <= QIANKE_COMPENSATION_MAX_AMOUNT（默认 50）
+执行时再次校验，模型/审批参数不能绕过
 ```
 
 规则：
@@ -192,6 +213,16 @@ RECEIVE_RETURN 验收入库 → 恢复库存 + 退款
 OPEN 售后单 → 人工驳回 → REJECTED
 ```
 
+### ISSUE_COMPENSATION
+
+```text
+work_item: saw_5fc028b66f504252
+order:     order_d72d0f02f6a94dcc
+approve:   action_params.amount = 25（覆盖模型建议 20）
+final:     DONE / EXECUTED
+comp:      cmp_a5952e34f5ee4b8b / 25.0 元
+```
+
 ## 9. 测试
 
 ```bash
@@ -208,12 +239,13 @@ C/商家订单均变为 CANCELLED
 驳回不执行
 动作执行失败不误报成功
 REFUND_AFTER_SALE / RECEIVE_RETURN / REJECT_AFTER_SALE
+ISSUE_COMPENSATION / 金额上限 / 重复补偿
 ```
 
 完整套件：
 
 ```text
-626 passed, 5 skipped, 1 warning
+631 passed, 5 skipped, 1 warning
 ```
 
 ## 10. 已知限制

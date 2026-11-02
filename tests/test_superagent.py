@@ -296,6 +296,75 @@ def test_semantic_slow_path(c_store, monkeypatch):
     assert result["reason"].startswith("SEMANTIC:")
 
 
+def test_issue_compensation_and_cap(c_store, monkeypatch):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1", draft["order_id"], draft["confirmation_token"], request_id="req_compensation"
+    )
+    _ship_and_complete(order["order_id"])
+    accepted = sa_router.ingest_event(
+        source="im", content=f"订单 {order['order_id']} 物流延迟补偿", channel="test",
+        thread_key="action:compensation",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+    sa_store.start_work_item(item_id)
+    action = {
+        "action_type": "ISSUE_COMPENSATION",
+        "order_id": order["order_id"],
+        "amount": 20,
+        "reason": "物流延迟补偿",
+    }
+    sa_store.finish_work_item(item_id, {"summary": "补偿", "action": action}, approval=True, action=action)
+    sa_store.decide_approval(item_id, approved=True, note="同意")
+    executed = sa_actions.execute_approved(item_id)
+    assert executed["approval"]["execution_status"] == "EXECUTED"
+    assert executed["approval"]["execution_result"]["compensation"]["amount"] == 20
+    assert c_store.get_compensation(order["order_id"])["amount"] == 20
+
+    # 同一订单不允许重复补偿
+    second = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    second_order = c_store.confirm_order(
+        "buyer_1", second["order_id"], second["confirmation_token"], request_id="req_comp_cap"
+    )
+    _ship_and_complete(second_order["order_id"])
+    with pytest.raises(c_store.CStoreError):
+        c_store.create_compensation(
+            order_id=second_order["order_id"], buyer_id="buyer_1", merchant_id="m_gear_002",
+            amount=20, reason="重复",
+        )
+        c_store.create_compensation(
+            order_id=second_order["order_id"], buyer_id="buyer_1", merchant_id="m_gear_002",
+            amount=20, reason="重复",
+        )
+
+
+def test_compensation_over_cap_is_rejected(c_store, monkeypatch):
+    monkeypatch.setenv("QIANKE_COMPENSATION_MAX_AMOUNT", "50")
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1", draft["order_id"], draft["confirmation_token"], request_id="req_comp_over_cap"
+    )
+    _ship_and_complete(order["order_id"])
+    accepted = sa_router.ingest_event(
+        source="im", content=f"订单 {order['order_id']} 超额补偿", channel="test",
+        thread_key="action:compensation-cap",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+    sa_store.start_work_item(item_id)
+    action = {
+        "action_type": "ISSUE_COMPENSATION",
+        "order_id": order["order_id"],
+        "amount": 100,
+        "reason": "超额补偿",
+    }
+    sa_store.finish_work_item(item_id, {"summary": "补偿", "action": action}, approval=True, action=action)
+    sa_store.decide_approval(item_id, approved=True, note="同意")
+    executed = sa_actions.execute_approved(item_id)
+    assert executed["approval"]["execution_status"] == "FAILED"
+    assert "INVALID_ACTION" in (executed.get("error") or "")
+    assert c_store.get_compensation(order["order_id"]) is None
+
+
 def test_refund_existing_after_sale(c_store, monkeypatch):
     draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
     order = c_store.confirm_order(
