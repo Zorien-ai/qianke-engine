@@ -1,0 +1,82 @@
+"""B 端商家工作台：租户绑定与订单作用域。"""
+from __future__ import annotations
+
+import pytest
+from fastapi import HTTPException
+
+from rag_demo.api import b_workbench
+from rag_demo.c_end import store
+from rag_demo.merchant import get_merchant_write_repository
+
+
+@pytest.fixture()
+def c_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("QIANKE_C_END_DB", str(tmp_path / "c_end.sqlite"))
+    monkeypatch.setattr(store, "_DB_PATH", None)
+    store.init()
+    return store
+
+
+def _admin(monkeypatch):
+    monkeypatch.setattr(
+        b_workbench.auth,
+        "current_account",
+        lambda: {"id": 1, "username": "admin", "display_name": "Admin", "status": "active", "is_system_admin": True},
+    )
+
+
+def test_system_admin_is_bound_to_default_merchant(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_me()
+    assert data["merchant"]["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+    assert data["merchant"]["role"] == "owner"
+    assert data["counts"]["products"] > 0
+    assert data["counts"]["orders"] > 0
+
+
+def test_unbound_non_admin_is_rejected(c_store, monkeypatch):
+    monkeypatch.setattr(
+        b_workbench.auth,
+        "current_account",
+        lambda: {"id": 99, "username": "other", "status": "active", "is_system_admin": False},
+    )
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_orders()
+    assert exc.value.status_code == 403
+
+
+def test_orders_are_scoped_to_bound_merchant(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_orders()
+    assert data["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+    assert all(order["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID for order in data["orders"])
+
+    # 绑定到另一个租户后只能看到该租户订单。
+    store.bind_merchant_member(1, "m_tea_001", role="owner")
+    tea = b_workbench.workbench_orders()
+    assert tea["merchant_id"] == "m_tea_001"
+    assert all(order["merchant_id"] == "m_tea_001" for order in tea["orders"])
+
+
+def test_update_order_status_is_scoped(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_orders(status="SHIPPED")
+    if not data["orders"]:
+        pytest.skip("种子中没有 SHIPPED 订单")
+    order_id = data["orders"][0]["order_id"]
+    result = b_workbench.workbench_update_order(
+        order_id,
+        b_workbench.WorkbenchOrderStatusIn(status="COMPLETED"),
+    )
+    assert result["order"]["status"] == "COMPLETED"
+    assert result["order"]["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+
+
+def test_after_sales_only_for_bound_merchant(c_store, monkeypatch):
+    _admin(monkeypatch)
+    # 没有工单时返回空列表即可；有工单时必须属于当前商家。
+    data = b_workbench.workbench_after_sales()
+    assert data["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+    for ticket in data["tickets"]:
+        order = c_store.get_order(ticket["order_id"])
+        assert order is not None

@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 1.9.12 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 2.0.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v1.9.12 |
+| AGENTS.md | v2.0.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -510,3 +510,4 @@ IM 社交载体
 | 1.9.10 | 2026-11-01 | 对账告警：c_reconciliation_alert 去重/自动 resolved、修复建议 API、运营台未读告警与标读 |
 | 1.9.11 | 2026-11-01 | 对账告警 Webhook：可配置 URL/Token、JSON 推送、失败不影响对账、本地接收端实测 |
 | 1.9.12 | 2026-11-01 | Webhook 格式适配：generic / 企业微信 / 钉钉 markdown；未知格式回退 generic |
+| 2.0.0 | 2026-11-02 | 商家租户与 B 端独立工作台：账号-商家绑定、/api/b/workbench 租户隔离、独立 /v2/b.html 订单/售后/商品 |

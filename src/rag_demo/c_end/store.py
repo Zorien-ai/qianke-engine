@@ -429,6 +429,13 @@ CREATE TABLE IF NOT EXISTS c_reconciliation_alert (
 CREATE INDEX IF NOT EXISTS idx_c_reconciliation_alert_open
     ON c_reconciliation_alert (resolved_at, read_at, last_seen_at DESC);
 
+CREATE TABLE IF NOT EXISTS c_merchant_member (
+    account_id  INTEGER PRIMARY KEY,
+    merchant_id TEXT NOT NULL,
+    role        TEXT NOT NULL DEFAULT 'owner',
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS c_mention (
     mention_id  TEXT PRIMARY KEY,
     owner_id    TEXT NOT NULL,
@@ -520,6 +527,47 @@ def init() -> None:
             conn.commit()
         finally:
             conn.close()
+
+
+def get_merchant_member(account_id: int) -> dict[str, Any] | None:
+    """读取账号绑定的商家租户；B 端工作台只允许访问该商家。"""
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_merchant_member WHERE account_id = ?",
+            (int(account_id),),
+        ).fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def bind_merchant_member(
+    account_id: int,
+    merchant_id: str,
+    *,
+    role: str = "owner",
+) -> dict[str, Any]:
+    merchant_id = str(merchant_id or "").strip()
+    role = str(role or "owner").strip() or "owner"
+    if not merchant_id:
+        raise CStoreError("INVALID_MERCHANT", "merchant_id 不能为空")
+    init()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_merchant_member(account_id, merchant_id, role, created_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET "
+            "merchant_id = excluded.merchant_id, role = excluded.role",
+            (int(account_id), merchant_id, role, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    row = get_merchant_member(account_id)
+    assert row is not None
+    return row
 
 
 def list_products(category: str | None = None, keyword: str | None = None, limit: int = 20) -> list[dict[str, Any]]:

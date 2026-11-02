@@ -15,6 +15,12 @@ def c_store(tmp_path, monkeypatch):
     return store
 
 
+@pytest.fixture(autouse=True)
+def _isolate_webhook_format(monkeypatch):
+    # 本地 .env 可能保存了 wecom/dingtalk 配置；单元测试默认 generic。
+    monkeypatch.delenv(alerts.WEBHOOK_FORMAT_ENV, raising=False)
+
+
 def _divergence(c_store):
     draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
     order = c_store.confirm_order(
