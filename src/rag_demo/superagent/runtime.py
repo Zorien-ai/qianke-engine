@@ -39,6 +39,15 @@ def start_worker(work_item_id: str) -> bool:
     return True
 
 
+def start_action(work_item_id: str) -> bool:
+    """审批通过后入队执行动作；与 Worker 使用同一持久化队列。"""
+    job = sa_store.enqueue_job(work_item_id, kind="ACTION")
+    if job.get("status") != "PENDING":
+        return False
+    _submit(job["job_id"])
+    return True
+
+
 def _submit(job_id: str) -> None:
     with _LOCK:
         if job_id in _CANCEL_EVENTS:
@@ -57,6 +66,9 @@ def _run_job(job_id: str, cancel_event: threading.Event) -> None:
         return
     work_item_id = job["work_item_id"]
     try:
+        if job["kind"] == "ACTION":
+            _run_action_job(job, work_item_id)
+            return
         current = sa_store.get_work_item(work_item_id)
         if current is None:
             sa_store.finish_job(job_id, "FAILED", error="work item not found")
@@ -85,6 +97,29 @@ def _run_job(job_id: str, cancel_event: threading.Event) -> None:
         with _LOCK:
             _CANCEL_EVENTS.pop(job_id, None)
             _JOB_BY_WORK_ITEM.pop(work_item_id, None)
+
+
+def _run_action_job(job: dict[str, Any], work_item_id: str) -> None:
+    from rag_demo.superagent import actions as sa_actions
+    from rag_demo.superagent import wecom_send
+
+    current = sa_store.get_work_item(work_item_id)
+    if current is None:
+        sa_store.finish_job(job["job_id"], "FAILED", error="work item not found")
+        return
+    if current["status"] != "EXECUTING":
+        sa_store.finish_job(job["job_id"], "DONE", error=f"skipped status={current['status']}")
+        return
+    result = sa_actions.execute_approved(work_item_id)
+    try:
+        wecom_send.notify_work_item(result, stage="APPROVED")
+    except Exception:  # noqa: BLE001
+        logger.exception("Super-agent 动作结果回写失败 work_item=%s", work_item_id)
+    sa_store.finish_job(
+        job["job_id"],
+        "DONE",
+        error=str(result.get("error") or ""),
+    )
 
 
 def stop_worker(work_item_id: str, note: str = "cancelled by user") -> dict[str, Any]:

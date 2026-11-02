@@ -53,9 +53,10 @@ GET  /api/superagent/work-items/{id}              → work item + triggers
 POST /api/superagent/work-items/{id}/run
 POST /api/superagent/work-items/{id}/stop         → {work_item_id,status:"CANCELLED",stopped:true}；状态不允许时 409
 POST /api/superagent/work-items/{id}/approve      {approved, note, action_params}
-                                                  approved=true 时按 result.action 调用受控接口，返回工作项可能为 DONE / EXECUTION_FAILED
+                                                  approved=true 时入队 ACTION Job，返回 status=EXECUTING / execution_pending=true；
+                                                  最终由 GET 单条变为 DONE / EXECUTION_FAILED；approval.execution_status: NONE | EXECUTED | FAILED
                                                   action_params: CREATE_AFTER_SALE 必填 {sale_type:"REFUND_ONLY"|"RETURN_REFUND"}（缺失 400）；
-                                                  SHIP_ORDER 可传 {tracking_no, carrier}；approval.execution_status: NONE | EXECUTED | FAILED
+                                                  SHIP_ORDER 可传 {tracking_no, carrier}
 POST /api/superagent/watchdog                     {timeout_seconds}
 ```
 
@@ -63,11 +64,12 @@ POST /api/superagent/watchdog                     {timeout_seconds}
 - 输入业务事件（示例：`请查订单 order_xxx，买家反馈物流异常要售后`）→「提交给 Super-agent」，提交后展示 `work_item_id` 与状态；不受理展示 `reason`；
 - 工作项列表展示状态、标题、创建/更新时间、审批状态；
   - `PENDING`：显示「运行调查」与「停止调查」；RUNNING 显示「停止调查」；stop 成功后状态变 `CANCELLED`/「已停止」，失败（如 409 状态不允许）toast + 行内 detail.message 并保持原状态；
-  - `RUNNING`：每 2s 轮询 `work-items`，全部结束（无 RUNNING）后自动停止；切换视图时停止；
+  - `RUNNING` / `EXECUTING`：列表每 2s 轮询 `work-items`（有 RUNNING 或 EXECUTING 时），全部结束（无 RUNNING/EXECUTING）后自动停止；切换视图时停止；
   - `WAITING_APPROVAL`：展示结论摘要 + 审批按钮；若 `result.action`（或 `approval.action`）存在，先展示「建议动作」卡（中文动作名、订单号、原因/参数），明确标注「通过后会调用受控接口执行，不只是记录审批」；
     - 动作卡下方为「审批参数」：`CREATE_AFTER_SALE` 单选「仅退款 / 退货退款」，默认不选，未选中时「通过并执行」禁用；`SHIP_ORDER` 必填物流单号 + 可选承运商（动作已有值则预填，未填时禁用）；`CANCEL_ORDER` / `COMPLETE_ORDER` 无额外参数；
     - 有动作时按钮为「通过并执行」，无动作仍为「通过」；点击通过先展开二次确认（动作类型 + 订单号 + 最终参数；无动作时说明无可执行动作），**取消不发请求**；确认时 POST 携带 `action_params`；后端 400（如缺 sale_type）toast + 行内 detail，并保留已填/已选参数；
-    - 通过后按 `approval.execution_status/execution_result` 或 `result.execution` 展示执行结果：成功「已执行：动作（订单号 · 参数）」、无动作「未执行动作」、失败「执行失败：error」；状态可能为 `DONE` 或 `EXECUTION_FAILED`；
+    - approve 成功后 toast「已通过，正在执行…」，工作项进入 `EXECUTING`/「执行中」：按钮显示「执行中…」并禁用，同时每 2s GET 单条直到 `DONE` / `EXECUTION_FAILED` / `REJECTED` / `CANCELLED` 等终态后停止；
+    - 终态后按 `approval.execution_status/execution_result` 或 `result.execution` 展示执行结果：成功「已执行：动作（订单号 · 参数）」、无动作「未执行动作」、失败「执行失败：error」；状态为 `DONE` 或 `EXECUTION_FAILED`；
     - 驳回只记录审批结果、不执行动作，状态变 `REJECTED`；
   - `DONE`：展示结果摘要与执行结果；`REJECTED`：展示已驳回（未执行动作）；`FAILED` / `STUCK`：展示错误详情；`CANCELLED`：展示已手动停止；
   - 「查看详情」按需 GET 单条工作项，展示线程与触发事件；「扫描卡死」调用 watchdog（默认 180s）并提示标记数量；

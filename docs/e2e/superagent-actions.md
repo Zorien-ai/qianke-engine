@@ -92,6 +92,10 @@ Deep Agents 输出并登记：
 ```text
 POST /api/superagent/work-items/saw_6e75bc08c6c04472/approve
 {"approved": true, "note": "E2E 同意取消"}
+→ status EXECUTING
+→ ACTION Job 入队
+→ Worker 执行
+→ DONE / EXECUTED
 ```
 
 结果：

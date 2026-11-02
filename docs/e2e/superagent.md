@@ -239,7 +239,7 @@ pytest tests/test_superagent.py -q
 # 12 passed
 
 npm run build
-# ✓ built in 5.08s
+# ✓ built in 4.27s
 # dist/b.html 已生成
 ```
 
@@ -276,6 +276,7 @@ Worker 队列：
 sa_job PENDING → 原子 claim → RUNNING
 API 重启 → dispatcher 恢复 PENDING/过期租约
 失败 → 最多重试 2 次
+审批动作 → ACTION Job 异步执行
 ```
 
 详见：[superagent-queue.md](superagent-queue.md)

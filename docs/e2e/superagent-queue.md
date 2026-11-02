@@ -79,7 +79,30 @@ action: CANCEL_ORDER
 
 说明重启后 PENDING Job 自动恢复并完成调查。
 
-## 5. API
+## 5. 动作执行也走队列
+
+审批通过不再同步执行：
+
+```text
+POST /approve
+→ status EXECUTING / execution_pending=true
+→ ACTION Job 入队
+→ Worker 执行白名单动作
+→ DONE / EXECUTION_FAILED
+→ 企业微信回写结果
+```
+
+真实 E2E：
+
+```text
+work_item: saw_b6f91832a191447c
+order:     order_01f759fee5624ce6
+approve:   200 / EXECUTING / execution_pending=true
+action job: saj_f38ec163f6414e7a / ACTION / DONE / attempts=1
+最终:      DONE / EXECUTED / ticket as_01f378dfc9384b94
+```
+
+## 6. API
 
 ```text
 GET /api/superagent/jobs?limit=50
@@ -87,7 +110,7 @@ GET /api/superagent/jobs?limit=50
 
 用于观测 Job 状态、attempts、lease、last_error。
 
-## 6. 测试
+## 7. 测试
 
 ```bash
 pytest tests/test_superagent.py -q
@@ -110,13 +133,12 @@ finish DONE
 610 passed, 5 skipped, 1 warning
 ```
 
-## 7. 已知限制
+## 8. 已知限制
 
 ```text
 队列仍是 SQLite，单机单写者；多实例高并发需 PostgreSQL/Redis
 dispatcher 是进程内线程，不是独立 worker 进程
 没有租约续期，超长任务（>30min）会被重新领取
 没有优先级、延迟任务 UI、死信队列页面
-动作执行仍同步，不走 Job 队列
 固定公网域名/可信 IP 仍需人工配置
 ```

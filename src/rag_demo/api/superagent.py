@@ -10,7 +10,6 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
-from rag_demo.superagent import actions as sa_actions
 from rag_demo.superagent import router as sa_router
 from rag_demo.superagent import runtime as sa_runtime
 from rag_demo.superagent import store as sa_store
@@ -201,20 +200,9 @@ def approve_work_item(work_item_id: str, req: ApproveIn) -> dict[str, Any]:
             detail="售后动作需要 action_params.sale_type：REFUND_ONLY 或 RETURN_REFUND",
         )
     decided = sa_store.decide_approval(work_item_id, approved=True, note=req.note)
-    try:
-        executed = sa_actions.execute_approved(work_item_id)
-        sa_wecom_send.notify_work_item(executed, stage="APPROVED")
-        return executed
-    except sa_actions.ActionError as exc:
-        # 执行器意外错误也落审计，不把 500 暴露给前端。
-        failed = sa_store.complete_execution(
-            work_item_id,
-            success=False,
-            result={"executed": False, "action": (decided.get("approval") or {}).get("action") or {}},
-            error=f"{exc.code}: {exc.message}",
-        )
-        sa_wecom_send.notify_work_item(failed, stage="APPROVED")
-        return failed
+    if not sa_runtime.start_action(work_item_id):
+        raise HTTPException(status_code=409, detail="动作执行任务已存在")
+    return {**decided, "execution_pending": True}
 
 
 @router.post("/watchdog")

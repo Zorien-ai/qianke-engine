@@ -120,6 +120,7 @@ const state = {
 
 let toastTimer = null;
 let workPollTimer = null;
+const executionPollTimers = new Map();
 
 /* ---------------- 基础工具 ---------------- */
 
@@ -389,7 +390,10 @@ async function ensureViewData(view = state.view) {
 
 async function switchView(view) {
   if (!VIEWS.some((item) => item.key === view) || state.view === view) return;
-  if (state.view === "superagent" && view !== "superagent") stopWorkPolling();
+  if (state.view === "superagent" && view !== "superagent") {
+    stopWorkPolling();
+    stopAllExecutionPolling();
+  }
   state.view = view;
   state.error = "";
   state.shipForm = null;
@@ -748,18 +752,129 @@ function stopWorkPolling() {
 }
 
 function syncWorkPolling() {
-  const hasRunning = state.workItems.some(
-    (item) => String(item.status || "").toUpperCase() === "RUNNING"
-  );
-  if (state.view === "superagent" && hasRunning) {
+  const hasActive = state.workItems.some((item) => {
+    const status = String(item.status || "").toUpperCase();
+    return status === "RUNNING" || status === "EXECUTING";
+  });
+  if (state.view === "superagent" && hasActive) {
     if (!workPollTimer) {
       workPollTimer = window.setInterval(() => {
         loadWorkItems({ silent: true });
       }, 2000);
     }
+    syncExecutionPolling();
     return;
   }
   stopWorkPolling();
+  syncExecutionPolling();
+}
+
+/* ---------- 异步执行单条轮询（approve → EXECUTING → 终态） ---------- */
+
+function isExecutionActiveStatus(status) {
+  return String(status || "").toUpperCase() === "EXECUTING";
+}
+
+function isExecutionTerminalStatus(status) {
+  return ["DONE", "EXECUTION_FAILED", "REJECTED", "CANCELLED", "FAILED", "STUCK"].includes(
+    String(status || "").toUpperCase()
+  );
+}
+
+function stopExecutionPolling(workItemId) {
+  const timer = executionPollTimers.get(workItemId);
+  if (timer) {
+    clearInterval(timer);
+    executionPollTimers.delete(workItemId);
+  }
+}
+
+function stopAllExecutionPolling() {
+  for (const workItemId of [...executionPollTimers.keys()]) {
+    stopExecutionPolling(workItemId);
+  }
+}
+
+function upsertWorkItem(updated) {
+  if (!updated?.work_item_id) return;
+  const id = String(updated.work_item_id);
+  const index = state.workItems.findIndex((item) => item.work_item_id === id);
+  if (index >= 0) {
+    state.workItems[index] = { ...state.workItems[index], ...updated };
+  } else {
+    state.workItems.unshift(updated);
+  }
+  if (updated.approval) state.executionCache[id] = updated;
+}
+
+function handleExecutionSettled(item) {
+  const status = String(item?.status || "").toUpperCase();
+  const execution = executionInfo(item);
+  if (status === "EXECUTION_FAILED" || execution?.failed) {
+    showToast(
+      `执行失败：${execution?.detail || errorMessage(item?.error || "受控动作执行失败")}`,
+      "error"
+    );
+    return;
+  }
+  if (execution?.executed) {
+    showToast(`执行完成：${execution.detail}`, "success");
+    return;
+  }
+  if (status === "CANCELLED") {
+    showToast("执行已取消", "success");
+    return;
+  }
+  showToast("审批已完成", "success");
+}
+
+function startExecutionPolling(workItemId) {
+  if (!workItemId || executionPollTimers.has(workItemId) || state.view !== "superagent") return;
+  const timer = window.setInterval(async () => {
+    try {
+      const updated = await api(
+        `/api/superagent/work-items/${encodeURIComponent(workItemId)}`
+      );
+      if (!updated?.work_item_id) return;
+      upsertWorkItem(updated);
+      if (isExecutionTerminalStatus(updated.status)) {
+        stopExecutionPolling(workItemId);
+        handleExecutionSettled(updated);
+        render();
+        loadWorkItems({ silent: true });
+        return;
+      }
+      render();
+    } catch (error) {
+      stopExecutionPolling(workItemId);
+      if (isSuperAgentAuthError(error)) {
+        handleAuthFailure(error);
+        return;
+      }
+      state.error = errorMessage(error);
+      showToast(state.error, "error");
+      render();
+    }
+  }, 2000);
+  executionPollTimers.set(workItemId, timer);
+}
+
+function syncExecutionPolling() {
+  if (state.view !== "superagent") {
+    stopAllExecutionPolling();
+    return;
+  }
+  const activeIds = new Set(
+    state.workItems
+      .filter((item) => isExecutionActiveStatus(item.status))
+      .map((item) => String(item.work_item_id))
+  );
+  for (const workItemId of [...executionPollTimers.keys()]) {
+    if (!activeIds.has(workItemId)) stopExecutionPolling(workItemId);
+  }
+  for (const workItemId of activeIds) {
+    if (!executionPollTimers.has(workItemId)) startExecutionPolling(workItemId);
+  }
 }
 
 async function loadWorkItems(options = {}) {
@@ -912,7 +1027,20 @@ async function approveWorkItem(workItemId, approved, actionParams = {}) {
       }
     );
     if (approved) {
-      if (response?.work_item_id) state.executionCache[workItemId] = response;
+      if (response?.work_item_id) {
+        state.executionCache[workItemId] = response;
+        upsertWorkItem(response);
+      }
+      const asyncExecution =
+        String(response?.status || "").toUpperCase() === "EXECUTING" ||
+        response?.execution_pending === true;
+      if (asyncExecution) {
+        showToast("已通过，正在执行…", "success");
+        startExecutionPolling(workItemId);
+        render();
+        await loadWorkItems({ silent: true });
+        return;
+      }
       const execution = executionInfo(response);
       if (response?.status === "EXECUTION_FAILED" || execution?.failed) {
         showToast(`执行失败：${execution?.detail || errorMessage(response?.error || "")}`, "error");
@@ -1474,6 +1602,10 @@ function workItemCard(item) {
     buttons.push(
       `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-stop-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${busy ? "停止中…" : "停止调查"}</button>`
     );
+  } else if (status === "EXECUTING") {
+    buttons.push(
+      `<button type="button" class="b-btn b-btn-primary" disabled>执行中…</button>`
+    );
   } else if (status === "WAITING_APPROVAL") {
     buttons.push(
       `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy || !paramsValid ? "disabled" : ""} ${action && !paramsValid ? 'title="请先填写/选择审批参数"' : ""}>${action ? "通过并执行" : "通过"}</button>`
@@ -1489,6 +1621,9 @@ function workItemCard(item) {
   let body = "";
   if (status === "RUNNING") {
     body = `<p class="b-muted b-running-line"><span class="b-spinner" aria-hidden="true"></span>调查中，页面每 2 秒自动刷新状态…</p>`;
+  } else if (status === "EXECUTING") {
+    body = `<p class="b-muted b-running-line"><span class="b-spinner" aria-hidden="true"></span>执行中，页面每 2 秒自动刷新执行结果…</p>
+      ${summary ? `<div class="b-md">${renderSafeText(summary)}</div>` : ""}`;
   } else if (status === "WAITING_APPROVAL") {
     body = `${action ? actionCardMarkup(action) : `<p class="b-approval-tip">本次结论没有可执行动作，通过仅记录人工审批。</p>`}
       ${action ? actionParamsMarkup(item, action) : ""}
@@ -1538,6 +1673,7 @@ function workItemCard(item) {
         <strong>${escapeHtml(text(item?.title, "未命名工作项"))}</strong>
         <span class="b-badge ${superAgentTone(status)}">${escapeHtml(superAgentStatusLabel(status))}</span>
         ${approval && approval !== "NONE" ? `<span class="b-tag">审批 · ${escapeHtml(approvalStatusLabel(approval))}</span>` : ""}
+        ${status === "EXECUTING" ? `<span class="b-tag">执行 · 执行中</span>` : ""}
         ${execution ? `<span class="b-tag ${execution.failed ? "is-error" : "is-success"}">执行 · ${escapeHtml(execution.title)}</span>` : ""}
       </div>
       <time>${escapeHtml(timeText(item?.created_at))}</time>
@@ -1845,6 +1981,7 @@ function bindEvents() {
 async function boot() {
   clearToast();
   stopWorkPolling();
+  stopAllExecutionPolling();
   state.initialLoading = true;
   state.loginRequired = false;
   state.fatalError = "";
