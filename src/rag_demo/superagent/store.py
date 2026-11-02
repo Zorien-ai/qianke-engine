@@ -149,9 +149,9 @@ def create_trigger(
         thread = conn.execute(
             "SELECT * FROM sa_thread WHERE thread_key = ?", (thread_key,)
         ).fetchone()
+        title = content.strip().replace("\n", " ")[:60] or "外部事件"
         if thread is None:
             thread_id = f"sat_{uuid.uuid4().hex[:16]}"
-            title = content.strip().replace("\n", " ")[:60] or "外部事件"
             conn.execute(
                 "INSERT INTO sa_thread(thread_id, channel, thread_key, title, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, 'OPEN', ?, ?)",

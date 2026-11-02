@@ -59,6 +59,26 @@ CANCEL_ORDER / COMPLETE_ORDER → 无额外参数
 
 ## 5. 真实 E2E
 
+固定域名：
+
+```text
+https://qianke.qiankeagent.com/api/superagent/wecom/callback
+```
+
+真实对话流程：
+
+```text
+企业微信消息
+→ 调查结论（含短码 ba45ff）
+→ 回复：同意 ba45ff 仅退款
+→ 已通过工作项 ba45ff，正在执行
+→ 执行结果：EXECUTION_FAILED / AFTER_SALE_EXISTS
+```
+
+这次失败是**正确的安全行为**：该订单已有处理中或已通过的售后工单，执行器拒绝重复建单。
+
+## 5.1 成功案例
+
 准备：
 
 ```text
@@ -89,6 +109,23 @@ ACTION Job: saj_5712d81f38c94b84 / DONE
 ```text
 企业微信应用结果回写成功
 ```
+
+## 5.2 重复售后拦截
+
+真实企微回复：
+
+```text
+同意 ba45ff 仅退款
+```
+
+结果：
+
+```text
+EXECUTION_FAILED
+AFTER_SALE_EXISTS: 该订单已有处理中或已通过的售后
+```
+
+原因：测试订单已经存在售后工单；执行器没有重复创建，属于正确的数据一致性保护。
 
 ## 6. 安全
 

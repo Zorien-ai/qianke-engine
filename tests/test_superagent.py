@@ -53,6 +53,22 @@ def test_thread_key_reuses_active_work_item(c_store):
     assert len(triggers) == 2
 
 
+def test_thread_reuses_only_active_work_item(c_store):
+    first = sa_router.ingest_event(
+        source="wecom", content="订单退款", channel="test", thread_key="thread:closed"
+    )
+    first_id = first["work_item"]["work_item_id"]
+    sa_store.start_work_item(first_id)
+    sa_store.finish_work_item(first_id, {"summary": "old"}, approval=False)
+
+    second = sa_router.ingest_event(
+        source="wecom", content="订单物流异常", channel="test", thread_key="thread:closed"
+    )
+    assert second["created_work_item"] is True
+    assert second["thread"]["thread_id"] == first["thread"]["thread_id"]
+    assert second["work_item"]["title"] == "订单物流异常"
+
+
 def test_worker_fallback_and_approval(c_store, monkeypatch):
     accepted = sa_router.ingest_event(
         source="im", content="帮我看一下 order_abc123 的售后", channel="group"
