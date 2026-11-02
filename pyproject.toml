@@ -13,6 +13,7 @@ dependencies = [
     "alibabacloud-oss-v2>=1.4.0",
     "argon2-cffi>=25.1.0",
     "datasets>=5.1.0",
+    "deepagents>=0.7.32",
     "fastapi>=0.142.4",
     "flagembedding>=1.4.2",
     "huggingface-hub>=1.33.0",

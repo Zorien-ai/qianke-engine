@@ -2,8 +2,8 @@ import "./b-workbench.css";
 
 /* ============================================================
  * 独立 B 端商家工作台（/v2/b.html）
- * 不依赖 Vue / vue-router，直接渲染三个视图：
- * 订单（状态操作）/ 售后（审批与验收）/ 商品（只读）
+ * 不依赖 Vue / vue-router，直接渲染四个视图：
+ * 订单（状态操作）/ 售后（审批与验收）/ 商品（只读）/ Super-agent（事件与人工审批）
  * ========================================================== */
 
 const root = document.getElementById("b-root");
@@ -12,6 +12,7 @@ const VIEWS = [
   { key: "orders", label: "订单" },
   { key: "after-sales", label: "售后" },
   { key: "products", label: "商品" },
+  { key: "superagent", label: "Super-agent" },
 ];
 
 const ORDER_STATUS_LABELS = {
@@ -39,6 +40,26 @@ const AFTER_SALE_TYPE_LABELS = {
   RETURN_REFUND: "退货退款",
 };
 
+const SUPERAGENT_STATUS_LABELS = {
+  PENDING: "待运行",
+  RUNNING: "调查中",
+  WAITING_APPROVAL: "待审批",
+  DONE: "已完成",
+  REJECTED: "已驳回",
+  FAILED: "失败",
+  STUCK: "卡住",
+};
+
+const APPROVAL_STATUS_LABELS = {
+  NONE: "未触发",
+  PENDING: "待审批",
+  APPROVED: "已通过",
+  REJECTED: "已驳回",
+};
+
+const SUPERAGENT_EVENT_EXAMPLE =
+  "请查订单 order_xxx，买家反馈物流异常要售后，确认是否需要人工介入。";
+
 const state = {
   view: "orders",
   me: null,
@@ -60,9 +81,21 @@ const state = {
   productsLoaded: false,
   shipForm: null,
   cancelConfirmId: "",
+  /* Super-agent */
+  workItems: [],
+  workItemsLoaded: false,
+  workItemsLoading: false,
+  eventDraft: "",
+  eventSubmitting: false,
+  eventNotice: null,
+  busyWorkItem: "",
+  workItemDetailId: "",
+  workItemDetail: null,
+  watchdogBusy: false,
 };
 
 let toastTimer = null;
+let workPollTimer = null;
 
 /* ---------------- 基础工具 ---------------- */
 
@@ -322,15 +355,23 @@ async function ensureViewData(view = state.view) {
   }
   if (view === "products") {
     if (!state.productsLoaded) await loadProducts();
+    return;
+  }
+  if (view === "superagent") {
+    if (!state.workItemsLoaded) await loadWorkItems();
+    else syncWorkPolling();
   }
 }
 
 async function switchView(view) {
   if (!VIEWS.some((item) => item.key === view) || state.view === view) return;
+  if (state.view === "superagent" && view !== "superagent") stopWorkPolling();
   state.view = view;
   state.error = "";
   state.shipForm = null;
   state.cancelConfirmId = "";
+  state.workItemDetailId = "";
+  state.workItemDetail = null;
   render();
   await ensureViewData(view);
 }
@@ -339,7 +380,277 @@ async function refreshCurrent() {
   state.error = "";
   if (state.view === "orders") await loadOrders();
   else if (state.view === "after-sales") await loadAfterSales();
+  else if (state.view === "superagent") await loadWorkItems();
   else await loadProducts();
+}
+
+/* ================= Super-agent：事件 / 工作项 / 人工审批 ================= */
+
+function superAgentStatusLabel(status) {
+  const key = String(status || "").toUpperCase();
+  return SUPERAGENT_STATUS_LABELS[key] || key || "—";
+}
+
+function approvalStatusLabel(status) {
+  const key = String(status || "").toUpperCase();
+  return APPROVAL_STATUS_LABELS[key] || key || "—";
+}
+
+function superAgentTone(status) {
+  const key = String(status || "").toUpperCase();
+  if (key === "RUNNING") return "is-info";
+  if (key === "DONE") return "is-success";
+  if (key === "FAILED" || key === "STUCK") return "is-danger";
+  if (key === "REJECTED") return "is-muted";
+  return "is-warn";
+}
+
+function isSuperAgentAuthError(error) {
+  return error instanceof ApiError && error.status === 401;
+}
+
+function handleSuperAgentError(error) {
+  if (isSuperAgentAuthError(error)) return handleAuthFailure(error);
+  state.error = errorMessage(error);
+  showToast(state.error, "error");
+  return false;
+}
+
+function workItemSummary(item) {
+  const result = item?.result;
+  if (result === null || result === undefined || result === "") return "";
+  if (typeof result === "string") return result.trim();
+  if (typeof result === "object") {
+    if (!Object.keys(result).length) return "";
+    for (const key of ["summary", "conclusion", "answer", "text", "report"]) {
+      const value = result[key];
+      if (typeof value === "string" && value.trim()) return value;
+    }
+    return JSON.stringify(result, null, 2);
+  }
+  return String(result);
+}
+
+/** 安全渲染 Markdown 风格结论：先整体转义 HTML，再按行还原换行/简单列表，不注入原文 HTML */
+function renderSafeText(value) {
+  const escapedLines = escapeHtml(value).split(/\r?\n/);
+  const blocks = [];
+  for (const line of escapedLines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      blocks.push('<p class="b-md-gap"></p>');
+      continue;
+    }
+    if (/^[-*]\s+/.test(trimmed)) {
+      blocks.push(`<p class="b-md-li">• ${trimmed.replace(/^[-*]\s+/, "")}</p>`);
+      continue;
+    }
+    if (/^\d+\.\s+/.test(trimmed)) {
+      blocks.push(`<p class="b-md-li">${trimmed}</p>`);
+      continue;
+    }
+    if (/^#{1,6}\s+/.test(trimmed)) {
+      blocks.push(`<p class="b-md-h">${trimmed.replace(/^#{1,6}\s+/, "")}</p>`);
+      continue;
+    }
+    blocks.push(`<p class="b-md-p">${trimmed}</p>`);
+  }
+  return blocks.join("");
+}
+
+function stopWorkPolling() {
+  if (workPollTimer) {
+    clearInterval(workPollTimer);
+    workPollTimer = null;
+  }
+}
+
+function syncWorkPolling() {
+  const hasRunning = state.workItems.some(
+    (item) => String(item.status || "").toUpperCase() === "RUNNING"
+  );
+  if (state.view === "superagent" && hasRunning) {
+    if (!workPollTimer) {
+      workPollTimer = window.setInterval(() => {
+        loadWorkItems({ silent: true });
+      }, 2000);
+    }
+    return;
+  }
+  stopWorkPolling();
+}
+
+async function loadWorkItems(options = {}) {
+  const silent = Boolean(options.silent);
+  if (silent && state.workItemsLoading) return;
+  state.workItemsLoading = true;
+  if (!silent) {
+    state.error = "";
+    render();
+  }
+  try {
+    const data = await api("/api/superagent/work-items?limit=50");
+    state.workItems = collectionFrom(data, ["work_items", "workItems"]);
+    state.workItemsLoaded = true;
+  } catch (error) {
+    if (isSuperAgentAuthError(error)) {
+      handleAuthFailure(error);
+      return;
+    }
+    if (!silent) {
+      state.error = errorMessage(error);
+      showToast(state.error, "error");
+    }
+  } finally {
+    state.workItemsLoading = false;
+    syncWorkPolling();
+    render();
+  }
+}
+
+async function submitSuperAgentEvent() {
+  if (state.eventSubmitting) return;
+  const content = String(state.eventDraft || "").trim();
+  if (!content) {
+    state.error = "请先填写业务事件内容";
+    showToast(state.error, "error");
+    render();
+    return;
+  }
+  state.eventSubmitting = true;
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/superagent/events", {
+      method: "POST",
+      body: JSON.stringify({
+        source: "manual",
+        channel: "b-workbench",
+        content,
+        auto_run: false,
+      }),
+    });
+    const item = data?.work_item || {};
+    if (data?.accepted === false) {
+      state.eventNotice = {
+        accepted: false,
+        message: String(data?.reason || "事件未被 Super-agent 受理"),
+      };
+      showToast(state.eventNotice.message, "error");
+    } else {
+      state.eventDraft = "";
+      state.eventNotice = {
+        accepted: true,
+        work_item_id: item.work_item_id || "",
+        status: item.status || "PENDING",
+        message: String(data?.reason || "已受理"),
+      };
+      showToast(`已提交给 Super-agent：${item.work_item_id || "已创建"}`, "success");
+      await loadWorkItems();
+    }
+  } catch (error) {
+    handleSuperAgentError(error);
+  } finally {
+    state.eventSubmitting = false;
+    render();
+  }
+}
+
+async function runWorkItem(workItemId) {
+  if (!workItemId || state.busyWorkItem) return;
+  state.busyWorkItem = workItemId;
+  state.error = "";
+  render();
+  try {
+    await api(`/api/superagent/work-items/${encodeURIComponent(workItemId)}/run`, {
+      method: "POST",
+    });
+    showToast("调查已启动，页面会每 2 秒自动刷新状态", "success");
+    await loadWorkItems();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      state.error = errorMessage(error);
+      showToast(state.error, "error");
+    } else {
+      handleSuperAgentError(error);
+    }
+  } finally {
+    state.busyWorkItem = "";
+    syncWorkPolling();
+    render();
+  }
+}
+
+async function approveWorkItem(workItemId, approved) {
+  if (!workItemId || state.busyWorkItem) return;
+  state.busyWorkItem = workItemId;
+  state.error = "";
+  render();
+  try {
+    await api(`/api/superagent/work-items/${encodeURIComponent(workItemId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ approved, note: approved ? "" : "" }),
+    });
+    showToast(approved ? "已通过审批" : "已驳回工作项", "success");
+    await loadWorkItems();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      state.error = errorMessage(error);
+      showToast(state.error, "error");
+    } else {
+      handleSuperAgentError(error);
+    }
+  } finally {
+    state.busyWorkItem = "";
+    render();
+  }
+}
+
+async function runWatchdog() {
+  if (state.watchdogBusy) return;
+  state.watchdogBusy = true;
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/superagent/watchdog", {
+      method: "POST",
+      body: JSON.stringify({ timeout_seconds: 180 }),
+    });
+    const stuckCount = Number(data?.stuck_count || 0);
+    showToast(
+      stuckCount
+        ? `Watchdog 扫描完成：${stuckCount} 个工作项被标记为卡住`
+        : "Watchdog 扫描完成：没有发现卡住的工作项",
+      "success"
+    );
+    await loadWorkItems();
+  } catch (error) {
+    handleSuperAgentError(error);
+  } finally {
+    state.watchdogBusy = false;
+    render();
+  }
+}
+
+async function toggleWorkItemDetail(workItemId) {
+  if (state.workItemDetailId === workItemId) {
+    state.workItemDetailId = "";
+    state.workItemDetail = null;
+    render();
+    return;
+  }
+  state.workItemDetailId = workItemId;
+  state.workItemDetail = null;
+  render();
+  try {
+    const data = await api(`/api/superagent/work-items/${encodeURIComponent(workItemId)}`);
+    if (state.workItemDetailId === workItemId) {
+      state.workItemDetail = data || null;
+      render();
+    }
+  } catch (error) {
+    handleSuperAgentError(error);
+  }
 }
 
 /* ---------------- 订单操作 ---------------- */
@@ -792,6 +1103,124 @@ function productsView() {
   </section>`;
 }
 
+function workItemCard(item) {
+  const id = String(item?.work_item_id || "");
+  const status = String(item?.status || "").toUpperCase();
+  const approval = String(item?.approval_status || "").toUpperCase();
+  const busy = state.busyWorkItem === id;
+  const summary = workItemSummary(item);
+  const errorText = String(item?.error || "").trim();
+  const showDetail = state.workItemDetailId === id;
+  const detail = state.workItemDetail;
+
+  const buttons = [];
+  if (status === "PENDING") {
+    buttons.push(
+      `<button type="button" class="b-btn b-btn-primary" data-run-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${busy ? "启动中…" : "运行调查"}</button>`
+    );
+  } else if (status === "WAITING_APPROVAL") {
+    buttons.push(
+      `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>通过</button>`
+    );
+    buttons.push(
+      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-reject-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>驳回</button>`
+    );
+  }
+  buttons.push(
+    `<button type="button" class="b-btn b-btn-ghost" data-detail-work-item="${escapeHtml(id)}">${showDetail ? "收起详情" : "查看详情"}</button>`
+  );
+
+  let body = "";
+  if (status === "RUNNING") {
+    body = `<p class="b-muted b-running-line"><span class="b-spinner" aria-hidden="true"></span>调查中，页面每 2 秒自动刷新状态…</p>`;
+  } else if (status === "WAITING_APPROVAL") {
+    body = `<div class="b-md">${renderSafeText(summary || "（本次调查没有返回结论摘要）")}</div>
+      <p class="b-approval-tip">通过 / 驳回复核结论；该操作只记录人工审批结果，不会自动改订单或退款。</p>`;
+  } else if (status === "FAILED" || status === "STUCK") {
+    body = `<div class="b-md b-md-error">${renderSafeText(errorText || "执行失败，未返回错误详情")}</div>
+      ${summary ? `<div class="b-md">${renderSafeText(summary)}</div>` : ""}`;
+  } else if (status === "DONE" || status === "REJECTED") {
+    body = `<div class="b-md">${renderSafeText(summary || "调查完成，本次未返回结论摘要。")}</div>`;
+  } else if (status === "PENDING") {
+    body = `<p class="b-muted">工作项已受理，点击「运行调查」后由 Super-agent 执行只读调查。</p>`;
+  }
+
+  const detailMarkup = showDetail
+    ? detail
+      ? `<div class="b-detail">
+          <p class="b-muted">线程 <code>${escapeHtml(text(detail.thread_id))}</code> · 更新 ${escapeHtml(timeText(detail.updated_at))} · 触发 ${(detail.triggers || []).length} 条</p>
+          ${(detail.triggers || [])
+            .map(
+              (trigger) =>
+                `<p class="b-detail-trigger"><span class="b-muted">[${escapeHtml(text(trigger.source))}/${escapeHtml(text(trigger.channel))}]</span> ${escapeHtml(text(trigger.content))}</p>`
+            )
+            .join("")}
+        </div>`
+      : `<p class="b-muted">详情加载中…</p>`
+    : "";
+
+  return `<article class="b-card b-work-item">
+    <div class="b-card-head">
+      <div class="b-card-title">
+        <strong>${escapeHtml(text(item?.title, "未命名工作项"))}</strong>
+        <span class="b-badge ${superAgentTone(status)}">${escapeHtml(superAgentStatusLabel(status))}</span>
+        ${approval && approval !== "NONE" ? `<span class="b-tag">审批 · ${escapeHtml(approvalStatusLabel(approval))}</span>` : ""}
+      </div>
+      <time>${escapeHtml(timeText(item?.created_at))}</time>
+    </div>
+    <dl class="b-meta b-meta-inline">
+      <div><dt>工作项</dt><dd><code class="b-mono">${escapeHtml(id)}</code></dd></div>
+      <div><dt>更新</dt><dd>${escapeHtml(timeText(item?.updated_at))}</dd></div>
+    </dl>
+    ${body}
+    ${detailMarkup}
+    <div class="b-actions">${buttons.join("")}</div>
+  </article>`;
+}
+
+function superAgentNoticeMarkup() {
+  const notice = state.eventNotice;
+  if (!notice) return "";
+  if (notice.accepted === false) {
+    return `<p class="b-event-notice is-error" role="alert">未受理：${escapeHtml(notice.message)}</p>`;
+  }
+  return `<p class="b-event-notice" role="status">已受理：工作项 <code>${escapeHtml(notice.work_item_id || "—")}</code> · 状态 ${escapeHtml(superAgentStatusLabel(notice.status))}</p>`;
+}
+
+function superAgentView() {
+  const body = state.workItemsLoading && !state.workItems.length
+    ? skeletonMarkup()
+    : state.workItems.length
+      ? `<div class="b-list">${state.workItems.map(workItemCard).join("")}</div>`
+      : emptyMarkup("暂无工作项，提交一条业务事件开始调查");
+  return `<section class="b-view" aria-label="Super-agent">
+    <div class="b-view-head">
+      <div>
+        <h1>Super-agent</h1>
+        <p class="b-muted">只读调查 + 人工审批，不会自动改订单/退款。</p>
+      </div>
+      <div class="b-view-tools">
+        <button type="button" class="b-btn b-btn-ghost" data-watchdog ${state.watchdogBusy ? "disabled" : ""}>${state.watchdogBusy ? "扫描中…" : "扫描卡死"}</button>
+        <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.workItemsLoading ? "disabled" : ""}>刷新</button>
+      </div>
+    </div>
+    <div class="b-card b-event-card">
+      <label class="b-event-label" for="b-event-content">业务事件</label>
+      <textarea id="b-event-content" data-event-input rows="3" maxlength="4000" placeholder="${escapeHtml(SUPERAGENT_EVENT_EXAMPLE)}">${escapeHtml(state.eventDraft)}</textarea>
+      <div class="b-event-actions">
+        <span class="b-muted">提交后生成待运行工作项；核查结论需人工审批。</span>
+        <button type="button" class="b-btn b-btn-primary" data-submit-event ${state.eventSubmitting ? "disabled" : ""}>${state.eventSubmitting ? "提交中…" : "提交给 Super-agent"}</button>
+      </div>
+      ${superAgentNoticeMarkup()}
+    </div>
+    <div class="b-section-head">
+      <strong>工作项</strong>
+      <span class="b-muted">共 ${state.workItems.length} 项${state.workItems.some((item) => String(item.status || "").toUpperCase() === "RUNNING") ? " · 有调查进行中（2s 轮询）" : ""}</span>
+    </div>
+    ${body}
+  </section>`;
+}
+
 function shellMarkup() {
   const activeView = VIEWS.find((view) => view.key === state.view) || VIEWS[0];
   const viewMarkup =
@@ -799,7 +1228,9 @@ function shellMarkup() {
       ? ordersView()
       : activeView.key === "after-sales"
         ? afterSalesView()
-        : productsView();
+        : activeView.key === "superagent"
+          ? superAgentView()
+          : productsView();
   const merchantName = state.me?.name || "商家";
   const merchantId = state.me?.id || "";
   return `<div class="b-shell">
@@ -822,23 +1253,44 @@ function shellMarkup() {
   </div>`;
 }
 
+function paint(html) {
+  // 轮询/浮层刷新时保留业务事件输入框的焦点与光标，避免打断输入
+  const active = document.activeElement;
+  const focusState =
+    active && active.id && root.contains(active)
+      ? { id: active.id, start: active.selectionStart, end: active.selectionEnd }
+      : null;
+  root.innerHTML = html;
+  if (focusState) {
+    const element = document.getElementById(focusState.id);
+    if (element) {
+      element.focus({ preventScroll: true });
+      if (typeof focusState.start === "number" && typeof element.setSelectionRange === "function") {
+        try {
+          element.setSelectionRange(focusState.start, focusState.end);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+  bindEvents();
+}
+
 function render() {
   if (state.loginRequired) {
-    root.innerHTML = authViewMarkup() + toastMarkup();
-    bindEvents();
+    paint(authViewMarkup() + toastMarkup());
     return;
   }
   if (state.fatalError && !state.me) {
-    root.innerHTML = fatalViewMarkup(state.fatalError) + toastMarkup();
-    bindEvents();
+    paint(fatalViewMarkup(state.fatalError) + toastMarkup());
     return;
   }
   if (state.initialLoading && !state.me) {
     root.innerHTML = `<div class="b-boot"><span class="b-spinner" aria-hidden="true"></span>正在加载商家工作台…</div>`;
     return;
   }
-  root.innerHTML = shellMarkup();
-  bindEvents();
+  paint(shellMarkup());
 }
 
 /* ---------------- 事件绑定 ---------------- */
@@ -873,8 +1325,36 @@ function bindEvents() {
       return;
     }
     if (target.closest("[data-refresh]")) {
-      if (state.loading || state.busy) return;
+      if (state.loading || state.busy || state.workItemsLoading) return;
       await refreshCurrent();
+      return;
+    }
+    if (target.closest("[data-submit-event]")) {
+      await submitSuperAgentEvent();
+      return;
+    }
+    if (target.closest("[data-watchdog]")) {
+      await runWatchdog();
+      return;
+    }
+    const runItemButton = target.closest("[data-run-work-item]");
+    if (runItemButton) {
+      await runWorkItem(runItemButton.dataset.runWorkItem);
+      return;
+    }
+    const approveItemButton = target.closest("[data-approve-work-item]");
+    if (approveItemButton) {
+      await approveWorkItem(approveItemButton.dataset.approveWorkItem, true);
+      return;
+    }
+    const rejectItemButton = target.closest("[data-reject-work-item]");
+    if (rejectItemButton) {
+      await approveWorkItem(rejectItemButton.dataset.rejectWorkItem, false);
+      return;
+    }
+    const detailItemButton = target.closest("[data-detail-work-item]");
+    if (detailItemButton) {
+      await toggleWorkItemDetail(detailItemButton.dataset.detailWorkItem);
       return;
     }
     const orderButton = target.closest("[data-order-action]");
@@ -902,6 +1382,13 @@ function bindEvents() {
     }
   });
 
+  root.addEventListener("input", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLTextAreaElement && target.matches("[data-event-input]")) {
+      state.eventDraft = target.value;
+    }
+  });
+
   root.addEventListener("keydown", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
@@ -917,6 +1404,7 @@ function bindEvents() {
 
 async function boot() {
   clearToast();
+  stopWorkPolling();
   state.initialLoading = true;
   state.loginRequired = false;
   state.fatalError = "";
@@ -925,9 +1413,19 @@ async function boot() {
   state.ordersLoaded = false;
   state.afterSalesLoaded = false;
   state.productsLoaded = false;
+  state.workItemsLoaded = false;
   state.orders = [];
   state.afterSales = [];
   state.products = [];
+  state.workItems = [];
+  state.workItemsLoading = false;
+  state.eventDraft = "";
+  state.eventSubmitting = false;
+  state.eventNotice = null;
+  state.busyWorkItem = "";
+  state.workItemDetailId = "";
+  state.workItemDetail = null;
+  state.watchdogBusy = false;
   state.error = "";
   state.shipForm = null;
   state.cancelConfirmId = "";

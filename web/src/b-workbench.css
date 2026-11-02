@@ -412,6 +412,12 @@ code,
   color: var(--b-muted);
 }
 
+.b-badge.is-danger {
+  border-color: color-mix(in srgb, var(--b-danger) 28%, var(--b-line));
+  background: var(--b-danger-soft);
+  color: var(--b-danger);
+}
+
 /* ---------------- 元信息 ---------------- */
 
 .b-meta {
@@ -688,6 +694,161 @@ code,
   font-size: 14px;
   line-height: 1.2;
   cursor: pointer;
+}
+
+/* ---------------- Super-agent ---------------- */
+
+.b-event-card {
+  padding: 14px;
+}
+
+.b-event-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--b-muted);
+  font-size: 10px;
+}
+
+.b-event-card textarea {
+  width: 100%;
+  min-height: 78px;
+  padding: 9px 10px;
+  border: 1px solid var(--b-line-strong);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg);
+  color: var(--b-text);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.b-event-card textarea:focus {
+  outline: none;
+  border-color: var(--b-accent);
+}
+
+.b-event-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.b-event-notice {
+  margin: 10px 0 0;
+  padding: 7px 9px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg-soft);
+  color: var(--b-text-2);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.b-event-notice.is-error {
+  border-color: color-mix(in srgb, var(--b-danger) 28%, var(--b-line));
+  background: var(--b-danger-soft);
+  color: var(--b-danger);
+}
+
+.b-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0 10px;
+}
+
+.b-section-head strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.b-work-item {
+  padding: 12px 14px;
+}
+
+.b-meta-inline {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.b-running-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.b-md {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg-soft);
+  color: var(--b-text-2);
+  font-size: 12px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.b-md-error {
+  border-color: color-mix(in srgb, var(--b-danger) 26%, var(--b-line));
+  background: var(--b-danger-soft);
+  color: var(--b-danger);
+}
+
+.b-md .b-md-p,
+.b-md .b-md-li,
+.b-md .b-md-h,
+.b-md .b-md-gap {
+  margin: 0;
+}
+
+.b-md .b-md-li {
+  padding-left: 2px;
+}
+
+.b-md .b-md-h {
+  color: var(--b-text);
+  font-weight: 600;
+}
+
+.b-md .b-md-gap {
+  height: 6px;
+}
+
+.b-approval-tip {
+  margin: 8px 0 0;
+  color: var(--b-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.b-detail {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px dashed var(--b-line-strong);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg);
+}
+
+.b-detail p {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.b-detail p:last-child {
+  margin-bottom: 0;
+}
+
+.b-detail-trigger {
+  color: var(--b-text-2);
 }
 
 /* ---------------- 移动端 ---------------- */

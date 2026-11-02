@@ -1077,6 +1077,8 @@ def c_agent_resume(req: CAgentResumeIn) -> dict:
 
 def register_c_end(app) -> None:
     from rag_demo.api.b_workbench import register_b_workbench
+    from rag_demo.api.superagent import register_superagent
 
     register_b_workbench(app)
+    register_superagent(app)
     app.include_router(router)

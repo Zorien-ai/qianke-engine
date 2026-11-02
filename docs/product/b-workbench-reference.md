@@ -6,7 +6,7 @@
 
 ```text
 web/b.html            独立 HTML 入口（title：千客 · 商家工作台）
-web/src/b-workbench.js 原生 JS 渲染：订单 / 售后 / 商品三视图
+web/src/b-workbench.js 原生 JS 渲染：订单 / 售后 / 商品 / Super-agent 四视图
 web/src/b-workbench.css 白色极简样式（中性色 + 低饱和强调色）
 web/vite.config.js    build.rollupOptions.input = { main: index.html, b: b.html }
 ```
@@ -28,7 +28,7 @@ POST  /api/b/workbench/after-sales/{ticket_id}/receive {accepted}
 ## UI 与状态
 
 - 未登录（401）：显示「请先登录」+ **去登录（`/v2/`）** 链接，不白屏；403 / 服务异常显示错误页 + 重试 + 去登录入口。
-- 顶部：商家名 + `merchant_id`；三视图 tab：订单 / 售后 / 商品。
+- 顶部：商家名 + `merchant_id`；四视图 tab：订单 / 售后 / 商品 / Super-agent。
 - 订单：状态筛选（全部/待支付/已支付/已发货/已完成/已取消/已退款）、订单号、买家、商品、金额、物流；行内操作：
   - `CREATED` → 标记已支付 / 取消订单（行内二次确认）
   - `PAID` → 发货（物流单号必填、至少 4 位；承运商可选）/ 取消订单
@@ -40,3 +40,28 @@ POST  /api/b/workbench/after-sales/{ticket_id}/receive {accepted}
 - 商品：只读列表（product_id / 标题 / 价格 / 库存 / 分类 / 更新时间）。
 - 所有写操作：`detail.message`（兼容字符串与 `{code,message}`）以 toast + 行内提示展示；操作中禁用按钮，成功后刷新当前视图。
 - 白色极简、移动端卡片式布局与单列表单，页面不横向溢出。
+
+## Super-agent（事件调查 + 人工审批）
+
+第四个视图「Super-agent」用于把业务事件交给只读调查 Agent，并由人工复核结论；**不会自动改订单/退款**。
+
+```text
+POST /api/superagent/events                       {source:"manual", channel:"b-workbench", content, auto_run:false}
+                                                  → {accepted, reason, work_item:{work_item_id,status,...}, thread}
+GET  /api/superagent/work-items?limit=50          → {work_items}
+GET  /api/superagent/work-items/{id}              → work item + triggers
+POST /api/superagent/work-items/{id}/run
+POST /api/superagent/work-items/{id}/approve      {approved, note}
+POST /api/superagent/watchdog                     {timeout_seconds}
+```
+
+- 顶部固定说明「只读调查 + 人工审批，不会自动改订单/退款」；
+- 输入业务事件（示例：`请查订单 order_xxx，买家反馈物流异常要售后`）→「提交给 Super-agent」，提交后展示 `work_item_id` 与状态；不受理展示 `reason`；
+- 工作项列表展示状态、标题、创建/更新时间、审批状态；
+  - `PENDING`：显示「运行调查」；点击调用 run；
+  - `RUNNING`：每 2s 轮询 `work-items`，全部结束（无 RUNNING）后自动停止；切换视图时停止；
+  - `WAITING_APPROVAL`：展示结论摘要 + 「通过 / 驳回」（approve `{approved,note}`）；
+  - `DONE`：展示结果摘要；`REJECTED`：展示已驳回及结果；`FAILED` / `STUCK`：展示错误详情；
+  - 「查看详情」按需 GET 单条工作项，展示线程与触发事件；「扫描卡死」调用 watchdog（默认 180s）并提示标记数量；
+- **结论安全渲染**：先 `escapeHtml` 整体转义，再按行还原换行与 `- / 1.` 简单列表；不使用原文 innerHTML，杜绝 Markdown/LLM 输出注入 HTML；
+- 轮询刷新会保留事件输入框焦点与光标；错误统一 toast + 行内 `detail.message`；移动端不横向溢出。
