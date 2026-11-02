@@ -64,7 +64,36 @@ def _run_job(job_id: str, cancel_event: threading.Event) -> None:
         with _LOCK:
             _CANCEL_EVENTS.pop(job_id, None)
         return
+    _execute_claimed(job, cancel_event)
+    with _LOCK:
+        _CANCEL_EVENTS.pop(job_id, None)
+        _JOB_BY_WORK_ITEM.pop(job["work_item_id"], None)
+
+
+def _heartbeat(job_id: str, worker_id: str, stop: threading.Event) -> None:
+    import time
+
+    while not stop.wait(60):
+        try:
+            sa_store.renew_lease(job_id, worker_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Super-agent Job 续租失败 job=%s", job_id)
+
+
+def _execute_claimed(job: dict[str, Any], cancel_event: threading.Event | None = None) -> None:
+    job_id = job["job_id"]
     work_item_id = job["work_item_id"]
+    cancel_event = cancel_event or threading.Event()
+    stop_heartbeat = threading.Event()
+    heartbeat = None
+    if job.get("worker_id"):
+        heartbeat = threading.Thread(
+            target=_heartbeat,
+            args=(job_id, job["worker_id"], stop_heartbeat),
+            name=f"sa-heartbeat-{job_id[-6:]}",
+            daemon=True,
+        )
+        heartbeat.start()
     try:
         if job["kind"] == "ACTION":
             _run_action_job(job, work_item_id)
@@ -92,11 +121,11 @@ def _run_job(job_id: str, cancel_event: threading.Event) -> None:
         if int(job.get("attempts") or 0) < int(job.get("max_attempts") or 2):
             sa_store.retry_job(job_id, error=str(exc))
         else:
-            sa_store.finish_job(job_id, "FAILED", error=str(exc))
+            sa_store.finish_job(job_id, "DEAD", error=str(exc))
     finally:
-        with _LOCK:
-            _CANCEL_EVENTS.pop(job_id, None)
-            _JOB_BY_WORK_ITEM.pop(work_item_id, None)
+        stop_heartbeat.set()
+        if heartbeat is not None:
+            heartbeat.join(timeout=2)
 
 
 def _run_action_job(job: dict[str, Any], work_item_id: str) -> None:
@@ -172,3 +201,23 @@ def start_dispatcher() -> bool:
         _DISPATCHER.start()
         logger.info("Super-agent 队列 dispatcher 已启动")
         return True
+
+
+def run_worker_loop(poll_seconds: float = 2.0, stop_event: threading.Event | None = None) -> None:
+    """独立 Worker 进程主循环：轮询 claim_next_job，带租约心跳。"""
+    import time
+
+    stop_event = stop_event or threading.Event()
+    sa_store.requeue_expired_jobs()
+    logger.info("Super-agent 独立 Worker 启动 worker_id=%s", _WORKER_ID)
+    while not stop_event.is_set():
+        try:
+            job = sa_store.claim_next_job(_WORKER_ID)
+            if job is None:
+                stop_event.wait(max(0.2, float(poll_seconds)))
+                continue
+            logger.info("Super-agent Worker 领取 job=%s kind=%s", job["job_id"], job["kind"])
+            _execute_claimed(job)
+        except Exception:  # noqa: BLE001
+            logger.exception("Super-agent 独立 Worker 循环异常")
+            stop_event.wait(max(0.5, float(poll_seconds)))

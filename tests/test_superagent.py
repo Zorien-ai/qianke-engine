@@ -210,6 +210,31 @@ def test_job_queue_claim_and_recovery(c_store):
     assert sa_store.get_job(first["job_id"])["status"] == "DONE"
 
 
+def test_claim_next_lease_and_dead_letter(c_store):
+    accepted = sa_router.ingest_event(
+        source="im", content="订单退款", channel="queue-next"
+    )
+    work_item_id = accepted["work_item"]["work_item_id"]
+    job = sa_store.enqueue_job(work_item_id, max_attempts=1)
+    claimed = sa_store.claim_next_job("worker-next", lease_seconds=60)
+    assert claimed is not None
+    assert claimed["job_id"] == job["job_id"]
+    assert sa_store.renew_lease(job["job_id"], "worker-next", lease_seconds=120) is True
+    assert sa_store.renew_lease(job["job_id"], "other-worker") is False
+
+    conn = c_store._connect()
+    try:
+        conn.execute(
+            "UPDATE sa_job SET lease_until = '2000-01-01T00:00:00+00:00' WHERE job_id = ?",
+            (job["job_id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert sa_store.requeue_expired_jobs() == 1
+    assert sa_store.get_job(job["job_id"])["status"] == "DEAD"
+
+
 def test_semantic_slow_path(c_store, monkeypatch):
     monkeypatch.setenv("QIANKE_SUPERAGENT_LLM_ROUTER", "1")
     monkeypatch.setattr(

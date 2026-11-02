@@ -136,9 +136,9 @@ finish DONE
 ## 8. 已知限制
 
 ```text
-队列仍是 SQLite，单机单写者；多实例高并发需 PostgreSQL/Redis
-dispatcher 是进程内线程，不是独立 worker 进程
-没有租约续期，超长任务（>30min）会被重新领取
-没有优先级、延迟任务 UI、死信队列页面
+独立 Worker 与 PostgreSQL SKIP LOCKED 已接入，见 superagent-worker.md
+队列仍是单机控制面依赖 SQLite WorkItem
+dispatcher 模式与独立 Worker 模式二选一
+没有优先级、延迟任务 UI、死信重放页面
 固定公网域名/可信 IP 仍需人工配置
 ```

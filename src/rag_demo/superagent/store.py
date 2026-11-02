@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from typing import Any
@@ -497,6 +498,16 @@ def get_approval(work_item_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def _queue_is_pg() -> bool:
+    return (os.environ.get("QIANKE_QUEUE_BACKEND") or "sqlite").strip().lower() in {"postgres", "postgresql", "pg"}
+
+
+def _pg_queue():
+    from rag_demo.superagent import queue_pg
+
+    return queue_pg
+
+
 def _iso_after(seconds: int) -> str:
     from datetime import datetime, timedelta, timezone
 
@@ -510,6 +521,8 @@ def enqueue_job(
     max_attempts: int = 2,
 ) -> dict[str, Any]:
     """幂等入队：同一 WorkItem/kind 只保留一个 Job。"""
+    if _queue_is_pg():
+        return _pg_queue().enqueue_job(work_item_id, kind=kind, max_attempts=max_attempts)
     init()
     now = _now()
     conn = store._connect()
@@ -540,6 +553,8 @@ def enqueue_job(
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
+    if _queue_is_pg():
+        return _pg_queue().get_job(job_id)
     init()
     conn = store._connect()
     try:
@@ -550,6 +565,8 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 
 
 def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
+    if _queue_is_pg():
+        return _pg_queue().list_jobs(limit=limit)
     init()
     conn = store._connect()
     try:
@@ -564,6 +581,8 @@ def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
 
 def claim_job(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> dict[str, Any] | None:
     """原子领取 Job；PENDING 或租约过期的 RUNNING 可被领取。"""
+    if _queue_is_pg():
+        return _pg_queue().claim_job(job_id, worker_id, lease_seconds=lease_seconds)
     init()
     now = _now()
     conn = store._connect()
@@ -583,7 +602,7 @@ def claim_job(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> dict
         attempts = int(row["attempts"]) + 1
         if attempts > int(row["max_attempts"]):
             conn.execute(
-                "UPDATE sa_job SET status = 'FAILED', last_error = 'max attempts exceeded', "
+                "UPDATE sa_job SET status = 'DEAD', last_error = 'max attempts exceeded', "
                 "updated_at = ? WHERE job_id = ?",
                 (now, job_id),
             )
@@ -604,6 +623,8 @@ def claim_job(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> dict
 
 
 def finish_job(job_id: str, status: str, *, error: str = "") -> dict[str, Any] | None:
+    if _queue_is_pg():
+        return _pg_queue().finish_job(job_id, status, error=error)
     init()
     now = _now()
     conn = store._connect()
@@ -620,6 +641,8 @@ def finish_job(job_id: str, status: str, *, error: str = "") -> dict[str, Any] |
 
 
 def retry_job(job_id: str, *, error: str = "", delay_seconds: int = 5) -> dict[str, Any] | None:
+    if _queue_is_pg():
+        return _pg_queue().retry_job(job_id, error=error, delay_seconds=delay_seconds)
     init()
     now = _now()
     conn = store._connect()
@@ -635,8 +658,74 @@ def retry_job(job_id: str, *, error: str = "", delay_seconds: int = 5) -> dict[s
     return get_job(job_id)
 
 
+def claim_next_job(
+    worker_id: str, *, lease_seconds: int = 1800
+) -> dict[str, Any] | None:
+    """原子领取下一个可执行 Job；SQLite 单写者下用 BEGIN IMMEDIATE。"""
+    if _queue_is_pg():
+        return _pg_queue().claim_next_job(worker_id, lease_seconds=lease_seconds)
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM sa_job WHERE "
+            "(status = 'PENDING' AND available_at <= ?) OR "
+            "(status = 'RUNNING' AND lease_until IS NOT NULL AND lease_until < ?) "
+            "ORDER BY created_at ASC LIMIT 1",
+            (now, now),
+        ).fetchone()
+        if row is None:
+            conn.commit()
+            return None
+        attempts = int(row["attempts"]) + 1
+        if attempts > int(row["max_attempts"]):
+            conn.execute(
+                "UPDATE sa_job SET status = 'DEAD', last_error = 'max attempts exceeded', "
+                "updated_at = ? WHERE job_id = ?",
+                (now, row["job_id"]),
+            )
+            conn.commit()
+            return None
+        conn.execute(
+            "UPDATE sa_job SET status = 'RUNNING', attempts = ?, worker_id = ?, "
+            "lease_until = ?, updated_at = ? WHERE job_id = ?",
+            (attempts, worker_id, _iso_after(lease_seconds), now, row["job_id"]),
+        )
+        conn.commit()
+        job_id = row["job_id"]
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_job(job_id)
+
+
+def renew_lease(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> bool:
+    """Worker 心跳续租；只能续自己持有的 RUNNING Job。"""
+    if _queue_is_pg():
+        return _pg_queue().renew_lease(job_id, worker_id, lease_seconds=lease_seconds)
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE sa_job SET lease_until = ?, updated_at = ? "
+            "WHERE job_id = ? AND worker_id = ? AND status = 'RUNNING'",
+            (_iso_after(lease_seconds), now, job_id, worker_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def requeue_expired_jobs() -> int:
     """把租约过期的 RUNNING Job 重新放回 PENDING；供启动恢复/看门狗调用。"""
+    if _queue_is_pg():
+        return _pg_queue().requeue_expired_jobs()
     init()
     now = _now()
     conn = store._connect()
@@ -649,7 +738,7 @@ def requeue_expired_jobs() -> int:
         for row in rows:
             if int(row["attempts"]) >= int(row["max_attempts"]):
                 conn.execute(
-                    "UPDATE sa_job SET status = 'FAILED', last_error = 'lease expired / max attempts', "
+                    "UPDATE sa_job SET status = 'DEAD', last_error = 'lease expired / max attempts', "
                     "updated_at = ? WHERE job_id = ?",
                     (now, row["job_id"]),
                 )
@@ -666,6 +755,8 @@ def requeue_expired_jobs() -> int:
 
 
 def pending_jobs(limit: int = 20) -> list[dict[str, Any]]:
+    if _queue_is_pg():
+        return _pg_queue().pending_jobs(limit=limit)
     init()
     now = _now()
     conn = store._connect()
