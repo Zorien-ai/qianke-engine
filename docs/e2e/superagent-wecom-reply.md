@@ -118,7 +118,11 @@ errcode 60020: not allow to access from your ip
 <调查结论摘要>
 建议动作：CREATE_AFTER_SALE
 订单：order_...
+审批回复：同意 <短码> 仅退款 / 同意 <短码> 退货退款
+驳回：驳回 <短码>
 ```
+
+企业微信内审批命令见：[superagent-wecom-approval.md](superagent-wecom-approval.md)
 
 执行完成：
 

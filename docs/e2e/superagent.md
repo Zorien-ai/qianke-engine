@@ -233,7 +233,7 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 610 passed, 5 skipped, 1 warning
+# 614 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed
@@ -260,6 +260,7 @@ Watchdog 超时标记与常驻启动
 
 ```text
 CApp 自动 Trigger + 企业微信原生回调已接入（只处理文本消息，不是群机器人 Webhook）
+企业微信内审批命令已接入：同意/驳回 + 售后类型/物流参数
 Worker 只读；协作式取消无法中断 Deep Agents 单次 invoke 内部
 Watchdog 已常驻，但只标记 STUCK，不自动恢复
 Router 批量是 HTTP 批量入口，不是跨渠道自动合批

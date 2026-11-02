@@ -180,6 +180,16 @@ def notify_work_item(item: dict[str, Any], *, stage: str) -> dict[str, Any]:
             lines.append(f"建议动作：{action.get('action_type')}")
             if action.get("order_id"):
                 lines.append(f"订单：{action.get('order_id')}")
+            code = str(item.get("work_item_id") or "")[-6:]
+            if code:
+                action_type = str(action.get("action_type") or "").upper()
+                if action_type == "CREATE_AFTER_SALE":
+                    lines.append(f"审批回复：同意 {code} 仅退款 / 同意 {code} 退货退款")
+                elif action_type == "SHIP_ORDER":
+                    lines.append(f"审批回复：同意 {code} 发货 <运单号>")
+                else:
+                    lines.append(f"审批回复：同意 {code}")
+                lines.append(f"驳回：驳回 {code}")
     elif stage == "APPROVED":
         execution = approval.get("execution_result") or result.get("execution") or {}
         lines.append("人工已审批并执行。")
