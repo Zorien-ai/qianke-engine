@@ -69,6 +69,29 @@ def test_thread_reuses_only_active_work_item(c_store):
     assert second["work_item"]["title"] == "订单物流异常"
 
 
+def test_merchant_tenant_isolation(c_store):
+    a = sa_router.ingest_event(
+        source="wecom", content="订单退款", channel="test", thread_key="tenant:1",
+        merchant_id="m_gear_002",
+    )
+    b = sa_router.ingest_event(
+        source="wecom", content="订单退款", channel="test", thread_key="tenant:1",
+        merchant_id="m_tea_001",
+    )
+    assert a["thread"]["thread_id"] != b["thread"]["thread_id"]
+    assert a["work_item"]["merchant_id"] == "m_gear_002"
+    assert b["work_item"]["merchant_id"] == "m_tea_001"
+    assert a["work_item"]["work_item_id"] != b["work_item"]["work_item_id"]
+    assert all(
+        item["merchant_id"] == "m_gear_002"
+        for item in sa_store.list_work_items(merchant_id="m_gear_002")
+    )
+    assert all(
+        item["merchant_id"] == "m_tea_001"
+        for item in sa_store.list_work_items(merchant_id="m_tea_001")
+    )
+
+
 def test_worker_fallback_and_approval(c_store, monkeypatch):
     accepted = sa_router.ingest_event(
         source="im", content="帮我看一下 order_abc123 的售后", channel="group"

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.tools import tool
@@ -17,15 +18,21 @@ from rag_demo.superagent import store as sa_store
 
 logger = logging.getLogger(__name__)
 
-MERCHANT_ID = "m_gear_002"
+MERCHANT_ID = sa_store.DEFAULT_MERCHANT_ID
+_CURRENT_MERCHANT: ContextVar[str] = ContextVar("sa_current_merchant", default=MERCHANT_ID)
+
+
+def _merchant() -> str:
+    return _CURRENT_MERCHANT.get()
 
 
 @tool
 def query_order(order_id: str) -> str:
     """查询订单：C 端状态、商家状态、金额、物流、售后摘要。"""
+    merchant_id = _merchant()
     order = store.get_order(order_id.strip())
-    if order is None:
-        return f"订单 {order_id} 不存在或无权查看。"
+    if order is None or get_merchant_repository().get_order(order_id.strip(), merchant_id=merchant_id) is None:
+        return f"订单 {order_id} 不存在或不属于当前商家。"
     item_names = "、".join(
         f"{item.get('title') or item.get('product_id')}×{item.get('quantity')}"
         for item in order.get("items") or []
@@ -42,32 +49,42 @@ def query_order(order_id: str) -> str:
 
 @tool
 def query_after_sales(order_id: str) -> str:
-    """查询某订单的售后工单；order_id 为空时查最近工单。"""
+    """查询某订单的售后工单；order_id 为空时查当前商家最近工单。"""
     tickets = store.list_after_sales(
         order_id=order_id.strip() or None,
         limit=20,
     )
-    if not tickets:
-        return "没有查到售后工单。"
+    merchant_id = _merchant()
+    scoped = []
+    for ticket in tickets:
+        order = store.get_order(ticket["order_id"])
+        if order is None:
+            continue
+        if get_merchant_repository().get_order(order["order_id"], merchant_id=merchant_id) is None:
+            continue
+        scoped.append(ticket)
+    if not scoped:
+        return "没有查到当前商家的售后工单。"
     return "\n".join(
         f"- {t['ticket_id']} / {t['type']} / {t['status']} / 退款={t.get('refund_amount')} / "
         f"原因={t['reason']} / 退回={t.get('return_tracking_no') or '-'}"
-        for t in tickets
+        for t in scoped
     )
 
 
 @tool
 def query_products(keyword: str) -> str:
-    """按关键词查询商家商品、价格与库存。"""
+    """按关键词查询当前商家商品、价格与库存。"""
+    merchant_id = _merchant()
     repo = get_merchant_repository()
-    products = repo.list_products(MERCHANT_ID, keyword=keyword.strip() or None, limit=10)
+    products = repo.list_products(merchant_id, keyword=keyword.strip() or None, limit=10)
     if not products:
         return "没有匹配商品。"
     lines = []
     for product in products:
-        skus = repo.list_product_skus(product.product_id, merchant_id=MERCHANT_ID)
+        skus = repo.list_product_skus(product.product_id, merchant_id=merchant_id)
         price = skus[0].price if skus else "?"
-        inv = repo.get_inventory(skus[0].sku, merchant_id=MERCHANT_ID) if skus else None
+        inv = repo.get_inventory(skus[0].sku, merchant_id=merchant_id) if skus else None
         lines.append(
             f"- {product.product_id} {product.title}：¥{price}，"
             f"可售={inv.available_qty if inv else '?'}"
@@ -237,6 +254,7 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
     Deep Agents 单次 invoke 内部目前没有可中断的 streaming 回调。
     """
     item = sa_store.start_work_item(work_item_id)
+    _CURRENT_MERCHANT.set(item.get("merchant_id") or MERCHANT_ID)
     if cancel_event is not None and cancel_event.is_set():
         return sa_store.cancel_work_item(work_item_id)
     triggers = item.get("triggers") or []

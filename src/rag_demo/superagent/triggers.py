@@ -51,6 +51,7 @@ def ingest_async(
     content: str,
     channel: str,
     thread_key: str | None = None,
+    merchant_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not _enabled():
@@ -61,6 +62,7 @@ def ingest_async(
             content=content,
             channel=channel,
             thread_key=thread_key,
+            merchant_id=merchant_id or sa_router.store.DEFAULT_MERCHANT_ID,
             metadata=metadata,
         )
     except Exception:  # noqa: BLE001
@@ -79,6 +81,7 @@ def maybe_trigger_capp(
     content: str,
     channel: str,
     thread_key: str,
+    merchant_id: str | None = None,
 ) -> dict[str, Any]:
     """CApp 好友/群聊消息钩子；异步入队，避免 Router LLM 拖慢聊天响应。"""
     if not _enabled():
@@ -89,6 +92,7 @@ def maybe_trigger_capp(
         content=content,
         channel=channel,
         thread_key=thread_key,
+        merchant_id=merchant_id,
         metadata={"buyer_id": buyer_id},
     )
     return {"scheduled": True, "reason": "QUEUED"}

@@ -70,7 +70,8 @@ def _approvers() -> set[str]:
 
 
 def _find_work_item(code: str) -> tuple[dict[str, Any] | None, str]:
-    items = sa_store.list_work_items(limit=200)
+    scope = (os.environ.get("QIANKE_WECOM_MERCHANT_ID") or sa_store.DEFAULT_MERCHANT_ID).strip()
+    items = sa_store.list_work_items(limit=200, merchant_id=scope)
     matches = [
         item for item in items
         if item["status"] == "WAITING_APPROVAL" and item["work_item_id"].lower().endswith(code.lower())

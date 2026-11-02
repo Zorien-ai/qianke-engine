@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import Any
 
@@ -10,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
+from rag_demo.c_end import store as c_store
 from rag_demo.superagent import router as sa_router
 from rag_demo.superagent import runtime as sa_runtime
 from rag_demo.superagent import store as sa_store
@@ -30,6 +32,7 @@ class EventIn(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
     channel: str = Field(default="manual", max_length=64)
     thread_key: str | None = Field(default=None, max_length=160)
+    merchant_id: str | None = Field(default=None, max_length=64)
     metadata: dict[str, Any] = Field(default_factory=dict)
     auto_run: bool = False
 
@@ -55,11 +58,38 @@ def _account() -> dict[str, Any]:
     if account.get("status") != auth.STATUS_ACTIVE:
         raise HTTPException(status_code=403, detail="账号不可用")
     if not account.get("is_system_admin"):
-        from rag_demo.c_end import store as c_store
-
         if c_store.get_merchant_member(account["id"]) is None:
             raise HTTPException(status_code=403, detail="当前账号没有 Super-agent 权限")
     return account
+
+
+def _tenant_scope(account: dict[str, Any]) -> str | None:
+    """系统管理员可跨租户；商家账号只能看绑定商家。"""
+    if account.get("is_system_admin"):
+        return None
+    member = c_store.get_merchant_member(account["id"])
+    if member is None:
+        raise HTTPException(status_code=403, detail="账号未绑定商家")
+    return str(member["merchant_id"])
+
+
+def _resolve_merchant(account: dict[str, Any], requested: str | None) -> str:
+    scope = _tenant_scope(account)
+    if scope is not None:
+        if requested and requested != scope:
+            raise HTTPException(status_code=403, detail="不能访问其他商家的数据")
+        return scope
+    return requested or sa_store.DEFAULT_MERCHANT_ID
+
+
+def _scoped_item(work_item_id: str, account: dict[str, Any]) -> dict[str, Any]:
+    item = sa_store.get_work_item(work_item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="工作项不存在")
+    scope = _tenant_scope(account)
+    if scope is not None and item.get("merchant_id") != scope:
+        raise HTTPException(status_code=404, detail="工作项不存在")
+    return item
 
 
 def _start(work_item_id: str) -> None:
@@ -69,13 +99,15 @@ def _start(work_item_id: str) -> None:
 
 @router.post("/events")
 async def ingest_event(req: EventIn) -> dict[str, Any]:
-    _account()
+    account = _account()
+    merchant_id = _resolve_merchant(account, req.merchant_id)
     try:
         result = sa_router.ingest_event(
             source=req.source,
             content=req.content,
             channel=req.channel,
             thread_key=req.thread_key,
+            merchant_id=merchant_id,
             metadata=req.metadata,
         )
     except sa_store.store.CStoreError as exc:
@@ -91,10 +123,11 @@ async def ingest_event(req: EventIn) -> dict[str, Any]:
 @router.post("/events/batch")
 def ingest_event_batch(req: BatchEventIn) -> dict[str, Any]:
     """批量事件：Router 一次处理多条 Trigger，同一 Thread 只建一个 WorkItem。"""
-    _account()
+    account = _account()
     payload = [event.model_dump() for event in req.events]
     for event in payload:
         event.pop("auto_run", None)
+        event["merchant_id"] = _resolve_merchant(account, event.get("merchant_id"))
     return sa_router.ingest_batch(payload)
 
 
@@ -118,43 +151,45 @@ async def inbound_webhook(provider: str, request: Request) -> dict[str, Any]:
         content=content,
         channel=str(body.get("channel") or provider)[:64],
         thread_key=str(body.get("thread_key") or "").strip() or None,
+        merchant_id=str(body.get("merchant_id") or "").strip() or None,
         metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
     )
 
 
 @router.get("/threads")
-def list_threads(limit: int = 50) -> dict[str, Any]:
-    _account()
-    return {"threads": sa_store.list_threads(limit=limit)}
+def list_threads(limit: int = 50, merchant_id: str | None = None) -> dict[str, Any]:
+    account = _account()
+    scope = _tenant_scope(account)
+    target = scope or merchant_id
+    return {"threads": sa_store.list_threads(limit=limit, merchant_id=target)}
 
 
 @router.get("/work-items")
-def list_work_items(limit: int = 50) -> dict[str, Any]:
-    _account()
-    return {"work_items": sa_store.list_work_items(limit=limit)}
+def list_work_items(limit: int = 50, merchant_id: str | None = None) -> dict[str, Any]:
+    account = _account()
+    scope = _tenant_scope(account)
+    target = scope or merchant_id
+    return {"work_items": sa_store.list_work_items(limit=limit, merchant_id=target)}
 
 
 @router.get("/jobs")
 def list_jobs(limit: int = 50) -> dict[str, Any]:
-    _account()
+    account = _account()
+    if _tenant_scope(account) is not None:
+        raise HTTPException(status_code=403, detail="只有系统管理员可以查看全局队列")
     return {"jobs": sa_store.list_jobs(limit=limit)}
 
 
 @router.get("/work-items/{work_item_id}")
 def get_work_item(work_item_id: str) -> dict[str, Any]:
-    _account()
-    item = sa_store.get_work_item(work_item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="工作项不存在")
-    return item
+    account = _account()
+    return _scoped_item(work_item_id, account)
 
 
 @router.post("/work-items/{work_item_id}/run")
 async def run_work_item(work_item_id: str) -> dict[str, Any]:
-    _account()
-    item = sa_store.get_work_item(work_item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="工作项不存在")
+    account = _account()
+    item = _scoped_item(work_item_id, account)
     if item["status"] != "PENDING":
         raise HTTPException(status_code=409, detail=f"工作项当前状态为 {item['status']}，不能启动")
     sa_store.start_work_item(work_item_id)
@@ -164,10 +199,8 @@ async def run_work_item(work_item_id: str) -> dict[str, Any]:
 
 @router.post("/work-items/{work_item_id}/stop")
 def stop_work_item(work_item_id: str) -> dict[str, Any]:
-    _account()
-    item = sa_store.get_work_item(work_item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="工作项不存在")
+    account = _account()
+    item = _scoped_item(work_item_id, account)
     if item["status"] not in ("PENDING", "RUNNING"):
         raise HTTPException(status_code=409, detail=f"工作项当前状态为 {item['status']}，不能停止")
     updated = sa_runtime.stop_worker(work_item_id)
@@ -176,10 +209,8 @@ def stop_work_item(work_item_id: str) -> dict[str, Any]:
 
 @router.post("/work-items/{work_item_id}/approve")
 def approve_work_item(work_item_id: str, req: ApproveIn) -> dict[str, Any]:
-    _account()
-    item = sa_store.get_work_item(work_item_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="工作项不存在")
+    account = _account()
+    item = _scoped_item(work_item_id, account)
     if item["status"] != "WAITING_APPROVAL":
         raise HTTPException(status_code=409, detail="工作项不在待审批状态")
     if not req.approved:
@@ -208,7 +239,9 @@ def approve_work_item(work_item_id: str, req: ApproveIn) -> dict[str, Any]:
 
 @router.post("/watchdog")
 def watchdog(req: WatchdogIn) -> dict[str, Any]:
-    _account()
+    account = _account()
+    if _tenant_scope(account) is not None:
+        raise HTTPException(status_code=403, detail="只有系统管理员可以执行全局 Watchdog")
     stuck = sa_store.scan_stuck_work_items(timeout_seconds=req.timeout_seconds)
     return {"stuck_count": len(stuck), "work_items": stuck}
 
@@ -274,6 +307,9 @@ async def wecom_callback_message(
             return "success"
         event = sa_wecom.message_to_event(message)
         if event is not None:
+            event["merchant_id"] = (
+                os.environ.get("QIANKE_WECOM_MERCHANT_ID") or sa_store.DEFAULT_MERCHANT_ID
+            )
             sa_triggers.ingest_async(**event)
         return "success"
     except HTTPException:

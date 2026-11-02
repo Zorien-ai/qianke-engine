@@ -974,6 +974,7 @@ def cancel_confirmed_order(
     order_id: str,
     *,
     request_id: str | None = None,
+    merchant_id: str | None = None,
 ) -> dict[str, Any]:
     """取消已确认订单：商家模拟退款/恢复商家库存，再恢复 C 库存并标记 CANCELLED。"""
     init()
@@ -991,7 +992,7 @@ def cancel_confirmed_order(
 
     try:
         get_merchant_write_repository().cancel_order(
-            _MERCHANT_ID,
+            merchant_id or _MERCHANT_ID,
             order_id,
             request_id=request_id,
         )

@@ -113,6 +113,7 @@ def ingest_event(
     content: str,
     channel: str = "manual",
     thread_key: str | None = None,
+    merchant_id: str = store.DEFAULT_MERCHANT_ID,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     text = (content or "").strip()
@@ -132,6 +133,7 @@ def ingest_event(
         content=text,
         channel=channel or "manual",
         thread_key=thread_key,
+        merchant_id=merchant_id,
         metadata={**(metadata or {}), "filter_reason": reason},
     )
     result["accepted"] = True
@@ -149,6 +151,7 @@ def ingest_batch(events: list[dict[str, Any]]) -> dict[str, Any]:
             content=str(event.get("content") or ""),
             channel=str(event.get("channel") or "batch"),
             thread_key=event.get("thread_key"),
+            merchant_id=str(event.get("merchant_id") or store.DEFAULT_MERCHANT_ID),
             metadata=event.get("metadata") if isinstance(event.get("metadata"), dict) else None,
         )
         results.append(result)

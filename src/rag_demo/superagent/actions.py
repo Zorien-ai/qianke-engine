@@ -28,24 +28,24 @@ class ActionError(Exception):
         self.message = message
 
 
-def _order_for_merchant(order_id: str) -> dict[str, Any]:
+def _order_for_merchant(order_id: str, merchant_id: str) -> dict[str, Any]:
     order = store.get_order(order_id)
     if order is None:
         raise ActionError("ORDER_NOT_FOUND", "订单不存在")
-    merchant_order = get_merchant_repository().get_order(order_id, merchant_id=MERCHANT_ID)
+    merchant_order = get_merchant_repository().get_order(order_id, merchant_id=merchant_id)
     if merchant_order is None:
         raise ActionError("ORDER_FORBIDDEN", "订单不属于当前商家")
     return order
 
 
-def _execute(action: dict[str, Any]) -> dict[str, Any]:
+def _execute(action: dict[str, Any], merchant_id: str) -> dict[str, Any]:
     action_type = str(action.get("action_type") or action.get("action") or "").strip().upper()
     if action_type not in ALLOWED_ACTIONS:
         raise ActionError("ACTION_NOT_ALLOWED", f"动作类型不在白名单：{action_type or 'EMPTY'}")
     order_id = str(action.get("order_id") or "").strip()
     if not order_id:
         raise ActionError("INVALID_ACTION", "动作缺少 order_id")
-    order = _order_for_merchant(order_id)
+    order = _order_for_merchant(order_id, merchant_id)
     buyer_id = order["buyer_id"]
 
     if action_type == "CANCEL_ORDER":
@@ -57,6 +57,7 @@ def _execute(action: dict[str, Any]) -> dict[str, Any]:
                 buyer_id,
                 order_id,
                 request_id=f"superagent:{action.get('work_item_id') or order_id}",
+                merchant_id=merchant_id,
             ),
         }
 
@@ -73,7 +74,7 @@ def _execute(action: dict[str, Any]) -> dict[str, Any]:
         if not tracking_no:
             raise ActionError("INVALID_ACTION", "发货动作缺少物流单号")
         updated = get_merchant_write_repository().update_order_status(
-            MERCHANT_ID,
+            merchant_id,
             order_id,
             "SHIPPED",
             tracking_no=tracking_no,
@@ -83,7 +84,7 @@ def _execute(action: dict[str, Any]) -> dict[str, Any]:
 
     if action_type == "COMPLETE_ORDER":
         updated = get_merchant_write_repository().update_order_status(
-            MERCHANT_ID, order_id, "COMPLETED"
+            merchant_id, order_id, "COMPLETED"
         )
         return {"action_type": action_type, "order": updated.to_dict()}
 
@@ -108,7 +109,8 @@ def execute_approved(work_item_id: str) -> dict[str, Any]:
         )
         return completed
     try:
-        result = _execute({**action, "work_item_id": work_item_id})
+        merchant_id = item.get("merchant_id") or MERCHANT_ID
+        result = _execute({**action, "work_item_id": work_item_id}, merchant_id)
         return sa_store.complete_execution(
             work_item_id,
             success=True,

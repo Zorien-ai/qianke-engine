@@ -233,7 +233,7 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 615 passed, 5 skipped, 1 warning
+# 616 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed
@@ -281,6 +281,8 @@ API 重启 → dispatcher 恢复 PENDING/过期租约
 ```
 
 详见：[superagent-queue.md](superagent-queue.md)
+
+租户隔离详见：[superagent-multitenant.md](superagent-multitenant.md)
 
 ## 8. 下一步
 

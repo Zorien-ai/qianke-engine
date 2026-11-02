@@ -11,9 +11,12 @@ from typing import Any
 
 from rag_demo.c_end import store
 
+DEFAULT_MERCHANT_ID = "m_gear_002"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sa_thread (
     thread_id   TEXT PRIMARY KEY,
+    merchant_id TEXT NOT NULL DEFAULT 'm_gear_002',
     channel     TEXT NOT NULL,
     thread_key  TEXT NOT NULL,
     title       TEXT NOT NULL,
@@ -43,6 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_sa_trigger_thread
 CREATE TABLE IF NOT EXISTS sa_work_item (
     work_item_id TEXT PRIMARY KEY,
     thread_id    TEXT NOT NULL,
+    merchant_id  TEXT NOT NULL DEFAULT 'm_gear_002',
     title        TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'PENDING',
     created_at   TEXT NOT NULL,
@@ -118,6 +122,15 @@ def init() -> None:
             for name, ddl in _APPROVAL_MIGRATIONS:
                 if name not in columns:
                     conn.execute(f"ALTER TABLE sa_approval ADD COLUMN {name} {ddl}")
+            for table in ("sa_thread", "sa_work_item"):
+                cols = {
+                    row["name"]
+                    for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                if "merchant_id" not in cols:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN merchant_id TEXT NOT NULL DEFAULT 'm_gear_002'"
+                    )
             conn.commit()
         finally:
             conn.close()
@@ -137,11 +150,15 @@ def create_trigger(
     content: str,
     channel: str = "manual",
     thread_key: str | None = None,
+    merchant_id: str = DEFAULT_MERCHANT_ID,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """写入事件并归并到 Thread；同一 thread_key 的连续事件复用 Thread。"""
+    """写入事件并归并到 Thread；租户通过 merchant_id 隔离。"""
     init()
-    thread_key = (thread_key or f"{source}:{channel}:default").strip() or "default"
+    merchant_id = (merchant_id or DEFAULT_MERCHANT_ID).strip() or DEFAULT_MERCHANT_ID
+    raw_key = (thread_key or f"{source}:{channel}:default").strip() or "default"
+    # 默认租户保持历史 key；非默认租户加前缀，避免跨商家碰撞。
+    thread_key = raw_key if merchant_id == DEFAULT_MERCHANT_ID else f"{merchant_id}:{raw_key}"
     now = _now()
     conn = store._connect()
     try:
@@ -150,12 +167,14 @@ def create_trigger(
             "SELECT * FROM sa_thread WHERE thread_key = ?", (thread_key,)
         ).fetchone()
         title = content.strip().replace("\n", " ")[:60] or "外部事件"
+        if thread is not None and thread["merchant_id"] != merchant_id:
+            raise store.CStoreError("SA_TENANT_MISMATCH", "Thread 不属于当前商家")
         if thread is None:
             thread_id = f"sat_{uuid.uuid4().hex[:16]}"
             conn.execute(
-                "INSERT INTO sa_thread(thread_id, channel, thread_key, title, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, 'OPEN', ?, ?)",
-                (thread_id, channel, thread_key, title, now, now),
+                "INSERT INTO sa_thread(thread_id, merchant_id, channel, thread_key, title, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?)",
+                (thread_id, merchant_id, channel, thread_key, title, now, now),
             )
         else:
             thread_id = thread["thread_id"]
@@ -170,17 +189,17 @@ def create_trigger(
         )
         # 同一 Thread 已有活跃工作项时，只追加 Trigger，不重复建工作项。
         active = conn.execute(
-            "SELECT * FROM sa_work_item WHERE thread_id = ? AND status IN "
+            "SELECT * FROM sa_work_item WHERE thread_id = ? AND merchant_id = ? AND status IN "
             "('PENDING','RUNNING','WAITING_APPROVAL') ORDER BY created_at DESC LIMIT 1",
-            (thread_id,),
+            (thread_id, merchant_id),
         ).fetchone()
         created = False
         if active is None:
             work_item_id = f"saw_{uuid.uuid4().hex[:16]}"
             conn.execute(
-                "INSERT INTO sa_work_item(work_item_id, thread_id, title, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'PENDING', ?, ?)",
-                (work_item_id, thread_id, title, now, now),
+                "INSERT INTO sa_work_item(work_item_id, thread_id, merchant_id, title, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'PENDING', ?, ?)",
+                (work_item_id, thread_id, merchant_id, title, now, now),
             )
             created = True
         else:
@@ -226,6 +245,7 @@ def get_thread(thread_id: str) -> dict[str, Any] | None:
         ).fetchall()
         return {
             "thread_id": row["thread_id"],
+            "merchant_id": row["merchant_id"],
             "channel": row["channel"],
             "thread_key": row["thread_key"],
             "title": row["title"],
@@ -238,17 +258,24 @@ def get_thread(thread_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
-def list_threads(limit: int = 50) -> list[dict[str, Any]]:
+def list_threads(limit: int = 50, merchant_id: str | None = None) -> list[dict[str, Any]]:
     init()
+    where = ""
+    params: list[Any] = []
+    if merchant_id:
+        where = "WHERE merchant_id = ?"
+        params.append(merchant_id)
+    params.append(max(1, min(int(limit), 200)))
     conn = store._connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM sa_thread ORDER BY updated_at DESC LIMIT ?",
-            (max(1, min(int(limit), 200)),),
+            f"SELECT * FROM sa_thread {where} ORDER BY updated_at DESC LIMIT ?",
+            params,
         ).fetchall()
         return [
             {
                 "thread_id": row["thread_id"],
+                "merchant_id": row["merchant_id"],
                 "channel": row["channel"],
                 "thread_key": row["thread_key"],
                 "title": row["title"],
@@ -262,13 +289,19 @@ def list_threads(limit: int = 50) -> list[dict[str, Any]]:
         conn.close()
 
 
-def list_work_items(limit: int = 50) -> list[dict[str, Any]]:
+def list_work_items(limit: int = 50, merchant_id: str | None = None) -> list[dict[str, Any]]:
     init()
+    where = ""
+    params: list[Any] = []
+    if merchant_id:
+        where = "WHERE merchant_id = ?"
+        params.append(merchant_id)
+    params.append(max(1, min(int(limit), 200)))
     conn = store._connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM sa_work_item ORDER BY created_at DESC LIMIT ?",
-            (max(1, min(int(limit), 200)),),
+            f"SELECT * FROM sa_work_item {where} ORDER BY created_at DESC LIMIT ?",
+            params,
         ).fetchall()
         return [_work_item_payload(row) for row in rows]
     finally:
@@ -720,6 +753,7 @@ def _work_item_payload(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "work_item_id": row["work_item_id"],
         "thread_id": row["thread_id"],
+        "merchant_id": row["merchant_id"],
         "title": row["title"],
         "status": row["status"],
         "created_at": row["created_at"],
