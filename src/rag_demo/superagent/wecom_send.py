@@ -146,6 +146,40 @@ def send_text(to_user: str, content: str, *, agent_id: str | None = None) -> dic
     return {"sent": True, "msgid": data.get("msgid")}
 
 
+def send_template_card(to_user: str, card: dict[str, Any], *, agent_id: str | None = None) -> dict[str, Any]:
+    if not configured():
+        return {"sent": False, "reason": "WECOM_SEND_NOT_CONFIGURED"}
+    recipient = (to_user or "").strip()
+    if not recipient:
+        return {"sent": False, "reason": "NO_RECIPIENT"}
+    agent = (agent_id or os.environ.get("QIANKE_WECOM_AGENT_ID") or "").strip()
+    try:
+        agent_id_int = int(agent)
+    except ValueError:
+        return {"sent": False, "reason": "INVALID_AGENT_ID"}
+    try:
+        data = _post_message({
+            "touser": recipient,
+            "msgtype": "template_card",
+            "agentid": agent_id_int,
+            "template_card": card,
+            "safe": 0,
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("企业微信卡片回写失败: %s", exc)
+        return {"sent": False, "reason": "DELIVERY_FAILED", "error": str(exc)[:300]}
+    if int(data.get("errcode") or 0) != 0:
+        logger.warning("企业微信卡片回写业务失败: %s", data.get("errmsg"))
+        return {
+            "sent": False,
+            "reason": "WECOM_ERROR",
+            "errcode": data.get("errcode"),
+            "error": data.get("errmsg"),
+        }
+    logger.info("企业微信审批卡片发送成功 msgid=%s", data.get("msgid"))
+    return {"sent": True, "msgid": data.get("msgid")}
+
+
 def _recipient(item: dict[str, Any]) -> tuple[str, str | None]:
     for trigger in item.get("triggers") or []:
         if trigger.get("source") != "wecom":
@@ -166,6 +200,16 @@ def notify_work_item(item: dict[str, Any], *, stage: str) -> dict[str, Any]:
     result = item.get("result") or {}
     approval = item.get("approval") or {}
     action = approval.get("action") or result.get("action") or {}
+    if stage == "INVESTIGATED" and action:
+        try:
+            from rag_demo.superagent import approval_card
+
+            card_result = approval_card.notify_card(item)
+            if card_result.get("sent"):
+                return {**card_result, "stage": stage, "card": True}
+            logger.info("企业微信审批卡片未发送，回退文本: %s", card_result.get("reason"))
+        except Exception:  # noqa: BLE001
+            logger.exception("企业微信审批卡片发送异常，回退文本")
     lines = [
         "【千客 Super-agent】",
         f"工作项：{item.get('work_item_id')}",

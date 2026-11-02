@@ -7,11 +7,12 @@ import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
 from rag_demo.c_end import store as c_store
+from rag_demo.superagent import approval_card as sa_approval_card
 from rag_demo.superagent import router as sa_router
 from rag_demo.superagent import runtime as sa_runtime
 from rag_demo.superagent import store as sa_store
@@ -235,6 +236,45 @@ def approve_work_item(work_item_id: str, req: ApproveIn) -> dict[str, Any]:
     if not sa_runtime.start_action(work_item_id):
         raise HTTPException(status_code=409, detail="动作执行任务已存在")
     return {**decided, "execution_pending": True}
+
+
+@router.get("/approval-card/{work_item_id}", response_class=HTMLResponse)
+def approval_card_page(work_item_id: str, token: str = Query(...)) -> HTMLResponse:
+    """企业微信卡片点击打开的无登录审批页；只靠签名 token 鉴权。"""
+    ok, error = sa_approval_card.verify_token(work_item_id, token)
+    if not ok:
+        return HTMLResponse(sa_approval_card.render_result("审批链接无效", error), status_code=403)
+    item = sa_store.get_work_item(work_item_id)
+    if item is None:
+        return HTMLResponse(sa_approval_card.render_result("工作项不存在", "请回到企业微信重新发起。"), status_code=404)
+    if item.get("status") != "WAITING_APPROVAL":
+        return HTMLResponse(
+            sa_approval_card.render_result("无需审批", f"当前状态：{item.get('status')}"),
+            status_code=409,
+        )
+    return HTMLResponse(sa_approval_card.render_page(item, token))
+
+
+@router.post("/approval-card/{work_item_id}", response_class=HTMLResponse)
+async def approval_card_submit(work_item_id: str, request: Request) -> HTMLResponse:
+    form = await request.form()
+    token = str(form.get("token") or "")
+    decision = str(form.get("decision") or "")
+    ok, error = sa_approval_card.verify_token(work_item_id, token)
+    if not ok:
+        return HTMLResponse(sa_approval_card.render_result("审批链接无效", error), status_code=403)
+    success, message = sa_approval_card.approve_from_card(
+        work_item_id,
+        decision=decision,
+        tracking_no=str(form.get("tracking_no") or ""),
+        carrier=str(form.get("carrier") or ""),
+    )
+    if success:
+        return HTMLResponse(sa_approval_card.render_result("审批已提交", message))
+    item = sa_store.get_work_item(work_item_id)
+    if item is None:
+        return HTMLResponse(sa_approval_card.render_result("审批失败", message), status_code=409)
+    return HTMLResponse(sa_approval_card.render_page(item, token, error=message), status_code=409)
 
 
 @router.post("/watchdog")
