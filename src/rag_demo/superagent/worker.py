@@ -263,6 +263,49 @@ def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
     return None
 
 
+def _validate_action_consistency(
+    action: dict[str, Any] | None, final: str
+) -> dict[str, Any] | None:
+    """Drop a proposed action when the final answer explicitly refuses it.
+
+    保留两种情况：
+    - 最终回答有明确“建议/可以”动作句；
+    - 最终回答没有拒绝措辞。
+    """
+    if not action:
+        return None
+    action_type = str(action.get("action_type") or "").upper()
+    text = final or ""
+    affirmative = {
+        "CANCEL_ORDER": ("建议取消", "可以取消", "建议取消订单"),
+        "CREATE_AFTER_SALE": ("建议创建售后", "建议创建工单", "建议仅退款", "建议退货退款", "建议走售后"),
+        "SHIP_ORDER": ("建议发货", "可以发货"),
+        "COMPLETE_ORDER": ("建议完成", "可以完成", "建议标记完成"),
+        "REFUND_AFTER_SALE": ("建议退款", "建议通过退款", "可以退款"),
+        "RECEIVE_RETURN": ("建议验收", "可以验收入库", "建议入库"),
+        "REJECT_AFTER_SALE": ("建议驳回", "可以驳回"),
+    }.get(action_type, ())
+    if any(phrase in text for phrase in affirmative):
+        return action
+    refusal = (
+        "未登记任何动作建议",
+        "不登记任何动作建议",
+        "不建议",
+        "不能",
+        "无法",
+        "证据不足",
+        "缺少依据",
+        "不应",
+        "不能直接",
+    )
+    if any(phrase in text for phrase in refusal):
+        logger.warning(
+            "丢弃与最终结论不一致的动作建议 work_item_action=%s", action_type
+        )
+        return None
+    return action
+
+
 def _notify(item: dict[str, Any], stage: str) -> None:
     try:
         from rag_demo.superagent import wecom_send
@@ -304,6 +347,7 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
         if not final:
             raise RuntimeError("Worker 没有产生最终回答")
         action = collected[-1] if collected else _derive_action(user_text, final)
+        action = _validate_action_consistency(action, final)
         output = {
             "summary": final,
             "trigger_count": len(triggers),

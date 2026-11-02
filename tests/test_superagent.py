@@ -87,6 +87,18 @@ def test_fallback_action_does_not_bypass_refusal(c_store):
     ) is None
 
 
+def test_action_must_match_final_refusal(c_store):
+    cancel = {"action_type": "CANCEL_ORDER", "order_id": "order_x"}
+    assert sa_worker._validate_action_consistency(cancel, "不能取消，证据不足") is None
+    assert sa_worker._validate_action_consistency(
+        cancel, "状态无法确认，但建议取消订单，仍需人工审批。"
+    ) == cancel
+    after_sale = {"action_type": "CREATE_AFTER_SALE", "order_id": "order_x"}
+    assert sa_worker._validate_action_consistency(
+        after_sale, "不建议直接退款，建议创建售后工单后人工审批。"
+    ) == after_sale
+
+
 def test_merchant_tenant_isolation(c_store):
     a = sa_router.ingest_event(
         source="wecom", content="订单退款", channel="test", thread_key="tenant:1",
