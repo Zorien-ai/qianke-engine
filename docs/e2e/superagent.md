@@ -162,11 +162,15 @@ Deep Agents Worker 查询后输出：
 审批：
 
 ```text
-POST /approve {"approved": true}
+POST /approve {"approved": true, "action_params": {"sale_type": "REFUND_ONLY"}}
 → EXECUTING
 → 白名单动作执行
 → DONE / EXECUTION_FAILED
 ```
+
+`CREATE_AFTER_SALE` 必须由人工选择 `REFUND_ONLY / RETURN_REFUND`，缺失时 400 不执行。
+
+企业微信结果回写见：[superagent-wecom-reply.md](superagent-wecom-reply.md)
 
 动作白名单：
 
@@ -228,13 +232,13 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 604 passed, 5 skipped, 1 warning
+# 608 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
-# 11 passed
+# 12 passed
 
 npm run build
-# ✓ built in 5.44s
+# ✓ built in 4.73s
 # dist/b.html 已生成
 ```
 

@@ -443,6 +443,37 @@ def get_approval(work_item_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def update_approval_action(work_item_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """人工审批前补充动作参数；只允许在待审批状态修改。"""
+    allowed = {"sale_type", "reason", "tracking_no", "carrier"}
+    clean = {key: (str(value).strip() if value is not None else "") for key, value in patch.items() if key in allowed}
+    if not clean:
+        return get_approval(work_item_id) or {}
+    init()
+    conn = store._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT action_json FROM sa_approval WHERE work_item_id = ? AND status = 'PENDING'",
+            (work_item_id,),
+        ).fetchone()
+        if row is None:
+            raise store.CStoreError("SA_APPROVAL_NOT_PENDING", "审批单不存在或已处理")
+        action = json.loads(row["action_json"] or "{}")
+        action.update(clean)
+        conn.execute(
+            "UPDATE sa_approval SET action_json = ? WHERE work_item_id = ?",
+            (_json(action), work_item_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_approval(work_item_id) or {}
+
+
 def scan_stuck_work_items(timeout_seconds: int = 180) -> list[dict[str, Any]]:
     """Watchdog：标记长时间 RUNNING 的工作项，不执行恢复写操作。"""
     init()

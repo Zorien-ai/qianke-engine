@@ -114,6 +114,8 @@ const state = {
   workItemDetail: null,
   watchdogBusy: false,
   approveConfirm: null,
+  actionParams: {},
+  executionCache: {},
 };
 
 let toastTimer = null;
@@ -458,6 +460,104 @@ function actionParams(action) {
   return rows;
 }
 
+function actionExtraText(action) {
+  const parts = [];
+  if (action?.sale_type) {
+    const key = String(action.sale_type).toUpperCase();
+    parts.push(`售后类型：${ACTION_SALE_TYPE_LABELS[key] || action.sale_type}`);
+  }
+  if (action?.tracking_no) parts.push(`物流单号：${action.tracking_no}`);
+  if (action?.carrier) parts.push(`承运商：${action.carrier}`);
+  return parts.join(" · ");
+}
+
+function actionParamsText(action) {
+  return actionExtraText(action) || "无额外参数";
+}
+
+/** 每个工作项的人工补充参数；SHIP_ORDER 预填动作已有值，CREATE_AFTER_SALE 必须由人选择 */
+function getActionParamsState(item) {
+  const id = String(item?.work_item_id || "");
+  if (!id) return { sale_type: "", tracking_no: "", carrier: "" };
+  if (!state.actionParams[id]) {
+    const action = workItemAction(item);
+    const isShip = String(action?.action_type || "").toUpperCase() === "SHIP_ORDER";
+    state.actionParams[id] = {
+      sale_type: "",
+      tracking_no: isShip ? String(action?.tracking_no || "") : "",
+      carrier: isShip ? String(action?.carrier || "") : "",
+    };
+  }
+  return state.actionParams[id];
+}
+
+function actionParamsValid(action, params) {
+  const type = String(action?.action_type || "").toUpperCase();
+  if (type === "CREATE_AFTER_SALE") {
+    return ["REFUND_ONLY", "RETURN_REFUND"].includes(String(params?.sale_type || "").toUpperCase());
+  }
+  if (type === "SHIP_ORDER") {
+    return String(params?.tracking_no || "").trim().length > 0;
+  }
+  return true;
+}
+
+function actionParamsForPost(action, params) {
+  const type = String(action?.action_type || "").toUpperCase();
+  if (type === "CREATE_AFTER_SALE") {
+    return { sale_type: String(params?.sale_type || "").toUpperCase() };
+  }
+  if (type === "SHIP_ORDER") {
+    const post = { tracking_no: String(params?.tracking_no || "").trim() };
+    const carrier = String(params?.carrier || "").trim();
+    if (carrier) post.carrier = carrier;
+    return post;
+  }
+  return {};
+}
+
+function actionParamsMarkup(item, action) {
+  const type = String(action?.action_type || "").toUpperCase();
+  if (type !== "CREATE_AFTER_SALE" && type !== "SHIP_ORDER") return "";
+  const id = String(item?.work_item_id || "");
+  const params = getActionParamsState(item);
+  const valid = actionParamsValid(action, params);
+
+  if (type === "CREATE_AFTER_SALE") {
+    const saleType = String(params.sale_type || "").toUpperCase();
+    return `<div class="b-param-card">
+      <p class="b-param-title">审批参数</p>
+      <p class="b-param-label">售后类型（必选）</p>
+      <div class="b-param-options">
+        ${Object.entries(ACTION_SALE_TYPE_LABELS)
+          .map(
+            ([value, label]) =>
+              `<label class="b-param-radio"><input type="radio" name="b-sale-type-${escapeHtml(id)}" value="${value}" data-param-sale-type="${escapeHtml(id)}" ${saleType === value ? "checked" : ""} /><span>${escapeHtml(label)}</span></label>`
+          )
+          .join("")}
+      </div>
+      ${
+        valid
+          ? `<p class="b-param-current">已选：${escapeHtml(ACTION_SALE_TYPE_LABELS[saleType] || saleType)}</p>`
+          : `<p class="b-param-hint">请选择售后类型后再通过并执行</p>`
+      }
+    </div>`;
+  }
+
+  return `<div class="b-param-card">
+    <p class="b-param-title">审批参数</p>
+    <div class="b-param-fields">
+      <label class="b-param-field">物流单号（必填）
+        <input id="b-param-tracking-${escapeHtml(id)}" data-param-tracking="${escapeHtml(id)}" value="${escapeHtml(params.tracking_no)}" placeholder="如 SF1234567890" autocomplete="off" />
+      </label>
+      <label class="b-param-field">承运商（可选）
+        <input id="b-param-carrier-${escapeHtml(id)}" data-param-carrier="${escapeHtml(id)}" value="${escapeHtml(params.carrier)}" placeholder="如 顺丰速运" autocomplete="off" />
+      </label>
+    </div>
+    ${valid ? "" : `<p class="b-param-hint">请填写物流单号后再通过并执行</p>`}
+  </div>`;
+}
+
 function executionStatusLabel(status) {
   const key = String(status || "").toUpperCase();
   return EXECUTION_STATUS_LABELS[key] || key || "未执行";
@@ -507,11 +607,12 @@ function executionInfo(item) {
     };
   }
   if (executed) {
+    const extra = actionExtraText(action);
     return {
       failed: false,
       executed,
       title: "已执行",
-      detail: `${label}${orderId ? `（订单 ${orderId}）` : ""}`,
+      detail: `${label}${orderId ? `（订单 ${orderId}）` : ""}${extra ? ` · ${extra}` : ""}`,
       orderId,
       action,
     };
@@ -561,16 +662,21 @@ function executionBlockMarkup(execution) {
   </div>`;
 }
 
-function approveConfirmMarkup(item, action, busy) {
+function approveConfirmMarkup(item, action, busy, params) {
   const id = String(item?.work_item_id || "");
   const hasAction = Boolean(action);
   const label = hasAction ? actionLabel(action) : "";
   const orderId = hasAction ? String(action?.order_id || "").trim() : "";
+  const finalAction = hasAction
+    ? { ...action, ...actionParamsForPost(action, params || getActionParamsState(item)) }
+    : null;
+  const paramsText = hasAction ? actionParamsText(finalAction) : "";
   return `<div class="b-confirm b-approve-confirm">
     <p>${hasAction ? "确认通过并执行该受控动作？" : "确认通过本次审批？"}</p>
     ${
       hasAction
         ? `<p class="b-confirm-detail">动作：<strong>${escapeHtml(label)}</strong>${orderId ? ` · 订单 <code>${escapeHtml(orderId)}</code>` : ""}</p>
+           <p class="b-confirm-detail">参数：<strong>${escapeHtml(paramsText)}</strong></p>
            <p class="b-confirm-note">通过后会调用受控接口执行，不只是记录审批；执行失败会记录在工作项中。</p>`
         : `<p class="b-confirm-detail">本次审批只记录结论，无可执行动作。</p>`
     }
@@ -788,21 +894,25 @@ async function stopWorkItem(workItemId) {
   }
 }
 
-async function approveWorkItem(workItemId, approved) {
+async function approveWorkItem(workItemId, approved, actionParams = {}) {
   if (!workItemId || state.busyWorkItem) return;
   state.busyWorkItem = workItemId;
   state.error = "";
   state.approveConfirm = null;
   render();
+  const body = approved
+    ? { approved: true, note: "", action_params: actionParams || {} }
+    : { approved: false, note: "" };
   try {
     const response = await api(
       `/api/superagent/work-items/${encodeURIComponent(workItemId)}/approve`,
       {
         method: "POST",
-        body: JSON.stringify({ approved, note: "" }),
+        body: JSON.stringify(body),
       }
     );
     if (approved) {
+      if (response?.work_item_id) state.executionCache[workItemId] = response;
       const execution = executionInfo(response);
       if (response?.status === "EXECUTION_FAILED" || execution?.failed) {
         showToast(`执行失败：${execution?.detail || errorMessage(response?.error || "")}`, "error");
@@ -1332,12 +1442,24 @@ function workItemCard(item) {
   const status = String(item?.status || "").toUpperCase();
   const approval = String(item?.approval_status || "").toUpperCase();
   const busy = state.busyWorkItem === id;
-  const summary = workItemSummary(item);
+  const cached = state.executionCache[id] || null;
+  const effective = cached
+    ? {
+        ...item,
+        approval: item?.approval || cached.approval,
+        result:
+          item?.result && Object.keys(item.result).length ? item.result : cached.result,
+        error: item?.error || cached.error,
+      }
+    : item;
+  const summary = workItemSummary(effective);
   const errorText = String(item?.error || "").trim();
   const showDetail = state.workItemDetailId === id;
   const detail = state.workItemDetail;
-  const action = workItemAction(item);
-  const execution = executionInfo(item);
+  const action = workItemAction(effective);
+  const execution = executionInfo(effective);
+  const params = action ? getActionParamsState(item) : null;
+  const paramsValid = !action || actionParamsValid(action, params);
   const confirming = state.approveConfirm?.workItemId === id && status === "WAITING_APPROVAL";
 
   const buttons = [];
@@ -1354,7 +1476,7 @@ function workItemCard(item) {
     );
   } else if (status === "WAITING_APPROVAL") {
     buttons.push(
-      `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${action ? "通过并执行" : "通过"}</button>`
+      `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy || !paramsValid ? "disabled" : ""} ${action && !paramsValid ? 'title="请先填写/选择审批参数"' : ""}>${action ? "通过并执行" : "通过"}</button>`
     );
     buttons.push(
       `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-reject-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>驳回</button>`
@@ -1369,9 +1491,10 @@ function workItemCard(item) {
     body = `<p class="b-muted b-running-line"><span class="b-spinner" aria-hidden="true"></span>调查中，页面每 2 秒自动刷新状态…</p>`;
   } else if (status === "WAITING_APPROVAL") {
     body = `${action ? actionCardMarkup(action) : `<p class="b-approval-tip">本次结论没有可执行动作，通过仅记录人工审批。</p>`}
+      ${action ? actionParamsMarkup(item, action) : ""}
       <div class="b-md">${renderSafeText(summary || "（本次调查没有返回结论摘要）")}</div>
       ${action ? "" : `<p class="b-approval-tip">驳回同样只记录审批结果，不会执行动作。</p>`}
-      ${confirming ? approveConfirmMarkup(item, action, busy) : ""}`;
+      ${confirming ? approveConfirmMarkup(item, action, busy, params) : ""}`;
   } else if (status === "EXECUTION_FAILED") {
     body = `${execution ? executionBlockMarkup(execution) : `<div class="b-md b-md-error">${renderSafeText(errorText || "受控动作执行失败")}</div>`}
       ${summary ? `<div class="b-md">${renderSafeText(summary)}</div>` : ""}`;
@@ -1600,16 +1723,35 @@ function bindEvents() {
     }
     const approveItemButton = target.closest("[data-approve-work-item]");
     if (approveItemButton) {
+      const workItemId = approveItemButton.dataset.approveWorkItem;
+      const item = state.workItems.find((candidate) => candidate.work_item_id === workItemId);
+      const action = item ? workItemAction(item) : null;
+      if (action && !actionParamsValid(action, getActionParamsState(item))) {
+        state.error = "请先填写/选择审批参数";
+        showToast(state.error, "error");
+        render();
+        return;
+      }
       // 通过前二次确认；仅展开确认区，不发请求
-      state.approveConfirm = { workItemId: approveItemButton.dataset.approveWorkItem };
+      state.approveConfirm = { workItemId };
       render();
       return;
     }
     const confirmApproveButton = target.closest("[data-confirm-approve]");
     if (confirmApproveButton) {
       const workItemId = confirmApproveButton.dataset.confirmApprove;
+      const item = state.workItems.find((candidate) => candidate.work_item_id === workItemId);
+      const action = item ? workItemAction(item) : null;
+      const params = item ? getActionParamsState(item) : null;
+      if (action && !actionParamsValid(action, params)) {
+        state.error = "请先填写/选择审批参数";
+        showToast(state.error, "error");
+        render();
+        return;
+      }
+      const actionParams = action ? actionParamsForPost(action, params) : {};
       state.approveConfirm = null;
-      await approveWorkItem(workItemId, true);
+      await approveWorkItem(workItemId, true, actionParams);
       return;
     }
     const cancelApproveButton = target.closest("[data-cancel-approve]");
@@ -1642,6 +1784,16 @@ function bindEvents() {
 
   root.addEventListener("change", async (event) => {
     const target = event.target;
+    if (target instanceof HTMLInputElement && target.matches("[data-param-sale-type]")) {
+      const workItemId = target.dataset.paramSaleType;
+      const item = state.workItems.find((candidate) => candidate.work_item_id === workItemId);
+      if (item) {
+        const params = getActionParamsState(item);
+        params.sale_type = target.value;
+      }
+      render();
+      return;
+    }
     if (!(target instanceof HTMLSelectElement)) return;
     if (target.matches("[data-order-filter]")) {
       state.orderFilter = target.value;
@@ -1658,6 +1810,21 @@ function bindEvents() {
     const target = event.target;
     if (target instanceof HTMLTextAreaElement && target.matches("[data-event-input]")) {
       state.eventDraft = target.value;
+      return;
+    }
+    if (
+      target instanceof HTMLInputElement &&
+      (target.matches("[data-param-tracking]") || target.matches("[data-param-carrier]"))
+    ) {
+      const workItemId = target.dataset.paramTracking || target.dataset.paramCarrier;
+      const item = state.workItems.find((candidate) => candidate.work_item_id === workItemId);
+      const params = item
+        ? getActionParamsState(item)
+        : (state.actionParams[workItemId] =
+            state.actionParams[workItemId] || { sale_type: "", tracking_no: "", carrier: "" });
+      if (target.matches("[data-param-tracking]")) params.tracking_no = target.value;
+      else params.carrier = target.value;
+      render();
     }
   });
 
@@ -1700,6 +1867,8 @@ async function boot() {
   state.workItemDetail = null;
   state.watchdogBusy = false;
   state.approveConfirm = null;
+  state.actionParams = {};
+  state.executionCache = {};
   state.error = "";
   state.shipForm = null;
   state.cancelConfirmId = "";

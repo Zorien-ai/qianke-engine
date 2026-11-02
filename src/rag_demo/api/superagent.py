@@ -17,6 +17,7 @@ from rag_demo.superagent import store as sa_store
 from rag_demo.superagent import triggers as sa_triggers
 from rag_demo.superagent import watchdog as sa_watchdog
 from rag_demo.superagent import wecom as sa_wecom
+from rag_demo.superagent import wecom_send as sa_wecom_send
 
 router = APIRouter(prefix="/api/superagent", tags=["superagent"])
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class BatchEventIn(BaseModel):
 class ApproveIn(BaseModel):
     approved: bool
     note: str = Field(default="", max_length=1000)
+    action_params: dict[str, Any] = Field(default_factory=dict)
 
 
 class WatchdogIn(BaseModel):
@@ -175,18 +177,38 @@ def approve_work_item(work_item_id: str, req: ApproveIn) -> dict[str, Any]:
     if item["status"] != "WAITING_APPROVAL":
         raise HTTPException(status_code=409, detail="工作项不在待审批状态")
     if not req.approved:
-        return sa_store.decide_approval(work_item_id, approved=False, note=req.note)
+        rejected = sa_store.decide_approval(work_item_id, approved=False, note=req.note)
+        sa_wecom_send.notify_work_item(rejected, stage="REJECTED")
+        return rejected
+    if req.action_params:
+        try:
+            sa_store.update_approval_action(work_item_id, req.action_params)
+        except sa_store.store.CStoreError as exc:
+            raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+    approval = sa_store.get_approval(work_item_id) or {}
+    action = approval.get("action") or (item.get("result") or {}).get("action") or {}
+    action_type = str(action.get("action_type") or "").upper()
+    sale_type = str(action.get("sale_type") or "").upper()
+    if action_type == "CREATE_AFTER_SALE" and sale_type not in {"REFUND_ONLY", "RETURN_REFUND"}:
+        raise HTTPException(
+            status_code=400,
+            detail="售后动作需要 action_params.sale_type：REFUND_ONLY 或 RETURN_REFUND",
+        )
     decided = sa_store.decide_approval(work_item_id, approved=True, note=req.note)
     try:
-        return sa_actions.execute_approved(work_item_id)
+        executed = sa_actions.execute_approved(work_item_id)
+        sa_wecom_send.notify_work_item(executed, stage="APPROVED")
+        return executed
     except sa_actions.ActionError as exc:
         # 执行器意外错误也落审计，不把 500 暴露给前端。
-        return sa_store.complete_execution(
+        failed = sa_store.complete_execution(
             work_item_id,
             success=False,
             result={"executed": False, "action": (decided.get("approval") or {}).get("action") or {}},
             error=f"{exc.code}: {exc.message}",
         )
+        sa_wecom_send.notify_work_item(failed, stage="APPROVED")
+        return failed
 
 
 @router.post("/watchdog")

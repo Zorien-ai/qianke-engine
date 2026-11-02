@@ -221,6 +221,15 @@ def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
     return None
 
 
+def _notify(item: dict[str, Any], stage: str) -> None:
+    try:
+        from rag_demo.superagent import wecom_send
+
+        wecom_send.notify_work_item(item, stage=stage)
+    except Exception:  # noqa: BLE001 - 回写失败不影响主流程
+        logger.exception("Super-agent 企业微信结果回写失败 work_item=%s", item.get("work_item_id"))
+
+
 def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[str, Any]:
     """同步执行一个 WorkItem；由 API 放进后台线程调用。
 
@@ -258,7 +267,9 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
             "worker": "deepagents",
             "action": action,
         }
-        return sa_store.finish_work_item(work_item_id, output, approval=True, action=action)
+        result = sa_store.finish_work_item(work_item_id, output, approval=True, action=action)
+        _notify(result, "INVESTIGATED")
+        return result
     except Exception as exc:  # noqa: BLE001 - 失败回退到确定性调查，便于运维
         if cancel_event is not None and cancel_event.is_set():
             return sa_store.cancel_work_item(work_item_id)
@@ -271,4 +282,6 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
             "error": str(exc)[:1000],
             "action": action,
         }
-        return sa_store.finish_work_item(work_item_id, output, approval=True, action=action)
+        result = sa_store.finish_work_item(work_item_id, output, approval=True, action=action)
+        _notify(result, "INVESTIGATED")
+        return result

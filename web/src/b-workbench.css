@@ -948,6 +948,96 @@ code,
   color: var(--b-danger);
 }
 
+/* ---------- 审批动作参数 ---------- */
+
+.b-param-card {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg);
+}
+
+.b-param-title {
+  margin: 0 0 6px;
+  color: var(--b-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.b-param-label {
+  margin: 0 0 6px;
+  color: var(--b-muted);
+  font-size: 10px;
+}
+
+.b-param-options {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.b-param-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--b-text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.b-param-radio input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--b-accent);
+  cursor: pointer;
+}
+
+.b-param-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.b-param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--b-muted);
+  font-size: 10px;
+}
+
+.b-param-field input {
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--b-line-strong);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg);
+  color: var(--b-text);
+  font-size: 12px;
+}
+
+.b-param-field input:focus {
+  outline: none;
+  border-color: var(--b-accent);
+}
+
+.b-param-hint {
+  margin: 6px 0 0;
+  color: var(--b-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.b-param-current {
+  margin: 6px 0 0;
+  color: var(--b-success);
+  font-size: 10px;
+}
+
 /* ---------------- 移动端 ---------------- */
 
 @media (max-width: 720px) {
@@ -1010,6 +1100,14 @@ code,
 
   .b-ship-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .b-param-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .b-param-options {
+    gap: 12px;
   }
 
   .b-actions {

@@ -27,6 +27,28 @@ COMPLETE_ORDER      标记商家订单完成
 
 不在白名单内的动作返回 `ACTION_NOT_ALLOWED`，不执行。
 
+审批前可补充参数：
+
+```json
+{
+  "approved": true,
+  "action_params": {
+    "sale_type": "RETURN_REFUND",
+    "tracking_no": "SF1234567890",
+    "carrier": "顺丰速运"
+  }
+}
+```
+
+规则：
+
+```text
+CREATE_AFTER_SALE 必须明确 sale_type=REFUND_ONLY/RETURN_REFUND
+SHIP_ORDER 必须明确 tracking_no
+CANCEL_ORDER / COMPLETE_ORDER 无额外参数
+缺失时审批 400，不执行
+```
+
 ## 3. 真实 E2E
 
 创建新订单：

@@ -187,6 +187,44 @@ def test_approved_cancel_order_executes(c_store, monkeypatch):
     assert get_merchant_write_repository().get_order(order["order_id"]).status == "CANCELLED"
 
 
+def test_approved_action_params_drive_after_sale(c_store, monkeypatch):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_sa_action_params",
+    )
+    repo = get_merchant_write_repository()
+    repo.update_order_status("m_gear_002", order["order_id"], "PAID")
+    repo.update_order_status("m_gear_002", order["order_id"], "SHIPPED", tracking_no="SF-TEST-1")
+    repo.update_order_status("m_gear_002", order["order_id"], "COMPLETED")
+
+    accepted = sa_router.ingest_event(
+        source="im",
+        content=f"订单 {order['order_id']} 售后处理，买家要退货退款",
+        channel="action",
+        thread_key="action:after-sale",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+
+    def broken_agent(*args, **kwargs):
+        raise RuntimeError("no model in test")
+
+    monkeypatch.setattr(sa_worker, "build_agent", broken_agent)
+    item = sa_worker.run_work_item(item_id)
+    assert item["status"] == "WAITING_APPROVAL"
+    assert item["approval"]["action"]["action_type"] == "CREATE_AFTER_SALE"
+
+    updated = sa_store.update_approval_action(item_id, {"sale_type": "RETURN_REFUND"})
+    assert updated["action"]["sale_type"] == "RETURN_REFUND"
+    sa_store.decide_approval(item_id, approved=True, note="同意退货退款")
+    executed = sa_actions.execute_approved(item_id)
+    assert executed["status"] == "DONE"
+    assert executed["approval"]["execution_status"] == "EXECUTED"
+    assert executed["approval"]["execution_result"]["ticket"]["type"] == "RETURN_REFUND"
+
+
 def test_rejected_action_does_not_execute(c_store, monkeypatch):
     draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
     order = c_store.confirm_order(
