@@ -23,6 +23,9 @@ CANCEL_ORDER        取消已确认订单（复用 cancel_confirmed_order，含�
 CREATE_AFTER_SALE   创建仅退款/退货退款售后工单
 SHIP_ORDER          商家发货并写物流单号
 COMPLETE_ORDER      标记商家订单完成
+REFUND_AFTER_SALE   审批已有售后工单：仅退款直接退款，退货退款进入待寄回
+RECEIVE_RETURN      退货物流已寄回后验收入库并退款
+REJECT_AFTER_SALE   驳回已有 OPEN 售后工单
 ```
 
 不在白名单内的动作返回 `ACTION_NOT_ALLOWED`，不执行。
@@ -47,7 +50,8 @@ Worker 建议 CREATE_AFTER_SALE / sale_type=RETURN_REFUND
   "action_params": {
     "sale_type": "RETURN_REFUND",
     "tracking_no": "SF1234567890",
-    "carrier": "顺丰速运"
+    "carrier": "顺丰速运",
+    "ticket_id": "as_xxx"
   }
 }
 ```
@@ -58,6 +62,8 @@ Worker 建议 CREATE_AFTER_SALE / sale_type=RETURN_REFUND
 CREATE_AFTER_SALE 必须明确 sale_type=REFUND_ONLY/RETURN_REFUND
 SHIP_ORDER 必须明确 tracking_no
 CANCEL_ORDER / COMPLETE_ORDER 无额外参数
+REFUND_AFTER_SALE / RECEIVE_RETURN / REJECT_AFTER_SALE 可用 ticket_id 指定工单
+未指定 ticket_id 时按订单状态选择最近符合条件的售后工单
 缺失时审批 400，不执行
 ```
 
@@ -156,8 +162,41 @@ WAITING_APPROVAL
 ## 7. 测试
 
 ```bash
+## 8. 新增动作 E2E
+
+### REFUND_AFTER_SALE
+
+```text
+work_item: saw_9004a0f4994a4c35
+order:     order_02844f44b3ac4b0a
+ticket:    as_da315a0089a74dcd / REFUND_ONLY / OPEN
+approve:   200 / EXECUTING
+final:     DONE / EXECUTED
+refund:    89.0
+order:     REFUNDED
+ticket:    APPROVED
+ACTION Job: saj_7bbd291d9ba749bf / DONE
+```
+
+### RECEIVE_RETURN
+
+```text
+售后单先进入 RETURN_PENDING
+用户提交退回物流 → RETURN_SHIPPED
+RECEIVE_RETURN 验收入库 → 恢复库存 + 退款
+```
+
+### REJECT_AFTER_SALE
+
+```text
+OPEN 售后单 → 人工驳回 → REJECTED
+```
+
+## 9. 测试
+
+```bash
 pytest tests/test_superagent.py -q
-# 11 passed
+# 20 passed
 ```
 
 覆盖：
@@ -168,18 +207,19 @@ Worker 生成 CANCEL_ORDER 建议
 C/商家订单均变为 CANCELLED
 驳回不执行
 动作执行失败不误报成功
+REFUND_AFTER_SALE / RECEIVE_RETURN / REJECT_AFTER_SALE
 ```
 
 完整套件：
 
 ```text
-598 passed, 5 skipped, 1 warning
+626 passed, 5 skipped, 1 warning
 ```
 
-## 8. 已知限制
+## 10. 已知限制
 
 ```text
-执行器同步执行，接口请求会等待动作完成
+动作执行走 ACTION Job，异步完成
 没有分布式锁，多实例审批可能有竞争
 没有动作回滚/补偿；外部动作失败后靠人工处理
 CREATE_AFTER_SALE 只创建工单，不等于退款；sale_type 必须由人工明确（REFUND_ONLY / RETURN_REFUND），缺失时执行器拒绝，不默认仅退款

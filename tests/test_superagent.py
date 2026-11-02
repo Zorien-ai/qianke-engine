@@ -12,6 +12,13 @@ from rag_demo.superagent import triggers as sa_triggers
 from rag_demo.superagent import worker as sa_worker
 
 
+def _ship_and_complete(order_id: str) -> None:
+    repo = get_merchant_write_repository()
+    repo.update_order_status("m_gear_002", order_id, "PAID")
+    repo.update_order_status("m_gear_002", order_id, "SHIPPED", tracking_no="SF-TEST-1")
+    repo.update_order_status("m_gear_002", order_id, "COMPLETED")
+
+
 @pytest.fixture()
 def c_store(tmp_path, monkeypatch):
     monkeypatch.setenv("QIANKE_C_END_DB", str(tmp_path / "c_end.sqlite"))
@@ -261,6 +268,96 @@ def test_semantic_slow_path(c_store, monkeypatch):
     )
     assert result["accepted"] is True
     assert result["reason"].startswith("SEMANTIC:")
+
+
+def test_refund_existing_after_sale(c_store, monkeypatch):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1", draft["order_id"], draft["confirmation_token"], request_id="req_refund_existing"
+    )
+    _ship_and_complete(order["order_id"])
+    ticket = c_store.create_after_sale(
+        "buyer_1", order["order_id"], sale_type="REFUND_ONLY", reason="测试退款"
+    )
+    accepted = sa_router.ingest_event(
+        source="im", content=f"订单 {order['order_id']} 售后退款", channel="test",
+        thread_key="action:refund-existing",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+    sa_store.start_work_item(item_id)
+    action = {
+        "action_type": "REFUND_AFTER_SALE",
+        "order_id": order["order_id"],
+        "ticket_id": ticket["ticket_id"],
+        "reason": "同意售后退款",
+    }
+    sa_store.finish_work_item(item_id, {"summary": "退款", "action": action}, approval=True, action=action)
+    sa_store.decide_approval(item_id, approved=True, note="同意")
+    executed = sa_actions.execute_approved(item_id)
+    assert executed["approval"]["execution_status"] == "EXECUTED"
+    assert executed["approval"]["execution_result"]["ticket"]["status"] == "APPROVED"
+    assert c_store.get_order(order["order_id"])["status"] == "REFUNDED"
+
+
+def test_receive_return_after_sale(c_store):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1", draft["order_id"], draft["confirmation_token"], request_id="req_receive_return"
+    )
+    _ship_and_complete(order["order_id"])
+    ticket = c_store.create_after_sale(
+        "buyer_1", order["order_id"], sale_type="RETURN_REFUND", reason="测试退货"
+    )
+    c_store.resolve_after_sale(ticket["ticket_id"], approved=True)
+    c_store.submit_return_shipment(
+        "buyer_1", ticket["ticket_id"], tracking_no="SF-RETURN-1", carrier="顺丰"
+    )
+    accepted = sa_router.ingest_event(
+        source="im", content=f"订单 {order['order_id']} 退货验收入库", channel="test",
+        thread_key="action:receive-return",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+    sa_store.start_work_item(item_id)
+    action = {
+        "action_type": "RECEIVE_RETURN",
+        "order_id": order["order_id"],
+        "ticket_id": ticket["ticket_id"],
+        "reason": "验收通过",
+    }
+    sa_store.finish_work_item(item_id, {"summary": "验收入库", "action": action}, approval=True, action=action)
+    sa_store.decide_approval(item_id, approved=True, note="同意")
+    executed = sa_actions.execute_approved(item_id)
+    assert executed["approval"]["execution_status"] == "EXECUTED"
+    assert executed["approval"]["execution_result"]["ticket"]["status"] == "APPROVED"
+    assert c_store.get_order(order["order_id"])["status"] == "REFUNDED"
+
+
+def test_reject_existing_after_sale(c_store):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1", draft["order_id"], draft["confirmation_token"], request_id="req_reject_existing"
+    )
+    _ship_and_complete(order["order_id"])
+    ticket = c_store.create_after_sale(
+        "buyer_1", order["order_id"], sale_type="REFUND_ONLY", reason="测试驳回"
+    )
+    accepted = sa_router.ingest_event(
+        source="im", content=f"订单 {order['order_id']} 售后驳回", channel="test",
+        thread_key="action:reject-existing",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+    sa_store.start_work_item(item_id)
+    action = {
+        "action_type": "REJECT_AFTER_SALE",
+        "order_id": order["order_id"],
+        "ticket_id": ticket["ticket_id"],
+        "reason": "证据不足",
+    }
+    sa_store.finish_work_item(item_id, {"summary": "驳回", "action": action}, approval=True, action=action)
+    sa_store.decide_approval(item_id, approved=True, note="同意驳回")
+    executed = sa_actions.execute_approved(item_id)
+    assert executed["approval"]["execution_status"] == "EXECUTED"
+    assert executed["approval"]["execution_result"]["ticket"]["status"] == "REJECTED"
 
 
 def test_approved_cancel_order_executes(c_store, monkeypatch):

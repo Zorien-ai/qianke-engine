@@ -233,13 +233,13 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 623 passed, 5 skipped, 1 warning
+# 626 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed
 
 npm run build
-# ✓ built in 4.27s
+# ✓ built in 4.28s
 # dist/b.html 已生成
 ```
 

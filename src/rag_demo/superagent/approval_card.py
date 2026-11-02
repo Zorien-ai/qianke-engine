@@ -96,6 +96,9 @@ def build_card(item: dict[str, Any]) -> dict[str, Any] | None:
         "CANCEL_ORDER": "待审批：取消订单",
         "SHIP_ORDER": "待审批：订单发货",
         "COMPLETE_ORDER": "待审批：完成订单",
+        "REFUND_AFTER_SALE": "待审批：售后退款",
+        "RECEIVE_RETURN": "待审批：退货入库",
+        "REJECT_AFTER_SALE": "待审批：驳回售后",
     }
     title = title_map.get(action_type, "待审批：Super-agent 动作")
     summary = str((item.get("result") or {}).get("summary") or "").strip()[:120]

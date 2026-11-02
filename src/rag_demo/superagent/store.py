@@ -773,7 +773,7 @@ def pending_jobs(limit: int = 20) -> list[dict[str, Any]]:
 
 def update_approval_action(work_item_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     """人工审批前补充动作参数；只允许在待审批状态修改。"""
-    allowed = {"sale_type", "reason", "tracking_no", "carrier"}
+    allowed = {"sale_type", "reason", "tracking_no", "carrier", "ticket_id"}
     clean = {key: (str(value).strip() if value is not None else "") for key, value in patch.items() if key in allowed}
     if not clean:
         return get_approval(work_item_id) or {}

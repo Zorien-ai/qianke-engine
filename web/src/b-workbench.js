@@ -65,6 +65,9 @@ const ACTION_LABELS = {
   CREATE_AFTER_SALE: "创建售后工单",
   SHIP_ORDER: "发货",
   COMPLETE_ORDER: "完成订单",
+  REFUND_AFTER_SALE: "售后退款",
+  RECEIVE_RETURN: "退货验收入库",
+  REJECT_AFTER_SALE: "驳回售后",
 };
 
 const ACTION_SALE_TYPE_LABELS = {

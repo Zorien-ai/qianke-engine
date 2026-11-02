@@ -110,7 +110,7 @@ SYSTEM_PROMPT = """你是千客 B 端 Super-agent 的售后/订单调查员。
 
 动作建议：
 - 如果结论包含可执行动作，必须调用 propose_action 工具登记；
-- 只允许 CANCEL_ORDER / CREATE_AFTER_SALE / SHIP_ORDER / COMPLETE_ORDER；
+- 只允许 CANCEL_ORDER / CREATE_AFTER_SALE / SHIP_ORDER / COMPLETE_ORDER / REFUND_AFTER_SALE / RECEIVE_RETURN / REJECT_AFTER_SALE；
 - 动作只是建议，真正执行必须等人工审批；
 - 没有足够依据时不要建议动作。
 
@@ -158,10 +158,12 @@ def _make_action_tool(collected: list[dict[str, Any]]):
         sale_type: str = "",
         tracking_no: str = "",
         carrier: str = "",
+        ticket_id: str = "",
     ) -> str:
         """登记一个待人工审批的动作建议，不执行任何写操作。
 
         action_type: CANCEL_ORDER / CREATE_AFTER_SALE / SHIP_ORDER / COMPLETE_ORDER
+                     / REFUND_AFTER_SALE / RECEIVE_RETURN / REJECT_AFTER_SALE
         """
         item = {
             "action_type": action_type.strip().upper(),
@@ -170,6 +172,7 @@ def _make_action_tool(collected: list[dict[str, Any]]):
             "sale_type": sale_type.strip().upper(),
             "tracking_no": tracking_no.strip(),
             "carrier": carrier.strip(),
+            "ticket_id": ticket_id.strip(),
         }
         collected.append(item)
         return f"已登记动作建议 {item['action_type']}，等待人工审批。"

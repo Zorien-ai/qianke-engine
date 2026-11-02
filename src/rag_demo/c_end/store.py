@@ -1117,7 +1117,12 @@ def list_after_sales(
         conn.close()
 
 
-def resolve_after_sale(ticket_id: str, *, approved: bool) -> dict[str, Any]:
+def resolve_after_sale(
+    ticket_id: str,
+    *,
+    approved: bool,
+    merchant_id: str | None = None,
+) -> dict[str, Any]:
     """管理员审批售后：通过时走商家退款并把 C 订单标记 REFUNDED。"""
     init()
     conn = _connect()
@@ -1173,7 +1178,7 @@ def resolve_after_sale(ticket_id: str, *, approved: bool) -> dict[str, Any]:
 
     try:
         merchant_order = get_merchant_write_repository().refund_order(
-            _MERCHANT_ID,
+            merchant_id or _MERCHANT_ID,
             order["order_id"],
             request_id=f"after_sale_{ticket_id}",
         )
@@ -1240,7 +1245,12 @@ def submit_return_shipment(
     return get_after_sale(ticket_id, buyer_id)
 
 
-def receive_after_sale(ticket_id: str, *, accepted: bool) -> dict[str, Any]:
+def receive_after_sale(
+    ticket_id: str,
+    *,
+    accepted: bool,
+    merchant_id: str | None = None,
+) -> dict[str, Any]:
     """商家验收入库：通过时先恢复商家库存再退款，并恢复 C 库存。"""
     init()
     conn = _connect()
@@ -1279,12 +1289,12 @@ def receive_after_sale(ticket_id: str, *, accepted: bool) -> dict[str, Any]:
 
     try:
         merchant_order = get_merchant_write_repository().receive_return(
-            _MERCHANT_ID,
+            merchant_id or _MERCHANT_ID,
             order["order_id"],
             request_id=f"return_{ticket_id}",
         )
         merchant_order = get_merchant_write_repository().refund_order(
-            _MERCHANT_ID,
+            merchant_id or _MERCHANT_ID,
             order["order_id"],
             request_id=f"after_sale_{ticket_id}",
         )

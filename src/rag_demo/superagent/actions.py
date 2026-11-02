@@ -18,7 +18,15 @@ from rag_demo.superagent import store as sa_store
 logger = logging.getLogger(__name__)
 
 MERCHANT_ID = "m_gear_002"
-ALLOWED_ACTIONS = {"CANCEL_ORDER", "CREATE_AFTER_SALE", "SHIP_ORDER", "COMPLETE_ORDER"}
+ALLOWED_ACTIONS = {
+    "CANCEL_ORDER",
+    "CREATE_AFTER_SALE",
+    "SHIP_ORDER",
+    "COMPLETE_ORDER",
+    "REFUND_AFTER_SALE",
+    "RECEIVE_RETURN",
+    "REJECT_AFTER_SALE",
+}
 
 
 class ActionError(Exception):
@@ -36,6 +44,21 @@ def _order_for_merchant(order_id: str, merchant_id: str) -> dict[str, Any]:
     if merchant_order is None:
         raise ActionError("ORDER_FORBIDDEN", "订单不属于当前商家")
     return order
+
+
+def _ticket_for_order(order_id: str, statuses: set[str], ticket_id: str = "") -> dict[str, Any]:
+    tickets = store.list_after_sales(order_id=order_id, limit=20)
+    if ticket_id:
+        for ticket in tickets:
+            if ticket.get("ticket_id") == ticket_id:
+                return ticket
+    for ticket in tickets:
+        if str(ticket.get("status") or "").upper() in statuses:
+            return ticket
+    raise ActionError(
+        "AFTER_SALE_NOT_FOUND",
+        f"订单 {order_id} 没有状态为 {'/'.join(sorted(statuses))} 的售后工单",
+    )
 
 
 def _execute(action: dict[str, Any], merchant_id: str) -> dict[str, Any]:
@@ -87,6 +110,29 @@ def _execute(action: dict[str, Any], merchant_id: str) -> dict[str, Any]:
             merchant_id, order_id, "COMPLETED"
         )
         return {"action_type": action_type, "order": updated.to_dict()}
+
+    if action_type == "REFUND_AFTER_SALE":
+        ticket = _ticket_for_order(order_id, {"OPEN"}, str(action.get("ticket_id") or ""))
+        resolved = store.resolve_after_sale(
+            ticket["ticket_id"], approved=True, merchant_id=merchant_id
+        )
+        return {"action_type": action_type, "order_id": order_id, "ticket": resolved}
+
+    if action_type == "RECEIVE_RETURN":
+        ticket = _ticket_for_order(
+            order_id, {"RETURN_SHIPPED"}, str(action.get("ticket_id") or "")
+        )
+        received = store.receive_after_sale(
+            ticket["ticket_id"], accepted=True, merchant_id=merchant_id
+        )
+        return {"action_type": action_type, "order_id": order_id, "ticket": received}
+
+    if action_type == "REJECT_AFTER_SALE":
+        ticket = _ticket_for_order(order_id, {"OPEN"}, str(action.get("ticket_id") or ""))
+        rejected = store.resolve_after_sale(
+            ticket["ticket_id"], approved=False, merchant_id=merchant_id
+        )
+        return {"action_type": action_type, "order_id": order_id, "ticket": rejected}
 
     raise ActionError("ACTION_NOT_ALLOWED", action_type)
 
