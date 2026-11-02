@@ -200,4 +200,7 @@ def workbench_receive_after_sale(ticket_id: str, req: WorkbenchAfterSaleReceiveI
 
 
 def register_b_workbench(app) -> None:
+    from rag_demo.api.tenants import router as tenants_router
+
     app.include_router(router)
+    app.include_router(tenants_router)

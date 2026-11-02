@@ -436,6 +436,13 @@ CREATE TABLE IF NOT EXISTS c_merchant_member (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_merchant_tenant (
+    merchant_id TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS c_mention (
     mention_id  TEXT PRIMARY KEY,
     owner_id    TEXT NOT NULL,
@@ -503,6 +510,16 @@ def init() -> None:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     _SEED,
                 )
+            tenant_count = conn.execute("SELECT COUNT(*) AS n FROM c_merchant_tenant").fetchone()["n"]
+            if tenant_count == 0:
+                conn.executemany(
+                    "INSERT INTO c_merchant_tenant(merchant_id, name, status, created_at) "
+                    "VALUES (?, ?, 'ACTIVE', ?)",
+                    (
+                        ("m_gear_002", "山野户外旗舰店", _now()),
+                        ("m_tea_001", "山雾茶业", _now()),
+                    ),
+                )
             # 伙伴表轻量迁移：老库补 user_nickname 列，并把历史默认名「小伴」迁到「小鱼」。
             companion_columns = {
                 row["name"] for row in conn.execute("PRAGMA table_info(c_companion)").fetchall()
@@ -568,6 +585,82 @@ def bind_merchant_member(
     row = get_merchant_member(account_id)
     assert row is not None
     return row
+
+
+def list_tenants() -> list[dict[str, Any]]:
+    """租户列表（管理端），包含成员数。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT t.*, (SELECT COUNT(*) FROM c_merchant_member m "
+            "WHERE m.merchant_id = t.merchant_id) AS member_count "
+            "FROM c_merchant_tenant t ORDER BY t.created_at ASC, t.merchant_id ASC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_tenant(merchant_id: str) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_merchant_tenant WHERE merchant_id = ?", (str(merchant_id).strip(),)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def create_tenant(merchant_id: str, name: str) -> dict[str, Any]:
+    merchant_id = str(merchant_id or "").strip()
+    name = str(name or "").strip()
+    if not merchant_id or len(merchant_id) > 64:
+        raise CStoreError("INVALID_MERCHANT", "merchant_id 不能为空且不能超过 64 字")
+    if not name or len(name) > 80:
+        raise CStoreError("INVALID_MERCHANT_NAME", "租户名称不能为空且不能超过 80 字")
+    init()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_merchant_tenant(merchant_id, name, status, created_at) "
+            "VALUES (?, ?, 'ACTIVE', ?) ON CONFLICT(merchant_id) DO UPDATE SET name = excluded.name",
+            (merchant_id, name, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    tenant = get_tenant(merchant_id)
+    assert tenant is not None
+    return tenant
+
+
+def list_merchant_members(merchant_id: str) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_merchant_member WHERE merchant_id = ? ORDER BY created_at ASC",
+            (str(merchant_id).strip(),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def unbind_merchant_member(account_id: int) -> bool:
+    init()
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM c_merchant_member WHERE account_id = ?", (int(account_id),)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def list_products(category: str | None = None, keyword: str | None = None, limit: int = 20) -> list[dict[str, Any]]:

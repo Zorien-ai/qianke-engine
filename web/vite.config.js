@@ -25,6 +25,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         b: fileURLToPath(new URL("./b.html", import.meta.url)),
+        tenants: fileURLToPath(new URL("./tenants.html", import.meta.url)),
       },
     },
   },
