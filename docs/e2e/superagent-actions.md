@@ -144,7 +144,7 @@ C/商家订单均变为 CANCELLED
 执行器同步执行，接口请求会等待动作完成
 没有分布式锁，多实例审批可能有竞争
 没有动作回滚/补偿；外部动作失败后靠人工处理
-CREATE_AFTER_SALE 只创建工单，不等于退款
+CREATE_AFTER_SALE 只创建工单，不等于退款；sale_type 必须由人工明确（REFUND_ONLY / RETURN_REFUND），缺失时执行器拒绝，不默认仅退款
 SHIP_ORDER/COMPLETE_ORDER 只更新商家侧，C 端展示依赖现有聚合
 没有二次复核/双人审批
 ```

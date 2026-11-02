@@ -61,7 +61,9 @@ def _execute(action: dict[str, Any]) -> dict[str, Any]:
         }
 
     if action_type == "CREATE_AFTER_SALE":
-        sale_type = str(action.get("sale_type") or "REFUND_ONLY").strip().upper()
+        sale_type = str(action.get("sale_type") or "").strip().upper()
+        if sale_type not in {"REFUND_ONLY", "RETURN_REFUND"}:
+            raise ActionError("INVALID_ACTION", "售后动作必须由人工明确 sale_type：REFUND_ONLY / RETURN_REFUND")
         reason = str(action.get("reason") or "Super-agent 调查后建议创建售后工单").strip()
         ticket = store.create_after_sale(buyer_id, order_id, sale_type=sale_type, reason=reason)
         return {"action_type": action_type, "order_id": order_id, "ticket": ticket}
