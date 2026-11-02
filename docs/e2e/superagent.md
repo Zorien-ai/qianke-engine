@@ -233,7 +233,7 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 619 passed, 5 skipped, 1 warning
+# 623 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed
@@ -285,6 +285,7 @@ API 重启 → dispatcher 恢复 PENDING/过期租约
 租户隔离详见：[superagent-multitenant.md](superagent-multitenant.md)
 独立 Worker / PostgreSQL 队列详见：[superagent-worker.md](superagent-worker.md)
 企业微信卡片审批详见：[superagent-wecom-card.md](superagent-wecom-card.md)
+Eval v2（22 场景）详见：[superagent-eval-v2.md](superagent-eval-v2.md)
 
 ## 8. 下一步
 

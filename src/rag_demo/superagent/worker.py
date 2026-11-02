@@ -209,17 +209,34 @@ def _fallback_report(item: dict[str, Any], error: str) -> str:
 
 
 def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
-    """模型没有调用 propose_action 时的确定性兜底；仍需人工审批。"""
+    """模型没有调用 propose_action 时的确定性兜底；仍需人工审批。
+
+    兜底只做「结构上可推断」的动作，且必须通过订单归属和状态校验；
+    模型明确表示无法/不建议/不存在时，不再凭关键词造动作。
+    """
     import re
 
+    if any(word in final for word in ("无法", "不能", "不存在", "不建议", "未执行", "无权", "跨商家", "不属于")):
+        return None
     text = f"{user_text}\n{final}"
     match = re.search(r"\b(order_[a-zA-Z0-9]+|ORD-\d{8}-\d{4})\b", text)
     if not match:
         return None
     order_id = match.group(1)
+    order = store.get_order(order_id)
+    if order is None:
+        return None
+    merchant_id = _merchant()
+    if get_merchant_repository().get_order(order_id, merchant_id=merchant_id) is None:
+        return None
+    status = str(order.get("status") or "").upper()
     if "取消订单" in text or "取消这单" in text:
+        if status != "CONFIRMED" or order.get("can_cancel") is False:
+            return None
         return {"action_type": "CANCEL_ORDER", "order_id": order_id, "reason": "建议取消订单"}
     if "退货退款" in text:
+        if order.get("can_after_sale") is False or store.list_after_sales(order_id=order_id, limit=1):
+            return None
         return {
             "action_type": "CREATE_AFTER_SALE",
             "order_id": order_id,
@@ -227,6 +244,8 @@ def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
             "reason": "建议创建退货退款售后工单",
         }
     if "售后" in text or "仅退款" in text or "退款" in text:
+        if order.get("can_after_sale") is False or store.list_after_sales(order_id=order_id, limit=1):
+            return None
         return {
             "action_type": "CREATE_AFTER_SALE",
             "order_id": order_id,
@@ -234,6 +253,9 @@ def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
             "reason": "建议创建仅退款售后工单",
         }
     if "完成订单" in text or "标记完成" in text:
+        merchant_order = get_merchant_repository().get_order(order_id, merchant_id=merchant_id)
+        if merchant_order is None or str(merchant_order.status).upper() not in {"SHIPPED", "DELIVERED"}:
+            return None
         return {"action_type": "COMPLETE_ORDER", "order_id": order_id, "reason": "建议完成订单"}
     return None
 
