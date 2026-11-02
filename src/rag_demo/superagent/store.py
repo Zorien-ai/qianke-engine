@@ -283,7 +283,7 @@ def finish_work_item(work_item_id: str, result: dict[str, Any], *, approval: boo
         conn.execute(
             "UPDATE sa_work_item SET status = CASE WHEN ? THEN 'WAITING_APPROVAL' ELSE 'DONE' END, "
             "updated_at = ?, finished_at = ?, result_json = ?, approval_status = ? "
-            "WHERE work_item_id = ?",
+            "WHERE work_item_id = ? AND status = 'RUNNING'",
             (1 if approval else 0, now, now, _json(result), "PENDING" if approval else "NONE", work_item_id),
         )
         if approval:
@@ -297,6 +297,23 @@ def finish_work_item(work_item_id: str, result: dict[str, Any], *, approval: boo
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+    return get_work_item(work_item_id) or {}
+
+
+def cancel_work_item(work_item_id: str, note: str = "cancelled by user") -> dict[str, Any]:
+    """取消 PENDING/RUNNING 工作项；Worker 结束后不会再覆盖取消状态。"""
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        conn.execute(
+            "UPDATE sa_work_item SET status = 'CANCELLED', error = ?, updated_at = ?, finished_at = ? "
+            "WHERE work_item_id = ? AND status IN ('PENDING', 'RUNNING')",
+            (str(note)[:1000], now, now, work_item_id),
+        )
+        conn.commit()
     finally:
         conn.close()
     return get_work_item(work_item_id) or {}

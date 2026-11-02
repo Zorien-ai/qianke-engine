@@ -157,9 +157,15 @@ def _fallback_report(item: dict[str, Any], error: str) -> str:
     )
 
 
-def run_work_item(work_item_id: str) -> dict[str, Any]:
-    """同步执行一个 WorkItem；由 API 放进后台线程调用。"""
+def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[str, Any]:
+    """同步执行一个 WorkItem；由 API 放进后台线程调用。
+
+    cancel_event 为 threading.Event：在模型调用前后检查，属于协作式取消；
+    Deep Agents 单次 invoke 内部目前没有可中断的 streaming 回调。
+    """
     item = sa_store.start_work_item(work_item_id)
+    if cancel_event is not None and cancel_event.is_set():
+        return sa_store.cancel_work_item(work_item_id)
     triggers = item.get("triggers") or []
     user_text = "\n".join(
         f"[{trigger['source']}/{trigger['channel']}] {trigger['content']}" for trigger in triggers
@@ -170,6 +176,8 @@ def run_work_item(work_item_id: str) -> dict[str, Any]:
             {"messages": [{"role": "user", "content": user_text}]},
             config={"recursion_limit": 12},
         )
+        if cancel_event is not None and cancel_event.is_set():
+            return sa_store.cancel_work_item(work_item_id)
         messages = result.get("messages") or []
         final = ""
         for message in reversed(messages):
@@ -185,6 +193,8 @@ def run_work_item(work_item_id: str) -> dict[str, Any]:
         }
         return sa_store.finish_work_item(work_item_id, output, approval=True)
     except Exception as exc:  # noqa: BLE001 - 失败回退到确定性调查，便于运维
+        if cancel_event is not None and cancel_event.is_set():
+            return sa_store.cancel_work_item(work_item_id)
         logger.exception("Super-agent Worker 失败 work_item=%s", work_item_id)
         output = {
             "summary": _fallback_report(item, str(exc)),

@@ -5,12 +5,13 @@
 ## 1. 架构
 
 ```text
-事件入口
-  → Router（确定性 Fast Path 过滤）
+事件入口（CApp / IM / Webhook）
+  → Router（Fast Path 规则 + Slow Path LLM 语义分类）
   → Thread / WorkItem（SQLite 控制面）
+  → 批量 Trigger 归并
   → Deep Agents Worker（只读调查）
   → 结论 + 人工审批
-  → Watchdog（RUNNING 超时标记）
+  → 常驻 Watchdog（RUNNING 超时标记）
 ```
 
 写操作不在 Super-agent 内执行；订单/退款/退货仍走现有受控 API + 人工确认。
@@ -19,9 +20,12 @@
 
 ```text
 src/rag_demo/superagent/
-├─ store.py     Thread / Trigger / WorkItem / Approval / Watchdog
-├─ router.py    Fast Path 事件过滤与 Thread 归并
-└─ worker.py    Deep Agents + 只读子代理
+├─ store.py      Thread / Trigger / WorkItem / Approval
+├─ router.py     Fast Path + LLM 语义分类 + 批量事件
+├─ worker.py     Deep Agents + 只读子代理
+├─ runtime.py    后台 Worker / 协作式 stop
+├─ triggers.py   CApp/IM 自动 Trigger + 通用 Webhook
+└─ watchdog.py   常驻 Watchdog
 src/rag_demo/api/superagent.py
 ```
 
@@ -36,12 +40,35 @@ policy_advisor 查询售后 / 发货 / 平台政策
 
 ```text
 POST /api/superagent/events
+POST /api/superagent/events/batch
+POST /api/superagent/webhooks/{provider}
 GET  /api/superagent/threads
 GET  /api/superagent/work-items
 GET  /api/superagent/work-items/{id}
 POST /api/superagent/work-items/{id}/run
+POST /api/superagent/work-items/{id}/stop
 POST /api/superagent/work-items/{id}/approve
 POST /api/superagent/watchdog
+```
+
+自动 Trigger：
+
+```text
+CApp 好友消息 → capp:friend:<buyer>:<friend> Thread
+CApp 群消息   → capp:group:<group_id> Thread
+外部 Webhook  → X-Superagent-Secret + POST /webhooks/{provider}
+```
+
+环境变量：
+
+```text
+QIANKE_SUPERAGENT_AUTO_TRIGGER=1
+QIANKE_SUPERAGENT_AUTO_RUN=1
+QIANKE_SUPERAGENT_LLM_ROUTER=1
+QIANKE_SUPERAGENT_WEBHOOK_SECRET=<shared-secret>
+QIANKE_SUPERAGENT_WATCHDOG_ENABLED=1
+QIANKE_SUPERAGENT_WATCHDOG_INTERVAL=60
+QIANKE_SUPERAGENT_WATCHDOG_TIMEOUT=180
 ```
 
 事件示例：
@@ -54,6 +81,57 @@ POST /api/superagent/watchdog
   "thread_key": "api-superagent-e2e"
 }
 ```
+
+Router：
+
+```text
+Fast Path：订单号 / 售后 / 物流 / 退款 / 退货等关键词
+Slow Path：没有明显关键词时，用 LLM 判断是否为业务请求
+Batch：POST /events/batch 一次处理多条 Trigger，同一 Thread 只建一个 WorkItem
+```
+
+真实语义分类/批量验证：
+
+```text
+batch: total=3 / accepted=2 / work_items=1
+semantic accepted: "我上周买的东西到现在还没到" → SEMANTIC:用户反映已购买商品未收到
+semantic rejected: "今天天气不错，随便聊聊" → SEMANTIC_REJECT
+```
+
+## 3.1 Worker 异步与 Watchdog
+
+```text
+POST /work-items/{id}/run   → 后台线程启动，接口立即返回
+POST /work-items/{id}/stop  → 协作式取消；模型调用中无法强杀，返回 CANCELLED
+POST /watchdog              → 手动扫描；常驻 Watchdog 每 60s 自动扫描
+```
+
+真实 Watchdog 启动日志：
+
+```text
+Super-agent Watchdog 已启动 interval=60s timeout=180s
+Super-agent Watchdog 标记卡住工作项: ['saw_6a7a025...']
+```
+
+## 3.2 对比 Eval
+
+```bash
+python scripts/superagent_eval.py
+# 输出 tests/superagent_eval_results.json
+```
+
+结果：
+
+```text
+5 个案例
+Super-agent 平均分 0.9
+当前 B Agent 平均分 0.6
+Super-agent 胜 2 / B Agent 胜 0 / 平 3
+```
+
+注意：这是不同工具域对比——Super-agent 能读商家订单/售后，当前 B Agent 只有用户画像和知识库；因此不能把 0.9 > 0.6 解释成通用能力全面提升。详见：
+
+[superagent-eval.md](superagent-eval.md)
 
 ## 4. 真实 Worker 结果
 
@@ -111,6 +189,11 @@ http://127.0.0.1:8000/v2/b.html
 → 结论：需要人工介入，状态不一致 + 无物流轨迹 + 无售后工单
 → 通过
 → 已完成 / 审批已通过
+
+停止调查：
+→ PENDING 工作项显示「停止调查」
+→ 点击后 POST /stop
+→ 已停止 / CANCELLED，不再继续调查
 ```
 
 同时验证：结论安全转义、无脚本注入、移动端无横向溢出、无 console error。
@@ -120,45 +203,47 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 591 passed, 5 skipped, 1 warning
+# 596 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
-# 4 passed
+# 9 passed
 
 npm run build
-# ✓ built in 4.38s
+# ✓ built in 4.82s
 # dist/b.html 已生成
 ```
 
 覆盖：
 
 ```text
-Router 过滤闲聊
+Router 过滤闲聊 / 语义 Slow Path / 批量归并
+CApp 自动 Trigger
+Webhook 共享密钥校验
 业务事件创建 Thread/WorkItem
 同 thread_key 复用活跃 WorkItem
 Worker 失败时确定性回退
-人工审批
-Watchdog 超时标记
+人工审批 / 协作式取消
+Watchdog 超时标记与常驻启动
 ```
 
 ## 7. 已知限制
 
 ```text
-MVP 只有确定性 Fast Path，没有 LLM 语义分类
-事件入口目前是 HTTP 手动提交；未接 IM/企业微信/GitHub 自动 Trigger
-Worker 只读，不做写操作；没有真实异步 start/stop/取消
-Watchdog 是手动 API，不是常驻后台 Control Loop
-没有 Router 批处理、Thread 多订阅、链式召回
+CApp 自动 Trigger 已接入；企业微信直接回调仍需中转/适配，当前用通用 Webhook
+Worker 只读；协作式取消无法中断 Deep Agents 单次 invoke 内部
+Watchdog 已常驻，但只标记 STUCK，不自动恢复
+Router 批量是 HTTP 批量入口，不是跨渠道自动合批
+没有 Thread 多订阅、链式召回、存算分离、端侧 daemon
 Deep Agents 是 Beta，文件系统工具未做细粒度权限隔离
-还没有接入 CApp 聊天的自动 Trigger（当前 B 工作台手动提交）
+对比 Eval 的 B Agent 数据域不同，分数不能代表通用能力
 ```
 
 ## 8. 下一步
 
 ```text
-1. IM/企业微信 Trigger 接入（B 工作台面板已完成）
-2. Router 异步 start/stop + 批处理
-3. 常驻 Watchdog
-4. Eval：Super-agent vs 当前 B Agent
+1. 企业微信/飞书回调适配与签名校验
+2. Deep Agents streaming 中断/恢复
+3. Watchdog 自动恢复与告警
+4. 多实例 Router / 链路追踪
 5. 多租户/权限隔离
 ```

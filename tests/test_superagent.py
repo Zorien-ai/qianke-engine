@@ -6,6 +6,7 @@ import pytest
 from rag_demo.c_end import store
 from rag_demo.superagent import router as sa_router
 from rag_demo.superagent import store as sa_store
+from rag_demo.superagent import triggers as sa_triggers
 from rag_demo.superagent import worker as sa_worker
 
 
@@ -90,3 +91,63 @@ def test_watchdog_marks_stuck_items(c_store):
     stuck = sa_store.scan_stuck_work_items(timeout_seconds=10)
     assert any(item["work_item_id"] == item_id for item in stuck)
     assert sa_store.get_work_item(item_id)["status"] == "STUCK"
+
+
+def test_cancel_does_not_get_overwritten(c_store):
+    accepted = sa_router.ingest_event(source="im", content="订单退款", channel="group")
+    item_id = accepted["work_item"]["work_item_id"]
+    sa_store.start_work_item(item_id)
+    cancelled = sa_store.cancel_work_item(item_id)
+    assert cancelled["status"] == "CANCELLED"
+    sa_store.finish_work_item(item_id, {"summary": "late"}, approval=True)
+    assert sa_store.get_work_item(item_id)["status"] == "CANCELLED"
+
+
+def test_batch_merges_same_thread(c_store):
+    result = sa_router.ingest_batch([
+        {"source": "capp", "content": "订单物流异常", "thread_key": "batch:1"},
+        {"source": "capp", "content": "买家要退款", "thread_key": "batch:1"},
+        {"source": "capp", "content": "今天天气不错", "thread_key": "batch:1"},
+    ])
+    assert result["total"] == 3
+    assert result["accepted"] == 2
+    ids = {
+        item["work_item"]["work_item_id"]
+        for item in result["results"]
+        if item.get("work_item")
+    }
+    assert len(ids) == 1
+
+
+def test_auto_trigger_ingest_and_env_gate(c_store, monkeypatch):
+    monkeypatch.setenv("QIANKE_SUPERAGENT_AUTO_TRIGGER", "1")
+    monkeypatch.setenv("QIANKE_SUPERAGENT_AUTO_RUN", "0")
+    result = sa_triggers.ingest_async(
+        source="capp", content="订单退款", channel="friend:1", thread_key="capp:1"
+    )
+    assert result["accepted"] is True
+    assert result["work_item"]["status"] == "PENDING"
+
+
+def test_webhook_secret_verification(monkeypatch):
+    monkeypatch.setenv(sa_triggers.WEBHOOK_SECRET_ENV, "secret-123")
+    assert sa_triggers.verify_webhook_secret("secret-123") is True
+    assert sa_triggers.verify_webhook_secret("bad") is False
+    assert sa_triggers.verify_webhook_secret(None) is False
+
+
+def test_semantic_slow_path(c_store, monkeypatch):
+    monkeypatch.setenv("QIANKE_SUPERAGENT_LLM_ROUTER", "1")
+    monkeypatch.setattr(
+        sa_router,
+        "semantic_classify",
+        lambda text: (True, "SEMANTIC:购买商品未收到"),
+    )
+    result = sa_router.ingest_event(
+        source="im",
+        content="我上周买的东西到现在还没到，帮我处理一下",
+        channel="semantic",
+        thread_key="semantic:test",
+    )
+    assert result["accepted"] is True
+    assert result["reason"].startswith("SEMANTIC:")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import uuid
 from datetime import datetime
@@ -17,9 +18,31 @@ from rag_demo.c_end import companion_agent, group, idempotency, negotiation, per
 from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
+logger = logging.getLogger(__name__)
 _THREAD_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _AVATAR_KIND_RE = re.compile(r"^(companion|user)$")
+
+
+def _maybe_superagent_trigger(
+    *,
+    buyer_id: str,
+    content: str,
+    channel: str,
+    thread_key: str,
+) -> None:
+    """聊天消息进入 Super-agent；默认关闭，失败绝不阻塞聊天。"""
+    try:
+        from rag_demo.superagent import triggers as sa_triggers
+
+        sa_triggers.maybe_trigger_capp(
+            buyer_id=buyer_id,
+            content=content,
+            channel=channel,
+            thread_key=thread_key,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Super-agent 聊天 Trigger 失败 channel=%s", channel)
 
 
 def _buyer() -> tuple[str, dict]:
@@ -416,9 +439,16 @@ def list_group_messages(group_id: str, limit: int = 30, before: str | None = Non
 def send_group_message(group_id: str, req: GroupMessageIn) -> dict:
     buyer_id, _ = _buyer()
     try:
-        return group.send_message(buyer_id, group_id, req.content)
+        result = group.send_message(buyer_id, group_id, req.content)
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
+    _maybe_superagent_trigger(
+        buyer_id=buyer_id,
+        content=req.content,
+        channel=f"group:{group_id}",
+        thread_key=f"capp:group:{group_id}",
+    )
+    return result
 
 
 @router.get("/threads/unread")
@@ -758,6 +788,13 @@ def send_message(friend_id: str, req: SendMessageIn) -> dict:
         result, replay = _send_store_message_once(buyer_id, friend_id, req.content, client_id)
         if replay:
             result["idempotent_replay"] = True
+        else:
+            _maybe_superagent_trigger(
+                buyer_id=buyer_id,
+                content=req.content,
+                channel=f"friend:{friend_id}",
+                thread_key=f"capp:friend:{buyer_id}:{friend_id}",
+            )
         return result
     except idempotency.IdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -798,6 +835,14 @@ async def chat_websocket(websocket: WebSocket, friend_id: str) -> None:
                 )
                 if replay:
                     result["idempotent_replay"] = True
+                else:
+                    await asyncio.to_thread(
+                        _maybe_superagent_trigger,
+                        buyer_id=buyer_id,
+                        content=content,
+                        channel=f"friend:{friend_id}",
+                        thread_key=f"capp:friend:{buyer_id}:{friend_id}",
+                    )
                 await websocket.send_json({"type": "chat", **result})
             except idempotency.IdempotencyConflict as exc:
                 await websocket.send_json({
@@ -838,6 +883,13 @@ async def group_chat_websocket(websocket: WebSocket, group_id: str) -> None:
                     buyer_id,
                     group_id,
                     content,
+                )
+                await asyncio.to_thread(
+                    _maybe_superagent_trigger,
+                    buyer_id=buyer_id,
+                    content=content,
+                    channel=f"group:{group_id}",
+                    thread_key=f"capp:group:{group_id}",
                 )
                 await websocket.send_json({"type": "group_chat", **result})
             except store.CStoreError as exc:

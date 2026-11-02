@@ -48,6 +48,7 @@ const SUPERAGENT_STATUS_LABELS = {
   REJECTED: "已驳回",
   FAILED: "失败",
   STUCK: "卡住",
+  CANCELLED: "已停止",
 };
 
 const APPROVAL_STATUS_LABELS = {
@@ -401,7 +402,7 @@ function superAgentTone(status) {
   if (key === "RUNNING") return "is-info";
   if (key === "DONE") return "is-success";
   if (key === "FAILED" || key === "STUCK") return "is-danger";
-  if (key === "REJECTED") return "is-muted";
+  if (key === "REJECTED" || key === "CANCELLED") return "is-muted";
   return "is-warn";
 }
 
@@ -566,6 +567,37 @@ async function runWorkItem(workItemId) {
       method: "POST",
     });
     showToast("调查已启动，页面会每 2 秒自动刷新状态", "success");
+    await loadWorkItems();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      state.error = errorMessage(error);
+      showToast(state.error, "error");
+    } else {
+      handleSuperAgentError(error);
+    }
+  } finally {
+    state.busyWorkItem = "";
+    syncWorkPolling();
+    render();
+  }
+}
+
+async function stopWorkItem(workItemId) {
+  if (!workItemId || state.busyWorkItem) return;
+  state.busyWorkItem = workItemId;
+  state.error = "";
+  render();
+  try {
+    const data = await api(`/api/superagent/work-items/${encodeURIComponent(workItemId)}/stop`, {
+      method: "POST",
+    });
+    const stoppedStatus = String(data?.status || "CANCELLED").toUpperCase();
+    showToast(
+      stoppedStatus === "CANCELLED"
+        ? `已停止工作项 ${workItemId} 的调查`
+        : `工作项状态已更新为「${superAgentStatusLabel(stoppedStatus)}」`,
+      "success"
+    );
     await loadWorkItems();
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {
@@ -1118,6 +1150,13 @@ function workItemCard(item) {
     buttons.push(
       `<button type="button" class="b-btn b-btn-primary" data-run-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${busy ? "启动中…" : "运行调查"}</button>`
     );
+    buttons.push(
+      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-stop-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>停止调查</button>`
+    );
+  } else if (status === "RUNNING") {
+    buttons.push(
+      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-stop-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${busy ? "停止中…" : "停止调查"}</button>`
+    );
   } else if (status === "WAITING_APPROVAL") {
     buttons.push(
       `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>通过</button>`
@@ -1141,6 +1180,8 @@ function workItemCard(item) {
       ${summary ? `<div class="b-md">${renderSafeText(summary)}</div>` : ""}`;
   } else if (status === "DONE" || status === "REJECTED") {
     body = `<div class="b-md">${renderSafeText(summary || "调查完成，本次未返回结论摘要。")}</div>`;
+  } else if (status === "CANCELLED") {
+    body = `<p class="b-muted">已手动停止本次调查，不会继续产生结论或执行任何操作。</p>`;
   } else if (status === "PENDING") {
     body = `<p class="b-muted">工作项已受理，点击「运行调查」后由 Super-agent 执行只读调查。</p>`;
   }
@@ -1340,6 +1381,11 @@ function bindEvents() {
     const runItemButton = target.closest("[data-run-work-item]");
     if (runItemButton) {
       await runWorkItem(runItemButton.dataset.runWorkItem);
+      return;
+    }
+    const stopItemButton = target.closest("[data-stop-work-item]");
+    if (stopItemButton) {
+      await stopWorkItem(stopItemButton.dataset.stopWorkItem);
       return;
     }
     const approveItemButton = target.closest("[data-approve-work-item]");

@@ -51,6 +51,7 @@ POST /api/superagent/events                       {source:"manual", channel:"b-w
 GET  /api/superagent/work-items?limit=50          → {work_items}
 GET  /api/superagent/work-items/{id}              → work item + triggers
 POST /api/superagent/work-items/{id}/run
+POST /api/superagent/work-items/{id}/stop         → {work_item_id,status:"CANCELLED",stopped:true}；状态不允许时 409
 POST /api/superagent/work-items/{id}/approve      {approved, note}
 POST /api/superagent/watchdog                     {timeout_seconds}
 ```
@@ -58,10 +59,10 @@ POST /api/superagent/watchdog                     {timeout_seconds}
 - 顶部固定说明「只读调查 + 人工审批，不会自动改订单/退款」；
 - 输入业务事件（示例：`请查订单 order_xxx，买家反馈物流异常要售后`）→「提交给 Super-agent」，提交后展示 `work_item_id` 与状态；不受理展示 `reason`；
 - 工作项列表展示状态、标题、创建/更新时间、审批状态；
-  - `PENDING`：显示「运行调查」；点击调用 run；
+  - `PENDING`：显示「运行调查」与「停止调查」；RUNNING 显示「停止调查」；stop 成功后状态变 `CANCELLED`/「已停止」，失败（如 409 状态不允许）toast + 行内 detail.message 并保持原状态；
   - `RUNNING`：每 2s 轮询 `work-items`，全部结束（无 RUNNING）后自动停止；切换视图时停止；
   - `WAITING_APPROVAL`：展示结论摘要 + 「通过 / 驳回」（approve `{approved,note}`）；
-  - `DONE`：展示结果摘要；`REJECTED`：展示已驳回及结果；`FAILED` / `STUCK`：展示错误详情；
+  - `DONE`：展示结果摘要；`REJECTED`：展示已驳回及结果；`FAILED` / `STUCK`：展示错误详情；`CANCELLED`：展示已手动停止；
   - 「查看详情」按需 GET 单条工作项，展示线程与触发事件；「扫描卡死」调用 watchdog（默认 180s）并提示标记数量；
 - **结论安全渲染**：先 `escapeHtml` 整体转义，再按行还原换行与 `- / 1.` 简单列表；不使用原文 innerHTML，杜绝 Markdown/LLM 输出注入 HTML；
 - 轮询刷新会保留事件输入框焦点与光标；错误统一 toast + 行内 `detail.message`；移动端不横向溢出。
