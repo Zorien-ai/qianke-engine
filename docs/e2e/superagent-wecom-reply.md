@@ -1,6 +1,6 @@
 # Super-agent 企业微信结果回写
 
-> 日期：2026-11-02 · 状态：代码完成，待应用 Secret 做真实发送
+> 日期：2026-11-02 · 状态：应用直发 + 群机器人兜底均已真实验证
 
 ## 1. 能力
 
@@ -87,6 +87,25 @@ status OPEN
 
 说明当前没有应用 Secret 时，执行结果已真实回写到企业微信群机器人。
 
+应用直发真实验证（配置 Secret + 可信 IP 后）：
+
+```text
+send_text -> {'sent': True, 'msgid': 'cpB2NxqCi8uaKeFH...'}
+真实工作项结果回写 -> {'sent': True, 'msgid': 'cpB2NxqCi8uaKeFH...'}
+```
+
+企业微信要求把服务出口 IP 加入应用「企业可信 IP」：
+
+```text
+113.116.58.161
+```
+
+未加白名单时返回：
+
+```text
+errcode 60020: not allow to access from your ip
+```
+
 ## 5. 内容示例
 
 调查完成：
@@ -140,9 +159,10 @@ RETURN_REFUND  退货退款
 ## 7. 已知限制
 
 ```text
-真实企业微信应用直发尚未验证（缺少应用 Secret）
-群机器人兜底已真实验证：sent=True / group_webhook，且审批执行结果真实回写
-需要应用有发消息权限，可能需要在企业微信配置可信 IP
+真实企业微信应用直发已验证（send_text + 工作项结果回写均返回 sent=True）
+群机器人兜底也已真实验证：sent=True / group_webhook
+必须把 API 出口 IP 加入应用「企业可信 IP」
+换网络/换出口 IP 后需要重新加白
 回写失败只记日志，不影响审批结果
 消息为纯文本，截断到 1200 字符
 ```
