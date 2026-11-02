@@ -52,6 +52,25 @@ def test_notify_builds_from_wecom_trigger(monkeypatch):
 def test_send_skips_without_config(monkeypatch):
     for key in ("QIANKE_WECOM_CORP_ID", "QIANKE_WECOM_CORP_SECRET", "QIANKE_WECOM_AGENT_ID"):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("QIANKE_ALERT_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("QIANKE_WECOM_REPLY_FALLBACK_GROUP", raising=False)
     result = wecom_send.send_text("user_1", "hello")
     assert result["sent"] is False
     assert result["reason"] == "WECOM_SEND_NOT_CONFIGURED"
+
+
+def test_group_webhook_fallback(monkeypatch):
+    for key in ("QIANKE_WECOM_CORP_ID", "QIANKE_WECOM_CORP_SECRET", "QIANKE_WECOM_AGENT_ID"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("QIANKE_ALERT_WEBHOOK_URL", "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=x")
+    monkeypatch.setenv("QIANKE_WECOM_REPLY_FALLBACK_GROUP", "1")
+    captured = {}
+
+    def fake_group(content):
+        captured["content"] = content
+        return {"sent": True, "channel": "group_webhook"}
+
+    monkeypatch.setattr(wecom_send, "_send_group_webhook", fake_group)
+    result = wecom_send.send_text("user_1", "fallback hello")
+    assert result["sent"] is True
+    assert captured["content"] == "fallback hello"

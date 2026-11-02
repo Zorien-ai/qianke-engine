@@ -33,6 +33,17 @@ QIANKE_WECOM_AGENT_ID=1000002
 
 没有配置 Secret 时，回写会被安全跳过，不影响 Super-agent 主流程。
 
+### 群机器人兜底
+
+如果暂时没有应用 Secret，可复用已有企业微信群机器人：
+
+```dotenv
+QIANKE_ALERT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...
+QIANKE_WECOM_REPLY_FALLBACK_GROUP=1
+```
+
+兜底会把同一份结果发到群机器人，不是应用直发给发起人。
+
 ## 3. 触发时机
 
 ```text
@@ -97,6 +108,7 @@ RETURN_REFUND  退货退款
 
 ```text
 真实企业微信主动发送尚未验证（缺少应用 Secret）
+群机器人兜底已真实验证：sent=True / group_webhook
 需要应用有发消息权限，可能需要在企业微信配置可信 IP
 回写失败只记日志，不影响审批结果
 消息为纯文本，截断到 1200 字符
@@ -106,7 +118,7 @@ RETURN_REFUND  退货退款
 
 ```bash
 pytest tests/test_superagent_wecom_send.py -q
-# 3 passed
+# 4 passed
 ```
 
 覆盖：
@@ -115,4 +127,5 @@ pytest tests/test_superagent_wecom_send.py -q
 文本消息构造
 从 wecom Trigger 提取接收人
 未配置 Secret 时安全跳过
+群机器人兜底
 ```

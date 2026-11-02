@@ -32,6 +32,46 @@ def configured() -> bool:
     )
 
 
+def _fallback_group_enabled() -> bool:
+    if (os.environ.get("QIANKE_WECOM_REPLY_FALLBACK_GROUP") or "0").strip() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        return False
+    return bool((os.environ.get("QIANKE_ALERT_WEBHOOK_URL") or "").strip())
+
+
+def _send_group_webhook(content: str) -> dict[str, Any]:
+    """已有企业微信群机器人兜底；不是应用直发给用户。"""
+    url = (os.environ.get("QIANKE_ALERT_WEBHOOK_URL") or "").strip()
+    if not url:
+        return {"sent": False, "reason": "NO_GROUP_WEBHOOK"}
+    payload = {"msgtype": "markdown", "markdown": {"content": content[:3800]}}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("企业微信群机器人兜底回写失败: %s", exc)
+        return {"sent": False, "reason": "GROUP_DELIVERY_FAILED", "error": str(exc)[:300]}
+    if int(data.get("errcode") or 0) != 0:
+        return {
+            "sent": False,
+            "reason": "GROUP_WECOM_ERROR",
+            "errcode": data.get("errcode"),
+            "error": data.get("errmsg"),
+        }
+    return {"sent": True, "channel": "group_webhook"}
+
+
 def _get_token() -> str:
     corp_id = (os.environ.get("QIANKE_WECOM_CORP_ID") or "").strip()
     secret = (os.environ.get("QIANKE_WECOM_CORP_SECRET") or "").strip()
@@ -66,6 +106,8 @@ def _post_message(payload: dict[str, Any]) -> dict[str, Any]:
 
 def send_text(to_user: str, content: str, *, agent_id: str | None = None) -> dict[str, Any]:
     if not configured():
+        if _fallback_group_enabled():
+            return _send_group_webhook(content)
         return {"sent": False, "reason": "WECOM_SEND_NOT_CONFIGURED"}
     recipient = (to_user or "").strip()
     if not recipient:

@@ -27,6 +27,18 @@ COMPLETE_ORDER      标记商家订单完成
 
 不在白名单内的动作返回 `ACTION_NOT_ALLOWED`，不执行。
 
+真实审批参数 E2E：
+
+```text
+订单 order_0e134d83049f4d8a
+Worker 建议 CREATE_AFTER_SALE / sale_type=RETURN_REFUND
+人工审批时改选 REFUND_ONLY
+→ 执行成功
+→ 工单 as_d252217b487f4a37 / REFUND_ONLY / OPEN
+```
+
+人工参数会覆盖模型建议，但不会静默执行：仍必须显式提交 `action_params`。
+
 审批前可补充参数：
 
 ```json
