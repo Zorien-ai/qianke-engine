@@ -286,6 +286,7 @@ API 重启 → dispatcher 恢复 PENDING/过期租约
 独立 Worker / PostgreSQL 队列详见：[superagent-worker.md](superagent-worker.md)
 企业微信卡片审批详见：[superagent-wecom-card.md](superagent-wecom-card.md)
 Eval v2（24 场景）详见：[superagent-eval-v2.md](superagent-eval-v2.md)
+Eval 稳定性与多次采样详见：[superagent-eval-stability.md](superagent-eval-stability.md)
 租户管理页面详见：[superagent-tenants.md](superagent-tenants.md)
 
 ## 8. 下一步

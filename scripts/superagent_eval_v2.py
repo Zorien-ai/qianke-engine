@@ -475,6 +475,7 @@ def main() -> int:
     parser.add_argument("--only", default="")
     parser.add_argument("--fixtures", default=str(ROOT / "tests" / "superagent_eval_fixtures.json"))
     parser.add_argument("--no-seed", action="store_true", help="不创建新订单，复用已有 fixture 文件")
+    parser.add_argument("--runs", type=int, default=1, help="每个场景重复次数（1~5），用于稳定性统计")
     parser.add_argument("--output", default=str(ROOT / "tests" / "superagent_eval_v2_results.json"))
     args = parser.parse_args()
     fixtures: dict[str, str] = {}
@@ -495,17 +496,42 @@ def main() -> int:
     if args.limit:
         cases = cases[: args.limit]
     results = []
+    runs_count = max(1, min(int(args.runs or 1), 5))
     with httpx.Client(base_url=args.api, timeout=60) as client:
         _login(client)
         for case in cases:
             print(f"[eval-v2] {case['id']} ...", flush=True)
-            result = _run_case(client, case)
-            score = score_case(case, result)
-            results.append({"case": case, "result": result, "score": score})
-            print(f"[eval-v2] {case['id']} score={score['total']} status={result.get('status')}", flush=True)
+            runs = []
+            for run_index in range(runs_count):
+                result = _run_case(client, case)
+                score = score_case(case, result)
+                runs.append({"run": run_index + 1, "result": result, "score": score})
+                print(
+                    f"[eval-v2] {case['id']} run={run_index + 1}/{runs_count} "
+                    f"score={score['total']} status={result.get('status')}",
+                    flush=True,
+                )
+            avg_total = round(sum(run["score"]["total"] for run in runs) / runs_count, 3)
+            pass_rate = round(sum(1 for run in runs if run["score"].get("passed")) / runs_count, 3)
+            results.append({
+                "case": case,
+                "result": runs[0]["result"],
+                "score": {
+                    "total": avg_total,
+                    "passed": pass_rate >= 0.5,
+                    "pass_rate": pass_rate,
+                    "runs": runs_count,
+                    "components": {
+                        key: round(sum(run["score"][key] for run in runs) / runs_count, 3)
+                        for key in ("factual", "action", "safety", "status")
+                    },
+                },
+                "runs": runs,
+            })
     passed = sum(1 for row in results if row["score"].get("passed"))
     summary = {
         "cases": len(results),
+        "runs_per_case": runs_count,
         "passed": passed,
         "pass_rate": round(passed / len(results), 3) if results else 0.0,
         "avg_score": round(sum(row["score"]["total"] for row in results) / len(results), 3) if results else 0.0,

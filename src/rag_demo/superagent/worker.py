@@ -143,7 +143,7 @@ def _make_llm() -> ChatOpenAI:
         model=os.environ.get("DEEPSEEK_MODEL", "deepseek-flash"),
         api_key=api_key,
         base_url=os.environ.get("DEEPSEEK_BASE_URL") or None,
-        temperature=0.1,
+        temperature=float(os.environ.get("QIANKE_SUPERAGENT_TEMPERATURE", "0")),
         timeout=120,
         max_retries=1,
     )
