@@ -158,8 +158,28 @@ Deep Agents Worker 查询后输出：
 
 ```text
 POST /approve {"approved": true}
-→ DONE / APPROVED
+→ EXECUTING
+→ 白名单动作执行
+→ DONE / EXECUTION_FAILED
 ```
+
+动作白名单：
+
+```text
+CANCEL_ORDER / CREATE_AFTER_SALE / SHIP_ORDER / COMPLETE_ORDER
+```
+
+真实取消订单 E2E：
+
+```text
+order_6165c9addb24431c CONFIRMED
+→ Worker 建议 CANCEL_ORDER
+→ 人工通过
+→ status=DONE / execution_status=EXECUTED
+→ C 端 CANCELLED / 商家 CANCELLED
+```
+
+详见：[superagent-actions.md](superagent-actions.md)
 
 Watchdog：
 
@@ -203,13 +223,13 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 596 passed, 5 skipped, 1 warning
+# 598 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
-# 9 passed
+# 11 passed
 
 npm run build
-# ✓ built in 4.82s
+# ✓ built in 4.77s
 # dist/b.html 已生成
 ```
 
@@ -222,7 +242,7 @@ Webhook 共享密钥校验
 业务事件创建 Thread/WorkItem
 同 thread_key 复用活跃 WorkItem
 Worker 失败时确定性回退
-人工审批 / 协作式取消
+人工审批 / 协作式取消 / 受控动作执行
 Watchdog 超时标记与常驻启动
 ```
 
@@ -236,6 +256,8 @@ Router 批量是 HTTP 批量入口，不是跨渠道自动合批
 没有 Thread 多订阅、链式召回、存算分离、端侧 daemon
 Deep Agents 是 Beta，文件系统工具未做细粒度权限隔离
 对比 Eval 的 B Agent 数据域不同，分数不能代表通用能力
+受控执行只有 4 个白名单动作，没有回滚/补偿/双人复核
+执行器同步执行，没有分布式锁/多实例竞争保护
 ```
 
 ## 8. 下一步

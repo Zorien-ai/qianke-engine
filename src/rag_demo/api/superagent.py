@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
+from rag_demo.superagent import actions as sa_actions
 from rag_demo.superagent import router as sa_router
 from rag_demo.superagent import runtime as sa_runtime
 from rag_demo.superagent import store as sa_store
@@ -166,7 +167,19 @@ def approve_work_item(work_item_id: str, req: ApproveIn) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="工作项不存在")
     if item["status"] != "WAITING_APPROVAL":
         raise HTTPException(status_code=409, detail="工作项不在待审批状态")
-    return sa_store.decide_approval(work_item_id, approved=req.approved, note=req.note)
+    if not req.approved:
+        return sa_store.decide_approval(work_item_id, approved=False, note=req.note)
+    decided = sa_store.decide_approval(work_item_id, approved=True, note=req.note)
+    try:
+        return sa_actions.execute_approved(work_item_id)
+    except sa_actions.ActionError as exc:
+        # 执行器意外错误也落审计，不把 500 暴露给前端。
+        return sa_store.complete_execution(
+            work_item_id,
+            success=False,
+            result={"executed": False, "action": (decided.get("approval") or {}).get("action") or {}},
+            error=f"{exc.code}: {exc.message}",
+        )
 
 
 @router.post("/watchdog")

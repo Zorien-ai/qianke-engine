@@ -91,6 +91,12 @@ SYSTEM_PROMPT = """你是千客 B 端 Super-agent 的售后/订单调查员。
 - 如果建议动作涉及退款、取消、退货入库，必须标记「需要人工确认」；
 - 最终输出中文，结构：结论 / 依据 / 建议 / 需要人工确认。
 
+动作建议：
+- 如果结论包含可执行动作，必须调用 propose_action 工具登记；
+- 只允许 CANCEL_ORDER / CREATE_AFTER_SALE / SHIP_ORDER / COMPLETE_ORDER；
+- 动作只是建议，真正执行必须等人工审批；
+- 没有足够依据时不要建议动作。
+
 可用子代理：
 - order_analyst：订单/售后/商品库存
 - policy_advisor：售后、发货、优惠政策
@@ -126,14 +132,42 @@ def _make_llm() -> ChatOpenAI:
     )
 
 
-def build_agent():
+def _make_action_tool(collected: list[dict[str, Any]]):
+    @tool
+    def propose_action(
+        action_type: str,
+        order_id: str,
+        reason: str = "",
+        sale_type: str = "",
+        tracking_no: str = "",
+        carrier: str = "",
+    ) -> str:
+        """登记一个待人工审批的动作建议，不执行任何写操作。
+
+        action_type: CANCEL_ORDER / CREATE_AFTER_SALE / SHIP_ORDER / COMPLETE_ORDER
+        """
+        item = {
+            "action_type": action_type.strip().upper(),
+            "order_id": order_id.strip(),
+            "reason": reason.strip()[:500],
+            "sale_type": sale_type.strip().upper(),
+            "tracking_no": tracking_no.strip(),
+            "carrier": carrier.strip(),
+        }
+        collected.append(item)
+        return f"已登记动作建议 {item['action_type']}，等待人工审批。"
+
+    return propose_action
+
+
+def build_agent(action_tool=None):
     """延迟构造 Deep Agent，避免模块导入时就要求模型依赖。"""
     from deepagents import create_deep_agent
 
     return create_deep_agent(
         model=_make_llm(),
         system_prompt=SYSTEM_PROMPT,
-        tools=[],
+        tools=[action_tool] if action_tool is not None else [],
         subagents=SUBAGENTS,
         name="qianke_superagent_worker",
     )
@@ -157,6 +191,36 @@ def _fallback_report(item: dict[str, Any], error: str) -> str:
     )
 
 
+def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
+    """模型没有调用 propose_action 时的确定性兜底；仍需人工审批。"""
+    import re
+
+    text = f"{user_text}\n{final}"
+    match = re.search(r"\b(order_[a-zA-Z0-9]+|ORD-\d{8}-\d{4})\b", text)
+    if not match:
+        return None
+    order_id = match.group(1)
+    if "取消订单" in text or "取消这单" in text:
+        return {"action_type": "CANCEL_ORDER", "order_id": order_id, "reason": "建议取消订单"}
+    if "退货退款" in text:
+        return {
+            "action_type": "CREATE_AFTER_SALE",
+            "order_id": order_id,
+            "sale_type": "RETURN_REFUND",
+            "reason": "建议创建退货退款售后工单",
+        }
+    if "售后" in text or "仅退款" in text or "退款" in text:
+        return {
+            "action_type": "CREATE_AFTER_SALE",
+            "order_id": order_id,
+            "sale_type": "REFUND_ONLY",
+            "reason": "建议创建仅退款售后工单",
+        }
+    if "完成订单" in text or "标记完成" in text:
+        return {"action_type": "COMPLETE_ORDER", "order_id": order_id, "reason": "建议完成订单"}
+    return None
+
+
 def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[str, Any]:
     """同步执行一个 WorkItem；由 API 放进后台线程调用。
 
@@ -170,8 +234,9 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
     user_text = "\n".join(
         f"[{trigger['source']}/{trigger['channel']}] {trigger['content']}" for trigger in triggers
     )
+    collected: list[dict[str, Any]] = []
     try:
-        agent = build_agent()
+        agent = build_agent(action_tool=_make_action_tool(collected))
         result = agent.invoke(
             {"messages": [{"role": "user", "content": user_text}]},
             config={"recursion_limit": 12},
@@ -186,20 +251,24 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
                 break
         if not final:
             raise RuntimeError("Worker 没有产生最终回答")
+        action = collected[-1] if collected else _derive_action(user_text, final)
         output = {
             "summary": final,
             "trigger_count": len(triggers),
             "worker": "deepagents",
+            "action": action,
         }
-        return sa_store.finish_work_item(work_item_id, output, approval=True)
+        return sa_store.finish_work_item(work_item_id, output, approval=True, action=action)
     except Exception as exc:  # noqa: BLE001 - 失败回退到确定性调查，便于运维
         if cancel_event is not None and cancel_event.is_set():
             return sa_store.cancel_work_item(work_item_id)
         logger.exception("Super-agent Worker 失败 work_item=%s", work_item_id)
+        action = _derive_action(user_text, "")
         output = {
             "summary": _fallback_report(item, str(exc)),
             "trigger_count": len(triggers),
             "worker": "deterministic_fallback",
             "error": str(exc)[:1000],
+            "action": action,
         }
-        return sa_store.finish_work_item(work_item_id, output, approval=True)
+        return sa_store.finish_work_item(work_item_id, output, approval=True, action=action)

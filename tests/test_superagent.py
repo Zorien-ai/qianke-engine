@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 
 from rag_demo.c_end import store
+from rag_demo.merchant import get_merchant_write_repository
+from rag_demo.superagent import actions as sa_actions
 from rag_demo.superagent import router as sa_router
 from rag_demo.superagent import store as sa_store
 from rag_demo.superagent import triggers as sa_triggers
@@ -57,7 +59,7 @@ def test_worker_fallback_and_approval(c_store, monkeypatch):
     )
     item_id = accepted["work_item"]["work_item_id"]
 
-    def broken_agent():
+    def broken_agent(*args, **kwargs):
         raise RuntimeError("no model in test")
 
     monkeypatch.setattr(sa_worker, "build_agent", broken_agent)
@@ -68,7 +70,7 @@ def test_worker_fallback_and_approval(c_store, monkeypatch):
     assert "需要人工确认" in item["result"]["summary"]
 
     approved = sa_store.decide_approval(item_id, approved=True, note="ok")
-    assert approved["status"] == "DONE"
+    assert approved["status"] == "EXECUTING"
     assert approved["approval_status"] == "APPROVED"
 
 
@@ -151,3 +153,61 @@ def test_semantic_slow_path(c_store, monkeypatch):
     )
     assert result["accepted"] is True
     assert result["reason"].startswith("SEMANTIC:")
+
+
+def test_approved_cancel_order_executes(c_store, monkeypatch):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_sa_action_cancel",
+    )
+    accepted = sa_router.ingest_event(
+        source="im",
+        content=f"请取消订单 {order['order_id']}，买家不想要了",
+        channel="action",
+        thread_key="action:cancel",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+
+    def broken_agent(*args, **kwargs):
+        raise RuntimeError("no model in test")
+
+    monkeypatch.setattr(sa_worker, "build_agent", broken_agent)
+    item = sa_worker.run_work_item(item_id)
+    assert item["status"] == "WAITING_APPROVAL"
+    assert item["approval"]["action"]["action_type"] == "CANCEL_ORDER"
+
+    sa_store.decide_approval(item_id, approved=True, note="同意")
+    executed = sa_actions.execute_approved(item_id)
+    assert executed["status"] == "DONE"
+    assert executed["approval"]["execution_status"] == "EXECUTED"
+    assert c_store.get_order(order["order_id"])["status"] == "CANCELLED"
+    assert get_merchant_write_repository().get_order(order["order_id"]).status == "CANCELLED"
+
+
+def test_rejected_action_does_not_execute(c_store, monkeypatch):
+    draft = c_store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_sa_action_reject",
+    )
+    accepted = sa_router.ingest_event(
+        source="im",
+        content=f"请取消订单 {order['order_id']}，买家不想要了",
+        channel="action",
+        thread_key="action:reject",
+    )
+    item_id = accepted["work_item"]["work_item_id"]
+
+    def broken_agent(*args, **kwargs):
+        raise RuntimeError("no model in test")
+
+    monkeypatch.setattr(sa_worker, "build_agent", broken_agent)
+    sa_worker.run_work_item(item_id)
+    rejected = sa_store.decide_approval(item_id, approved=False, note="不同意")
+    assert rejected["status"] == "REJECTED"
+    assert c_store.get_order(order["order_id"])["status"] == "CONFIRMED"

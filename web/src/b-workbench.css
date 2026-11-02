@@ -851,6 +851,103 @@ code,
   color: var(--b-text-2);
 }
 
+/* ---------- 审批建议动作 / 受控执行结果 ---------- */
+
+.b-action-card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--b-accent) 24%, var(--b-line));
+  border-left: 3px solid var(--b-accent);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-accent-soft);
+}
+
+.b-action-card .b-meta {
+  margin-top: 8px;
+}
+
+.b-action-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.b-action-head strong {
+  color: var(--b-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.b-action-warning {
+  margin: 8px 0 0;
+  color: var(--b-text-2);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.b-confirm-detail {
+  margin: 6px 0 0 !important;
+  color: var(--b-text) !important;
+}
+
+.b-confirm-detail code {
+  font-family: var(--b-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.b-confirm-note {
+  margin: 4px 0 0 !important;
+  color: var(--b-text-2) !important;
+  font-size: 10px !important;
+  line-height: 1.6;
+}
+
+.b-exec {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  font-size: 11px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.b-exec strong {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.b-exec.is-success {
+  border-color: color-mix(in srgb, var(--b-success) 26%, var(--b-line));
+  background: var(--b-success-soft);
+  color: var(--b-success);
+}
+
+.b-exec.is-error {
+  border-color: color-mix(in srgb, var(--b-danger) 26%, var(--b-line));
+  background: var(--b-danger-soft);
+  color: var(--b-danger);
+}
+
+.b-tag.is-success {
+  border-color: color-mix(in srgb, var(--b-success) 26%, var(--b-line));
+  background: var(--b-success-soft);
+  color: var(--b-success);
+}
+
+.b-tag.is-error {
+  border-color: color-mix(in srgb, var(--b-danger) 26%, var(--b-line));
+  background: var(--b-danger-soft);
+  color: var(--b-danger);
+}
+
 /* ---------------- 移动端 ---------------- */
 
 @media (max-width: 720px) {

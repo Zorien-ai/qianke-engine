@@ -44,7 +44,9 @@ const SUPERAGENT_STATUS_LABELS = {
   PENDING: "待运行",
   RUNNING: "调查中",
   WAITING_APPROVAL: "待审批",
+  EXECUTING: "执行中",
   DONE: "已完成",
+  EXECUTION_FAILED: "执行失败",
   REJECTED: "已驳回",
   FAILED: "失败",
   STUCK: "卡住",
@@ -56,6 +58,24 @@ const APPROVAL_STATUS_LABELS = {
   PENDING: "待审批",
   APPROVED: "已通过",
   REJECTED: "已驳回",
+};
+
+const ACTION_LABELS = {
+  CANCEL_ORDER: "取消订单",
+  CREATE_AFTER_SALE: "创建售后工单",
+  SHIP_ORDER: "发货",
+  COMPLETE_ORDER: "完成订单",
+};
+
+const ACTION_SALE_TYPE_LABELS = {
+  REFUND_ONLY: "仅退款",
+  RETURN_REFUND: "退货退款",
+};
+
+const EXECUTION_STATUS_LABELS = {
+  NONE: "未执行",
+  EXECUTED: "已执行",
+  FAILED: "执行失败",
 };
 
 const SUPERAGENT_EVENT_EXAMPLE =
@@ -93,6 +113,7 @@ const state = {
   workItemDetailId: "",
   workItemDetail: null,
   watchdogBusy: false,
+  approveConfirm: null,
 };
 
 let toastTimer = null;
@@ -373,6 +394,7 @@ async function switchView(view) {
   state.cancelConfirmId = "";
   state.workItemDetailId = "";
   state.workItemDetail = null;
+  state.approveConfirm = null;
   render();
   await ensureViewData(view);
 }
@@ -399,11 +421,164 @@ function approvalStatusLabel(status) {
 
 function superAgentTone(status) {
   const key = String(status || "").toUpperCase();
-  if (key === "RUNNING") return "is-info";
+  if (key === "RUNNING" || key === "EXECUTING") return "is-info";
   if (key === "DONE") return "is-success";
-  if (key === "FAILED" || key === "STUCK") return "is-danger";
+  if (key === "FAILED" || key === "STUCK" || key === "EXECUTION_FAILED") return "is-danger";
   if (key === "REJECTED" || key === "CANCELLED") return "is-muted";
   return "is-warn";
+}
+
+/* ---------- 审批动作 / 受控执行 ---------- */
+
+function workItemAction(item) {
+  const candidates = [item?.approval?.action, item?.result?.action];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && Object.keys(candidate).length) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function actionLabel(action) {
+  const key = String(action?.action_type || "").toUpperCase();
+  return ACTION_LABELS[key] || key || "受控动作";
+}
+
+function actionParams(action) {
+  const rows = [];
+  if (action?.order_id) rows.push(["订单号", String(action.order_id)]);
+  if (action?.sale_type) {
+    const key = String(action.sale_type).toUpperCase();
+    rows.push(["售后类型", ACTION_SALE_TYPE_LABELS[key] || action.sale_type]);
+  }
+  if (action?.tracking_no) rows.push(["物流单号", String(action.tracking_no)]);
+  if (action?.carrier) rows.push(["承运商", String(action.carrier)]);
+  if (action?.reason) rows.push(["原因", String(action.reason)]);
+  return rows;
+}
+
+function executionStatusLabel(status) {
+  const key = String(status || "").toUpperCase();
+  return EXECUTION_STATUS_LABELS[key] || key || "未执行";
+}
+
+/** 兼容读取 approval.execution_status / execution_result 与 result.execution */
+function executionInfo(item) {
+  const approval = item?.approval && typeof item.approval === "object" ? item.approval : null;
+  const rawExecution = item?.result?.execution;
+  const execution =
+    rawExecution && typeof rawExecution === "object"
+      ? rawExecution
+      : approval?.execution_result && typeof approval.execution_result === "object"
+        ? approval.execution_result
+        : null;
+  const executionStatus = String(approval?.execution_status || "").toUpperCase();
+  const status = String(item?.status || "").toUpperCase();
+  const hasExecution =
+    (execution && Object.keys(execution).length > 0) ||
+    (executionStatus && executionStatus !== "NONE") ||
+    status === "EXECUTION_FAILED";
+  if (!hasExecution) return null;
+
+  const action =
+    approval?.action ||
+    item?.result?.action ||
+    execution?.action ||
+    (execution?.action_type ? execution : null) ||
+    null;
+  const failed =
+    status === "EXECUTION_FAILED" ||
+    executionStatus === "FAILED" ||
+    execution?.success === false;
+  const executed = execution?.executed === true;
+  const error = String(item?.error || execution?.error || "").trim();
+  const orderId = String(execution?.order_id || action?.order_id || "").trim();
+  const label = actionLabel(action);
+
+  if (failed) {
+    return {
+      failed: true,
+      executed,
+      title: "执行失败",
+      detail: error || "受控动作执行失败，请人工核查",
+      orderId,
+      action,
+    };
+  }
+  if (executed) {
+    return {
+      failed: false,
+      executed,
+      title: "已执行",
+      detail: `${label}${orderId ? `（订单 ${orderId}）` : ""}`,
+      orderId,
+      action,
+    };
+  }
+  const message =
+    typeof execution?.message === "string" && execution.message.trim()
+      ? execution.message
+      : execution?.reason === "NO_ACTION"
+        ? "仅记录人工审批，无执行动作"
+        : "仅记录人工审批，未执行动作";
+  return {
+    failed: false,
+    executed: false,
+    title: "未执行动作",
+    detail: message,
+    orderId,
+    action,
+  };
+}
+
+function actionCardMarkup(action) {
+  const params = actionParams(action);
+  return `<div class="b-action-card">
+    <div class="b-action-head">
+      <span class="b-tag">建议动作</span>
+      <strong>${escapeHtml(actionLabel(action))}</strong>
+    </div>
+    ${
+      params.length
+        ? `<dl class="b-meta b-meta-inline">${params
+            .map(
+              ([label, value]) =>
+                `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`
+            )
+            .join("")}</dl>`
+        : ""
+    }
+    <p class="b-action-warning">通过后会调用受控接口执行，不只是记录审批；执行结果会写入工作项。</p>
+    <p class="b-muted">驳回只记录审批结果，不会执行动作。</p>
+  </div>`;
+}
+
+function executionBlockMarkup(execution) {
+  return `<div class="b-exec ${execution.failed ? "is-error" : "is-success"}">
+    <strong>${escapeHtml(execution.title)}</strong>
+    <span>${escapeHtml(execution.detail)}</span>
+  </div>`;
+}
+
+function approveConfirmMarkup(item, action, busy) {
+  const id = String(item?.work_item_id || "");
+  const hasAction = Boolean(action);
+  const label = hasAction ? actionLabel(action) : "";
+  const orderId = hasAction ? String(action?.order_id || "").trim() : "";
+  return `<div class="b-confirm b-approve-confirm">
+    <p>${hasAction ? "确认通过并执行该受控动作？" : "确认通过本次审批？"}</p>
+    ${
+      hasAction
+        ? `<p class="b-confirm-detail">动作：<strong>${escapeHtml(label)}</strong>${orderId ? ` · 订单 <code>${escapeHtml(orderId)}</code>` : ""}</p>
+           <p class="b-confirm-note">通过后会调用受控接口执行，不只是记录审批；执行失败会记录在工作项中。</p>`
+        : `<p class="b-confirm-detail">本次审批只记录结论，无可执行动作。</p>`
+    }
+    <div class="b-actions">
+      <button type="button" class="b-btn b-btn-primary" data-confirm-approve="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${hasAction ? "确认通过并执行" : "确认通过"}</button>
+      <button type="button" class="b-btn b-btn-ghost" data-cancel-approve="${escapeHtml(id)}" ${busy ? "disabled" : ""}>取消</button>
+    </div>
+  </div>`;
 }
 
 function isSuperAgentAuthError(error) {
@@ -617,13 +792,30 @@ async function approveWorkItem(workItemId, approved) {
   if (!workItemId || state.busyWorkItem) return;
   state.busyWorkItem = workItemId;
   state.error = "";
+  state.approveConfirm = null;
   render();
   try {
-    await api(`/api/superagent/work-items/${encodeURIComponent(workItemId)}/approve`, {
-      method: "POST",
-      body: JSON.stringify({ approved, note: approved ? "" : "" }),
-    });
-    showToast(approved ? "已通过审批" : "已驳回工作项", "success");
+    const response = await api(
+      `/api/superagent/work-items/${encodeURIComponent(workItemId)}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ approved, note: "" }),
+      }
+    );
+    if (approved) {
+      const execution = executionInfo(response);
+      if (response?.status === "EXECUTION_FAILED" || execution?.failed) {
+        showToast(`执行失败：${execution?.detail || errorMessage(response?.error || "")}`, "error");
+      } else if (execution?.executed) {
+        showToast(`已通过并执行：${execution.detail}`, "success");
+      } else if (workItemAction(response)) {
+        showToast("已通过并执行受控动作", "success");
+      } else {
+        showToast("已通过审批（无执行动作）", "success");
+      }
+    } else {
+      showToast("已驳回工作项，未执行任何动作", "success");
+    }
     await loadWorkItems();
   } catch (error) {
     if (error instanceof ApiError && error.status === 403) {
@@ -1144,6 +1336,9 @@ function workItemCard(item) {
   const errorText = String(item?.error || "").trim();
   const showDetail = state.workItemDetailId === id;
   const detail = state.workItemDetail;
+  const action = workItemAction(item);
+  const execution = executionInfo(item);
+  const confirming = state.approveConfirm?.workItemId === id && status === "WAITING_APPROVAL";
 
   const buttons = [];
   if (status === "PENDING") {
@@ -1159,7 +1354,7 @@ function workItemCard(item) {
     );
   } else if (status === "WAITING_APPROVAL") {
     buttons.push(
-      `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>通过</button>`
+      `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${action ? "通过并执行" : "通过"}</button>`
     );
     buttons.push(
       `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-reject-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>驳回</button>`
@@ -1173,13 +1368,22 @@ function workItemCard(item) {
   if (status === "RUNNING") {
     body = `<p class="b-muted b-running-line"><span class="b-spinner" aria-hidden="true"></span>调查中，页面每 2 秒自动刷新状态…</p>`;
   } else if (status === "WAITING_APPROVAL") {
-    body = `<div class="b-md">${renderSafeText(summary || "（本次调查没有返回结论摘要）")}</div>
-      <p class="b-approval-tip">通过 / 驳回复核结论；该操作只记录人工审批结果，不会自动改订单或退款。</p>`;
+    body = `${action ? actionCardMarkup(action) : `<p class="b-approval-tip">本次结论没有可执行动作，通过仅记录人工审批。</p>`}
+      <div class="b-md">${renderSafeText(summary || "（本次调查没有返回结论摘要）")}</div>
+      ${action ? "" : `<p class="b-approval-tip">驳回同样只记录审批结果，不会执行动作。</p>`}
+      ${confirming ? approveConfirmMarkup(item, action, busy) : ""}`;
+  } else if (status === "EXECUTION_FAILED") {
+    body = `${execution ? executionBlockMarkup(execution) : `<div class="b-md b-md-error">${renderSafeText(errorText || "受控动作执行失败")}</div>`}
+      ${summary ? `<div class="b-md">${renderSafeText(summary)}</div>` : ""}`;
   } else if (status === "FAILED" || status === "STUCK") {
     body = `<div class="b-md b-md-error">${renderSafeText(errorText || "执行失败，未返回错误详情")}</div>
       ${summary ? `<div class="b-md">${renderSafeText(summary)}</div>` : ""}`;
-  } else if (status === "DONE" || status === "REJECTED") {
-    body = `<div class="b-md">${renderSafeText(summary || "调查完成，本次未返回结论摘要。")}</div>`;
+  } else if (status === "REJECTED") {
+    body = `<p class="b-muted">已驳回，仅记录审批结果，未执行任何动作。</p>
+      ${summary ? `<div class="b-md">${renderSafeText(summary)}</div>` : ""}`;
+  } else if (status === "DONE") {
+    body = `${execution ? executionBlockMarkup(execution) : ""}
+      <div class="b-md">${renderSafeText(summary || "调查完成，本次未返回结论摘要。")}</div>`;
   } else if (status === "CANCELLED") {
     body = `<p class="b-muted">已手动停止本次调查，不会继续产生结论或执行任何操作。</p>`;
   } else if (status === "PENDING") {
@@ -1190,6 +1394,11 @@ function workItemCard(item) {
     ? detail
       ? `<div class="b-detail">
           <p class="b-muted">线程 <code>${escapeHtml(text(detail.thread_id))}</code> · 更新 ${escapeHtml(timeText(detail.updated_at))} · 触发 ${(detail.triggers || []).length} 条</p>
+          ${
+            detail.approval
+              ? `<p class="b-muted">审批：${escapeHtml(approvalStatusLabel(detail.approval.status))} · 执行：${escapeHtml(executionStatusLabel(detail.approval.execution_status))}</p>`
+              : ""
+          }
           ${(detail.triggers || [])
             .map(
               (trigger) =>
@@ -1206,6 +1415,7 @@ function workItemCard(item) {
         <strong>${escapeHtml(text(item?.title, "未命名工作项"))}</strong>
         <span class="b-badge ${superAgentTone(status)}">${escapeHtml(superAgentStatusLabel(status))}</span>
         ${approval && approval !== "NONE" ? `<span class="b-tag">审批 · ${escapeHtml(approvalStatusLabel(approval))}</span>` : ""}
+        ${execution ? `<span class="b-tag ${execution.failed ? "is-error" : "is-success"}">执行 · ${escapeHtml(execution.title)}</span>` : ""}
       </div>
       <time>${escapeHtml(timeText(item?.created_at))}</time>
     </div>
@@ -1390,11 +1600,27 @@ function bindEvents() {
     }
     const approveItemButton = target.closest("[data-approve-work-item]");
     if (approveItemButton) {
-      await approveWorkItem(approveItemButton.dataset.approveWorkItem, true);
+      // 通过前二次确认；仅展开确认区，不发请求
+      state.approveConfirm = { workItemId: approveItemButton.dataset.approveWorkItem };
+      render();
+      return;
+    }
+    const confirmApproveButton = target.closest("[data-confirm-approve]");
+    if (confirmApproveButton) {
+      const workItemId = confirmApproveButton.dataset.confirmApprove;
+      state.approveConfirm = null;
+      await approveWorkItem(workItemId, true);
+      return;
+    }
+    const cancelApproveButton = target.closest("[data-cancel-approve]");
+    if (cancelApproveButton) {
+      state.approveConfirm = null;
+      render();
       return;
     }
     const rejectItemButton = target.closest("[data-reject-work-item]");
     if (rejectItemButton) {
+      state.approveConfirm = null;
       await approveWorkItem(rejectItemButton.dataset.rejectWorkItem, false);
       return;
     }
@@ -1438,9 +1664,10 @@ function bindEvents() {
   root.addEventListener("keydown", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    if (event.key === "Escape" && (state.shipForm || state.cancelConfirmId)) {
+    if (event.key === "Escape" && (state.shipForm || state.cancelConfirmId || state.approveConfirm)) {
       state.shipForm = null;
       state.cancelConfirmId = "";
+      state.approveConfirm = null;
       render();
     }
   });
@@ -1472,6 +1699,7 @@ async function boot() {
   state.workItemDetailId = "";
   state.workItemDetail = null;
   state.watchdogBusy = false;
+  state.approveConfirm = null;
   state.error = "";
   state.shipForm = null;
   state.cancelConfirmId = "";

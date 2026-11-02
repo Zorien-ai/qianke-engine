@@ -63,12 +63,25 @@ CREATE TABLE IF NOT EXISTS sa_approval (
     status       TEXT NOT NULL DEFAULT 'PENDING',
     note         TEXT,
     created_at   TEXT NOT NULL,
-    decided_at   TEXT
+    decided_at   TEXT,
+    action_json  TEXT NOT NULL DEFAULT '{}',
+    execution_status TEXT NOT NULL DEFAULT 'NONE',
+    execution_result_json TEXT NOT NULL DEFAULT '{}',
+    executed_at  TEXT,
+    idempotency_key TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sa_approval_work_item
     ON sa_approval (work_item_id);
 """
+
+_APPROVAL_MIGRATIONS = (
+    ("action_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("execution_status", "TEXT NOT NULL DEFAULT 'NONE'"),
+    ("execution_result_json", "TEXT NOT NULL DEFAULT '{}'"),
+    ("executed_at", "TEXT"),
+    ("idempotency_key", "TEXT"),
+)
 
 
 def init() -> None:
@@ -77,6 +90,13 @@ def init() -> None:
         conn = store._connect()
         try:
             conn.executescript(_SCHEMA)
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(sa_approval)").fetchall()
+            }
+            for name, ddl in _APPROVAL_MIGRATIONS:
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE sa_approval ADD COLUMN {name} {ddl}")
             conn.commit()
         finally:
             conn.close()
@@ -249,6 +269,10 @@ def get_work_item(work_item_id: str) -> dict[str, Any] | None:
             (row["thread_id"],),
         ).fetchall()
         item["triggers"] = [_trigger_payload(t) for t in triggers]
+        approval = conn.execute(
+            "SELECT * FROM sa_approval WHERE work_item_id = ?", (work_item_id,)
+        ).fetchone()
+        item["approval"] = _approval_payload(approval) if approval else None
         return item
     finally:
         conn.close()
@@ -274,7 +298,13 @@ def start_work_item(work_item_id: str) -> dict[str, Any]:
     return item
 
 
-def finish_work_item(work_item_id: str, result: dict[str, Any], *, approval: bool = True) -> dict[str, Any]:
+def finish_work_item(
+    work_item_id: str,
+    result: dict[str, Any],
+    *,
+    approval: bool = True,
+    action: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     init()
     now = _now()
     conn = store._connect()
@@ -289,9 +319,9 @@ def finish_work_item(work_item_id: str, result: dict[str, Any], *, approval: boo
         if approval:
             approval_id = f"saa_{uuid.uuid4().hex[:16]}"
             conn.execute(
-                "INSERT OR REPLACE INTO sa_approval(approval_id, work_item_id, status, created_at) "
-                "VALUES (?, ?, 'PENDING', ?)",
-                (approval_id, work_item_id, now),
+                "INSERT OR REPLACE INTO sa_approval(approval_id, work_item_id, status, created_at, action_json) "
+                "VALUES (?, ?, 'PENDING', ?, ?)",
+                (approval_id, work_item_id, now, _json(action or {})),
             )
         conn.commit()
     except Exception:
@@ -350,7 +380,7 @@ def decide_approval(work_item_id: str, *, approved: bool, note: str = "") -> dic
         conn.execute(
             "UPDATE sa_work_item SET status = ?, approval_status = ?, updated_at = ? "
             "WHERE work_item_id = ?",
-            ("DONE" if approved else "REJECTED", status, now, work_item_id),
+            ("EXECUTING" if approved else "REJECTED", status, now, work_item_id),
         )
         conn.commit()
     except Exception:
@@ -359,6 +389,58 @@ def decide_approval(work_item_id: str, *, approved: bool, note: str = "") -> dic
     finally:
         conn.close()
     return get_work_item(work_item_id) or {}
+
+
+def complete_execution(
+    work_item_id: str,
+    *,
+    success: bool,
+    result: dict[str, Any],
+    error: str = "",
+) -> dict[str, Any]:
+    """记录审批动作执行结果；失败不回滚已成功的外部动作，由审计和人工处理。"""
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "UPDATE sa_approval SET execution_status = ?, execution_result_json = ?, "
+            "executed_at = ? WHERE work_item_id = ?",
+            ("EXECUTED" if success else "FAILED", _json(result), now, work_item_id),
+        )
+        conn.execute(
+            "UPDATE sa_work_item SET status = ?, updated_at = ?, finished_at = ?, "
+            "result_json = json_set(result_json, '$.execution', json(?)), "
+            "error = ? WHERE work_item_id = ?",
+            (
+                "DONE" if success else "EXECUTION_FAILED",
+                now,
+                now,
+                _json({"success": success, **result, "error": error}),
+                (str(error)[:2000] or None) if not success else None,
+                work_item_id,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_work_item(work_item_id) or {}
+
+
+def get_approval(work_item_id: str) -> dict[str, Any] | None:
+    init()
+    conn = store._connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM sa_approval WHERE work_item_id = ?", (work_item_id,)
+        ).fetchone()
+        return _approval_payload(row) if row else None
+    finally:
+        conn.close()
 
 
 def scan_stuck_work_items(timeout_seconds: int = 180) -> list[dict[str, Any]]:
@@ -412,4 +494,20 @@ def _work_item_payload(row: sqlite3.Row) -> dict[str, Any]:
         "result": json.loads(row["result_json"] or "{}"),
         "error": row["error"],
         "approval_status": row["approval_status"],
+    }
+
+
+def _approval_payload(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "approval_id": row["approval_id"],
+        "work_item_id": row["work_item_id"],
+        "status": row["status"],
+        "note": row["note"],
+        "action": json.loads(row["action_json"] or "{}"),
+        "execution_status": row["execution_status"],
+        "execution_result": json.loads(row["execution_result_json"] or "{}"),
+        "created_at": row["created_at"],
+        "decided_at": row["decided_at"],
+        "executed_at": row["executed_at"],
+        "idempotency_key": row["idempotency_key"],
     }

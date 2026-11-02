@@ -53,6 +53,8 @@ GET  /api/superagent/work-items/{id}              → work item + triggers
 POST /api/superagent/work-items/{id}/run
 POST /api/superagent/work-items/{id}/stop         → {work_item_id,status:"CANCELLED",stopped:true}；状态不允许时 409
 POST /api/superagent/work-items/{id}/approve      {approved, note}
+                                                  approved=true 时按 result.action 调用受控接口，返回工作项可能为 DONE / EXECUTION_FAILED
+                                                  approval.execution_status: NONE | EXECUTED | FAILED
 POST /api/superagent/watchdog                     {timeout_seconds}
 ```
 
@@ -61,8 +63,11 @@ POST /api/superagent/watchdog                     {timeout_seconds}
 - 工作项列表展示状态、标题、创建/更新时间、审批状态；
   - `PENDING`：显示「运行调查」与「停止调查」；RUNNING 显示「停止调查」；stop 成功后状态变 `CANCELLED`/「已停止」，失败（如 409 状态不允许）toast + 行内 detail.message 并保持原状态；
   - `RUNNING`：每 2s 轮询 `work-items`，全部结束（无 RUNNING）后自动停止；切换视图时停止；
-  - `WAITING_APPROVAL`：展示结论摘要 + 「通过 / 驳回」（approve `{approved,note}`）；
-  - `DONE`：展示结果摘要；`REJECTED`：展示已驳回及结果；`FAILED` / `STUCK`：展示错误详情；`CANCELLED`：展示已手动停止；
+  - `WAITING_APPROVAL`：展示结论摘要 + 审批按钮；若 `result.action`（或 `approval.action`）存在，先展示「建议动作」卡（中文动作名、订单号、原因/参数，如售后类型、物流单号、承运商），明确标注「通过后会调用受控接口执行，不只是记录审批」；
+    - 有动作时按钮为「通过并执行」，无动作仍为「通过」；点击通过先展开二次确认（动作类型 + 订单号；无动作时说明无可执行动作），**取消不发请求**；
+    - 通过后按 `approval.execution_status/execution_result` 或 `result.execution` 展示执行结果：成功「已执行：动作（订单号）」、无动作「未执行动作」、失败「执行失败：error」；状态可能为 `DONE` 或 `EXECUTION_FAILED`；
+    - 驳回只记录审批结果、不执行动作，状态变 `REJECTED`；
+  - `DONE`：展示结果摘要与执行结果；`REJECTED`：展示已驳回（未执行动作）；`FAILED` / `STUCK`：展示错误详情；`CANCELLED`：展示已手动停止；
   - 「查看详情」按需 GET 单条工作项，展示线程与触发事件；「扫描卡死」调用 watchdog（默认 180s）并提示标记数量；
 - **结论安全渲染**：先 `escapeHtml` 整体转义，再按行还原换行与 `- / 1.` 简单列表；不使用原文 innerHTML，杜绝 Markdown/LLM 输出注入 HTML；
 - 轮询刷新会保留事件输入框焦点与光标；错误统一 toast + 行内 `detail.message`；移动端不横向溢出。
