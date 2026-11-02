@@ -1,9 +1,12 @@
 """Super-agent HTTP API：事件入口、Thread/WorkItem、审批、Watchdog。"""
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
@@ -13,8 +16,12 @@ from rag_demo.superagent import runtime as sa_runtime
 from rag_demo.superagent import store as sa_store
 from rag_demo.superagent import triggers as sa_triggers
 from rag_demo.superagent import watchdog as sa_watchdog
+from rag_demo.superagent import wecom as sa_wecom
 
 router = APIRouter(prefix="/api/superagent", tags=["superagent"])
+logger = logging.getLogger(__name__)
+_WECOM_SEEN: set[str] = set()
+_WECOM_LOCK = threading.Lock()
 
 
 class EventIn(BaseModel):
@@ -187,6 +194,74 @@ def watchdog(req: WatchdogIn) -> dict[str, Any]:
     _account()
     stuck = sa_store.scan_stuck_work_items(timeout_seconds=req.timeout_seconds)
     return {"stuck_count": len(stuck), "work_items": stuck}
+
+
+def _wecom_crypto() -> sa_wecom.WeComCrypto:
+    token, aes_key, corp_id = sa_wecom.config_from_env()
+    if not token or not aes_key:
+        raise HTTPException(status_code=503, detail="企业微信回调未配置 token / EncodingAESKey")
+    try:
+        return sa_wecom.WeComCrypto(token, aes_key, corp_id)
+    except sa_wecom.WeComCryptoError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/wecom/callback", response_class=PlainTextResponse)
+def wecom_callback_verify(
+    msg_signature: str = Query(..., alias="msg_signature"),
+    timestamp: str = Query(...),
+    nonce: str = Query(...),
+    echostr: str = Query(...),
+) -> str:
+    """企业微信回调 URL 验证：验签并返回解密后的 echostr。"""
+    crypto = _wecom_crypto()
+    if not crypto.verify_signature(msg_signature, timestamp, nonce, echostr):
+        raise HTTPException(status_code=403, detail="企业微信签名不合法")
+    try:
+        return crypto.decrypt(echostr)
+    except sa_wecom.WeComCryptoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/wecom/callback", response_class=PlainTextResponse)
+async def wecom_callback_message(
+    request: Request,
+    msg_signature: str = Query(..., alias="msg_signature"),
+    timestamp: str = Query(...),
+    nonce: str = Query(...),
+) -> str:
+    """企业微信消息回调：验签 → 解密 → 去重 → 生成 Super-agent Trigger。"""
+    crypto = _wecom_crypto()
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    try:
+        root_encrypt = ""
+        try:
+            import xml.etree.ElementTree as ET
+
+            root_encrypt = ET.fromstring(raw).findtext("Encrypt") or ""
+        except Exception:  # noqa: BLE001
+            raise sa_wecom.WeComCryptoError("企业微信 XML 解析失败")
+        if not crypto.verify_signature(msg_signature, timestamp, nonce, root_encrypt):
+            raise HTTPException(status_code=403, detail="企业微信签名不合法")
+        plain = crypto.decrypt(root_encrypt)
+        message = sa_wecom.parse_message(plain)
+        msg_id = str(message.get("MsgId") or "")
+        if msg_id:
+            with _WECOM_LOCK:
+                if msg_id in _WECOM_SEEN:
+                    return "success"
+                _WECOM_SEEN.add(msg_id)
+                if len(_WECOM_SEEN) > 5000:
+                    _WECOM_SEEN.clear()
+        event = sa_wecom.message_to_event(message)
+        if event is not None:
+            sa_triggers.ingest_async(**event)
+        return "success"
+    except HTTPException:
+        raise
+    except sa_wecom.WeComCryptoError as exc:
+        logger.warning("企业微信回调处理失败: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def register_superagent(app) -> None:

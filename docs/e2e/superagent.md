@@ -42,6 +42,8 @@ policy_advisor 查询售后 / 发货 / 平台政策
 POST /api/superagent/events
 POST /api/superagent/events/batch
 POST /api/superagent/webhooks/{provider}
+GET  /api/superagent/wecom/callback
+POST /api/superagent/wecom/callback
 GET  /api/superagent/threads
 GET  /api/superagent/work-items
 GET  /api/superagent/work-items/{id}
@@ -57,6 +59,9 @@ POST /api/superagent/watchdog
 CApp 好友消息 → capp:friend:<buyer>:<friend> Thread
 CApp 群消息   → capp:group:<group_id> Thread
 外部 Webhook  → X-Superagent-Secret + POST /webhooks/{provider}
+企业微信回调  → AES/签名校验后 POST /wecom/callback
+
+企业微信配置与真实协议测试见：[superagent-wecom.md](superagent-wecom.md)
 ```
 
 环境变量：
@@ -223,13 +228,13 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 598 passed, 5 skipped, 1 warning
+# 604 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 11 passed
 
 npm run build
-# ✓ built in 4.77s
+# ✓ built in 5.44s
 # dist/b.html 已生成
 ```
 
@@ -249,7 +254,7 @@ Watchdog 超时标记与常驻启动
 ## 7. 已知限制
 
 ```text
-CApp 自动 Trigger 已接入；企业微信直接回调仍需中转/适配，当前用通用 Webhook
+CApp 自动 Trigger + 企业微信原生回调已接入（只处理文本消息，不是群机器人 Webhook）
 Worker 只读；协作式取消无法中断 Deep Agents 单次 invoke 内部
 Watchdog 已常驻，但只标记 STUCK，不自动恢复
 Router 批量是 HTTP 批量入口，不是跨渠道自动合批
@@ -263,9 +268,9 @@ Deep Agents 是 Beta，文件系统工具未做细粒度权限隔离
 ## 8. 下一步
 
 ```text
-1. 企业微信/飞书回调适配与签名校验
-2. Deep Agents streaming 中断/恢复
-3. Watchdog 自动恢复与告警
-4. 多实例 Router / 链路追踪
+1. 企业微信/飞书更多消息类型与群事件
+2. 持久化任务队列与多实例锁
+3. Worker streaming 中断/恢复
+4. Watchdog 自动恢复与告警
 5. 多租户/权限隔离
 ```
