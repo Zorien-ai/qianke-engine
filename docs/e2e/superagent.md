@@ -46,6 +46,7 @@ GET  /api/superagent/wecom/callback
 POST /api/superagent/wecom/callback
 GET  /api/superagent/threads
 GET  /api/superagent/work-items
+GET  /api/superagent/jobs
 GET  /api/superagent/work-items/{id}
 POST /api/superagent/work-items/{id}/run
 POST /api/superagent/work-items/{id}/stop
@@ -232,13 +233,13 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 609 passed, 5 skipped, 1 warning
+# 610 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed
 
 npm run build
-# ✓ built in 4.73s
+# ✓ built in 5.08s
 # dist/b.html 已生成
 ```
 
@@ -268,6 +269,16 @@ Deep Agents 是 Beta，文件系统工具未做细粒度权限隔离
 受控执行只有 4 个白名单动作，没有回滚/补偿/双人复核
 执行器同步执行，没有分布式锁/多实例竞争保护
 ```
+
+Worker 队列：
+
+```text
+sa_job PENDING → 原子 claim → RUNNING
+API 重启 → dispatcher 恢复 PENDING/过期租约
+失败 → 最多重试 2 次
+```
+
+详见：[superagent-queue.md](superagent-queue.md)
 
 ## 8. 下一步
 

@@ -138,6 +138,39 @@ def test_webhook_secret_verification(monkeypatch):
     assert sa_triggers.verify_webhook_secret(None) is False
 
 
+def test_job_queue_claim_and_recovery(c_store):
+    accepted = sa_router.ingest_event(source="im", content="订单退款", channel="queue")
+    work_item_id = accepted["work_item"]["work_item_id"]
+    first = sa_store.enqueue_job(work_item_id)
+    second = sa_store.enqueue_job(work_item_id)
+    assert first["job_id"] == second["job_id"]
+    assert first["status"] == "PENDING"
+
+    claimed = sa_store.claim_job(first["job_id"], "worker-a", lease_seconds=60)
+    assert claimed is not None
+    assert claimed["status"] == "RUNNING"
+    assert claimed["attempts"] == 1
+    assert sa_store.claim_job(first["job_id"], "worker-b") is None
+
+    # 模拟租约过期，恢复后应重新变成 PENDING。
+    conn = c_store._connect()
+    try:
+        conn.execute(
+            "UPDATE sa_job SET lease_until = '2000-01-01T00:00:00+00:00' WHERE job_id = ?",
+            (first["job_id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert sa_store.requeue_expired_jobs() == 1
+    recovered = sa_store.get_job(first["job_id"])
+    assert recovered["status"] == "PENDING"
+    assert any(job["job_id"] == first["job_id"] for job in sa_store.pending_jobs())
+
+    sa_store.finish_job(first["job_id"], "DONE")
+    assert sa_store.get_job(first["job_id"])["status"] == "DONE"
+
+
 def test_semantic_slow_path(c_store, monkeypatch):
     monkeypatch.setenv("QIANKE_SUPERAGENT_LLM_ROUTER", "1")
     monkeypatch.setattr(

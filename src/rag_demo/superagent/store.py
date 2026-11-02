@@ -73,6 +73,27 @@ CREATE TABLE IF NOT EXISTS sa_approval (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sa_approval_work_item
     ON sa_approval (work_item_id);
+
+CREATE TABLE IF NOT EXISTS sa_job (
+    job_id       TEXT PRIMARY KEY,
+    work_item_id TEXT NOT NULL,
+    kind         TEXT NOT NULL DEFAULT 'WORKER',
+    status       TEXT NOT NULL DEFAULT 'PENDING',
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 2,
+    available_at TEXT NOT NULL,
+    lease_until  TEXT,
+    worker_id    TEXT,
+    last_error   TEXT,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sa_job_work_item
+    ON sa_job (work_item_id, kind);
+
+CREATE INDEX IF NOT EXISTS idx_sa_job_claim
+    ON sa_job (status, available_at);
 """
 
 _APPROVAL_MIGRATIONS = (
@@ -443,6 +464,189 @@ def get_approval(work_item_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def _iso_after(seconds: int) -> str:
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) + timedelta(seconds=max(1, int(seconds)))).isoformat()
+
+
+def enqueue_job(
+    work_item_id: str,
+    *,
+    kind: str = "WORKER",
+    max_attempts: int = 2,
+) -> dict[str, Any]:
+    """幂等入队：同一 WorkItem/kind 只保留一个 Job。"""
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT * FROM sa_job WHERE work_item_id = ? AND kind = ?",
+            (work_item_id, kind),
+        ).fetchone()
+        if existing is not None:
+            conn.commit()
+            return _job_payload(existing)
+        job_id = f"saj_{uuid.uuid4().hex[:16]}"
+        conn.execute(
+            "INSERT INTO sa_job(job_id, work_item_id, kind, status, attempts, max_attempts, "
+            "available_at, created_at, updated_at) VALUES (?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)",
+            (job_id, work_item_id, kind, max(1, int(max_attempts)), now, now, now),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    job = get_job(job_id)
+    assert job is not None
+    return job
+
+
+def get_job(job_id: str) -> dict[str, Any] | None:
+    init()
+    conn = store._connect()
+    try:
+        row = conn.execute("SELECT * FROM sa_job WHERE job_id = ?", (job_id,)).fetchone()
+        return _job_payload(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
+    init()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sa_job ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+        return [_job_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def claim_job(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> dict[str, Any] | None:
+    """原子领取 Job；PENDING 或租约过期的 RUNNING 可被领取。"""
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM sa_job WHERE job_id = ?", (job_id,)).fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        claimable = row["status"] == "PENDING" and (row["available_at"] or now) <= now
+        claimable = claimable or (
+            row["status"] == "RUNNING" and (row["lease_until"] or "") < now
+        )
+        if not claimable:
+            conn.rollback()
+            return None
+        attempts = int(row["attempts"]) + 1
+        if attempts > int(row["max_attempts"]):
+            conn.execute(
+                "UPDATE sa_job SET status = 'FAILED', last_error = 'max attempts exceeded', "
+                "updated_at = ? WHERE job_id = ?",
+                (now, job_id),
+            )
+            conn.commit()
+            return None
+        conn.execute(
+            "UPDATE sa_job SET status = 'RUNNING', attempts = ?, worker_id = ?, "
+            "lease_until = ?, updated_at = ? WHERE job_id = ?",
+            (attempts, worker_id, _iso_after(lease_seconds), now, job_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return get_job(job_id)
+
+
+def finish_job(job_id: str, status: str, *, error: str = "") -> dict[str, Any] | None:
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        conn.execute(
+            "UPDATE sa_job SET status = ?, last_error = ?, lease_until = NULL, updated_at = ? "
+            "WHERE job_id = ?",
+            (status, str(error)[:2000] or None, now, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_job(job_id)
+
+
+def retry_job(job_id: str, *, error: str = "", delay_seconds: int = 5) -> dict[str, Any] | None:
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        conn.execute(
+            "UPDATE sa_job SET status = 'PENDING', available_at = ?, lease_until = NULL, "
+            "worker_id = NULL, last_error = ?, updated_at = ? WHERE job_id = ?",
+            (_iso_after(delay_seconds), str(error)[:2000], now, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_job(job_id)
+
+
+def requeue_expired_jobs() -> int:
+    """把租约过期的 RUNNING Job 重新放回 PENDING；供启动恢复/看门狗调用。"""
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sa_job WHERE status = 'RUNNING' AND lease_until IS NOT NULL "
+            "AND lease_until < ?",
+            (now,),
+        ).fetchall()
+        for row in rows:
+            if int(row["attempts"]) >= int(row["max_attempts"]):
+                conn.execute(
+                    "UPDATE sa_job SET status = 'FAILED', last_error = 'lease expired / max attempts', "
+                    "updated_at = ? WHERE job_id = ?",
+                    (now, row["job_id"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE sa_job SET status = 'PENDING', available_at = ?, lease_until = NULL, "
+                    "worker_id = NULL, updated_at = ? WHERE job_id = ?",
+                    (now, now, row["job_id"]),
+                )
+        conn.commit()
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def pending_jobs(limit: int = 20) -> list[dict[str, Any]]:
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sa_job WHERE status = 'PENDING' AND available_at <= ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (now, max(1, min(int(limit), 100))),
+        ).fetchall()
+        return [_job_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def update_approval_action(work_item_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     """人工审批前补充动作参数；只允许在待审批状态修改。"""
     allowed = {"sale_type", "reason", "tracking_no", "carrier"}
@@ -541,4 +745,21 @@ def _approval_payload(row: sqlite3.Row) -> dict[str, Any]:
         "decided_at": row["decided_at"],
         "executed_at": row["executed_at"],
         "idempotency_key": row["idempotency_key"],
+    }
+
+
+def _job_payload(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "job_id": row["job_id"],
+        "work_item_id": row["work_item_id"],
+        "kind": row["kind"],
+        "status": row["status"],
+        "attempts": int(row["attempts"]),
+        "max_attempts": int(row["max_attempts"]),
+        "available_at": row["available_at"],
+        "lease_until": row["lease_until"],
+        "worker_id": row["worker_id"],
+        "last_error": row["last_error"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
     }

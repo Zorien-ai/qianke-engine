@@ -134,6 +134,12 @@ def list_work_items(limit: int = 50) -> dict[str, Any]:
     return {"work_items": sa_store.list_work_items(limit=limit)}
 
 
+@router.get("/jobs")
+def list_jobs(limit: int = 50) -> dict[str, Any]:
+    _account()
+    return {"jobs": sa_store.list_jobs(limit=limit)}
+
+
 @router.get("/work-items/{work_item_id}")
 def get_work_item(work_item_id: str) -> dict[str, Any]:
     _account()
@@ -291,4 +297,5 @@ def register_superagent(app) -> None:
     # 常驻 Watchdog 是独立 daemon 线程，在注册 API 时启动，测试环境由 env 关闭。
     if sa_watchdog.enabled():
         sa_watchdog.start()
+    sa_runtime.start_dispatcher()
     app.include_router(router)

@@ -16,6 +16,7 @@ def _isolate_merchant_db(tmp_path, monkeypatch):
     monkeypatch.setenv("QIANKE_SUPERAGENT_AUTO_RUN", "0")
     monkeypatch.setenv("QIANKE_SUPERAGENT_LLM_ROUTER", "0")
     monkeypatch.setenv("QIANKE_SUPERAGENT_WATCHDOG_ENABLED", "0")
+    monkeypatch.setenv("QIANKE_SUPERAGENT_QUEUE_DISPATCHER", "0")
     reset_merchant_repository_cache()
     yield
     reset_merchant_repository_cache()
