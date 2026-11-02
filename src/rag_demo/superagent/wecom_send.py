@@ -107,7 +107,13 @@ def _post_message(payload: dict[str, Any]) -> dict[str, Any]:
 def send_text(to_user: str, content: str, *, agent_id: str | None = None) -> dict[str, Any]:
     if not configured():
         if _fallback_group_enabled():
-            return _send_group_webhook(content)
+            result = _send_group_webhook(content)
+            logger.info(
+                "企业微信回写走群机器人兜底 sent=%s reason=%s",
+                result.get("sent"),
+                result.get("reason"),
+            )
+            return result
         return {"sent": False, "reason": "WECOM_SEND_NOT_CONFIGURED"}
     recipient = (to_user or "").strip()
     if not recipient:
@@ -136,6 +142,7 @@ def send_text(to_user: str, content: str, *, agent_id: str | None = None) -> dic
     if int(data.get("errcode") or 0) != 0:
         logger.warning("企业微信结果回写业务失败: %s", data.get("errmsg"))
         return {"sent": False, "reason": "WECOM_ERROR", "errcode": data.get("errcode"), "error": data.get("errmsg")}
+    logger.info("企业微信应用结果回写成功 msgid=%s", data.get("msgid"))
     return {"sent": True, "msgid": data.get("msgid")}
 
 

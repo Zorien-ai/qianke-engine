@@ -54,7 +54,40 @@ Worker 调查完成 → INVESTIGATED
 
 消息只回写给来源为 `wecom` 的 Trigger 的 `from_user`；CApp/Webhook 来源不会误发。
 
-## 4. 内容示例
+## 4. 真实回写 E2E
+
+真实测试订单：
+
+```text
+order_22340294c85d4efd
+work_item saw_b2e3702a53bf4086
+```
+
+人工审批：
+
+```json
+{"approved": true, "action_params": {"sale_type": "REFUND_ONLY"}}
+```
+
+执行结果：
+
+```text
+status DONE
+execution_status EXECUTED
+ticket as_2a0d85ace25f4051
+type REFUND_ONLY
+status OPEN
+```
+
+回写日志：
+
+```text
+企业微信回写走群机器人兜底 sent=True reason=None
+```
+
+说明当前没有应用 Secret 时，执行结果已真实回写到企业微信群机器人。
+
+## 5. 内容示例
 
 调查完成：
 
@@ -79,7 +112,7 @@ Worker 调查完成 → INVESTIGATED
 订单：order_...
 ```
 
-## 5. 审批参数
+## 6. 审批参数
 
 `POST /approve` 支持：
 
@@ -104,17 +137,17 @@ RETURN_REFUND  退货退款
 
 缺失时审批返回 400，不执行。
 
-## 6. 已知限制
+## 7. 已知限制
 
 ```text
-真实企业微信主动发送尚未验证（缺少应用 Secret）
-群机器人兜底已真实验证：sent=True / group_webhook
+真实企业微信应用直发尚未验证（缺少应用 Secret）
+群机器人兜底已真实验证：sent=True / group_webhook，且审批执行结果真实回写
 需要应用有发消息权限，可能需要在企业微信配置可信 IP
 回写失败只记日志，不影响审批结果
 消息为纯文本，截断到 1200 字符
 ```
 
-## 7. 测试
+## 8. 测试
 
 ```bash
 pytest tests/test_superagent_wecom_send.py -q
