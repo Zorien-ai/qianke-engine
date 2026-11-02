@@ -151,7 +151,48 @@ renew_lease 只允许持有者续租
 617 passed, 5 skipped, 1 warning
 ```
 
-## 7. 回滚
+## 7. 队列可观测性与死信重放
+
+```text
+GET  /api/superagent/jobs?status=DEAD&kind=WORKER&limit=50
+GET  /api/superagent/jobs/stats
+POST /api/superagent/jobs/{job_id}/replay
+```
+
+`/jobs` 返回：
+
+```text
+jobs 列表 + stats 汇总
+```
+
+`/jobs/stats`：
+
+```text
+total / pending / running / done / failed / dead
+oldest_pending_at
+```
+
+重放规则：
+
+```text
+只允许 DEAD / FAILED
+attempts 归零
+status → PENDING
+清空 lease_until / worker_id / last_error
+API 内置 dispatcher 会立即尝试领取
+独立 Worker 模式下由 Worker 下一轮领取
+```
+
+真实冒烟：
+
+```text
+dead job: saj_c42054cd8681437b / DEAD
+stats.dead: 1
+replay: 200 / PENDING / attempts=0
+replay again: 409 / Job 状态为 RUNNING（dispatcher 已领取）
+```
+
+## 8. 回滚
 
 ```bash
 unset QIANKE_QUEUE_BACKEND
@@ -160,7 +201,7 @@ unset QIANKE_SUPERAGENT_QUEUE_DISPATCHER
 
 恢复 SQLite + API 内置 dispatcher，不需要迁移数据；PG 表可保留。
 
-## 8. 已知限制
+## 9. 已知限制
 
 ```text
 PG 表固定 sa_queue.sa_job，没有迁移版本管理

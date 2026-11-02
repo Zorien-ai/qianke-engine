@@ -564,19 +564,84 @@ def get_job(job_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
-def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
+def list_jobs(
+    limit: int = 50,
+    *,
+    status: str | None = None,
+    kind: str | None = None,
+) -> list[dict[str, Any]]:
     if _queue_is_pg():
-        return _pg_queue().list_jobs(limit=limit)
+        return _pg_queue().list_jobs(limit=limit, status=status, kind=kind)
     init()
+    where: list[str] = []
+    params: list[Any] = []
+    if status:
+        where.append("status = ?")
+        params.append(status.upper())
+    if kind:
+        where.append("kind = ?")
+        params.append(kind.upper())
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    params.append(max(1, min(int(limit), 200)))
     conn = store._connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM sa_job ORDER BY created_at DESC LIMIT ?",
-            (max(1, min(int(limit), 200)),),
+            f"SELECT * FROM sa_job {clause} ORDER BY created_at DESC LIMIT ?",
+            params,
         ).fetchall()
         return [_job_payload(row) for row in rows]
     finally:
         conn.close()
+
+
+def job_stats() -> dict[str, Any]:
+    if _queue_is_pg():
+        return _pg_queue().job_stats()
+    init()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM sa_job GROUP BY status"
+        ).fetchall()
+        counts = {str(row["status"]).lower(): int(row["n"]) for row in rows}
+        oldest = conn.execute(
+            "SELECT MIN(created_at) AS ts FROM sa_job WHERE status = 'PENDING'"
+        ).fetchone()
+        return {
+            "total": sum(counts.values()),
+            "pending": counts.get("pending", 0),
+            "running": counts.get("running", 0),
+            "done": counts.get("done", 0),
+            "failed": counts.get("failed", 0),
+            "dead": counts.get("dead", 0),
+            "oldest_pending_at": oldest["ts"] if oldest else None,
+        }
+    finally:
+        conn.close()
+
+
+def replay_job(job_id: str) -> dict[str, Any] | None:
+    """把 DEAD/FAILED Job 重置为 PENDING，attempts 归零；由 dispatcher/Worker 重新领取。"""
+    if _queue_is_pg():
+        return _pg_queue().replay_job(job_id)
+    init()
+    now = _now()
+    conn = store._connect()
+    try:
+        row = conn.execute("SELECT * FROM sa_job WHERE job_id = ?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        if row["status"] not in ("DEAD", "FAILED"):
+            raise store.CStoreError("JOB_NOT_REPLAYABLE", f"Job 状态为 {row['status']}，不能重放")
+        conn.execute(
+            "UPDATE sa_job SET status = 'PENDING', attempts = 0, available_at = ?, "
+            "lease_until = NULL, worker_id = NULL, last_error = NULL, updated_at = ? WHERE job_id = ?",
+            (now, now, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_job(job_id)
 
 
 def claim_job(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> dict[str, Any] | None:

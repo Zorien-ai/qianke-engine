@@ -240,6 +240,20 @@ def test_job_queue_claim_and_recovery(c_store):
     assert sa_store.get_job(first["job_id"])["status"] == "DONE"
 
 
+def test_job_stats_and_dead_letter_replay(c_store):
+    accepted = sa_router.ingest_event(source="im", content="订单退款", channel="job-replay")
+    work_item_id = accepted["work_item"]["work_item_id"]
+    job = sa_store.enqueue_job(work_item_id)
+    sa_store.finish_job(job["job_id"], "DEAD", error="max attempts")
+    stats = sa_store.job_stats()
+    assert stats["dead"] >= 1
+    replayed = sa_store.replay_job(job["job_id"])
+    assert replayed["status"] == "PENDING"
+    assert replayed["attempts"] == 0
+    assert sa_store.get_job(job["job_id"])["status"] == "PENDING"
+    sa_store.finish_job(job["job_id"], "DONE")
+
+
 def test_claim_next_lease_and_dead_letter(c_store):
     accepted = sa_router.ingest_event(
         source="im", content="订单退款", channel="queue-next"

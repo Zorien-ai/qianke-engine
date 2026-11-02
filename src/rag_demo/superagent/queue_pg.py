@@ -108,20 +108,80 @@ def get_job(job_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
-def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
+def list_jobs(
+    limit: int = 50,
+    *,
+    status: str | None = None,
+    kind: str | None = None,
+) -> list[dict[str, Any]]:
     import psycopg2.extras
 
     _ensure()
+    where: list[str] = []
+    params: list[Any] = []
+    if status:
+        where.append("status = %s")
+        params.append(status.upper())
+    if kind:
+        where.append("kind = %s")
+        params.append(kind.upper())
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    params.append(max(1, min(int(limit), 200)))
     conn = _connect()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                f"SELECT * FROM {SCHEMA}.sa_job ORDER BY created_at DESC LIMIT %s",
-                (max(1, min(int(limit), 200)),),
+                f"SELECT * FROM {SCHEMA}.sa_job {clause} ORDER BY created_at DESC LIMIT %s",
+                params,
             )
             return [_row(row) for row in cur.fetchall()]
     finally:
         conn.close()
+
+
+def job_stats() -> dict[str, Any]:
+    _ensure()
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT status, COUNT(*) FROM {SCHEMA}.sa_job GROUP BY status")
+            counts = {str(status).lower(): int(n) for status, n in cur.fetchall()}
+            cur.execute(
+                f"SELECT MIN(created_at) FROM {SCHEMA}.sa_job WHERE status = 'PENDING'"
+            )
+            oldest = cur.fetchone()[0]
+        return {
+            "total": sum(counts.values()),
+            "pending": counts.get("pending", 0),
+            "running": counts.get("running", 0),
+            "done": counts.get("done", 0),
+            "failed": counts.get("failed", 0),
+            "dead": counts.get("dead", 0),
+            "oldest_pending_at": oldest,
+        }
+    finally:
+        conn.close()
+
+
+def replay_job(job_id: str) -> dict[str, Any] | None:
+    _ensure()
+    now = _now()
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE {SCHEMA}.sa_job SET status='PENDING', attempts=0, available_at=%s, "
+                "lease_until=NULL, worker_id=NULL, last_error=NULL, updated_at=%s "
+                "WHERE job_id=%s AND status IN ('DEAD','FAILED')",
+                (now, now, job_id),
+            )
+            changed = cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    if not changed:
+        return None
+    return get_job(job_id)
 
 
 def enqueue_job(work_item_id: str, *, kind: str = "WORKER", max_attempts: int = 2) -> dict[str, Any]:

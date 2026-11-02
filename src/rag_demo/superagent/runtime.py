@@ -48,6 +48,15 @@ def start_action(work_item_id: str) -> bool:
     return True
 
 
+def resume_job(job_id: str) -> bool:
+    """死信/失败 Job 重放后，通知本地 dispatcher 立即尝试领取。"""
+    job = sa_store.get_job(job_id)
+    if job is None or job.get("status") != "PENDING":
+        return False
+    _submit(job_id)
+    return True
+
+
 def _submit(job_id: str) -> None:
     with _LOCK:
         if job_id in _CANCEL_EVENTS:

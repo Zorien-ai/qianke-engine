@@ -174,11 +174,43 @@ def list_work_items(limit: int = 50, merchant_id: str | None = None) -> dict[str
 
 
 @router.get("/jobs")
-def list_jobs(limit: int = 50) -> dict[str, Any]:
+def list_jobs(
+    limit: int = 50,
+    status: str | None = None,
+    kind: str | None = None,
+) -> dict[str, Any]:
     account = _account()
     if _tenant_scope(account) is not None:
         raise HTTPException(status_code=403, detail="只有系统管理员可以查看全局队列")
-    return {"jobs": sa_store.list_jobs(limit=limit)}
+    return {
+        "jobs": sa_store.list_jobs(limit=limit, status=status, kind=kind),
+        "stats": sa_store.job_stats(),
+    }
+
+
+@router.get("/jobs/stats")
+def job_stats() -> dict[str, Any]:
+    account = _account()
+    if _tenant_scope(account) is not None:
+        raise HTTPException(status_code=403, detail="只有系统管理员可以查看全局队列")
+    return sa_store.job_stats()
+
+
+@router.post("/jobs/{job_id}/replay")
+def replay_job(job_id: str) -> dict[str, Any]:
+    account = _account()
+    if _tenant_scope(account) is not None:
+        raise HTTPException(status_code=403, detail="只有系统管理员可以重放队列")
+    job = sa_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job 不存在")
+    if job.get("status") not in ("DEAD", "FAILED"):
+        raise HTTPException(status_code=409, detail=f"Job 状态为 {job.get('status')}，不能重放")
+    replayed = sa_store.replay_job(job_id)
+    if replayed is None:
+        raise HTTPException(status_code=409, detail="Job 重放失败")
+    sa_runtime.resume_job(job_id)
+    return {"job": replayed, "replayed": True}
 
 
 @router.get("/work-items/{work_item_id}")
