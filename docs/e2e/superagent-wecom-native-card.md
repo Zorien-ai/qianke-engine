@@ -81,29 +81,57 @@ EventKey JSON 解析
 635 passed, 5 skipped, 1 warning
 ```
 
-## 5. 真实发送阻塞
+## 5. 真实发送与回调
 
-真实尝试：
-
-```text
-errcode: 60020
-error: not allow to access from your ip
-from ip: 113.116.59.199
-```
-
-当前企业微信应用可信 IP 仍是旧出口 IP（113.116.58.161），出网 IP 已变化。
-
-需要：
+企业微信 `touser` 返回：
 
 ```text
-1. 把当前出口 IP 加入企业微信应用可信 IP
-2. 或使用固定出口 IP
-3. 再验证原生卡片发送
-4. 再验证 template_card_event 是否真的推送到应用回调
+81013 user & party & tag all invalid
 ```
 
-即使发送成功，应用消息通道是否支持按钮事件回调仍取决于企业微信账号/应用类型；
-当前签名链接审批卡片已真实可用。
+`user/list` / `agent/get` 显示用户 `zzzzzzzq` 与部门 `1` 均存在，但直接 touser 不可用。
+启用部门兜底：
+
+```bash
+QIANKE_WECOM_FALLBACK_PARTY_ID=1
+```
+
+结果：
+
+```text
+text:  sent=true / channel=party / msgid=...
+card:  sent=true / channel=party / msgid=cpB2NxqCi8uaKeFH...
+```
+
+原生按钮卡片已真实发送到企业微信。
+
+回调模拟（签名 + 加密 + 固定域名）：
+
+```text
+POST /api/superagent/wecom/callback
+EventKey={"a":"approve","w":"saw_71b0b513f35b410a","s":"REFUND_ONLY"}
+→ 200 success
+→ item 进入 EXECUTION_FAILED
+```
+
+失败是因为测试订单 `order_native_button_test` 不存在，属于预期业务失败；
+说明事件解析、命令映射、审批、ACTION Job、回调验签链路都已打通。
+
+## 5.1 真实点击仍未验证
+
+```text
+需要在企业微信里点击真实按钮
+如果企业微信应用消息通道不推送 template_card_event，
+服务端不会收到按钮事件；签名链接卡片仍可用
+```
+
+## 5.2 部门兜底注意
+
+```text
+toparty=1 会发给部门可见成员
+当前部门只有 zzzzzzq
+生产环境必须确认部门成员范围
+```
 
 ## 6. 已知限制
 
@@ -112,5 +140,5 @@ from ip: 113.116.59.199
 真实原生按钮点击未验证
 应用消息通道可能不推送 template_card_event
 复杂参数（金额/运单号）仍走签名审批页
-可信 IP 变化会导致所有应用主动消息失败
+touser 81013 需要 toparty 兜底；部门范围必须可控
 ```

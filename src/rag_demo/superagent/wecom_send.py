@@ -104,6 +104,20 @@ def _post_message(payload: dict[str, Any]) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _post_message_with_party_fallback(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """某些企业账号 touser 会返回 81013，但 toparty 可用；显式开关兜底。"""
+    data = _post_message(payload)
+    if int(data.get("errcode") or 0) != 81013:
+        return data, "user"
+    party = (os.environ.get("QIANKE_WECOM_FALLBACK_PARTY_ID") or "").strip()
+    if not party:
+        return data, "user"
+    fallback = {k: v for k, v in payload.items() if k != "touser"}
+    fallback["toparty"] = party
+    logger.warning("企业微信 touser 返回 81013，改用 toparty=%s 兜底", party)
+    return _post_message(fallback), "party"
+
+
 def send_text(to_user: str, content: str, *, agent_id: str | None = None) -> dict[str, Any]:
     if not configured():
         if _fallback_group_enabled():
@@ -129,7 +143,7 @@ def send_text(to_user: str, content: str, *, agent_id: str | None = None) -> dic
     # 企业微信文本消息上限 2048 字节，按字符保守截断。
     text = text[:1200]
     try:
-        data = _post_message({
+        data, channel = _post_message_with_party_fallback({
             "touser": recipient,
             "msgtype": "text",
             "agentid": agent_id_int,
@@ -142,8 +156,8 @@ def send_text(to_user: str, content: str, *, agent_id: str | None = None) -> dic
     if int(data.get("errcode") or 0) != 0:
         logger.warning("企业微信结果回写业务失败: %s", data.get("errmsg"))
         return {"sent": False, "reason": "WECOM_ERROR", "errcode": data.get("errcode"), "error": data.get("errmsg")}
-    logger.info("企业微信应用结果回写成功 msgid=%s", data.get("msgid"))
-    return {"sent": True, "msgid": data.get("msgid")}
+    logger.info("企业微信应用结果回写成功 msgid=%s channel=%s", data.get("msgid"), channel)
+    return {"sent": True, "msgid": data.get("msgid"), "channel": channel}
 
 
 def send_template_card(to_user: str, card: dict[str, Any], *, agent_id: str | None = None) -> dict[str, Any]:
@@ -158,7 +172,7 @@ def send_template_card(to_user: str, card: dict[str, Any], *, agent_id: str | No
     except ValueError:
         return {"sent": False, "reason": "INVALID_AGENT_ID"}
     try:
-        data = _post_message({
+        data, channel = _post_message_with_party_fallback({
             "touser": recipient,
             "msgtype": "template_card",
             "agentid": agent_id_int,
@@ -176,8 +190,8 @@ def send_template_card(to_user: str, card: dict[str, Any], *, agent_id: str | No
             "errcode": data.get("errcode"),
             "error": data.get("errmsg"),
         }
-    logger.info("企业微信审批卡片发送成功 msgid=%s", data.get("msgid"))
-    return {"sent": True, "msgid": data.get("msgid")}
+    logger.info("企业微信审批卡片发送成功 msgid=%s channel=%s", data.get("msgid"), channel)
+    return {"sent": True, "msgid": data.get("msgid"), "channel": channel}
 
 
 def _recipient(item: dict[str, Any]) -> tuple[str, str | None]:

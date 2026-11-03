@@ -23,6 +23,28 @@ def test_send_text_success(monkeypatch):
     assert captured["text"]["content"] == "hello"
 
 
+def test_send_text_party_fallback_on_81013(monkeypatch):
+    monkeypatch.setenv("QIANKE_WECOM_CORP_ID", "ww_test")
+    monkeypatch.setenv("QIANKE_WECOM_CORP_SECRET", "secret")
+    monkeypatch.setenv("QIANKE_WECOM_AGENT_ID", "1000002")
+    monkeypatch.setenv("QIANKE_WECOM_FALLBACK_PARTY_ID", "1")
+    monkeypatch.setattr(wecom_send, "_get_token", lambda: "token")
+    payloads = []
+
+    def fake_post(payload):
+        payloads.append(payload)
+        if len(payloads) == 1:
+            return {"errcode": 81013, "errmsg": "user invalid"}
+        return {"errcode": 0, "msgid": "msg_party"}
+
+    monkeypatch.setattr(wecom_send, "_post_message", fake_post)
+    result = wecom_send.send_text("user_1", "hello", agent_id="1000002")
+    assert result["sent"] is True
+    assert result["channel"] == "party"
+    assert "touser" not in payloads[1]
+    assert payloads[1]["toparty"] == "1"
+
+
 def test_notify_builds_from_wecom_trigger(monkeypatch):
     monkeypatch.setenv("QIANKE_WECOM_CORP_ID", "ww_test")
     monkeypatch.setenv("QIANKE_WECOM_CORP_SECRET", "secret")

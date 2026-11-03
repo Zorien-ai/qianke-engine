@@ -44,6 +44,24 @@ QIANKE_WECOM_REPLY_FALLBACK_GROUP=1
 
 兜底会把同一份结果发到群机器人，不是应用直发给发起人。
 
+### touser 81013 部门兜底
+
+部分企业账号直接 `touser` 会返回：
+
+```text
+81013 user & party & tag all invalid
+```
+
+此时可配置：
+
+```dotenv
+QIANKE_WECOM_FALLBACK_PARTY_ID=1
+```
+
+发送失败后自动改用 `toparty=1` 重试。
+
+注意：`toparty` 会发给部门可见成员，生产环境必须确认部门范围。
+
 ## 3. 触发时机
 
 ```text
