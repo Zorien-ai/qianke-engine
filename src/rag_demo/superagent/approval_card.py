@@ -119,9 +119,17 @@ def build_card(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def notify_card(item: dict[str, Any]) -> dict[str, Any]:
+    from rag_demo.superagent import wecom_native_card
+
     user, agent_id = wecom_send._recipient(item)  # noqa: SLF001
     if not user:
         return {"sent": False, "reason": "NO_WECOM_TRIGGER"}
+    native = wecom_native_card.build_card(item)
+    if native is not None:
+        result = wecom_send.send_template_card(user, native, agent_id=agent_id)
+        if result.get("sent"):
+            return {**result, "card_type": "native_button"}
+        logger.warning("原生按钮卡片发送失败，回退链接卡片: %s", result.get("reason"))
     card = build_card(item)
     if card is None:
         return {"sent": False, "reason": "CARD_NOT_READY"}

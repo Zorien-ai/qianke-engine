@@ -20,6 +20,7 @@ from rag_demo.superagent import triggers as sa_triggers
 from rag_demo.superagent import watchdog as sa_watchdog
 from rag_demo.superagent import wecom as sa_wecom
 from rag_demo.superagent import wecom_approval as sa_wecom_approval
+from rag_demo.superagent import wecom_native_card as sa_wecom_native
 from rag_demo.superagent import wecom_send as sa_wecom_send
 
 router = APIRouter(prefix="/api/superagent", tags=["superagent"])
@@ -391,6 +392,8 @@ async def wecom_callback_message(
                 _WECOM_SEEN.add(msg_id)
                 if len(_WECOM_SEEN) > 5000:
                     _WECOM_SEEN.clear()
+        if sa_wecom_native.handle_event(message):
+            return "success"
         if sa_wecom_approval.handle_message(message):
             return "success"
         event = sa_wecom.message_to_event(message)
