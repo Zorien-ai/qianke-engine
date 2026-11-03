@@ -155,29 +155,36 @@ buttons:   仅退款 / 退货退款 / 驳回
 
 `toparty=1` 兜底注意：会发给部门可见成员；当前部门只有 zzzzzzq。
 
-## 5.3 真实点击遇到身份不一致
+## 5.3 真实点击身份修正
 
-新卡片点击返回：
-
-```text
-你没有权限审批这个工作项。
-```
-
-说明按钮事件已到达，但事件里的 `FromUserName` 与该 WorkItem 发起人
-`zzzzzzzq` 不一致。已加入事件日志：
+真实事件日志：
 
 ```text
-原生卡片事件 from=<真实 userid> work_item=... action=...
+原生卡片事件 from=zzzzzzq work_item=saw_54fecb19e50a43ca action=approve
 ```
 
-待再次点击后读取真实 userid，再决定：
+WorkItem 发起人原记录为 `zzzzzzzq`（多了一个 z），因此被权限校验拒绝。
+
+修正发起人后，用相同事件体（FromUserName=`zzzzzzq`）验证：
 
 ```text
-1. 修正 WorkItem 发起人映射
-2. 或配置 QIANKE_WECOM_APPROVERS 授权名单
+callback 200 success
+final: DONE / EXECUTED
+ticket: as_510a4783f9624c6f / REFUND_ONLY / OPEN
 ```
 
-在身份确认前，不会放宽审批人校验。
+说明完整原生按钮链路已闭合：
+
+```text
+真实按钮事件到达
+→ 身份匹配
+→ 审批
+→ ACTION Job
+→ 创建售后工单
+→ DONE
+```
+
+已处理工作项的重复点击会回复当前状态，不再刷「没有找到待审批」。
 
 ## 6. 已知限制
 
