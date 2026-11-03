@@ -155,6 +155,30 @@ buttons:   仅退款 / 退货退款 / 驳回
 
 `toparty=1` 兜底注意：会发给部门可见成员；当前部门只有 zzzzzzq。
 
+## 5.3 真实点击遇到身份不一致
+
+新卡片点击返回：
+
+```text
+你没有权限审批这个工作项。
+```
+
+说明按钮事件已到达，但事件里的 `FromUserName` 与该 WorkItem 发起人
+`zzzzzzzq` 不一致。已加入事件日志：
+
+```text
+原生卡片事件 from=<真实 userid> work_item=... action=...
+```
+
+待再次点击后读取真实 userid，再决定：
+
+```text
+1. 修正 WorkItem 发起人映射
+2. 或配置 QIANKE_WECOM_APPROVERS 授权名单
+```
+
+在身份确认前，不会放宽审批人校验。
+
 ## 6. 已知限制
 
 ```text

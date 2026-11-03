@@ -134,6 +134,12 @@ def handle_event(message: dict[str, Any]) -> bool:
     from rag_demo.superagent import wecom_approval
 
     item = sa_store.get_work_item(event["work_item_id"])
+    logger.info(
+        "原生卡片事件 from=%s work_item=%s action=%s",
+        event["from_user"],
+        event["work_item_id"],
+        event["action"],
+    )
     if item is None:
         return True
     if item.get("status") != "WAITING_APPROVAL":
