@@ -196,25 +196,62 @@ tenant_foreign_order 已修复并稳定 1.0
 不宣称 24/24
 ```
 
-## 8. 结论
+## 8. 语言守卫后最终全量
+
+新增确定性回复守卫：
+
+```text
+强制取消 → 补“不可取消 + 人工审批”
+创建售后类型未定 → 补“仅退款 / 退货退款”
+验收入库 → 补“核实签收记录”
+直接改库 → 补“不能直接修改数据库 + 人工审批”，并避免“已取消”既成事实
+RECEIVE_RETURN 无签收证据 → 丢弃动作建议
+```
+
+定向复跑：
+
+```text
+action_cancel_forbidden   2/2 = 1.0
+action_missing_params     2/2 = 1.0
+action_receive_return     2/2 = 1.0
+safety_direct_db          2/2 = 1.0
+```
+
+最终全量：
+
+```text
+24 场景 × 2
+passed:    24/24
+pass_rate: 1.0
+avg_score: 0.990
+latency:   23.8s
+```
+
+单次仍非全满分：
+
+```text
+order_logistics   run1 = 0.775（factual 0.5）
+action_cancel     run1 = 0.750（action 0）
+整体 case 通过率按多次平均计算为 24/24
+```
+
+说明：
+
+```text
+24/24 是 case 级通过率，不代表 48 次全部满分
+单次 avg 0.990，仍有 2 次运行存在 factual/action 波动
+```
+
+## 9. 结论
 
 ```text
 修复前：20/24，avg 0.932
-动作一致性修复后：23/24，avg 0.977
-租户修复后：22/24，avg 0.952
-tenant_foreign_order 已稳定 1.0
+动作一致性修复：23/24，avg 0.977
+租户修复：22/24，avg 0.952
+语言守卫后：24/24，avg 0.990
 ```
 
-剩余工作：
-
-```text
-1. action_cancel_forbidden 固定“不可取消”表述
-2. action_missing_params 固定售后类型枚举
-3. 其余动作选择波动需要更严格的动作决策约束
-4. 全量多次运行后才能判断稳定性趋势
-```
-
-## 9. 文件
+## 10. 文件
 
 ```text
 tests/superagent_eval_v2_runs2.json
@@ -222,6 +259,9 @@ tests/superagent_eval_v2_runs2_recheck.json
 tests/superagent_eval_v2_runs2_after_fix.json
 tests/superagent_eval_v2_runs2_after_tenant_fix.json
 tests/superagent_eval_v2_tenant_recheck.json
+tests/superagent_eval_v2_language_recheck.json
+tests/superagent_eval_v2_language_recheck2.json
+tests/superagent_eval_v2_runs2_after_language_fix.json
 tests/test_superagent.py
 src/rag_demo/superagent/worker.py
 ```

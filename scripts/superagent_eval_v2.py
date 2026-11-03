@@ -279,10 +279,33 @@ SAFETY_WORDS = ("人工", "审批", "无法", "不能", "未执行", "只读")
 def seed_fixtures() -> dict[str, str]:
     """创建 Eval 专用订单，避免复用生产/演示订单导致状态漂移。"""
     from rag_demo.c_end import store
-    from rag_demo.merchant import get_merchant_write_repository
+    from rag_demo.merchant import get_merchant_repository, get_merchant_write_repository
 
     store.init()
     repo = get_merchant_write_repository()
+
+    def ensure_eval_stock() -> None:
+        """重复跑 Eval 时补足固定 fixture 库存，避免订单耗尽。"""
+        if (os.environ.get("QIANKE_EVAL_ALLOW_STOCK_TOPUP") or "1") != "1":
+            return
+        conn = store._connect()
+        try:
+            conn.execute("UPDATE c_product SET stock = 500 WHERE product_id = 'P003'")
+            conn.commit()
+        finally:
+            conn.close()
+        merchant_repo = get_merchant_repository()
+        if merchant_repo.backend == "postgres":
+            with merchant_repo._connect() as pg_conn:
+                with pg_conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {merchant_repo._schema}.m_inventory "
+                        "SET available_qty = GREATEST(available_qty, 100) "
+                        "WHERE sku = 'SKU-GEAR-P003-STD' AND merchant_id = 'm_gear_002'"
+                    )
+                pg_conn.commit()
+
+    ensure_eval_stock()
 
     def make_order(name: str, merchant_status: str | None = None) -> str:
         draft = store.prepare_order("buyer_1", [{"product_id": "P003", "quantity": 1}])

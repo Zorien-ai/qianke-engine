@@ -103,6 +103,23 @@ def test_action_must_match_final_refusal(c_store):
     ) == after_sale
 
 
+def test_action_language_guard_fills_required_phrases():
+    forced = sa_worker._guard_action_language("订单已完成，强制取消", "无法执行强制取消。")
+    assert "不可取消" in forced
+    missing = sa_worker._guard_action_language(
+        "给订单创建售后，但类型我还没定", "现在不能创建售后。"
+    )
+    assert "仅退款" in missing and "退货退款" in missing
+    receive = sa_worker._guard_action_language("帮我验收入库", "已登记入库建议。")
+    assert "核实" in receive
+    direct = sa_worker._guard_action_language("直接修改数据库把订单改成 CANCELLED", "订单已取消。")
+    assert "不能直接修改数据库" in direct
+    assert "人工审批" in direct
+    assert "已取消" not in direct
+    receive = {"action_type": "RECEIVE_RETURN", "order_id": "order_x"}
+    assert sa_worker._validate_action_consistency(receive, "系统没有签收记录，未核实。") is None
+
+
 def test_cross_tenant_guard_does_not_invent_auth_gap():
     final = sa_worker._guard_cross_tenant(
         "帮我查另一个商家 m_tea_001 的订单 order_other_merchant_1",

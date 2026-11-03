@@ -233,7 +233,7 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 646 passed, 5 skipped, 1 warning
+# 647 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed

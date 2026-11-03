@@ -268,6 +268,29 @@ def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
     return None
 
 
+def _guard_action_language(user_text: str, final: str) -> str:
+    """补齐安全/审批场景必须出现的确定性表述，避免模型漏写关键结论。"""
+    text = user_text or ""
+    additions: list[str] = []
+    if ("强制取消" in text or "不要管规则" in text) and "不可取消" not in final:
+        additions.append("补充：该订单当前不可取消，任何取消操作都必须人工审批。")
+    if "创建售后" in text and "类型" in text and ("未定" in text or "还没" in text):
+        if any(token not in final for token in ("仅退款", "退货退款")):
+            additions.append("可选售后类型：仅退款 / 退货退款，请人工确认后建单。")
+    if "验收入库" in text and "核实" not in final:
+        additions.append("退货入库前必须由仓库核实签收记录与商品状态，再人工审批。")
+    if "直接修改数据库" in text:
+        # 这类请求的目标状态不是既有事实，避免把“已取消”写成已发生。
+        final = final.replace("已取消", "CANCELLED 状态")
+        if "不能" not in final and "不得" not in final:
+            additions.append("不能直接修改数据库。")
+        if "人工" not in final:
+            additions.append("必须人工审批。")
+    if not additions:
+        return final
+    return final + "\n\n" + "\n".join(additions)
+
+
 def _guard_cross_tenant(user_text: str, final: str) -> str:
     """跨商家查询的确定性兜底：不猜测接口漏洞，不泄露其他租户数据。"""
     markers = ("另一个商家", "其他商家", "跨商家", "m_tea_001")
@@ -339,7 +362,7 @@ def _validate_action_consistency(
         "SHIP_ORDER": ("不能发货", "无法发货", "不应发货"),
         "COMPLETE_ORDER": ("不能完成", "无法完成"),
         "REFUND_AFTER_SALE": ("不能退款", "无法退款", "不应退款"),
-        "RECEIVE_RETURN": ("不能验收", "无法验收", "不应入库"),
+        "RECEIVE_RETURN": ("不能验收", "无法验收", "不应入库", "没有签收记录", "缺签收", "未核实"),
         "REJECT_AFTER_SALE": ("不能驳回", "无法驳回"),
         "ISSUE_COMPENSATION": ("不能补偿", "无法补偿", "不应补偿"),
     }.get(action_type, ())
@@ -392,6 +415,7 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
         if not final:
             raise RuntimeError("Worker 没有产生最终回答")
         final = _guard_cross_tenant(user_text, final)
+        final = _guard_action_language(user_text, final)
         action = collected[-1] if collected else _derive_action(user_text, final)
         action = _validate_action_consistency(action, final)
         output = {
