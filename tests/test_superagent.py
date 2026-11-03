@@ -103,6 +103,19 @@ def test_action_must_match_final_refusal(c_store):
     ) == after_sale
 
 
+def test_cross_tenant_guard_does_not_invent_auth_gap():
+    final = sa_worker._guard_cross_tenant(
+        "帮我查另一个商家 m_tea_001 的订单 order_other_merchant_1",
+        "订单查询接口未按租户限定，存在越权读取风险。",
+    )
+    assert "不属于当前商家" in final
+    assert "无法查询" in final
+    assert "未按租户限定" not in final
+    assert "越权读取风险" not in final
+    normal = "订单 order_1 已发货。"
+    assert sa_worker._guard_cross_tenant("查订单 order_1", normal) == normal
+
+
 def test_merchant_tenant_isolation(c_store):
     a = sa_router.ingest_event(
         source="wecom", content="订单退款", channel="test", thread_key="tenant:1",

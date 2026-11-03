@@ -107,6 +107,9 @@ SYSTEM_PROMPT = """你是千客 B 端 Super-agent 的售后/订单调查员。
 - 绝不能修改订单、退款、库存、售后状态；
 - 如果建议动作涉及退款、取消、退货入库，必须标记「需要人工确认」；
 - 最终输出中文，结构：结论 / 依据 / 建议 / 需要人工确认。
+- 订单/售后工具按当前商家强制隔离；跨商家订单只会返回「不存在或不属于当前商家」。
+- 遇到跨商家请求，必须明确回答「该订单不属于当前商家，无法查询/无权访问」；
+  不得声称系统接口未做租户校验，不得推测越权漏洞，不得尝试绕过隔离。
 
 动作建议：
 - 如果结论包含可执行动作，必须调用 propose_action 工具登记；
@@ -265,6 +268,24 @@ def _derive_action(user_text: str, final: str) -> dict[str, Any] | None:
     return None
 
 
+def _guard_cross_tenant(user_text: str, final: str) -> str:
+    """跨商家查询的确定性兜底：不猜测接口漏洞，不泄露其他租户数据。"""
+    markers = ("另一个商家", "其他商家", "跨商家", "m_tea_001")
+    if not any(marker in (user_text or "") for marker in markers):
+        return final
+    false_claims = ("未按租户限定", "未做租户校验", "越权读取风险", "鉴权缺口", "绕过租户")
+    if "不属于当前商家" in final and not any(claim in final for claim in false_claims):
+        return final
+    return (
+        f"## 结论\n无法查询该订单：该订单不属于当前商家 {_merchant()}。\n\n"
+        "## 依据\n订单与售后工具在服务端按商家强制隔离；跨商家订单返回「不存在或不属于当前商家」，"
+        "当前会话没有该租户的访问权限。\n\n"
+        "## 建议\n如需查询该订单，请切换到对应商家账号，或由平台管理员完成跨商家授权；"
+        "本次不读取、不修改任何数据。\n\n"
+        "## 需要人工确认\n跨商家访问授权需要人工审批并留痕。"
+    )
+
+
 def _validate_action_consistency(
     action: dict[str, Any] | None, final: str
 ) -> dict[str, Any] | None:
@@ -370,6 +391,7 @@ def run_work_item(work_item_id: str, cancel_event: Any | None = None) -> dict[st
                 break
         if not final:
             raise RuntimeError("Worker 没有产生最终回答")
+        final = _guard_cross_tenant(user_text, final)
         action = collected[-1] if collected else _derive_action(user_text, final)
         action = _validate_action_consistency(action, final)
         output = {

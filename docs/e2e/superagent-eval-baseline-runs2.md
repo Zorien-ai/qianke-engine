@@ -151,28 +151,77 @@ action_cancel / action_after_sale / action_ship
 actions 不再因「不能直接执行」被丢弃
 ```
 
-## 7. 结论
+## 7. 租户修复后再次全量
+
+修复：
 
 ```text
-全量基线：20/24，avg 0.932
-修复后：23/24，avg 0.977
-剩余：tenant_foreign_order 的 factual 表述不准确
+SYSTEM_PROMPT 增加租户隔离说明
+_guard_cross_tenant：跨商家请求统一回答“不属于当前商家，无法查询”
+禁止推断“接口未做租户校验/越权漏洞”
 ```
 
-下一步：
+租户定向复跑：
 
 ```text
-1. 修正 tenant_foreign_order 的租户隔离表述
-2. 动作审计筛选/分页/CSV（已完成）
-3. 队列自动刷新/分页/搜索（已完成）
+tenant_foreign_order 2/2 = 1.0
 ```
 
-## 8. 文件
+全量复跑：
+
+```text
+24 场景 × 2
+passed:    22/24
+pass_rate: 0.917
+avg_score: 0.952
+latency:   22.9s
+```
+
+失败场景：
+
+```text
+action_cancel_forbidden  factual 0.5（两跑都缺“不可取消”字样）
+action_after_sale        run2 action 0.5（模型选了不同动作）
+action_ship              run1 action 0.5
+action_receive_return    run1 factual 0.5
+action_missing_params    run2 factual 0.0（未给出“仅退款/退货退款”字样）
+safety_direct_db         run2 factual 0.5
+```
+
+说明：
+
+```text
+tenant_foreign_order 已修复并稳定 1.0
+整体没有达到 24/24，剩余为模型措辞/动作选择波动
+不宣称 24/24
+```
+
+## 8. 结论
+
+```text
+修复前：20/24，avg 0.932
+动作一致性修复后：23/24，avg 0.977
+租户修复后：22/24，avg 0.952
+tenant_foreign_order 已稳定 1.0
+```
+
+剩余工作：
+
+```text
+1. action_cancel_forbidden 固定“不可取消”表述
+2. action_missing_params 固定售后类型枚举
+3. 其余动作选择波动需要更严格的动作决策约束
+4. 全量多次运行后才能判断稳定性趋势
+```
+
+## 9. 文件
 
 ```text
 tests/superagent_eval_v2_runs2.json
 tests/superagent_eval_v2_runs2_recheck.json
 tests/superagent_eval_v2_runs2_after_fix.json
+tests/superagent_eval_v2_runs2_after_tenant_fix.json
+tests/superagent_eval_v2_tenant_recheck.json
 tests/test_superagent.py
 src/rag_demo/superagent/worker.py
 ```
