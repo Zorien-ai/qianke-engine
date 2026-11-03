@@ -14,6 +14,7 @@ const VIEWS = [
   { key: "products", label: "商品" },
   { key: "superagent", label: "Super-agent" },
   { key: "policy", label: "动作策略" },
+  { key: "audit", label: "执行审计" },
 ];
 
 const ORDER_STATUS_LABELS = {
@@ -108,6 +109,9 @@ const state = {
   policy: null,
   policyLoaded: false,
   policySaving: false,
+  auditActions: [],
+  auditPolicy: [],
+  auditLoaded: false,
   shipForm: null,
   cancelConfirmId: "",
   /* Super-agent */
@@ -433,6 +437,28 @@ async function savePolicy() {
   }
 }
 
+async function loadAudit() {
+  state.loading = true;
+  state.error = "";
+  render();
+  try {
+    const [actions, policy] = await Promise.all([
+      api("/api/superagent/audit/actions?limit=100"),
+      api("/api/superagent/audit/policy?limit=50"),
+    ]);
+    state.auditActions = actions.actions || [];
+    state.auditPolicy = policy.changes || [];
+    state.auditLoaded = true;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    showToast(state.error, "error");
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
 async function ensureViewData(view = state.view) {
   if (view === "orders") {
     if (!state.ordersLoaded) await loadOrders();
@@ -453,6 +479,10 @@ async function ensureViewData(view = state.view) {
   }
   if (view === "policy") {
     if (!state.policyLoaded) await loadPolicy();
+    return;
+  }
+  if (view === "audit") {
+    if (!state.auditLoaded) await loadAudit();
   }
 }
 
@@ -479,6 +509,7 @@ async function refreshCurrent() {
   else if (state.view === "after-sales") await loadAfterSales();
   else if (state.view === "superagent") await loadWorkItems();
   else if (state.view === "policy") await loadPolicy();
+  else if (state.view === "audit") await loadAudit();
   else await loadProducts();
 }
 
@@ -1663,6 +1694,70 @@ function productsView() {
   </section>`;
 }
 
+function auditTime(value) {
+  const text = String(value || "");
+  return text ? text.replace("T", " ").slice(0, 19) : "—";
+}
+
+function auditView() {
+  const actionRows = state.auditActions.length
+    ? state.auditActions.map((row) => {
+        const actionType = row.action_type || "—";
+        const exec = String(row.execution_status || "NONE").toUpperCase();
+        const result = row.execution_result || {};
+        const detail =
+          result.ticket?.ticket_id ||
+          result.compensation?.compensation_id ||
+          row.error ||
+          "—";
+        return `<tr>
+          <td><code>${escapeHtml(String(row.work_item_id || "").slice(-10))}</code></td>
+          <td>${escapeHtml(ACTION_LABELS[actionType] || actionType)}</td>
+          <td><code>${escapeHtml(row.order_id || "—")}</code></td>
+          <td>${escapeHtml(superAgentStatusLabel(row.work_status))}</td>
+          <td><span class="b-status ${exec === "EXECUTED" ? "is-success" : exec === "FAILED" ? "is-danger" : ""}">${escapeHtml(EXECUTION_STATUS_LABELS[exec] || exec)}</span></td>
+          <td title="${escapeHtml(JSON.stringify(result).slice(0, 500))}">${escapeHtml(String(detail))}</td>
+          <td>${escapeHtml(auditTime(row.executed_at || row.decided_at || row.created_at))}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="7" class="b-empty">暂无动作执行记录</td></tr>`;
+  const policyRows = state.auditPolicy.length
+    ? state.auditPolicy.map((change) => {
+        const before = change.before || {};
+        const after = change.after || {};
+        const summary = `补偿 ${Number(before.compensation_max_amount || 0)}→${Number(after.compensation_max_amount || 0)} 元 · 退款 ${Number(before.refund_max_amount || 0)}→${Number(after.refund_max_amount || 0)} 元 · 动作 ${(before.allowed_actions || []).length}→${(after.allowed_actions || []).length} 个`;
+        return `<li class="b-audit-policy-row">
+          <div><strong>${escapeHtml(change.changed_by || "—")}</strong> <span class="b-muted">${escapeHtml(auditTime(change.changed_at))}</span></div>
+          <div class="b-muted">${escapeHtml(summary)}</div>
+        </li>`;
+      }).join("")
+    : `<li class="b-empty">暂无策略变更</li>`;
+  return `<section class="b-view" aria-label="执行审计">
+    <div class="b-view-head">
+      <div>
+        <h1>执行审计</h1>
+        <p class="b-muted">动作执行结果与商家策略变更 · 只读</p>
+      </div>
+      <div class="b-view-tools">
+        <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
+      </div>
+    </div>
+    <div class="b-card b-audit-card">
+      <h2 class="b-card-title">动作执行</h2>
+      <div class="b-table-wrap">
+        <table class="b-audit-table">
+          <thead><tr><th>工作项</th><th>动作</th><th>订单</th><th>工作项状态</th><th>执行</th><th>结果</th><th>时间</th></tr></thead>
+          <tbody>${actionRows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="b-card b-audit-card">
+      <h2 class="b-card-title">策略变更</h2>
+      <ul class="b-audit-policy">${policyRows}</ul>
+    </div>
+  </section>`;
+}
+
 function policyView() {
   const policy = state.policy || {
     allowed_actions: Object.keys(ACTION_LABELS),
@@ -1879,7 +1974,9 @@ function shellMarkup() {
           ? superAgentView()
           : activeView.key === "policy"
             ? policyView()
-            : productsView();
+            : activeView.key === "audit"
+              ? auditView()
+              : productsView();
   const merchantName = state.me?.name || "商家";
   const merchantId = state.me?.id || "";
   return `<div class="b-shell">

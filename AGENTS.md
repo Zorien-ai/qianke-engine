@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 2.29.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 2.30.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v2.29.0 |
+| AGENTS.md | v2.30.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -541,3 +541,4 @@ IM 社交载体
 | 2.27.0 | 2026-11-03 | 原生卡片真实点击闭环：处理中→成功原地更新，工单创建 |
 | 2.28.0 | 2026-11-03 | 商家级动作策略：允许动作、补偿/退款上限、执行前强制校验与配置页 |
 | 2.29.0 | 2026-11-03 | Eval 24×2 基线 20/24；修复“不能直接执行”误丢弃动作 |
+| 2.30.0 | 2026-11-03 | 动作执行审计：策略变更留痕、执行结果查询、B 工作台审计页 |

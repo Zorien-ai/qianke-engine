@@ -6,6 +6,8 @@ import pytest
 from rag_demo.c_end import store
 from rag_demo.merchant import get_merchant_write_repository
 from rag_demo.superagent import actions
+from rag_demo.superagent import router as sa_router
+from rag_demo.superagent import store as sa_store
 
 
 @pytest.fixture()
@@ -52,6 +54,21 @@ def test_policy_upsert_and_validation(c_store):
     assert policy["allowed_actions"] == ["CREATE_AFTER_SALE", "ISSUE_COMPENSATION"]
     assert policy["compensation_max_amount"] == 20
     assert policy["require_note"] is True
+    changes = store.list_policy_audit("m_gear_002")
+    assert len(changes) == 1
+    assert changes[0]["before"]["compensation_max_amount"] == 50
+    assert changes[0]["after"]["compensation_max_amount"] == 20
+    assert changes[0]["changed_by"] == "owner"
+    # 相同配置不重复记审计。
+    store.upsert_merchant_policy(
+        "m_gear_002",
+        allowed_actions=["CREATE_AFTER_SALE", "ISSUE_COMPENSATION"],
+        compensation_max_amount=20,
+        refund_max_amount=100,
+        require_note=True,
+        updated_by="owner",
+    )
+    assert len(store.list_policy_audit("m_gear_002")) == 1
     with pytest.raises(store.CStoreError):
         store.upsert_merchant_policy(
             "m_gear_002",
@@ -101,3 +118,35 @@ def test_action_execution_enforces_policy(c_store):
             "m_gear_002",
         )
     assert exc.value.code == "COMPENSATION_EXCEEDS_POLICY"
+
+
+def test_action_audit_lists_executed_action(c_store):
+    order_id = _completed_order()
+    accepted = sa_router.ingest_event(
+        source="manual",
+        content=f"订单 {order_id} 补偿 10 元",
+        channel="test",
+        thread_key="policy:audit",
+        merchant_id="m_gear_002",
+    )
+    work_item_id = accepted["work_item"]["work_item_id"]
+    sa_store.start_work_item(work_item_id)
+    action = {
+        "action_type": "ISSUE_COMPENSATION",
+        "order_id": order_id,
+        "amount": 10,
+        "reason": "审计测试",
+    }
+    sa_store.finish_work_item(
+        work_item_id, {"summary": "补偿", "action": action}, approval=True, action=action
+    )
+    sa_store.decide_approval(work_item_id, approved=True, note="同意")
+    actions.execute_approved(work_item_id)
+
+    rows = sa_store.list_action_audit("m_gear_002")
+    assert rows
+    row = next(item for item in rows if item["work_item_id"] == work_item_id)
+    assert row["action_type"] == "ISSUE_COMPENSATION"
+    assert row["order_id"] == order_id
+    assert row["execution_status"] == "EXECUTED"
+    assert row["work_status"] == "DONE"

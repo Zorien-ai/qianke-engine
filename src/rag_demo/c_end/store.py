@@ -453,6 +453,15 @@ CREATE TABLE IF NOT EXISTS c_merchant_policy (
     updated_at               TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_merchant_policy_audit (
+    policy_audit_id TEXT PRIMARY KEY,
+    merchant_id     TEXT NOT NULL,
+    changed_by      TEXT NOT NULL DEFAULT '',
+    before_json     TEXT NOT NULL DEFAULT '{}',
+    after_json      TEXT NOT NULL DEFAULT '{}',
+    changed_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS c_compensation (
     compensation_id TEXT PRIMARY KEY,
     order_id        TEXT NOT NULL,
@@ -738,6 +747,19 @@ def upsert_merchant_policy(
         raise CStoreError("INVALID_POLICY", "补偿上限必须在 0~100000 元之间")
     if not (0 <= refund <= 100000):
         raise CStoreError("INVALID_POLICY", "退款上限必须在 0~100000 元之间")
+    before = get_merchant_policy(merchant_id)
+    after = {
+        "merchant_id": merchant_id,
+        "allowed_actions": clean_actions,
+        "compensation_max_amount": compensation,
+        "refund_max_amount": refund,
+        "require_note": bool(require_note),
+        "updated_by": str(updated_by or "")[:64],
+    }
+    changed = any(
+        before.get(key) != after.get(key)
+        for key in ("allowed_actions", "compensation_max_amount", "refund_max_amount", "require_note")
+    )
     init()
     conn = _connect()
     try:
@@ -760,10 +782,47 @@ def upsert_merchant_policy(
                 _now(),
             ),
         )
+        if changed:
+            conn.execute(
+                "INSERT INTO c_merchant_policy_audit(policy_audit_id, merchant_id, changed_by, "
+                "before_json, after_json, changed_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    f"pau_{uuid.uuid4().hex[:16]}",
+                    merchant_id,
+                    str(updated_by or "")[:64],
+                    json.dumps(before, ensure_ascii=False),
+                    json.dumps(after, ensure_ascii=False),
+                    _now(),
+                ),
+            )
         conn.commit()
     finally:
         conn.close()
     return get_merchant_policy(merchant_id)
+
+
+def list_policy_audit(merchant_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_merchant_policy_audit WHERE merchant_id = ? "
+            "ORDER BY changed_at DESC LIMIT ?",
+            (str(merchant_id or "").strip(), max(1, min(int(limit), 200))),
+        ).fetchall()
+        return [
+            {
+                "policy_audit_id": row["policy_audit_id"],
+                "merchant_id": row["merchant_id"],
+                "changed_by": row["changed_by"],
+                "before": json.loads(row["before_json"] or "{}"),
+                "after": json.loads(row["after_json"] or "{}"),
+                "changed_at": row["changed_at"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
 
 
 def check_action_policy(

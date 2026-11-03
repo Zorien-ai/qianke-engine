@@ -88,6 +88,26 @@ def update_policy(req: PolicyIn, merchant_id: str | None = None) -> dict[str, An
     return {"merchant_id": target, "policy": policy}
 
 
+@router.get("/audit/actions")
+def audit_actions(limit: int = 100, merchant_id: str | None = None) -> dict[str, Any]:
+    account = _account()
+    target = _resolve_merchant(account, merchant_id)
+    return {
+        "merchant_id": target,
+        "actions": sa_store.list_action_audit(target, limit=limit),
+    }
+
+
+@router.get("/audit/policy")
+def audit_policy(limit: int = 50, merchant_id: str | None = None) -> dict[str, Any]:
+    account = _account()
+    target = _resolve_merchant(account, merchant_id)
+    return {
+        "merchant_id": target,
+        "changes": c_store.list_policy_audit(target, limit=limit),
+    }
+
+
 def _account() -> dict[str, Any]:
     account = auth.current_account()
     if account is None:

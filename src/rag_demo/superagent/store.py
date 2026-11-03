@@ -537,6 +537,47 @@ def get_card_response_codes(work_item_id: str) -> dict[str, str]:
         conn.close()
 
 
+def list_action_audit(merchant_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    """动作执行审计：审批、执行状态与结果，按最近时间倒序。"""
+    init()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT a.*, w.status AS work_status, w.merchant_id AS work_merchant_id "
+            "FROM sa_approval a JOIN sa_work_item w ON w.work_item_id = a.work_item_id "
+            "WHERE w.merchant_id = ? AND a.action_json != '{}' "
+            "ORDER BY COALESCE(a.executed_at, a.decided_at, a.created_at) DESC LIMIT ?",
+            (str(merchant_id or "").strip(), max(1, min(int(limit), 200))),
+        ).fetchall()
+        result = []
+        for row in rows:
+            try:
+                action = json.loads(row["action_json"] or "{}")
+            except (TypeError, ValueError):
+                action = {}
+            try:
+                execution = json.loads(row["execution_result_json"] or "{}")
+            except (TypeError, ValueError):
+                execution = {}
+            result.append({
+                "approval_id": row["approval_id"],
+                "work_item_id": row["work_item_id"],
+                "merchant_id": row["work_merchant_id"],
+                "work_status": row["work_status"],
+                "approval_status": row["status"],
+                "execution_status": row["execution_status"],
+                "action": action,
+                "order_id": action.get("order_id") or "",
+                "action_type": action.get("action_type") or "",
+                "execution_result": execution,
+                "error": execution.get("error") or "",
+                "created_at": row["created_at"],
+                "decided_at": row["decided_at"],
+                "executed_at": row["executed_at"],
+            })
+        return result
+    finally:
+        conn.close()
 def _queue_is_pg() -> bool:
     return (os.environ.get("QIANKE_QUEUE_BACKEND") or "sqlite").strip().lower() in {"postgres", "postgresql", "pg"}
 

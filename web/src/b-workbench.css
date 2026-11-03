@@ -1140,3 +1140,18 @@ code,
 .b-policy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end; }
 .b-policy-grid label { display: grid; gap: 5px; font-size: 12px; color: var(--b-muted, #7a746a); }
 .b-policy-grid input[type="number"] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 8px 10px; font-size: 13px; background: #fff; }
+
+/* 执行审计 */
+.b-audit-card { display: grid; gap: 12px; margin-bottom: 14px; }
+.b-audit-card .b-card-title { margin: 0; font-size: 15px; }
+.b-table-wrap { overflow-x: auto; }
+.b-audit-table { width: 100%; border-collapse: collapse; min-width: 820px; }
+.b-audit-table th, .b-audit-table td { text-align: left; padding: 8px 8px; border-top: 1px solid var(--b-line, #e3ddd2); font-size: 12px; vertical-align: top; }
+.b-audit-table th { color: var(--b-muted, #7a746a); font-weight: 500; border-top: 0; white-space: nowrap; }
+.b-audit-table code { font-size: 11px; }
+.b-audit-policy { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.b-audit-policy-row { border-top: 1px solid var(--b-line, #e3ddd2); padding-top: 8px; display: grid; gap: 3px; font-size: 12px; }
+.b-audit-policy-row:first-child { border-top: 0; padding-top: 0; }
+.b-status { display: inline-block; border-radius: 999px; padding: 2px 8px; border: 1px solid var(--b-line, #e3ddd2); font-size: 11px; white-space: nowrap; }
+.b-status.is-success { color: #1f4d3a; border-color: #cfe0d6; }
+.b-status.is-danger { color: #a33a2f; border-color: #e7cfcb; }
