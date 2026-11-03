@@ -8,7 +8,7 @@ import pytest
 from rag_demo.c_end import store
 from rag_demo.superagent import router as sa_router
 from rag_demo.superagent import store as sa_store
-from rag_demo.superagent import wecom_approval, wecom_native_card
+from rag_demo.superagent import wecom_approval, wecom_native_card, wecom_send
 
 
 @pytest.fixture()
@@ -52,6 +52,23 @@ def test_native_card_payload_and_parse(c_store):
     assert event["work_item_id"] == item["work_item_id"]
     assert event["sale_type"] == "REFUND_ONLY"
     assert wecom_native_card.to_command(event) == f"同意 {item['work_item_id'][-6:]} 仅退款"
+
+
+def test_native_event_duplicate_reply(c_store, monkeypatch):
+    item = _pending(c_store)
+    sa_store.decide_approval(item["work_item_id"], approved=False, note="test")
+    replies = []
+    monkeypatch.setattr(wecom_send, "send_text", lambda to, text, **kwargs: replies.append(text) or {"sent": True})
+    key = json.dumps({"a": "approve", "w": item["work_item_id"], "s": "REFUND_ONLY"})
+    handled = wecom_native_card.handle_event({
+        "MsgType": "event",
+        "Event": "template_card_event",
+        "EventKey": key,
+        "FromUserName": "approver",
+        "AgentID": "1000002",
+    })
+    assert handled is True
+    assert replies and "无需重复审批" in replies[0]
 
 
 def test_native_event_reuses_approval_command(c_store, monkeypatch):

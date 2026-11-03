@@ -117,21 +117,43 @@ EventKey={"a":"approve","w":"saw_71b0b513f35b410a","s":"REFUND_ONLY"}
 失败是因为测试订单 `order_native_button_test` 不存在，属于预期业务失败；
 说明事件解析、命令映射、审批、ACTION Job、回调验签链路都已打通。
 
-## 5.1 真实点击仍未验证
+## 5.1 真实点击事件已到达
+
+企业微信真实回调日志出现多次按钮事件：
 
 ```text
-需要在企业微信里点击真实按钮
-如果企业微信应用消息通道不推送 template_card_event，
-服务端不会收到按钮事件；签名链接卡片仍可用
+10:35:04  113.108.92.100   POST /api/superagent/wecom/callback 200
+10:35:00  14.116.241.251   POST /api/superagent/wecom/callback 200
+10:47:52  183.47.98.227    POST /api/superagent/wecom/callback 200
 ```
 
-## 5.2 部门兜底注意
+说明应用消息通道确实会推送 `template_card_event`。
+
+当时的卡片对应已处理工作项，重复点击返回：
 
 ```text
-toparty=1 会发给部门可见成员
-当前部门只有 zzzzzzq
-生产环境必须确认部门成员范围
+没有找到待审批的工作项
 ```
+
+已优化：点击已处理工作项现在直接回复：
+
+```text
+工作项 <短码> 当前状态为 <STATUS>，无需重复审批。
+```
+
+## 5.2 成功点击验证
+
+新卡片：
+
+```text
+work_item: saw_54fecb19e50a43ca
+order:     order_70fd445a945940f3
+buttons:   仅退款 / 退货退款 / 驳回
+```
+
+卡片已真实发送，等待人工点击「仅退款」后确认成功执行。
+
+`toparty=1` 兜底注意：会发给部门可见成员；当前部门只有 zzzzzzq。
 
 ## 6. 已知限制
 

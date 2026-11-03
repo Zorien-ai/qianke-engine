@@ -117,15 +117,35 @@ def to_command(event: dict[str, Any]) -> str | None:
     return f"同意 {code}"
 
 
+def _reply(from_user: str, text: str, agent_id: str | None) -> None:
+    try:
+        from rag_demo.superagent import wecom_send
+
+        wecom_send.send_text(from_user, text, agent_id=agent_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("原生卡片状态回复失败 user=%s", from_user)
+
+
 def handle_event(message: dict[str, Any]) -> bool:
     event = parse_event(message)
     if event is None:
         return False
+    from rag_demo.superagent import store as sa_store
     from rag_demo.superagent import wecom_approval
 
+    item = sa_store.get_work_item(event["work_item_id"])
+    if item is None:
+        return True
+    if item.get("status") != "WAITING_APPROVAL":
+        _reply(
+            event["from_user"],
+            f"工作项 {event['work_item_id'][-6:]} 当前状态为 {item.get('status')}，无需重复审批。",
+            event["agent_id"],
+        )
+        return True
     command = to_command(event)
     if command is None:
-        # 复杂参数走签名审批页，由文本卡片/链接继续处理。
+        # 复杂参数走签名审批页。
         return True
     return wecom_approval.handle_message(
         {
