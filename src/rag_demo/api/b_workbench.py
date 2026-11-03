@@ -18,7 +18,23 @@ from rag_demo.merchant import MerchantError, get_merchant_repository, get_mercha
 router = APIRouter(prefix="/api/b/workbench", tags=["b-workbench"])
 
 DEFAULT_MERCHANT_ID = "m_gear_002"
-MERCHANT_NAMES = {"m_gear_002": "山野户外旗舰店"}
+MERCHANT_NAMES = {"m_gear_002": "山野户外旗舰店", "m_tea_001": "山雾茶业"}
+
+ROLE_PERMISSIONS = {
+    "owner": {
+        "view_orders", "view_products", "view_after_sales", "view_superagent",
+        "operate_orders", "resolve_after_sale", "receive_return",
+        "approve_superagent", "manage_members",
+    },
+    "admin": {
+        "view_orders", "view_products", "view_after_sales", "view_superagent",
+        "operate_orders", "resolve_after_sale", "receive_return",
+        "approve_superagent",
+    },
+    "staff": {
+        "view_orders", "view_products", "view_after_sales", "view_superagent",
+    },
+}
 
 
 class WorkbenchOrderStatusIn(BaseModel):
@@ -52,6 +68,17 @@ def _membership(account: dict[str, Any]) -> dict[str, Any]:
     if account.get("is_system_admin"):
         return store.bind_merchant_member(account["id"], DEFAULT_MERCHANT_ID)
     raise HTTPException(status_code=403, detail="当前账号未绑定商家，无法进入商家工作台")
+
+
+def permissions_for(role: str) -> set[str]:
+    return set(ROLE_PERMISSIONS.get(str(role or "").lower(), set()))
+
+
+def _require_permission(account: dict[str, Any], permission: str) -> dict[str, Any]:
+    member = _membership(account)
+    if permission not in permissions_for(member["role"]):
+        raise HTTPException(status_code=403, detail=f"当前角色 {member['role']} 没有 {permission} 权限")
+    return member
 
 
 def _merchant_error(exc: MerchantError) -> HTTPException:
@@ -96,6 +123,7 @@ def workbench_me() -> dict[str, Any]:
             "name": MERCHANT_NAMES.get(merchant_id, merchant_id),
             "role": member["role"],
         },
+        "permissions": sorted(permissions_for(member["role"])),
         "counts": {"products": len(products), "orders": len(orders)},
         "backend": repo.backend,
     }
@@ -137,7 +165,7 @@ def workbench_orders(status: str | None = None, limit: int = 100) -> dict[str, A
 @router.patch("/orders/{order_id}/status")
 def workbench_update_order(order_id: str, req: WorkbenchOrderStatusIn) -> dict[str, Any]:
     account = _account()
-    merchant_id = _membership(account)["merchant_id"]
+    merchant_id = _require_permission(account, "operate_orders")["merchant_id"]
     repo = get_merchant_write_repository()
     try:
         order = repo.update_order_status(
@@ -174,7 +202,7 @@ def workbench_after_sales(status: str | None = None, limit: int = 100) -> dict[s
 @router.patch("/after-sales/{ticket_id}")
 def workbench_resolve_after_sale(ticket_id: str, req: WorkbenchAfterSaleResolveIn) -> dict[str, Any]:
     account = _account()
-    merchant_id = _membership(account)["merchant_id"]
+    merchant_id = _require_permission(account, "resolve_after_sale")["merchant_id"]
     _ticket_for_merchant(ticket_id, merchant_id)
     try:
         return store.resolve_after_sale(ticket_id, approved=req.approved)
@@ -188,7 +216,7 @@ def workbench_resolve_after_sale(ticket_id: str, req: WorkbenchAfterSaleResolveI
 @router.post("/after-sales/{ticket_id}/receive")
 def workbench_receive_after_sale(ticket_id: str, req: WorkbenchAfterSaleReceiveIn) -> dict[str, Any]:
     account = _account()
-    merchant_id = _membership(account)["merchant_id"]
+    merchant_id = _require_permission(account, "receive_return")["merchant_id"]
     _ticket_for_merchant(ticket_id, merchant_id)
     try:
         return store.receive_after_sale(ticket_id, accepted=req.accepted)

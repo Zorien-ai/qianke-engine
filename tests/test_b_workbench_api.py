@@ -72,6 +72,37 @@ def test_update_order_status_is_scoped(c_store, monkeypatch):
     assert result["order"]["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
 
 
+def test_staff_is_read_only(c_store, monkeypatch):
+    store.bind_merchant_member(42, b_workbench.DEFAULT_MERCHANT_ID, role="staff")
+    monkeypatch.setattr(
+        b_workbench.auth,
+        "current_account",
+        lambda: {"id": 42, "username": "staff", "status": "active", "is_system_admin": False},
+    )
+    data = b_workbench.workbench_me()
+    assert data["merchant"]["role"] == "staff"
+    assert "view_orders" in data["permissions"]
+    assert "operate_orders" not in data["permissions"]
+    assert b_workbench.workbench_orders()["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_update_order(
+            "order_any", b_workbench.WorkbenchOrderStatusIn(status="COMPLETED")
+        )
+    assert exc.value.status_code == 403
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_resolve_after_sale(
+            "as_any", b_workbench.WorkbenchAfterSaleResolveIn(approved=True)
+        )
+    assert exc.value.status_code == 403
+
+
+def test_admin_role_can_operate(c_store):
+    assert "operate_orders" in b_workbench.permissions_for("admin")
+    assert "manage_members" not in b_workbench.permissions_for("admin")
+    assert "manage_members" in b_workbench.permissions_for("owner")
+
+
 def test_after_sales_only_for_bound_merchant(c_store, monkeypatch):
     _admin(monkeypatch)
     # 没有工单时返回空列表即可；有工单时必须属于当前商家。

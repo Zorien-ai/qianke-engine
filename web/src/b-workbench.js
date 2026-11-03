@@ -268,7 +268,13 @@ function merchantFrom(data) {
       "商家"
     ),
     id: text(source.merchant_id ?? source.merchantId ?? source.id ?? account.merchant_id, ""),
+    role: text(data?.merchant?.role ?? source.role, ""),
+    permissions: Array.isArray(data?.permissions) ? data.permissions : [],
   };
+}
+
+function can(permission) {
+  return state.me?.permissions?.includes(permission) ?? true;
 }
 
 async function loadMe() {
@@ -1362,7 +1368,7 @@ function orderCard(order) {
   const id = String(order.order_id || "");
   const status = String(order.status || "").toUpperCase();
   const busy = state.busy === `order:${id}`;
-  const attrs = `data-order-id="${escapeHtml(id)}" ${busy ? "disabled" : ""}`;
+  const attrs = `data-order-id="${escapeHtml(id)}" ${busy || !can("operate_orders") ? "disabled" : ""}`;
   const showShipForm = state.shipForm && String(state.shipForm.orderId) === id;
   const showCancelConfirm = state.cancelConfirmId === id;
   const items = Array.isArray(order.items) ? order.items : [];
@@ -1444,21 +1450,23 @@ function afterSaleCard(ticket) {
   const type = String(ticket.type || "").toUpperCase();
   const busy = state.busy === `ticket:${id}`;
   const attrs = `data-ticket-id="${escapeHtml(id)}" ${busy ? "disabled" : ""}`;
+  const canResolve = can("resolve_after_sale");
+  const canReceive = can("receive_return");
   const isReturn = type === "RETURN_REFUND";
   const buttons = [];
   if (status === "OPEN") {
     buttons.push(
-      `<button type="button" class="b-btn b-btn-primary" data-ticket-action="approve" ${attrs}>${isReturn ? "同意退货" : "通过"}</button>`
+      `<button type="button" class="b-btn b-btn-primary" data-ticket-action="approve" ${attrs} ${canResolve ? "" : "disabled"}>${isReturn ? "同意退货" : "通过"}</button>`
     );
     buttons.push(
-      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-ticket-action="reject" ${attrs}>拒绝</button>`
+      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-ticket-action="reject" ${attrs} ${canResolve ? "" : "disabled"}>拒绝</button>`
     );
   } else if (status === "RETURN_SHIPPED") {
     buttons.push(
-      `<button type="button" class="b-btn b-btn-primary" data-ticket-action="receive" ${attrs}>验收通过</button>`
+      `<button type="button" class="b-btn b-btn-primary" data-ticket-action="receive" ${attrs} ${canReceive ? "" : "disabled"}>验收通过</button>`
     );
     buttons.push(
-      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-ticket-action="reject-receive" ${attrs}>拒收</button>`
+      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-ticket-action="reject-receive" ${attrs} ${canReceive ? "" : "disabled"}>拒收</button>`
     );
   } else if (status === "RETURN_PENDING") {
     buttons.push(`<span class="b-muted">等待买家寄回</span>`);
@@ -1627,11 +1635,11 @@ function workItemCard(item) {
       `<button type="button" class="b-btn b-btn-primary" data-run-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${busy ? "启动中…" : "运行调查"}</button>`
     );
     buttons.push(
-      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-stop-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>停止调查</button>`
+      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-stop-work-item="${escapeHtml(id)}" ${busy || !can("approve_superagent") ? "disabled" : ""}>停止调查</button>`
     );
   } else if (status === "RUNNING") {
     buttons.push(
-      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-stop-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>${busy ? "停止中…" : "停止调查"}</button>`
+      `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-stop-work-item="${escapeHtml(id)}" ${busy || !can("approve_superagent") ? "disabled" : ""}>${busy ? "停止中…" : "停止调查"}</button>`
     );
   } else if (status === "EXECUTING") {
     buttons.push(
@@ -1639,7 +1647,7 @@ function workItemCard(item) {
     );
   } else if (status === "WAITING_APPROVAL") {
     buttons.push(
-      `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy || !paramsValid ? "disabled" : ""} ${action && !paramsValid ? 'title="请先填写/选择审批参数"' : ""}>${action ? "通过并执行" : "通过"}</button>`
+      `<button type="button" class="b-btn b-btn-primary" data-approve-work-item="${escapeHtml(id)}" ${busy || !paramsValid || !can("approve_superagent") ? "disabled" : ""} ${action && !paramsValid ? 'title="请先填写/选择审批参数"' : ""}>${action ? "通过并执行" : "通过"}</button>`
     );
     buttons.push(
       `<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-reject-work-item="${escapeHtml(id)}" ${busy ? "disabled" : ""}>驳回</button>`

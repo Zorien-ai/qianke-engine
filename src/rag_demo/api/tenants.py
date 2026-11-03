@@ -35,6 +35,20 @@ def _admin() -> dict[str, Any]:
     return account
 
 
+def _manage_tenant(merchant_id: str) -> dict[str, Any]:
+    account = auth.current_account()
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    if account.get("status") != auth.STATUS_ACTIVE:
+        raise HTTPException(status_code=403, detail="账号不可用")
+    if account.get("is_system_admin"):
+        return account
+    member = store.get_merchant_member(account["id"])
+    if member is None or member["merchant_id"] != merchant_id or member["role"] != "owner":
+        raise HTTPException(status_code=403, detail="只有系统管理员或租户 owner 可以管理成员")
+    return account
+
+
 def _member_payload(member: dict[str, Any]) -> dict[str, Any]:
     user = auth.find_user_by_id(int(member["account_id"])) or {}
     return {
@@ -110,7 +124,7 @@ def search_accounts(q: str = Query(default="", max_length=80)) -> dict[str, Any]
 
 @router.post("/{merchant_id}/members")
 def bind_member(merchant_id: str, req: MemberIn) -> dict[str, Any]:
-    _admin()
+    _manage_tenant(merchant_id)
     tenant = store.get_tenant(merchant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="租户不存在")
@@ -123,7 +137,7 @@ def bind_member(merchant_id: str, req: MemberIn) -> dict[str, Any]:
 
 @router.delete("/{merchant_id}/members/{account_id}")
 def unbind_member(merchant_id: str, account_id: int) -> dict[str, Any]:
-    _admin()
+    _manage_tenant(merchant_id)
     member = store.get_merchant_member(account_id)
     if member is None or member["merchant_id"] != merchant_id:
         raise HTTPException(status_code=404, detail="成员不存在")

@@ -74,6 +74,17 @@ def _tenant_scope(account: dict[str, Any]) -> str | None:
     return str(member["merchant_id"])
 
 
+def _require_superagent_operator(account: dict[str, Any]) -> None:
+    """owner/admin 可启动、停止、审批；staff 只读。"""
+    if account.get("is_system_admin"):
+        return
+    member = c_store.get_merchant_member(account["id"])
+    if member is None:
+        raise HTTPException(status_code=403, detail="账号未绑定商家")
+    if str(member.get("role") or "").lower() not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="当前角色只能查看 Super-agent，不能操作")
+
+
 def _resolve_merchant(account: dict[str, Any], requested: str | None) -> str:
     scope = _tenant_scope(account)
     if scope is not None:
@@ -222,6 +233,7 @@ def get_work_item(work_item_id: str) -> dict[str, Any]:
 @router.post("/work-items/{work_item_id}/run")
 async def run_work_item(work_item_id: str) -> dict[str, Any]:
     account = _account()
+    _require_superagent_operator(account)
     item = _scoped_item(work_item_id, account)
     if item["status"] != "PENDING":
         raise HTTPException(status_code=409, detail=f"工作项当前状态为 {item['status']}，不能启动")
@@ -233,6 +245,7 @@ async def run_work_item(work_item_id: str) -> dict[str, Any]:
 @router.post("/work-items/{work_item_id}/stop")
 def stop_work_item(work_item_id: str) -> dict[str, Any]:
     account = _account()
+    _require_superagent_operator(account)
     item = _scoped_item(work_item_id, account)
     if item["status"] not in ("PENDING", "RUNNING"):
         raise HTTPException(status_code=409, detail=f"工作项当前状态为 {item['status']}，不能停止")
@@ -243,6 +256,7 @@ def stop_work_item(work_item_id: str) -> dict[str, Any]:
 @router.post("/work-items/{work_item_id}/approve")
 def approve_work_item(work_item_id: str, req: ApproveIn) -> dict[str, Any]:
     account = _account()
+    _require_superagent_operator(account)
     item = _scoped_item(work_item_id, account)
     if item["status"] != "WAITING_APPROVAL":
         raise HTTPException(status_code=409, detail="工作项不在待审批状态")
