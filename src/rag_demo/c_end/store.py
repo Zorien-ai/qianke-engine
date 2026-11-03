@@ -443,6 +443,16 @@ CREATE TABLE IF NOT EXISTS c_merchant_tenant (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_merchant_policy (
+    merchant_id              TEXT PRIMARY KEY,
+    allowed_actions_json     TEXT NOT NULL DEFAULT '[]',
+    compensation_max_amount  REAL NOT NULL DEFAULT 50,
+    refund_max_amount        REAL NOT NULL DEFAULT 1000,
+    require_note             INTEGER NOT NULL DEFAULT 0,
+    updated_by               TEXT NOT NULL DEFAULT '',
+    updated_at               TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS c_compensation (
     compensation_id TEXT PRIMARY KEY,
     order_id        TEXT NOT NULL,
@@ -647,6 +657,134 @@ def create_tenant(merchant_id: str, name: str) -> dict[str, Any]:
     tenant = get_tenant(merchant_id)
     assert tenant is not None
     return tenant
+
+
+POLICY_ACTIONS = (
+    "CANCEL_ORDER",
+    "CREATE_AFTER_SALE",
+    "SHIP_ORDER",
+    "COMPLETE_ORDER",
+    "REFUND_AFTER_SALE",
+    "RECEIVE_RETURN",
+    "REJECT_AFTER_SALE",
+    "ISSUE_COMPENSATION",
+)
+
+
+def _policy_payload(row: sqlite3.Row | None, merchant_id: str) -> dict[str, Any]:
+    if row is None:
+        return {
+            "merchant_id": merchant_id,
+            "allowed_actions": list(POLICY_ACTIONS),
+            "compensation_max_amount": 50.0,
+            "refund_max_amount": 1000.0,
+            "require_note": False,
+            "updated_by": "",
+            "updated_at": "",
+        }
+    try:
+        allowed = json.loads(row["allowed_actions_json"] or "[]")
+    except (TypeError, ValueError):
+        allowed = []
+    return {
+        "merchant_id": row["merchant_id"],
+        "allowed_actions": [str(item) for item in allowed if str(item) in POLICY_ACTIONS],
+        "compensation_max_amount": float(row["compensation_max_amount"]),
+        "refund_max_amount": float(row["refund_max_amount"]),
+        "require_note": bool(row["require_note"]),
+        "updated_by": row["updated_by"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def get_merchant_policy(merchant_id: str) -> dict[str, Any]:
+    merchant_id = str(merchant_id or "").strip()
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_merchant_policy WHERE merchant_id = ?", (merchant_id,)
+        ).fetchone()
+        return _policy_payload(row, merchant_id)
+    finally:
+        conn.close()
+
+
+def upsert_merchant_policy(
+    merchant_id: str,
+    *,
+    allowed_actions: list[str] | tuple[str, ...],
+    compensation_max_amount: float,
+    refund_max_amount: float,
+    require_note: bool = False,
+    updated_by: str = "",
+) -> dict[str, Any]:
+    merchant_id = str(merchant_id or "").strip()
+    if not merchant_id:
+        raise CStoreError("INVALID_MERCHANT", "merchant_id 不能为空")
+    clean_actions = []
+    for action in allowed_actions or ():
+        action = str(action or "").strip().upper()
+        if action and action not in clean_actions:
+            clean_actions.append(action)
+    invalid = [action for action in clean_actions if action not in POLICY_ACTIONS]
+    if invalid:
+        raise CStoreError("INVALID_ACTION", f"未知动作：{','.join(invalid)}")
+    if not clean_actions:
+        raise CStoreError("INVALID_POLICY", "至少保留一个允许动作")
+    compensation = float(compensation_max_amount)
+    refund = float(refund_max_amount)
+    if not (0 <= compensation <= 100000):
+        raise CStoreError("INVALID_POLICY", "补偿上限必须在 0~100000 元之间")
+    if not (0 <= refund <= 100000):
+        raise CStoreError("INVALID_POLICY", "退款上限必须在 0~100000 元之间")
+    init()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_merchant_policy(merchant_id, allowed_actions_json, "
+            "compensation_max_amount, refund_max_amount, require_note, updated_by, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(merchant_id) DO UPDATE SET "
+            "allowed_actions_json = excluded.allowed_actions_json, "
+            "compensation_max_amount = excluded.compensation_max_amount, "
+            "refund_max_amount = excluded.refund_max_amount, "
+            "require_note = excluded.require_note, updated_by = excluded.updated_by, "
+            "updated_at = excluded.updated_at",
+            (
+                merchant_id,
+                json.dumps(clean_actions, ensure_ascii=False),
+                compensation,
+                refund,
+                1 if require_note else 0,
+                str(updated_by or "")[:64],
+                _now(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_merchant_policy(merchant_id)
+
+
+def check_action_policy(
+    merchant_id: str,
+    action_type: str,
+    *,
+    amount: float | None = None,
+    refund_amount: float | None = None,
+) -> tuple[bool, str]:
+    """执行前策略校验；返回 (allowed, code)。"""
+    policy = get_merchant_policy(merchant_id)
+    action_type = str(action_type or "").strip().upper()
+    if action_type not in policy["allowed_actions"]:
+        return False, "ACTION_NOT_ALLOWED_BY_POLICY"
+    if action_type == "ISSUE_COMPENSATION" and amount is not None:
+        if amount <= 0 or amount > policy["compensation_max_amount"]:
+            return False, "COMPENSATION_EXCEEDS_POLICY"
+    if action_type == "REFUND_AFTER_SALE" and refund_amount is not None:
+        if refund_amount > policy["refund_max_amount"]:
+            return False, "REFUND_EXCEEDS_POLICY"
+    return True, ""
 
 
 def list_merchant_members(merchant_id: str) -> list[dict[str, Any]]:

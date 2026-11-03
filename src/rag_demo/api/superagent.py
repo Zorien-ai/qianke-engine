@@ -53,6 +53,41 @@ class WatchdogIn(BaseModel):
     timeout_seconds: int = Field(default=180, ge=10, le=3600)
 
 
+class PolicyIn(BaseModel):
+    allowed_actions: list[str] = Field(default_factory=list)
+    compensation_max_amount: float = Field(default=50, ge=0, le=100000)
+    refund_max_amount: float = Field(default=1000, ge=0, le=100000)
+    require_note: bool = False
+
+
+@router.get("/policy")
+def get_policy(merchant_id: str | None = None) -> dict[str, Any]:
+    account = _account()
+    target = _resolve_merchant(account, merchant_id)
+    return {"merchant_id": target, "policy": c_store.get_merchant_policy(target)}
+
+
+@router.put("/policy")
+def update_policy(req: PolicyIn, merchant_id: str | None = None) -> dict[str, Any]:
+    account = _account()
+    _require_superagent_operator(account)
+    target = _resolve_merchant(account, merchant_id)
+    try:
+        policy = c_store.upsert_merchant_policy(
+            target,
+            allowed_actions=req.allowed_actions,
+            compensation_max_amount=req.compensation_max_amount,
+            refund_max_amount=req.refund_max_amount,
+            require_note=req.require_note,
+            updated_by=str(account.get("username") or ""),
+        )
+    except c_store.CStoreError as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": exc.code, "message": exc.message}
+        ) from exc
+    return {"merchant_id": target, "policy": policy}
+
+
 def _account() -> dict[str, Any]:
     account = auth.current_account()
     if account is None:

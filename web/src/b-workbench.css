@@ -1130,3 +1130,13 @@ code,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 动作策略 */
+.b-policy-card { display: grid; gap: 14px; }
+.b-policy-card .b-card-title { margin: 0; font-size: 15px; }
+.b-policy-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.b-policy-check { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--b-ink, #1f1d19); }
+.b-policy-check input[type="checkbox"] { width: 15px; height: 15px; }
+.b-policy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end; }
+.b-policy-grid label { display: grid; gap: 5px; font-size: 12px; color: var(--b-muted, #7a746a); }
+.b-policy-grid input[type="number"] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 8px 10px; font-size: 13px; background: #fff; }

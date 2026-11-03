@@ -13,6 +13,7 @@ const VIEWS = [
   { key: "after-sales", label: "售后" },
   { key: "products", label: "商品" },
   { key: "superagent", label: "Super-agent" },
+  { key: "policy", label: "动作策略" },
 ];
 
 const ORDER_STATUS_LABELS = {
@@ -104,6 +105,9 @@ const state = {
   afterSalesLoaded: false,
   products: [],
   productsLoaded: false,
+  policy: null,
+  policyLoaded: false,
+  policySaving: false,
   shipForm: null,
   cancelConfirmId: "",
   /* Super-agent */
@@ -379,6 +383,56 @@ async function loadProducts() {
   }
 }
 
+async function loadPolicy() {
+  state.loading = true;
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/superagent/policy");
+    state.policy = data.policy || null;
+    state.policyLoaded = true;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    showToast(state.error, "error");
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
+async function savePolicy() {
+  if (state.policySaving) return;
+  const allowed = [...root.querySelectorAll("[data-policy-action]:checked")].map((input) => input.value);
+  const compensation = Number(document.getElementById("b-policy-compensation")?.value || 0);
+  const refund = Number(document.getElementById("b-policy-refund")?.value || 0);
+  const requireNote = Boolean(document.getElementById("b-policy-note")?.checked);
+  state.policySaving = true;
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/superagent/policy", {
+      method: "PUT",
+      body: JSON.stringify({
+        allowed_actions: allowed,
+        compensation_max_amount: compensation,
+        refund_max_amount: refund,
+        require_note: requireNote,
+      }),
+    });
+    state.policy = data.policy || state.policy;
+    state.policyLoaded = true;
+    showToast("动作策略已保存");
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    showToast(state.error, "error");
+  } finally {
+    state.policySaving = false;
+    render();
+  }
+}
+
 async function ensureViewData(view = state.view) {
   if (view === "orders") {
     if (!state.ordersLoaded) await loadOrders();
@@ -395,6 +449,10 @@ async function ensureViewData(view = state.view) {
   if (view === "superagent") {
     if (!state.workItemsLoaded) await loadWorkItems();
     else syncWorkPolling();
+    return;
+  }
+  if (view === "policy") {
+    if (!state.policyLoaded) await loadPolicy();
   }
 }
 
@@ -420,6 +478,7 @@ async function refreshCurrent() {
   if (state.view === "orders") await loadOrders();
   else if (state.view === "after-sales") await loadAfterSales();
   else if (state.view === "superagent") await loadWorkItems();
+  else if (state.view === "policy") await loadPolicy();
   else await loadProducts();
 }
 
@@ -1604,6 +1663,45 @@ function productsView() {
   </section>`;
 }
 
+function policyView() {
+  const policy = state.policy || {
+    allowed_actions: Object.keys(ACTION_LABELS),
+    compensation_max_amount: 50,
+    refund_max_amount: 1000,
+    require_note: false,
+  };
+  const allowed = new Set(policy.allowed_actions || []);
+  const canEdit = can("approve_superagent") && !state.policySaving;
+  const disabled = canEdit ? "" : "disabled";
+  return `<section class="b-view" aria-label="动作策略">
+    <div class="b-view-head">
+      <div>
+        <h1>动作策略</h1>
+        <p class="b-muted">控制本商家允许的 Super-agent 动作与金额上限${canEdit ? "" : " · 只读"}</p>
+      </div>
+      <div class="b-view-tools">
+        <button type="button" class="b-btn b-btn-primary" data-save-policy ${canEdit ? "" : "disabled"}>${state.policySaving ? "保存中…" : "保存策略"}</button>
+      </div>
+    </div>
+    <div class="b-card b-policy-card">
+      <h2 class="b-card-title">允许的动作</h2>
+      <div class="b-policy-actions">
+        ${Object.entries(ACTION_LABELS).map(([action, label]) => `<label class="b-policy-check"><input type="checkbox" data-policy-action value="${action}" ${allowed.has(action) ? "checked" : ""} ${disabled} /> ${label}</label>`).join("")}
+      </div>
+      <div class="b-policy-grid">
+        <label>补偿上限（元/单）
+          <input id="b-policy-compensation" type="number" min="0" max="100000" step="1" value="${Number(policy.compensation_max_amount || 0)}" ${disabled} />
+        </label>
+        <label>退款上限（元/单）
+          <input id="b-policy-refund" type="number" min="0" max="100000" step="1" value="${Number(policy.refund_max_amount || 0)}" ${disabled} />
+        </label>
+        <label class="b-policy-check"><input id="b-policy-note" type="checkbox" ${policy.require_note ? "checked" : ""} ${disabled} /> 动作必须填写原因</label>
+      </div>
+      <p class="b-muted">执行前会再次校验；超过上限或未开放的动作会直接拒绝，审批参数无法绕过。</p>
+    </div>
+  </section>`;
+}
+
 function workItemCard(item) {
   const id = String(item?.work_item_id || "");
   const status = String(item?.status || "").toUpperCase();
@@ -1779,7 +1877,9 @@ function shellMarkup() {
         ? afterSalesView()
         : activeView.key === "superagent"
           ? superAgentView()
-          : productsView();
+          : activeView.key === "policy"
+            ? policyView()
+            : productsView();
   const merchantName = state.me?.name || "商家";
   const merchantId = state.me?.id || "";
   return `<div class="b-shell">
@@ -1880,6 +1980,10 @@ function bindEvents() {
     }
     if (target.closest("[data-submit-event]")) {
       await submitSuperAgentEvent();
+      return;
+    }
+    if (target.closest("[data-save-policy]")) {
+      await savePolicy();
       return;
     }
     if (target.closest("[data-watchdog]")) {

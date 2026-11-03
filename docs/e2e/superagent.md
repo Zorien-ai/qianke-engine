@@ -233,13 +233,13 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 639 passed, 5 skipped, 1 warning
+# 643 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed
 
 npm run build
-# ✓ built in 5.22s
+# ✓ built in 5.97s
 # dist/b.html 已生成
 ```
 
@@ -291,6 +291,7 @@ Eval 稳定性与多次采样详见：[superagent-eval-stability.md](superagent-
 租户管理页面详见：[superagent-tenants.md](superagent-tenants.md)
 队列管理页面详见：[superagent-queue-ui.md](superagent-queue-ui.md)
 角色细粒度权限详见：[superagent-roles.md](superagent-roles.md)
+商家级动作策略详见：[superagent-policy.md](superagent-policy.md)
 
 ## 8. 下一步
 

@@ -67,6 +67,11 @@ def _execute(action: dict[str, Any], merchant_id: str) -> dict[str, Any]:
     action_type = str(action.get("action_type") or action.get("action") or "").strip().upper()
     if action_type not in ALLOWED_ACTIONS:
         raise ActionError("ACTION_NOT_ALLOWED", f"动作类型不在白名单：{action_type or 'EMPTY'}")
+    policy = store.get_merchant_policy(merchant_id)
+    if action_type not in policy["allowed_actions"]:
+        raise ActionError("ACTION_NOT_ALLOWED_BY_POLICY", f"商家策略未开放动作：{action_type}")
+    if policy.get("require_note") and not str(action.get("reason") or "").strip():
+        raise ActionError("NOTE_REQUIRED", "商家策略要求填写动作原因")
     order_id = str(action.get("order_id") or "").strip()
     if not order_id:
         raise ActionError("INVALID_ACTION", "动作缺少 order_id")
@@ -115,6 +120,12 @@ def _execute(action: dict[str, Any], merchant_id: str) -> dict[str, Any]:
 
     if action_type == "REFUND_AFTER_SALE":
         ticket = _ticket_for_order(order_id, {"OPEN"}, str(action.get("ticket_id") or ""))
+        refund_amount = float(ticket.get("refund_amount") or order.get("amount") or 0)
+        allowed, code = store.check_action_policy(
+            merchant_id, action_type, refund_amount=refund_amount
+        )
+        if not allowed:
+            raise ActionError(code, f"退款金额 {refund_amount:.2f} 超出商家策略上限")
         resolved = store.resolve_after_sale(
             ticket["ticket_id"], approved=True, merchant_id=merchant_id
         )
@@ -141,7 +152,15 @@ def _execute(action: dict[str, Any], merchant_id: str) -> dict[str, Any]:
             amount = float(action.get("amount") or 0)
         except (TypeError, ValueError):
             raise ActionError("INVALID_ACTION", "补偿金额必须是数字") from None
-        cap = float(os.environ.get("QIANKE_COMPENSATION_MAX_AMOUNT") or "50")
+        cap = min(
+            float(os.environ.get("QIANKE_COMPENSATION_MAX_AMOUNT") or "50"),
+            float(policy["compensation_max_amount"]),
+        )
+        allowed, code = store.check_action_policy(
+            merchant_id, action_type, amount=amount
+        )
+        if not allowed:
+            raise ActionError(code, f"补偿金额超出商家策略上限 {cap:g} 元")
         if amount <= 0 or amount > cap:
             raise ActionError("INVALID_ACTION", f"补偿金额必须在 0~{cap:g} 元之间")
         reason = str(action.get("reason") or "Super-agent 售后补偿").strip()[:300]

@@ -361,7 +361,10 @@ def test_compensation_over_cap_is_rejected(c_store, monkeypatch):
     sa_store.decide_approval(item_id, approved=True, note="同意")
     executed = sa_actions.execute_approved(item_id)
     assert executed["approval"]["execution_status"] == "FAILED"
-    assert "INVALID_ACTION" in (executed.get("error") or "")
+    assert any(
+        code in (executed.get("error") or "")
+        for code in ("INVALID_ACTION", "COMPENSATION_EXCEEDS_POLICY")
+    )
     assert c_store.get_compensation(order["order_id"]) is None
 
 
