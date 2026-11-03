@@ -143,15 +143,33 @@ EventKey={"a":"approve","w":"saw_71b0b513f35b410a","s":"REFUND_ONLY"}
 
 ## 5.2 成功点击验证
 
-新卡片：
+真实点击卡片：
 
 ```text
-work_item: saw_54fecb19e50a43ca
-order:     order_70fd445a945940f3
-buttons:   仅退款 / 退货退款 / 驳回
+work_item: saw_ae8c9e528d394a47
+order:     order_f6669088a33e461d
+按钮:      仅退款
 ```
 
-卡片已真实发送，等待人工点击「仅退款」后确认成功执行。
+真实日志：
+
+```text
+14:42:51  原生卡片事件 ... has_response_code=True
+14:42:52  企业微信卡片更新成功   ← ⏳ 正在处理
+14:42:53  应用结果回写成功
+14:42:54  企业微信卡片更新成功   ← ✅ 已通过
+```
+
+最终：
+
+```text
+work_item: DONE
+exec:      EXECUTED
+ticket:    as_1e398d95e5ec4bb6
+card:      成功 / 审批通过，动作已执行成功
+```
+
+真实原生按钮 + 原地状态更新 + 最终结果卡片已完整闭环。
 
 `toparty=1` 兜底注意：会发给部门可见成员；当前部门只有 zzzzzzq。
 
