@@ -501,6 +501,14 @@ function auditExportUrl() {
   return `/api/superagent/audit/actions.csv?${params.toString()}`;
 }
 
+function auditPolicyExportUrl() {
+  const f = state.auditFilters;
+  const params = new URLSearchParams();
+  if (f.date_from) params.set("date_from", f.date_from);
+  if (f.date_to) params.set("date_to", f.date_to);
+  return `/api/superagent/audit/policy.csv?${params.toString()}`;
+}
+
 async function ensureViewData(view = state.view) {
   if (view === "orders") {
     if (!state.ordersLoaded) await loadOrders();
@@ -1790,8 +1798,8 @@ function auditView() {
           ${Object.entries(EXECUTION_STATUS_LABELS).map(([status, label]) => `<option value="${status}" ${state.auditFilters.execution_status === status ? "selected" : ""}>${label}</option>`).join("")}
         </select>
         <input data-audit-search type="search" placeholder="搜索工作项/订单" value="${escapeHtml(state.auditFilters.q || "")}" ${state.loading ? "disabled" : ""} />
-        <input data-audit-date-from type="date" value="${escapeHtml(state.auditFilters.date_from || "")}" ${state.loading ? "disabled" : ""} title="开始日期" />
-        <input data-audit-date-to type="date" value="${escapeHtml(state.auditFilters.date_to || "")}" ${state.loading ? "disabled" : ""} title="结束日期" />
+        <input data-audit-date-from type="datetime-local" step="60" value="${escapeHtml(state.auditFilters.date_from || "")}" ${state.loading ? "disabled" : ""} title="开始时间" />
+        <input data-audit-date-to type="datetime-local" step="60" value="${escapeHtml(state.auditFilters.date_to || "")}" ${state.loading ? "disabled" : ""} title="结束时间" />
         <a class="b-btn b-btn-ghost" href="${escapeHtml(auditExportUrl())}" download>导出 CSV</a>
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
@@ -1812,6 +1820,9 @@ function auditView() {
     </div>
     <div class="b-card b-audit-card">
       <h2 class="b-card-title">策略变更</h2>
+      <div class="b-audit-policy-tools">
+        <a class="b-btn b-btn-ghost" href="${escapeHtml(auditPolicyExportUrl())}" download>导出策略 CSV</a>
+      </div>
       <ul class="b-audit-policy">${policyRows}</ul>
       <div class="b-audit-pager">
         <span class="b-muted">共 ${state.auditPolicyTotal} 条 · 第 ${Math.floor(state.auditFilters.policy_offset / state.auditFilters.policy_limit) + 1} 页</span>

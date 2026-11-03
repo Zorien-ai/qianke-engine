@@ -129,7 +129,7 @@ def audit_actions_csv(
     target = _resolve_merchant(account, merchant_id)
     result = sa_store.list_action_audit(
         target,
-        limit=200,
+        limit=5000,
         offset=0,
         action_type=action_type,
         execution_status=execution_status,
@@ -184,6 +184,47 @@ def audit_policy(
         target, limit=limit, offset=offset, date_from=date_from, date_to=date_to
     )
     return {"merchant_id": target, **result}
+
+
+@router.get("/audit/policy.csv")
+def audit_policy_csv(
+    date_from: str = "",
+    date_to: str = "",
+    merchant_id: str | None = None,
+) -> Response:
+    account = _account()
+    target = _resolve_merchant(account, merchant_id)
+    result = c_store.query_policy_audit(
+        target, limit=5000, offset=0, date_from=date_from, date_to=date_to
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "changed_at", "changed_by", "compensation_before", "compensation_after",
+        "refund_before", "refund_after", "actions_before", "actions_after",
+        "require_note_before", "require_note_after",
+    ])
+    for row in result["items"]:
+        before = row.get("before") or {}
+        after = row.get("after") or {}
+        writer.writerow([
+            row.get("changed_at", ""),
+            row.get("changed_by", ""),
+            before.get("compensation_max_amount", ""),
+            after.get("compensation_max_amount", ""),
+            before.get("refund_max_amount", ""),
+            after.get("refund_max_amount", ""),
+            ",".join(before.get("allowed_actions") or []),
+            ",".join(after.get("allowed_actions") or []),
+            before.get("require_note", ""),
+            after.get("require_note", ""),
+        ])
+    content = "\ufeff" + buffer.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="superagent-policy-audit.csv"'},
+    )
 
 
 def _account() -> dict[str, Any]:

@@ -537,6 +537,13 @@ def get_card_response_codes(work_item_id: str) -> dict[str, str]:
         conn.close()
 
 
+def _audit_time_bound(value: str, *, end: bool = False) -> str:
+    text = str(value or "").strip().replace(" ", "T")
+    if len(text) == 10:
+        return text + ("T23:59:59.999999" if end else "T00:00:00")
+    return text
+
+
 def list_action_audit(
     merchant_id: str,
     limit: int = 100,
@@ -567,11 +574,11 @@ def list_action_audit(
         params.extend([like, like, like])
     ts = "COALESCE(a.executed_at, a.decided_at, a.created_at)"
     if date_from:
-        where.append(f"date({ts}) >= date(?)")
-        params.append(str(date_from)[:10])
+        where.append(f"datetime({ts}) >= datetime(?)")
+        params.append(_audit_time_bound(date_from))
     if date_to:
-        where.append(f"date({ts}) <= date(?)")
-        params.append(str(date_to)[:10])
+        where.append(f"datetime({ts}) <= datetime(?)")
+        params.append(_audit_time_bound(date_to, end=True))
     clause = " AND ".join(where)
     conn = store._connect()
     try:
@@ -585,7 +592,7 @@ def list_action_audit(
             "FROM sa_approval a JOIN sa_work_item w ON w.work_item_id = a.work_item_id "
             f"WHERE {clause} "
             "ORDER BY COALESCE(a.executed_at, a.decided_at, a.created_at) DESC LIMIT ? OFFSET ?",
-            (*params, max(1, min(int(limit), 200)), max(0, int(offset))),
+            (*params, max(1, min(int(limit), 5000)), max(0, int(offset))),
         ).fetchall()
         result = []
         for row in rows:

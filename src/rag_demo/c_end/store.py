@@ -801,6 +801,13 @@ def upsert_merchant_policy(
     return get_merchant_policy(merchant_id)
 
 
+def _audit_time_bound(value: str, *, end: bool = False) -> str:
+    text = str(value or "").strip().replace(" ", "T")
+    if len(text) == 10:
+        return text + ("T23:59:59.999999" if end else "T00:00:00")
+    return text
+
+
 def query_policy_audit(
     merchant_id: str,
     limit: int = 20,
@@ -813,11 +820,11 @@ def query_policy_audit(
     where = ["merchant_id = ?"]
     params: list[Any] = [merchant_id]
     if date_from:
-        where.append("date(changed_at) >= date(?)")
-        params.append(str(date_from)[:10])
+        where.append("datetime(changed_at) >= datetime(?)")
+        params.append(_audit_time_bound(date_from))
     if date_to:
-        where.append("date(changed_at) <= date(?)")
-        params.append(str(date_to)[:10])
+        where.append("datetime(changed_at) <= datetime(?)")
+        params.append(_audit_time_bound(date_to, end=True))
     clause = " AND ".join(where)
     init()
     conn = _connect()
@@ -828,7 +835,7 @@ def query_policy_audit(
         rows = conn.execute(
             f"SELECT * FROM c_merchant_policy_audit WHERE {clause} "
             "ORDER BY changed_at DESC LIMIT ? OFFSET ?",
-            (*params, max(1, min(int(limit), 200)), max(0, int(offset))),
+            (*params, max(1, min(int(limit), 5000)), max(0, int(offset))),
         ).fetchall()
         items = [
             {

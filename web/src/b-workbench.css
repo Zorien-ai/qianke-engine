@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
  * B 端独立商家工作台（/v2/b.html）：白色极简
  * 只使用中性色 + 低饱和强调色，无阴影堆叠、无渐变装饰
  * ========================================================== */
@@ -1159,4 +1159,6 @@ code,
 .b-audit-pager { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 10px; }
 .b-view-tools input[data-audit-search] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 7px 10px; font-size: 12px; background: #fff; min-width: 180px; }
 
-.b-view-tools input[type="date"] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 7px 8px; font-size: 12px; background: #fff; color: var(--b-ink, #1f1d19); }
+.b-view-tools input[type="date"], .b-view-tools input[type="datetime-local"] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 7px 8px; font-size: 12px; background: #fff; color: var(--b-ink, #1f1d19); }
+
+.b-audit-policy-tools { display: flex; justify-content: flex-end; }
