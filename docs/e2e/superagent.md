@@ -239,7 +239,7 @@ pytest tests/test_superagent.py -q
 # 12 passed
 
 npm run build
-# ✓ built in 4.03s
+# ✓ built in 4.46s
 # dist/b.html 已生成
 ```
 
@@ -288,6 +288,7 @@ API 重启 → dispatcher 恢复 PENDING/过期租约
 Eval v2（24 场景）详见：[superagent-eval-v2.md](superagent-eval-v2.md)
 Eval 稳定性与多次采样详见：[superagent-eval-stability.md](superagent-eval-stability.md)
 租户管理页面详见：[superagent-tenants.md](superagent-tenants.md)
+队列管理页面详见：[superagent-queue-ui.md](superagent-queue-ui.md)
 
 ## 8. 下一步
 

@@ -26,6 +26,7 @@ export default defineConfig({
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         b: fileURLToPath(new URL("./b.html", import.meta.url)),
         tenants: fileURLToPath(new URL("./tenants.html", import.meta.url)),
+        queue: fileURLToPath(new URL("./queue.html", import.meta.url)),
       },
     },
   },
