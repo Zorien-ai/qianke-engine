@@ -761,6 +761,34 @@ def count_jobs(
         conn.close()
 
 
+def work_item_stats() -> dict[str, int]:
+    init()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM sa_work_item GROUP BY status"
+        ).fetchall()
+        return {str(row["status"]).lower(): int(row["n"]) for row in rows}
+    finally:
+        conn.close()
+
+
+def approval_stats() -> dict[str, int]:
+    init()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT status, execution_status, COUNT(*) AS n FROM sa_approval "
+            "GROUP BY status, execution_status"
+        ).fetchall()
+        return {
+            f"{row['status']}_{row['execution_status']}".lower(): int(row["n"])
+            for row in rows
+        }
+    finally:
+        conn.close()
+
+
 def job_stats() -> dict[str, Any]:
     if _queue_is_pg():
         return _pg_queue().job_stats()

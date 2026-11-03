@@ -60,6 +60,7 @@ from rag_demo.api.demo_showcase import (
 from rag_demo.api.c_end import register_c_end
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
+from rag_demo.api.ops import register_ops
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache, dataset_data_version
 from rag_demo.config import (
@@ -660,6 +661,7 @@ register_c_end(app)
 # AI 监控 / Token 账单控制面（VIP）：/api/monitor/*、/api/billing/*、/api/admin/*。
 # 采集/账本在 rag_demo/ai_monitor.py，接口在 rag_demo/api/monitor.py。
 register_monitor(app)
+register_ops(app)
 
 # Vue 3 新界面（M3）：把构建产物挂到 /v2。
 # 项目根从本文件位置向上推导（api/main.py → api → rag_demo → src → 项目根），
