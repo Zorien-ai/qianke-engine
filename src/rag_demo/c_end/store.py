@@ -453,6 +453,14 @@ CREATE TABLE IF NOT EXISTS c_merchant_policy (
     updated_at               TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_tenant_provision (
+    provision_id    TEXT PRIMARY KEY,
+    merchant_id     TEXT NOT NULL,
+    owner_account_id INTEGER NOT NULL,
+    created_by      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS c_merchant_policy_audit (
     policy_audit_id TEXT PRIMARY KEY,
     merchant_id     TEXT NOT NULL,
@@ -678,6 +686,73 @@ POLICY_ACTIONS = (
     "REJECT_AFTER_SALE",
     "ISSUE_COMPENSATION",
 )
+
+
+def provision_tenant(
+    merchant_id: str,
+    name: str,
+    owner_account_id: int,
+    *,
+    compensation_max_amount: float = 50,
+    refund_max_amount: float = 1000,
+    allowed_actions: list[str] | tuple[str, ...] | None = None,
+    created_by: str = "",
+) -> dict[str, Any]:
+    """开通租户：创建/更新租户 + 绑定 owner + 初始化动作策略。"""
+    merchant_id = str(merchant_id or "").strip()
+    if not merchant_id:
+        raise CStoreError("INVALID_MERCHANT", "merchant_id 不能为空")
+    owner_account_id = int(owner_account_id)
+    if owner_account_id <= 0:
+        raise CStoreError("INVALID_OWNER", "owner_account_id 不合法")
+    existing = get_merchant_member(owner_account_id)
+    if existing is not None and existing["merchant_id"] != merchant_id:
+        raise CStoreError(
+            "ACCOUNT_ALREADY_BOUND",
+            f"账号已绑定商家 {existing['merchant_id']}，请先解绑",
+        )
+    tenant = create_tenant(merchant_id, name)
+    member = bind_merchant_member(owner_account_id, merchant_id, role="owner")
+    policy = upsert_merchant_policy(
+        merchant_id,
+        allowed_actions=list(allowed_actions or POLICY_ACTIONS),
+        compensation_max_amount=compensation_max_amount,
+        refund_max_amount=refund_max_amount,
+        require_note=False,
+        updated_by=created_by,
+    )
+    init()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_tenant_provision(provision_id, merchant_id, owner_account_id, "
+            "created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                f"tp_{uuid.uuid4().hex[:16]}",
+                merchant_id,
+                owner_account_id,
+                str(created_by or "")[:64],
+                _now(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"tenant": tenant, "member": member, "policy": policy}
+
+
+def list_tenant_provisions(merchant_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_tenant_provision WHERE merchant_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (str(merchant_id or "").strip(), max(1, min(int(limit), 200))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
 
 def _policy_payload(row: sqlite3.Row | None, merchant_id: str) -> dict[str, Any]:

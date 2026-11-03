@@ -87,6 +87,7 @@ function tenantView(tenant) {
         <span>工作项 <b>${counts.work_items || 0}</b></span>
         <span>待处理 <b>${counts.open_work_items || 0}</b></span>
       </div>
+      <div class="tenant-msg">动作策略：补偿上限 ¥${Number(tenant.policy?.compensation_max_amount ?? 50)} / 退款上限 ¥${Number(tenant.policy?.refund_max_amount ?? 1000)} · 允许 ${(tenant.policy?.allowed_actions || []).length} 个动作</div>
       ${tenant.backend_error ? `<div class="tenant-msg error">${esc(tenant.backend_error)}</div>` : ""}
       <div class="member-list">
         ${tenant.members.length ? tenant.members.map((member) => memberView(tenant, member)).join("") : '<div class="tenant-msg">还没有绑定成员</div>'}
@@ -112,11 +113,14 @@ function pageView() {
     ${statsView()}
     <div class="tenant-grid">${tenants.map(tenantView).join("") || '<div class="panel">暂无租户</div>'}</div>
     <section class="panel">
-      <h3>新建租户</h3>
+      <h3>开通租户</h3>
       <form class="form-row" id="create-tenant">
         <input id="tenant-id" placeholder="merchant_id，例如 m_tea_002" required />
         <input id="tenant-name" placeholder="租户名称" required />
-        <button class="btn primary" type="submit">创建</button>
+        <input id="tenant-owner" placeholder="owner 账号 ID" required style="width:120px" />
+        <input id="tenant-comp" type="number" min="0" max="100000" step="1" value="50" title="补偿上限" style="width:100px" />
+        <input id="tenant-refund" type="number" min="0" max="100000" step="1" value="1000" title="退款上限" style="width:110px" />
+        <button class="btn primary" type="submit">开通</button>
       </form>
       <div class="tenant-msg" id="create-msg"></div>
     </section>
@@ -156,10 +160,22 @@ async function createTenant(event) {
   event.preventDefault();
   const merchantId = document.getElementById("tenant-id").value.trim();
   const name = document.getElementById("tenant-name").value.trim();
+  const ownerAccountId = Number(document.getElementById("tenant-owner").value || 0);
+  const compensation = Number(document.getElementById("tenant-comp").value || 50);
+  const refund = Number(document.getElementById("tenant-refund").value || 1000);
   const message = document.getElementById("create-msg");
   try {
-    await api("/api/admin/tenants", { method: "POST", body: JSON.stringify({ merchant_id: merchantId, name }) });
-    message.textContent = "已创建";
+    const result = await api("/api/admin/tenants/provision", {
+      method: "POST",
+      body: JSON.stringify({
+        merchant_id: merchantId,
+        name,
+        owner_account_id: ownerAccountId,
+        compensation_max_amount: compensation,
+        refund_max_amount: refund,
+      }),
+    });
+    message.textContent = `已开通：owner ${result.owner?.username || ownerAccountId}，补偿上限 ¥${result.policy?.compensation_max_amount}`;
     message.className = "tenant-msg";
     await load();
   } catch (error) {

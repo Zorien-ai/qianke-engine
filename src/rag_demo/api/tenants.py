@@ -24,6 +24,15 @@ class MemberIn(BaseModel):
     role: str = Field(default="owner", pattern="^(owner|admin|staff)$")
 
 
+class ProvisionIn(BaseModel):
+    merchant_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=80)
+    owner_account_id: int | None = Field(default=None, ge=1)
+    owner_username: str = Field(default="", max_length=80)
+    compensation_max_amount: float = Field(default=50, ge=0, le=100000)
+    refund_max_amount: float = Field(default=1000, ge=0, le=100000)
+
+
 def _admin() -> dict[str, Any]:
     account = auth.current_account()
     if account is None:
@@ -75,6 +84,8 @@ def _tenant_payload(tenant: dict[str, Any]) -> dict[str, Any]:
     return {
         **tenant,
         "members": [_member_payload(m) for m in store.list_merchant_members(merchant_id)],
+        "policy": store.get_merchant_policy(merchant_id),
+        "provisions": store.list_tenant_provisions(merchant_id, limit=5),
         "counts": {
             "orders": len(orders),
             "products": len(products),
@@ -100,6 +111,39 @@ def create_tenant(req: TenantIn) -> dict[str, Any]:
     except store.CStoreError as exc:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
     return {"tenant": _tenant_payload(tenant)}
+
+
+@router.post("/provision")
+def provision_tenant(req: ProvisionIn) -> dict[str, Any]:
+    """开通租户：租户 + owner + 默认动作策略，一步完成。"""
+    admin = _admin()
+    owner = auth.find_user_by_id(req.owner_account_id) if req.owner_account_id else None
+    if owner is None and req.owner_username:
+        owner = auth.find_user(req.owner_username)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="owner 账号不存在")
+    if owner.get("status") != auth.STATUS_ACTIVE:
+        raise HTTPException(status_code=409, detail="owner 账号不可用")
+    try:
+        result = store.provision_tenant(
+            req.merchant_id,
+            req.name,
+            int(owner["id"]),
+            compensation_max_amount=req.compensation_max_amount,
+            refund_max_amount=req.refund_max_amount,
+            created_by=str(admin.get("username") or ""),
+        )
+    except store.CStoreError as exc:
+        status = 409 if exc.code in {"ACCOUNT_ALREADY_BOUND"} else 400
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message}) from exc
+    tenant = store.get_tenant(req.merchant_id)
+    assert tenant is not None
+    return {
+        "provisioned": True,
+        "tenant": _tenant_payload(tenant),
+        "owner": _member_payload(result["member"]),
+        "policy": result["policy"],
+    }
 
 
 @router.get("/accounts")

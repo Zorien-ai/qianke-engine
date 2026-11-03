@@ -233,13 +233,13 @@ http://127.0.0.1:8000/v2/b.html
 
 ```bash
 pytest tests/ -q
-# 649 passed, 5 skipped, 1 warning
+# 650 passed, 5 skipped, 1 warning
 
 pytest tests/test_superagent.py -q
 # 12 passed
 
 npm run build
-# ✓ built in 8.54s
+# ✓ built in 5.16s
 # dist/b.html 已生成
 ```
 
@@ -294,6 +294,7 @@ Eval 全量 24×2 基线详见：[superagent-eval-baseline-runs2.md](superagent-
 角色细粒度权限详见：[superagent-roles.md](superagent-roles.md)
 商家级动作策略详见：[superagent-policy.md](superagent-policy.md)
 动作执行审计详见：[superagent-audit.md](superagent-audit.md)
+租户开通流程详见：[superagent-tenant-provisioning.md](superagent-tenant-provisioning.md)
 运维就绪/指标/备份详见：[ops-readiness-backup.md](ops-readiness-backup.md)
 
 ## 8. 下一步
