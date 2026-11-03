@@ -244,6 +244,25 @@ def test_job_queue_claim_and_recovery(c_store):
     assert sa_store.get_job(first["job_id"])["status"] == "DONE"
 
 
+def test_job_list_filters_search_pagination(c_store):
+    ids = []
+    for index in range(2):
+        accepted = sa_router.ingest_event(
+            source="im", content="订单退款", channel=f"job-search-{index}"
+        )
+        work_item_id = accepted["work_item"]["work_item_id"]
+        ids.append(work_item_id)
+        sa_store.enqueue_job(work_item_id)
+    page = sa_store.list_jobs(limit=1, offset=0)
+    assert len(page) == 1
+    assert sa_store.count_jobs() >= 2
+    query = ids[0][-8:]
+    rows = sa_store.list_jobs(q=query)
+    assert rows
+    assert all(query in row["work_item_id"] or query in row["job_id"] for row in rows)
+    assert sa_store.count_jobs(q=query) == len(rows)
+
+
 def test_job_stats_and_dead_letter_replay(c_store):
     accepted = sa_router.ingest_event(source="im", content="订单退款", channel="job-replay")
     work_item_id = accepted["work_item"]["work_item_id"]

@@ -16,6 +16,9 @@ http://127.0.0.1:8000/v2/queue.html
 Job 总数 / PENDING / RUNNING / DONE / FAILED / DEAD
 按状态过滤
 按类型过滤（WORKER / ACTION）
+关键词搜索：Job / WorkItem / Worker / 错误
+分页：每页 50 条，上一页/下一页
+5 秒自动刷新（可关闭）
 最老 PENDING 时间
 Job 列表：Job ID、WorkItem、类型、状态、attempts、worker、错误、更新时间
 DEAD/FAILED 一键重放
@@ -24,12 +27,16 @@ DEAD/FAILED 一键重放
 ## 2. 数据接口
 
 ```text
-GET  /api/superagent/jobs?limit=100&status=...&kind=...
+GET  /api/superagent/jobs?limit=50&offset=0&status=&kind=&q=
 GET  /api/superagent/jobs/stats
 POST /api/superagent/jobs/{job_id}/replay
 ```
 
-`/jobs` 同时返回 `jobs` 和 `stats`。
+`/jobs` 同时返回：
+
+```text
+jobs / total / offset / limit / stats
+```
 
 ## 3. 浏览器验证
 
@@ -38,16 +45,18 @@ Playwright：
 ```text
 导航 /v2/queue.html
 标题：千客 · 队列管理
-总任务 149 / DONE 149
-状态、类型过滤器渲染
-列表显示 100 条
+总任务 246
+分页 1/5
+搜索 saj_ed683b3e2bdb4b8f → 共 1 条
+清空搜索 → 下一页 → 第 2/5 页
+5s 自动刷新默认开启
 console errors: 0
 ```
 
 截图：
 
 ```text
-.mcp/playwright-output/queue-admin.png
+.mcp/playwright-output/queue-page2.png
 ```
 
 ## 4. 重放交互
@@ -82,9 +91,8 @@ npm run build
 ## 6. 已知限制
 
 ```text
-没有分页，最多显示 100 条
-没有自动刷新/轮询
-没有按 WorkItem/Worker 搜索
+没有按时间范围过滤
+自动刷新固定 5s，不可配置
 没有批量重放
 没有死信导出
 ```

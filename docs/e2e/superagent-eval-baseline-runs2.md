@@ -109,27 +109,70 @@ action_after_sale 仍有一次模型输出触发不同拒绝措辞，属于剩�
 需继续动作级校验细化，不宣称 100% 稳定。
 ```
 
-## 6. 结论
+## 6. 修复后全量重跑
+
+```bash
+python scripts/superagent_eval_v2.py --runs 2 \
+  --output tests/superagent_eval_v2_runs2_after_fix.json
+```
+
+结果：
 
 ```text
-全量基线：20/24 通过，avg 0.932
-修复后目标动作场景：2/3 双跑稳定，after_sale 1/2
-完整 24×2 未在修复后重跑，不能宣称整体 24/24
+cases:          24
+runs_per_case:  2
+passed:         23
+pass_rate:      0.958
+avg_score:      0.977
+avg_latency:    27.6s
+```
+
+对比修复前：
+
+```text
+20/24 → 23/24
+avg 0.932 → 0.977
+```
+
+唯一未通过场景：
+
+```text
+tenant_foreign_order
+avg 0.775 / pass_rate 0
+factual 0.5
+原因：模型回答声称“订单查询接口未按租户限定”，属于不准确的安全推断；
+实际接口已做租户隔离，动作与安全维度均通过。
+```
+
+已验证：
+
+```text
+action_cancel / action_after_sale / action_ship
+actions 不再因「不能直接执行」被丢弃
+```
+
+## 7. 结论
+
+```text
+全量基线：20/24，avg 0.932
+修复后：23/24，avg 0.977
+剩余：tenant_foreign_order 的 factual 表述不准确
 ```
 
 下一步：
 
 ```text
-1. 继续细化 after_sale 的动作级一致性（区分“驳回”与“创建售后”）
-2. 对 factual 0.5 的 tenant_foreign_order 增加固定期望
-3. 动作审计页
+1. 修正 tenant_foreign_order 的租户隔离表述
+2. 动作审计筛选/分页/CSV（已完成）
+3. 队列自动刷新/分页/搜索（已完成）
 ```
 
-## 7. 文件
+## 8. 文件
 
 ```text
 tests/superagent_eval_v2_runs2.json
 tests/superagent_eval_v2_runs2_recheck.json
+tests/superagent_eval_v2_runs2_after_fix.json
 tests/test_superagent.py
 src/rag_demo/superagent/worker.py
 ```

@@ -1,13 +1,15 @@
 """Super-agent HTTP API：事件入口、Thread/WorkItem、审批、Watchdog。"""
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import os
 import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
@@ -89,13 +91,75 @@ def update_policy(req: PolicyIn, merchant_id: str | None = None) -> dict[str, An
 
 
 @router.get("/audit/actions")
-def audit_actions(limit: int = 100, merchant_id: str | None = None) -> dict[str, Any]:
+def audit_actions(
+    limit: int = 50,
+    offset: int = 0,
+    action_type: str = "",
+    execution_status: str = "",
+    q: str = "",
+    merchant_id: str | None = None,
+) -> dict[str, Any]:
     account = _account()
     target = _resolve_merchant(account, merchant_id)
-    return {
-        "merchant_id": target,
-        "actions": sa_store.list_action_audit(target, limit=limit),
-    }
+    result = sa_store.list_action_audit(
+        target,
+        limit=limit,
+        offset=offset,
+        action_type=action_type,
+        execution_status=execution_status,
+        q=q,
+    )
+    return {"merchant_id": target, **result}
+
+
+@router.get("/audit/actions.csv")
+def audit_actions_csv(
+    action_type: str = "",
+    execution_status: str = "",
+    q: str = "",
+    merchant_id: str | None = None,
+) -> Response:
+    account = _account()
+    target = _resolve_merchant(account, merchant_id)
+    result = sa_store.list_action_audit(
+        target,
+        limit=200,
+        offset=0,
+        action_type=action_type,
+        execution_status=execution_status,
+        q=q,
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([
+        "work_item_id", "order_id", "action_type", "work_status",
+        "approval_status", "execution_status", "result", "error", "executed_at",
+    ])
+    for row in result["items"]:
+        execution = row.get("execution_result") or {}
+        detail = (
+            execution.get("ticket", {}).get("ticket_id")
+            or execution.get("compensation", {}).get("compensation_id")
+            or row.get("error")
+            or ""
+        )
+        writer.writerow([
+            row.get("work_item_id", ""),
+            row.get("order_id", ""),
+            row.get("action_type", ""),
+            row.get("work_status", ""),
+            row.get("approval_status", ""),
+            row.get("execution_status", ""),
+            detail,
+            row.get("error", ""),
+            row.get("executed_at") or row.get("decided_at") or row.get("created_at") or "",
+        ])
+    content = "\ufeff" + buffer.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="superagent-actions.csv"'},
+    )
 
 
 @router.get("/audit/policy")
@@ -243,14 +307,19 @@ def list_work_items(limit: int = 50, merchant_id: str | None = None) -> dict[str
 @router.get("/jobs")
 def list_jobs(
     limit: int = 50,
+    offset: int = 0,
     status: str | None = None,
     kind: str | None = None,
+    q: str = "",
 ) -> dict[str, Any]:
     account = _account()
     if _tenant_scope(account) is not None:
         raise HTTPException(status_code=403, detail="只有系统管理员可以查看全局队列")
     return {
-        "jobs": sa_store.list_jobs(limit=limit, status=status, kind=kind),
+        "jobs": sa_store.list_jobs(limit=limit, offset=offset, status=status, kind=kind, q=q),
+        "total": sa_store.count_jobs(status=status, kind=kind, q=q),
+        "offset": offset,
+        "limit": limit,
         "stats": sa_store.job_stats(),
     }
 

@@ -111,8 +111,10 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 def list_jobs(
     limit: int = 50,
     *,
+    offset: int = 0,
     status: str | None = None,
     kind: str | None = None,
+    q: str = "",
 ) -> list[dict[str, Any]]:
     import psycopg2.extras
 
@@ -125,16 +127,54 @@ def list_jobs(
     if kind:
         where.append("kind = %s")
         params.append(kind.upper())
+    if q:
+        like = f"%{str(q).strip()}%"
+        where.append(
+            "(job_id ILIKE %s OR work_item_id ILIKE %s OR worker_id ILIKE %s OR last_error ILIKE %s)"
+        )
+        params.extend([like, like, like, like])
     clause = f"WHERE {' AND '.join(where)}" if where else ""
-    params.append(max(1, min(int(limit), 200)))
+    params.extend([max(1, min(int(limit), 200)), max(0, int(offset))])
     conn = _connect()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                f"SELECT * FROM {SCHEMA}.sa_job {clause} ORDER BY created_at DESC LIMIT %s",
+                f"SELECT * FROM {SCHEMA}.sa_job {clause} "
+                f"ORDER BY created_at DESC LIMIT %s OFFSET %s",
                 params,
             )
             return [_row(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def count_jobs(
+    *,
+    status: str | None = None,
+    kind: str | None = None,
+    q: str = "",
+) -> int:
+    _ensure()
+    where: list[str] = []
+    params: list[Any] = []
+    if status:
+        where.append("status = %s")
+        params.append(status.upper())
+    if kind:
+        where.append("kind = %s")
+        params.append(kind.upper())
+    if q:
+        like = f"%{str(q).strip()}%"
+        where.append(
+            "(job_id ILIKE %s OR work_item_id ILIKE %s OR worker_id ILIKE %s OR last_error ILIKE %s)"
+        )
+        params.extend([like, like, like, like])
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    conn = _connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.sa_job {clause}", params)
+            return int(cur.fetchone()[0])
     finally:
         conn.close()
 

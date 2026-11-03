@@ -1155,3 +1155,6 @@ code,
 .b-status { display: inline-block; border-radius: 999px; padding: 2px 8px; border: 1px solid var(--b-line, #e3ddd2); font-size: 11px; white-space: nowrap; }
 .b-status.is-success { color: #1f4d3a; border-color: #cfe0d6; }
 .b-status.is-danger { color: #a33a2f; border-color: #e7cfcb; }
+
+.b-audit-pager { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 10px; }
+.b-view-tools input[data-audit-search] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 7px 10px; font-size: 12px; background: #fff; min-width: 180px; }

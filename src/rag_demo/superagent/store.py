@@ -537,17 +537,46 @@ def get_card_response_codes(work_item_id: str) -> dict[str, str]:
         conn.close()
 
 
-def list_action_audit(merchant_id: str, limit: int = 100) -> list[dict[str, Any]]:
-    """动作执行审计：审批、执行状态与结果，按最近时间倒序。"""
+def list_action_audit(
+    merchant_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    *,
+    action_type: str = "",
+    execution_status: str = "",
+    q: str = "",
+) -> dict[str, Any]:
+    """动作执行审计：支持动作/执行状态/关键词过滤与分页。"""
     init()
+    where = ["w.merchant_id = ?", "a.action_json != '{}'"]
+    params: list[Any] = [str(merchant_id or "").strip()]
+    if action_type:
+        where.append("json_extract(a.action_json, '$.action_type') = ?")
+        params.append(str(action_type).strip().upper())
+    if execution_status:
+        where.append("a.execution_status = ?")
+        params.append(str(execution_status).strip().upper())
+    if q:
+        like = f"%{str(q).strip()}%"
+        where.append(
+            "(w.work_item_id LIKE ? OR json_extract(a.action_json, '$.order_id') LIKE ? "
+            "OR a.action_json LIKE ?)"
+        )
+        params.extend([like, like, like])
+    clause = " AND ".join(where)
     conn = store._connect()
     try:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM sa_approval a JOIN sa_work_item w "
+            f"ON w.work_item_id = a.work_item_id WHERE {clause}",
+            params,
+        ).fetchone()["n"]
         rows = conn.execute(
             "SELECT a.*, w.status AS work_status, w.merchant_id AS work_merchant_id "
             "FROM sa_approval a JOIN sa_work_item w ON w.work_item_id = a.work_item_id "
-            "WHERE w.merchant_id = ? AND a.action_json != '{}' "
-            "ORDER BY COALESCE(a.executed_at, a.decided_at, a.created_at) DESC LIMIT ?",
-            (str(merchant_id or "").strip(), max(1, min(int(limit), 200))),
+            f"WHERE {clause} "
+            "ORDER BY COALESCE(a.executed_at, a.decided_at, a.created_at) DESC LIMIT ? OFFSET ?",
+            (*params, max(1, min(int(limit), 200)), max(0, int(offset))),
         ).fetchall()
         result = []
         for row in rows:
@@ -575,7 +604,7 @@ def list_action_audit(merchant_id: str, limit: int = 100) -> list[dict[str, Any]
                 "decided_at": row["decided_at"],
                 "executed_at": row["executed_at"],
             })
-        return result
+        return {"items": result, "total": int(total), "limit": limit, "offset": offset}
     finally:
         conn.close()
 def _queue_is_pg() -> bool:
@@ -647,11 +676,15 @@ def get_job(job_id: str) -> dict[str, Any] | None:
 def list_jobs(
     limit: int = 50,
     *,
+    offset: int = 0,
     status: str | None = None,
     kind: str | None = None,
+    q: str = "",
 ) -> list[dict[str, Any]]:
     if _queue_is_pg():
-        return _pg_queue().list_jobs(limit=limit, status=status, kind=kind)
+        return _pg_queue().list_jobs(
+            limit=limit, offset=offset, status=status, kind=kind, q=q
+        )
     init()
     where: list[str] = []
     params: list[Any] = []
@@ -661,15 +694,53 @@ def list_jobs(
     if kind:
         where.append("kind = ?")
         params.append(kind.upper())
+    if q:
+        like = f"%{str(q).strip()}%"
+        where.append(
+            "(job_id LIKE ? OR work_item_id LIKE ? OR worker_id LIKE ? OR last_error LIKE ?)"
+        )
+        params.extend([like, like, like, like])
     clause = f"WHERE {' AND '.join(where)}" if where else ""
-    params.append(max(1, min(int(limit), 200)))
+    params.extend([max(1, min(int(limit), 200)), max(0, int(offset))])
     conn = store._connect()
     try:
         rows = conn.execute(
-            f"SELECT * FROM sa_job {clause} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT * FROM sa_job {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             params,
         ).fetchall()
         return [_job_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def count_jobs(
+    *,
+    status: str | None = None,
+    kind: str | None = None,
+    q: str = "",
+) -> int:
+    if _queue_is_pg():
+        return _pg_queue().count_jobs(status=status, kind=kind, q=q)
+    init()
+    where: list[str] = []
+    params: list[Any] = []
+    if status:
+        where.append("status = ?")
+        params.append(status.upper())
+    if kind:
+        where.append("kind = ?")
+        params.append(kind.upper())
+    if q:
+        like = f"%{str(q).strip()}%"
+        where.append(
+            "(job_id LIKE ? OR work_item_id LIKE ? OR worker_id LIKE ? OR last_error LIKE ?)"
+        )
+        params.extend([like, like, like, like])
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    conn = store._connect()
+    try:
+        row = conn.execute(f"SELECT COUNT(*) AS n FROM sa_job {clause}", params).fetchone()
+        return int(row["n"])
     finally:
         conn.close()
 

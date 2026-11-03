@@ -143,9 +143,9 @@ def test_action_audit_lists_executed_action(c_store):
     sa_store.decide_approval(work_item_id, approved=True, note="同意")
     actions.execute_approved(work_item_id)
 
-    rows = sa_store.list_action_audit("m_gear_002")
-    assert rows
-    row = next(item for item in rows if item["work_item_id"] == work_item_id)
+    result = sa_store.list_action_audit("m_gear_002")
+    assert result["items"]
+    row = next(item for item in result["items"] if item["work_item_id"] == work_item_id)
     assert row["action_type"] == "ISSUE_COMPENSATION"
     assert row["order_id"] == order_id
     assert row["execution_status"] == "EXECUTED"

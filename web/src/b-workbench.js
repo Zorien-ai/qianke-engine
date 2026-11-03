@@ -111,7 +111,9 @@ const state = {
   policySaving: false,
   auditActions: [],
   auditPolicy: [],
+  auditTotal: 0,
   auditLoaded: false,
+  auditFilters: { action_type: "", execution_status: "", q: "", limit: 50, offset: 0 },
   shipForm: null,
   cancelConfirmId: "",
   /* Super-agent */
@@ -442,11 +444,20 @@ async function loadAudit() {
   state.error = "";
   render();
   try {
+    const f = state.auditFilters;
+    const params = new URLSearchParams({
+      limit: String(f.limit),
+      offset: String(f.offset),
+    });
+    if (f.action_type) params.set("action_type", f.action_type);
+    if (f.execution_status) params.set("execution_status", f.execution_status);
+    if (f.q) params.set("q", f.q);
     const [actions, policy] = await Promise.all([
-      api("/api/superagent/audit/actions?limit=100"),
+      api(`/api/superagent/audit/actions?${params.toString()}`),
       api("/api/superagent/audit/policy?limit=50"),
     ]);
-    state.auditActions = actions.actions || [];
+    state.auditActions = actions.items || [];
+    state.auditTotal = Number(actions.total || 0);
     state.auditPolicy = policy.changes || [];
     state.auditLoaded = true;
   } catch (error) {
@@ -457,6 +468,15 @@ async function loadAudit() {
     state.loading = false;
     render();
   }
+}
+
+function auditExportUrl() {
+  const f = state.auditFilters;
+  const params = new URLSearchParams();
+  if (f.action_type) params.set("action_type", f.action_type);
+  if (f.execution_status) params.set("execution_status", f.execution_status);
+  if (f.q) params.set("q", f.q);
+  return `/api/superagent/audit/actions.csv?${params.toString()}`;
 }
 
 async function ensureViewData(view = state.view) {
@@ -1739,6 +1759,16 @@ function auditView() {
         <p class="b-muted">动作执行结果与商家策略变更 · 只读</p>
       </div>
       <div class="b-view-tools">
+        <select data-audit-action-filter ${state.loading ? "disabled" : ""}>
+          <option value="">全部动作</option>
+          ${Object.entries(ACTION_LABELS).map(([action, label]) => `<option value="${action}" ${state.auditFilters.action_type === action ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+        <select data-audit-status-filter ${state.loading ? "disabled" : ""}>
+          <option value="">全部执行状态</option>
+          ${Object.entries(EXECUTION_STATUS_LABELS).map(([status, label]) => `<option value="${status}" ${state.auditFilters.execution_status === status ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+        <input data-audit-search type="search" placeholder="搜索工作项/订单" value="${escapeHtml(state.auditFilters.q || "")}" ${state.loading ? "disabled" : ""} />
+        <a class="b-btn b-btn-ghost" href="${escapeHtml(auditExportUrl())}" download>导出 CSV</a>
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
     </div>
@@ -1749,6 +1779,11 @@ function auditView() {
           <thead><tr><th>工作项</th><th>动作</th><th>订单</th><th>工作项状态</th><th>执行</th><th>结果</th><th>时间</th></tr></thead>
           <tbody>${actionRows}</tbody>
         </table>
+      </div>
+      <div class="b-audit-pager">
+        <span class="b-muted">共 ${state.auditTotal} 条 · 第 ${Math.floor(state.auditFilters.offset / state.auditFilters.limit) + 1} 页</span>
+        <button type="button" class="b-btn b-btn-ghost" data-audit-prev ${state.auditFilters.offset <= 0 ? "disabled" : ""}>上一页</button>
+        <button type="button" class="b-btn b-btn-ghost" data-audit-next ${state.auditFilters.offset + state.auditFilters.limit >= state.auditTotal ? "disabled" : ""}>下一页</button>
       </div>
     </div>
     <div class="b-card b-audit-card">
@@ -2047,6 +2082,28 @@ function bindEvents() {
   if (eventsBound) return;
   eventsBound = true;
 
+  root.addEventListener("change", async (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target.matches("[data-audit-action-filter]")) {
+      state.auditFilters.action_type = target.value;
+      state.auditFilters.offset = 0;
+      await loadAudit();
+      return;
+    }
+    if (target.matches("[data-audit-status-filter]")) {
+      state.auditFilters.execution_status = target.value;
+      state.auditFilters.offset = 0;
+      await loadAudit();
+      return;
+    }
+    if (target.matches("[data-audit-search]")) {
+      state.auditFilters.q = target.value.trim();
+      state.auditFilters.offset = 0;
+      await loadAudit();
+    }
+  });
+
   root.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
@@ -2081,6 +2138,16 @@ function bindEvents() {
     }
     if (target.closest("[data-save-policy]")) {
       await savePolicy();
+      return;
+    }
+    if (target.closest("[data-audit-prev]")) {
+      state.auditFilters.offset = Math.max(0, state.auditFilters.offset - state.auditFilters.limit);
+      await loadAudit();
+      return;
+    }
+    if (target.closest("[data-audit-next]")) {
+      state.auditFilters.offset += state.auditFilters.limit;
+      await loadAudit();
       return;
     }
     if (target.closest("[data-watchdog]")) {
