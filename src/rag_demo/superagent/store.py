@@ -545,6 +545,8 @@ def list_action_audit(
     action_type: str = "",
     execution_status: str = "",
     q: str = "",
+    date_from: str = "",
+    date_to: str = "",
 ) -> dict[str, Any]:
     """动作执行审计：支持动作/执行状态/关键词过滤与分页。"""
     init()
@@ -563,6 +565,13 @@ def list_action_audit(
             "OR a.action_json LIKE ?)"
         )
         params.extend([like, like, like])
+    ts = "COALESCE(a.executed_at, a.decided_at, a.created_at)"
+    if date_from:
+        where.append(f"date({ts}) >= date(?)")
+        params.append(str(date_from)[:10])
+    if date_to:
+        where.append(f"date({ts}) <= date(?)")
+        params.append(str(date_to)[:10])
     clause = " AND ".join(where)
     conn = store._connect()
     try:

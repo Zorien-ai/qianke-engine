@@ -801,16 +801,36 @@ def upsert_merchant_policy(
     return get_merchant_policy(merchant_id)
 
 
-def list_policy_audit(merchant_id: str, limit: int = 50) -> list[dict[str, Any]]:
+def query_policy_audit(
+    merchant_id: str,
+    limit: int = 20,
+    offset: int = 0,
+    *,
+    date_from: str = "",
+    date_to: str = "",
+) -> dict[str, Any]:
+    merchant_id = str(merchant_id or "").strip()
+    where = ["merchant_id = ?"]
+    params: list[Any] = [merchant_id]
+    if date_from:
+        where.append("date(changed_at) >= date(?)")
+        params.append(str(date_from)[:10])
+    if date_to:
+        where.append("date(changed_at) <= date(?)")
+        params.append(str(date_to)[:10])
+    clause = " AND ".join(where)
     init()
     conn = _connect()
     try:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM c_merchant_policy_audit WHERE {clause}", params
+        ).fetchone()["n"]
         rows = conn.execute(
-            "SELECT * FROM c_merchant_policy_audit WHERE merchant_id = ? "
-            "ORDER BY changed_at DESC LIMIT ?",
-            (str(merchant_id or "").strip(), max(1, min(int(limit), 200))),
+            f"SELECT * FROM c_merchant_policy_audit WHERE {clause} "
+            "ORDER BY changed_at DESC LIMIT ? OFFSET ?",
+            (*params, max(1, min(int(limit), 200)), max(0, int(offset))),
         ).fetchall()
-        return [
+        items = [
             {
                 "policy_audit_id": row["policy_audit_id"],
                 "merchant_id": row["merchant_id"],
@@ -821,8 +841,13 @@ def list_policy_audit(merchant_id: str, limit: int = 50) -> list[dict[str, Any]]
             }
             for row in rows
         ]
+        return {"items": items, "total": int(total), "limit": limit, "offset": offset}
     finally:
         conn.close()
+
+
+def list_policy_audit(merchant_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    return query_policy_audit(merchant_id, limit=limit)["items"]
 
 
 def check_action_policy(

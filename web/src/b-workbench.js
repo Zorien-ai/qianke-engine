@@ -112,8 +112,19 @@ const state = {
   auditActions: [],
   auditPolicy: [],
   auditTotal: 0,
+  auditPolicyTotal: 0,
   auditLoaded: false,
-  auditFilters: { action_type: "", execution_status: "", q: "", limit: 50, offset: 0 },
+  auditFilters: {
+    action_type: "",
+    execution_status: "",
+    q: "",
+    date_from: "",
+    date_to: "",
+    limit: 50,
+    offset: 0,
+    policy_offset: 0,
+    policy_limit: 10,
+  },
   shipForm: null,
   cancelConfirmId: "",
   /* Super-agent */
@@ -452,13 +463,22 @@ async function loadAudit() {
     if (f.action_type) params.set("action_type", f.action_type);
     if (f.execution_status) params.set("execution_status", f.execution_status);
     if (f.q) params.set("q", f.q);
+    if (f.date_from) params.set("date_from", f.date_from);
+    if (f.date_to) params.set("date_to", f.date_to);
+    const policyParams = new URLSearchParams({
+      limit: String(f.policy_limit),
+      offset: String(f.policy_offset),
+    });
+    if (f.date_from) policyParams.set("date_from", f.date_from);
+    if (f.date_to) policyParams.set("date_to", f.date_to);
     const [actions, policy] = await Promise.all([
       api(`/api/superagent/audit/actions?${params.toString()}`),
-      api("/api/superagent/audit/policy?limit=50"),
+      api(`/api/superagent/audit/policy?${policyParams.toString()}`),
     ]);
     state.auditActions = actions.items || [];
     state.auditTotal = Number(actions.total || 0);
-    state.auditPolicy = policy.changes || [];
+    state.auditPolicy = policy.items || [];
+    state.auditPolicyTotal = Number(policy.total || 0);
     state.auditLoaded = true;
   } catch (error) {
     if (handleAuthFailure(error)) return;
@@ -476,6 +496,8 @@ function auditExportUrl() {
   if (f.action_type) params.set("action_type", f.action_type);
   if (f.execution_status) params.set("execution_status", f.execution_status);
   if (f.q) params.set("q", f.q);
+  if (f.date_from) params.set("date_from", f.date_from);
+  if (f.date_to) params.set("date_to", f.date_to);
   return `/api/superagent/audit/actions.csv?${params.toString()}`;
 }
 
@@ -1768,6 +1790,8 @@ function auditView() {
           ${Object.entries(EXECUTION_STATUS_LABELS).map(([status, label]) => `<option value="${status}" ${state.auditFilters.execution_status === status ? "selected" : ""}>${label}</option>`).join("")}
         </select>
         <input data-audit-search type="search" placeholder="搜索工作项/订单" value="${escapeHtml(state.auditFilters.q || "")}" ${state.loading ? "disabled" : ""} />
+        <input data-audit-date-from type="date" value="${escapeHtml(state.auditFilters.date_from || "")}" ${state.loading ? "disabled" : ""} title="开始日期" />
+        <input data-audit-date-to type="date" value="${escapeHtml(state.auditFilters.date_to || "")}" ${state.loading ? "disabled" : ""} title="结束日期" />
         <a class="b-btn b-btn-ghost" href="${escapeHtml(auditExportUrl())}" download>导出 CSV</a>
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
@@ -1789,6 +1813,11 @@ function auditView() {
     <div class="b-card b-audit-card">
       <h2 class="b-card-title">策略变更</h2>
       <ul class="b-audit-policy">${policyRows}</ul>
+      <div class="b-audit-pager">
+        <span class="b-muted">共 ${state.auditPolicyTotal} 条 · 第 ${Math.floor(state.auditFilters.policy_offset / state.auditFilters.policy_limit) + 1} 页</span>
+        <button type="button" class="b-btn b-btn-ghost" data-audit-policy-prev ${state.auditFilters.policy_offset <= 0 ? "disabled" : ""}>上一页</button>
+        <button type="button" class="b-btn b-btn-ghost" data-audit-policy-next ${state.auditFilters.policy_offset + state.auditFilters.policy_limit >= state.auditPolicyTotal ? "disabled" : ""}>下一页</button>
+      </div>
     </div>
   </section>`;
 }
@@ -2101,6 +2130,20 @@ function bindEvents() {
       state.auditFilters.q = target.value.trim();
       state.auditFilters.offset = 0;
       await loadAudit();
+      return;
+    }
+    if (target.matches("[data-audit-date-from]")) {
+      state.auditFilters.date_from = target.value;
+      state.auditFilters.offset = 0;
+      state.auditFilters.policy_offset = 0;
+      await loadAudit();
+      return;
+    }
+    if (target.matches("[data-audit-date-to]")) {
+      state.auditFilters.date_to = target.value;
+      state.auditFilters.offset = 0;
+      state.auditFilters.policy_offset = 0;
+      await loadAudit();
     }
   });
 
@@ -2147,6 +2190,19 @@ function bindEvents() {
     }
     if (target.closest("[data-audit-next]")) {
       state.auditFilters.offset += state.auditFilters.limit;
+      await loadAudit();
+      return;
+    }
+    if (target.closest("[data-audit-policy-prev]")) {
+      state.auditFilters.policy_offset = Math.max(
+        0,
+        state.auditFilters.policy_offset - state.auditFilters.policy_limit,
+      );
+      await loadAudit();
+      return;
+    }
+    if (target.closest("[data-audit-policy-next]")) {
+      state.auditFilters.policy_offset += state.auditFilters.policy_limit;
       await loadAudit();
       return;
     }

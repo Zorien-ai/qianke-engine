@@ -97,6 +97,8 @@ def audit_actions(
     action_type: str = "",
     execution_status: str = "",
     q: str = "",
+    date_from: str = "",
+    date_to: str = "",
     merchant_id: str | None = None,
 ) -> dict[str, Any]:
     account = _account()
@@ -108,6 +110,8 @@ def audit_actions(
         action_type=action_type,
         execution_status=execution_status,
         q=q,
+        date_from=date_from,
+        date_to=date_to,
     )
     return {"merchant_id": target, **result}
 
@@ -117,6 +121,8 @@ def audit_actions_csv(
     action_type: str = "",
     execution_status: str = "",
     q: str = "",
+    date_from: str = "",
+    date_to: str = "",
     merchant_id: str | None = None,
 ) -> Response:
     account = _account()
@@ -128,6 +134,8 @@ def audit_actions_csv(
         action_type=action_type,
         execution_status=execution_status,
         q=q,
+        date_from=date_from,
+        date_to=date_to,
     )
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -163,13 +171,19 @@ def audit_actions_csv(
 
 
 @router.get("/audit/policy")
-def audit_policy(limit: int = 50, merchant_id: str | None = None) -> dict[str, Any]:
+def audit_policy(
+    limit: int = 20,
+    offset: int = 0,
+    date_from: str = "",
+    date_to: str = "",
+    merchant_id: str | None = None,
+) -> dict[str, Any]:
     account = _account()
     target = _resolve_merchant(account, merchant_id)
-    return {
-        "merchant_id": target,
-        "changes": c_store.list_policy_audit(target, limit=limit),
-    }
+    result = c_store.query_policy_audit(
+        target, limit=limit, offset=offset, date_from=date_from, date_to=date_to
+    )
+    return {"merchant_id": target, **result}
 
 
 def _account() -> dict[str, Any]:

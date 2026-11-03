@@ -69,6 +69,12 @@ def test_policy_upsert_and_validation(c_store):
         updated_by="owner",
     )
     assert len(store.list_policy_audit("m_gear_002")) == 1
+    paged = store.query_policy_audit("m_gear_002", limit=1, offset=0)
+    assert paged["total"] == 1
+    assert len(paged["items"]) == 1
+    today = paged["items"][0]["changed_at"][:10]
+    assert store.query_policy_audit("m_gear_002", date_from=today)["total"] == 1
+    assert store.query_policy_audit("m_gear_002", date_from="2099-01-01")["total"] == 0
     with pytest.raises(store.CStoreError):
         store.upsert_merchant_policy(
             "m_gear_002",
@@ -150,3 +156,7 @@ def test_action_audit_lists_executed_action(c_store):
     assert row["order_id"] == order_id
     assert row["execution_status"] == "EXECUTED"
     assert row["work_status"] == "DONE"
+    today = row["executed_at"][:10]
+    scoped = sa_store.list_action_audit("m_gear_002", date_from=today, date_to=today)
+    assert scoped["total"] >= 1
+    assert sa_store.list_action_audit("m_gear_002", date_from="2099-01-01")["total"] == 0

@@ -239,7 +239,7 @@ pytest tests/test_superagent.py -q
 # 12 passed
 
 npm run build
-# ✓ built in 4.70s
+# ✓ built in 5.83s
 # dist/b.html 已生成
 ```
 

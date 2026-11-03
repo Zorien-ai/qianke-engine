@@ -1158,3 +1158,5 @@ code,
 
 .b-audit-pager { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 10px; }
 .b-view-tools input[data-audit-search] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 7px 10px; font-size: 12px; background: #fff; min-width: 180px; }
+
+.b-view-tools input[type="date"] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 7px 8px; font-size: 12px; background: #fff; color: var(--b-ink, #1f1d19); }
