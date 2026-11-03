@@ -288,6 +288,7 @@ API 重启 → dispatcher 恢复 PENDING/过期租约
 企业微信原生按钮卡片详见：[superagent-wecom-native-card.md](superagent-wecom-native-card.md)
 Eval v2（24 场景）详见：[superagent-eval-v2.md](superagent-eval-v2.md)
 Eval 稳定性与多次采样详见：[superagent-eval-stability.md](superagent-eval-stability.md)
+Eval 全量 24×2 基线详见：[superagent-eval-baseline-runs2.md](superagent-eval-baseline-runs2.md)
 租户管理页面详见：[superagent-tenants.md](superagent-tenants.md)
 队列管理页面详见：[superagent-queue-ui.md](superagent-queue-ui.md)
 角色细粒度权限详见：[superagent-roles.md](superagent-roles.md)

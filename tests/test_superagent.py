@@ -93,6 +93,10 @@ def test_action_must_match_final_refusal(c_store):
     assert sa_worker._validate_action_consistency(
         cancel, "状态无法确认，但建议取消订单，仍需人工审批。"
     ) == cancel
+    assert sa_worker._validate_action_consistency(
+        cancel, "当前不能直接执行，已登记取消建议，等待人工审批。"
+    ) == cancel
+    assert sa_worker._validate_action_consistency(cancel, "不能取消，已经发货") is None
     after_sale = {"action_type": "CREATE_AFTER_SALE", "order_id": "order_x"}
     assert sa_worker._validate_action_consistency(
         after_sale, "不建议直接退款，建议创建售后工单后人工审批。"

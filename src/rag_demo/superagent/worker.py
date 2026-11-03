@@ -279,14 +279,28 @@ def _validate_action_consistency(
     action_type = str(action.get("action_type") or "").upper()
     text = final or ""
     affirmative = {
-        "CANCEL_ORDER": ("建议取消", "可以取消", "建议取消订单"),
-        "CREATE_AFTER_SALE": ("建议创建售后", "建议创建工单", "建议仅退款", "建议退货退款", "建议走售后"),
-        "SHIP_ORDER": ("建议发货", "可以发货"),
-        "COMPLETE_ORDER": ("建议完成", "可以完成", "建议标记完成"),
-        "REFUND_AFTER_SALE": ("建议退款", "建议通过退款", "可以退款"),
-        "RECEIVE_RETURN": ("建议验收", "可以验收入库", "建议入库"),
-        "REJECT_AFTER_SALE": ("建议驳回", "可以驳回"),
-        "ISSUE_COMPENSATION": ("建议补偿", "可以补偿", "建议发放补偿", "建议发放优惠券"),
+        "CANCEL_ORDER": ("建议取消", "可以取消", "建议取消订单", "已登记取消建议", "登记取消建议"),
+        "CREATE_AFTER_SALE": (
+            "建议创建售后",
+            "建议创建工单",
+            "建议仅退款",
+            "建议退货退款",
+            "建议走售后",
+            "已登记创建售后",
+            "已登记售后建议",
+        ),
+        "SHIP_ORDER": ("建议发货", "可以发货", "已登记发货", "登记发货建议"),
+        "COMPLETE_ORDER": ("建议完成", "可以完成", "建议标记完成", "已登记完成"),
+        "REFUND_AFTER_SALE": ("建议退款", "建议通过退款", "可以退款", "已登记退款"),
+        "RECEIVE_RETURN": ("建议验收", "可以验收入库", "建议入库", "已登记验收"),
+        "REJECT_AFTER_SALE": ("建议驳回", "可以驳回", "已登记驳回"),
+        "ISSUE_COMPENSATION": (
+            "建议补偿",
+            "可以补偿",
+            "建议发放补偿",
+            "建议发放优惠券",
+            "已登记补偿",
+        ),
     }.get(action_type, ())
     if any(phrase in text for phrase in affirmative):
         return action
@@ -294,14 +308,21 @@ def _validate_action_consistency(
         "未登记任何动作建议",
         "不登记任何动作建议",
         "不建议",
-        "不能",
-        "无法",
         "证据不足",
         "缺少依据",
         "不应",
-        "不能直接",
     )
-    if any(phrase in text for phrase in refusal):
+    action_refusal = {
+        "CANCEL_ORDER": ("不能取消", "无法取消", "不应取消"),
+        "CREATE_AFTER_SALE": ("不能创建售后", "无法创建售后", "不符合售后", "不满足售后"),
+        "SHIP_ORDER": ("不能发货", "无法发货", "不应发货"),
+        "COMPLETE_ORDER": ("不能完成", "无法完成"),
+        "REFUND_AFTER_SALE": ("不能退款", "无法退款", "不应退款"),
+        "RECEIVE_RETURN": ("不能验收", "无法验收", "不应入库"),
+        "REJECT_AFTER_SALE": ("不能驳回", "无法驳回"),
+        "ISSUE_COMPENSATION": ("不能补偿", "无法补偿", "不应补偿"),
+    }.get(action_type, ())
+    if any(phrase in text for phrase in refusal + action_refusal):
         logger.warning(
             "丢弃与最终结论不一致的动作建议 work_item_action=%s", action_type
         )
