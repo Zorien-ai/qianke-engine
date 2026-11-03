@@ -102,6 +102,8 @@ def parse_event(message: dict[str, Any]) -> dict[str, Any] | None:
         "sale_type": str(data.get("s") or "").strip().upper(),
         "from_user": str(message.get("FromUserName") or "").strip(),
         "agent_id": str(message.get("AgentID") or "").strip() or None,
+        "response_code": str(message.get("ResponseCode") or "").strip(),
+        "task_id": str(message.get("TaskId") or "").strip(),
     }
 
 
@@ -135,10 +137,11 @@ def handle_event(message: dict[str, Any]) -> bool:
 
     item = sa_store.get_work_item(event["work_item_id"])
     logger.info(
-        "原生卡片事件 from=%s work_item=%s action=%s",
+        "原生卡片事件 from=%s work_item=%s action=%s has_response_code=%s",
         event["from_user"],
         event["work_item_id"],
         event["action"],
+        bool(event["response_code"]),
     )
     if item is None:
         return True
@@ -153,6 +156,21 @@ def handle_event(message: dict[str, Any]) -> bool:
     if command is None:
         # 复杂参数走签名审批页。
         return True
+    if event["response_code"]:
+        sa_store.set_card_response_code(
+            event["work_item_id"], event["response_code"], source="event"
+        )
+        from rag_demo.superagent import approval_card
+
+        try:
+            approval_card.update_card_state(
+                item,
+                "processing",
+                response_code=event["response_code"],
+                agent_id=event["agent_id"],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("原生卡片处理中状态更新失败 work_item=%s", event["work_item_id"])
     return wecom_approval.handle_message(
         {
             "MsgType": "text",

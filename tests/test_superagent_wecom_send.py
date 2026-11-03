@@ -23,6 +23,27 @@ def test_send_text_success(monkeypatch):
     assert captured["text"]["content"] == "hello"
 
 
+def test_update_template_card_payload(monkeypatch):
+    monkeypatch.setattr(wecom_send, "_get_token", lambda: "token")
+    captured = []
+
+    def fake_post(path, payload):
+        captured.append((path, payload))
+        return {"errcode": 0}
+
+    monkeypatch.setattr(wecom_send, "_post_json", fake_post)
+    result = wecom_send.update_template_card(
+        "rc_1",
+        {"card_type": "text_notice", "main_title": {"title": "✅ 已通过"}},
+        agent_id="1000002",
+    )
+    assert result["sent"] is True
+    assert captured[0][0].endswith("/message/update_template_card")
+    assert captured[0][1]["response_code"] == "rc_1"
+    assert captured[0][1]["atall"] == 1
+    assert captured[0][1]["template_card"]["main_title"]["title"] == "✅ 已通过"
+
+
 def test_send_text_party_fallback_on_81013(monkeypatch):
     monkeypatch.setenv("QIANKE_WECOM_CORP_ID", "ww_test")
     monkeypatch.setenv("QIANKE_WECOM_CORP_SECRET", "secret")

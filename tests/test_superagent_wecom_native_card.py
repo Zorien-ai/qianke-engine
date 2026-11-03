@@ -54,6 +54,19 @@ def test_native_card_payload_and_parse(c_store):
     assert wecom_native_card.to_command(event) == f"同意 {item['work_item_id'][-6:]} 仅退款"
 
 
+def test_state_card_processing_success_failed(c_store):
+    item = _pending(c_store)
+    from rag_demo.superagent import approval_card
+
+    processing = approval_card.build_state_card(item, "processing")
+    assert processing["main_title"]["title"] == "⏳ 正在处理"
+    success = approval_card.build_state_card(item, "success", "工单 as_1")
+    assert success["main_title"]["title"] == "✅ 已通过"
+    failed = approval_card.build_state_card(item, "failed", "ORDER_NOT_FOUND")
+    assert failed["main_title"]["title"] == "❌ 执行失败"
+    assert failed["horizontal_content_list"][-1]["value"] == "ORDER_NOT_FOUND"
+
+
 def test_native_event_duplicate_reply(c_store, monkeypatch):
     item = _pending(c_store)
     sa_store.decide_approval(item["work_item_id"], approved=False, note="test")

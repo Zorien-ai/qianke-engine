@@ -153,6 +153,20 @@ def _run_action_job(job: dict[str, Any], work_item_id: str) -> None:
         wecom_send.notify_work_item(result, stage="APPROVED")
     except Exception:  # noqa: BLE001
         logger.exception("Super-agent 动作结果回写失败 work_item=%s", work_item_id)
+    try:
+        from rag_demo.superagent import approval_card
+
+        approval = result.get("approval") or {}
+        success = approval.get("execution_status") == "EXECUTED"
+        execution = approval.get("execution_result") or {}
+        detail = (
+            f"工单 {execution.get('ticket', {}).get('ticket_id')}"
+            if success and isinstance(execution.get("ticket"), dict)
+            else str(execution.get("error") or "")
+        )
+        approval_card.update_result_card(result, success=success, detail=detail)
+    except Exception:  # noqa: BLE001
+        logger.exception("Super-agent 卡片结果更新失败 work_item=%s", work_item_id)
     sa_store.finish_job(
         job["job_id"],
         "DONE",

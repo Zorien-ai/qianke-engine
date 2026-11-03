@@ -107,6 +107,8 @@ _APPROVAL_MIGRATIONS = (
     ("execution_result_json", "TEXT NOT NULL DEFAULT '{}'"),
     ("executed_at", "TEXT"),
     ("idempotency_key", "TEXT"),
+    ("card_send_response_code", "TEXT"),
+    ("card_event_response_code", "TEXT"),
 )
 
 
@@ -494,6 +496,43 @@ def get_approval(work_item_id: str) -> dict[str, Any] | None:
             "SELECT * FROM sa_approval WHERE work_item_id = ?", (work_item_id,)
         ).fetchone()
         return _approval_payload(row) if row else None
+    finally:
+        conn.close()
+
+
+def set_card_response_code(work_item_id: str, code: str, *, source: str = "send") -> None:
+    """保存发送卡片返回的 response_code，用于动作完成后二次更新卡片。"""
+    column = "card_event_response_code" if source == "event" else "card_send_response_code"
+    value = str(code or "").strip()
+    if not value:
+        return
+    init()
+    conn = store._connect()
+    try:
+        conn.execute(
+            f"UPDATE sa_approval SET {column} = ? WHERE work_item_id = ?",
+            (value, work_item_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_card_response_codes(work_item_id: str) -> dict[str, str]:
+    init()
+    conn = store._connect()
+    try:
+        row = conn.execute(
+            "SELECT card_send_response_code, card_event_response_code "
+            "FROM sa_approval WHERE work_item_id = ?",
+            (work_item_id,),
+        ).fetchone()
+        if row is None:
+            return {}
+        return {
+            "send": str(row["card_send_response_code"] or ""),
+            "event": str(row["card_event_response_code"] or ""),
+        }
     finally:
         conn.close()
 
@@ -935,6 +974,8 @@ def _approval_payload(row: sqlite3.Row) -> dict[str, Any]:
         "decided_at": row["decided_at"],
         "executed_at": row["executed_at"],
         "idempotency_key": row["idempotency_key"],
+        "card_send_response_code": row["card_send_response_code"],
+        "card_event_response_code": row["card_event_response_code"],
     }
 
 

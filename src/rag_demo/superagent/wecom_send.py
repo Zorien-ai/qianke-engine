@@ -92,10 +92,14 @@ def _get_token() -> str:
 
 
 def _post_message(payload: dict[str, Any]) -> dict[str, Any]:
+    return _post_json("/cgi-bin/message/send", payload)
+
+
+def _post_json(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     token = _get_token()
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
-        f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={urllib.parse.quote(token)}",
+        f"https://qyapi.weixin.qq.com{path}?access_token={urllib.parse.quote(token)}",
         data=body,
         headers={"Content-Type": "application/json; charset=utf-8"},
         method="POST",
@@ -191,7 +195,51 @@ def send_template_card(to_user: str, card: dict[str, Any], *, agent_id: str | No
             "error": data.get("errmsg"),
         }
     logger.info("企业微信审批卡片发送成功 msgid=%s channel=%s", data.get("msgid"), channel)
-    return {"sent": True, "msgid": data.get("msgid"), "channel": channel}
+    return {
+        "sent": True,
+        "msgid": data.get("msgid"),
+        "channel": channel,
+        "response_code": data.get("response_code") or "",
+    }
+
+
+def update_template_card(
+    response_code: str,
+    card: dict[str, Any],
+    *,
+    agent_id: str | None = None,
+    at_all: bool = True,
+) -> dict[str, Any]:
+    """用发送/回调返回的 response_code 更新同一张模板卡片。"""
+    code = str(response_code or "").strip()
+    if not code:
+        return {"sent": False, "reason": "NO_RESPONSE_CODE"}
+    try:
+        agent_id_int = int(agent_id or os.environ.get("QIANKE_WECOM_AGENT_ID") or 1000002)
+    except ValueError:
+        agent_id_int = 1000002
+    payload: dict[str, Any] = {
+        "agentid": agent_id_int,
+        "response_code": code,
+        "template_card": card,
+    }
+    if at_all:
+        payload["atall"] = 1
+    try:
+        data = _post_json("/cgi-bin/message/update_template_card", payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("企业微信更新卡片失败: %s", exc)
+        return {"sent": False, "reason": "DELIVERY_FAILED", "error": str(exc)[:300]}
+    if int(data.get("errcode") or 0) != 0:
+        logger.warning("企业微信更新卡片业务失败: %s", data.get("errmsg"))
+        return {
+            "sent": False,
+            "reason": "WECOM_ERROR",
+            "errcode": data.get("errcode"),
+            "error": data.get("errmsg"),
+        }
+    logger.info("企业微信卡片更新成功")
+    return {"sent": True}
 
 
 def _recipient(item: dict[str, Any]) -> tuple[str, str | None]:

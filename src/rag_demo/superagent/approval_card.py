@@ -118,6 +118,78 @@ def build_card(item: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def build_state_card(
+    item: dict[str, Any],
+    state: str,
+    detail: str = "",
+) -> dict[str, Any]:
+    """审批卡片的状态替换卡：处理中 / 成功 / 失败。"""
+    action = _action(item)
+    code = item["work_item_id"][-6:]
+    order_id = str(action.get("order_id") or "")
+    state_norm = str(state or "").lower()
+    if state_norm == "processing":
+        title = "⏳ 正在处理"
+        subtitle = "已收到审批，正在执行，请稍候…"
+    elif state_norm == "success":
+        title = "✅ 已通过"
+        subtitle = "审批通过，动作已执行成功。"
+    else:
+        title = "❌ 执行失败"
+        subtitle = "动作执行失败，请查看详情或重试。"
+    horizontal = [
+        {"keyname": "工作项", "value": code},
+        {"keyname": "动作", "value": str(action.get("action_type") or "-")},
+    ]
+    if order_id:
+        horizontal.append({"keyname": "订单", "value": order_id})
+    if detail:
+        horizontal.append({"keyname": "结果", "value": str(detail)[:80]})
+    url = approval_url(item) or f"{base_url()}/v2/b.html"
+    return {
+        "card_type": "text_notice",
+        "main_title": {"title": title, "desc": f"工作项 {code}"},
+        "emphasis_content": {"title": "成功" if state_norm == "success" else "失败", "desc": subtitle}
+        if state_norm in {"success", "failed"}
+        else {"title": "处理中", "desc": subtitle},
+        "sub_title_text": subtitle,
+        "horizontal_content_list": horizontal,
+        "card_action": {"type": 1, "url": url},
+    }
+
+
+def update_card_state(
+    item: dict[str, Any],
+    state: str,
+    detail: str = "",
+    *,
+    response_code: str = "",
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    code = str(response_code or "").strip()
+    if not code:
+        code = sa_store.get_card_response_codes(item["work_item_id"]).get("send", "")
+    card = build_state_card(item, state, detail)
+    return wecom_send.update_template_card(code, card, agent_id=agent_id, at_all=True)
+
+
+def update_result_card(
+    item: dict[str, Any],
+    *,
+    success: bool,
+    detail: str = "",
+) -> dict[str, Any]:
+    codes = sa_store.get_card_response_codes(item["work_item_id"])
+    send_code = codes.get("send", "")
+    if not send_code:
+        return {"sent": False, "reason": "NO_SEND_RESPONSE_CODE"}
+    return wecom_send.update_template_card(
+        send_code,
+        build_state_card(item, "success" if success else "failed", detail),
+        at_all=True,
+    )
+
+
 def notify_card(item: dict[str, Any]) -> dict[str, Any]:
     from rag_demo.superagent import wecom_native_card
 
@@ -128,12 +200,20 @@ def notify_card(item: dict[str, Any]) -> dict[str, Any]:
     if native is not None:
         result = wecom_send.send_template_card(user, native, agent_id=agent_id)
         if result.get("sent"):
+            sa_store.set_card_response_code(
+                item["work_item_id"], result.get("response_code") or "", source="send"
+            )
             return {**result, "card_type": "native_button"}
         logger.warning("原生按钮卡片发送失败，回退链接卡片: %s", result.get("reason"))
     card = build_card(item)
     if card is None:
         return {"sent": False, "reason": "CARD_NOT_READY"}
-    return wecom_send.send_template_card(user, card, agent_id=agent_id)
+    result = wecom_send.send_template_card(user, card, agent_id=agent_id)
+    if result.get("sent"):
+        sa_store.set_card_response_code(
+            item["work_item_id"], result.get("response_code") or "", source="send"
+        )
+    return result
 
 
 def _page(title: str, body: str) -> str:

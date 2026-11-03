@@ -186,12 +186,59 @@ ticket: as_510a4783f9624c6f / REFUND_ONLY / OPEN
 
 已处理工作项的重复点击会回复当前状态，不再刷「没有找到待审批」。
 
+## 5.4 卡片内状态更新
+
+点击后不再只发聊天消息，原卡片会被替换为三态：
+
+```text
+⏳ 正在处理
+✅ 已通过
+❌ 执行失败
+```
+
+实现：
+
+```text
+发送卡片响应 → response_code 存入 sa_approval
+按钮回调 ResponseCode → 用 update_template_card 立即替换为处理中
+动作完成后 → 用发送卡片 response_code 再替换为成功/失败
+```
+
+企业微信 API：
+
+```text
+POST /cgi-bin/message/update_template_card
+{
+  "agentid": 1000002,
+  "response_code": "...",
+  "atall": 1,
+  "template_card": { ... }
+}
+```
+
+真实验证：
+
+```text
+发送卡片 response_code: cGiIl5_...
+update_template_card: {'sent': True}
+```
+
+说明卡片内状态更新 API 已真实可用。
+
+限制：
+
+```text
+企业微信卡片不支持真正的弹窗和红/绿色块
+当前用 ✅/❌ + emphasis_content 表达成功/失败
+如需强提醒，可额外发 markdown 彩色消息
+```
+
 ## 6. 已知限制
 
 ```text
-默认关闭，避免影响现有文本命令/链接卡片
-真实原生按钮点击未验证
-应用消息通道可能不推送 template_card_event
+企业微信卡片不支持真正的弹窗和红/绿色块
+状态更新依赖 response_code 一次性使用
+发送 response_code 缺失时无法做最终态更新
 复杂参数（金额/运单号）仍走签名审批页
 touser 81013 需要 toparty 兜底；部门范围必须可控
 ```
