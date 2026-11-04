@@ -65,10 +65,31 @@ def _pg_dump(target: Path) -> dict:
         return {"ok": False, "error": str(exc)[:300]}
 
 
+def _prune_backups(parent: Path, keep: int) -> list[str]:
+    """只清理带 manifest 的时间戳备份目录，保留最新 keep 个。"""
+    if keep < 1 or not parent.exists():
+        return []
+    candidates = sorted(
+        [
+            path for path in parent.iterdir()
+            if path.is_dir() and (path / "manifest.json").exists()
+        ],
+        key=lambda path: path.name,
+        reverse=True,
+    )
+    removed = []
+    for path in candidates[max(keep, 0):]:
+        shutil.rmtree(path)
+        removed.append(path.name)
+    return removed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="")
     parser.add_argument("--include-pg", action="store_true")
+    parser.add_argument("--keep", type=int, default=7, help="保留最近 N 份时间戳备份")
+    parser.add_argument("--no-verify", action="store_true")
     args = parser.parse_args()
 
     from rag_demo.c_end import store
@@ -98,13 +119,21 @@ def main() -> int:
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "files": files,
         "postgres": pg,
+        "verified": not args.no_verify,
     }
+    if not args.no_verify:
+        for item in files:
+            if _sha256(output / item["file"]) != item["sha256"]:
+                raise SystemExit(f"verify failed: {item['file']}")
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"backup={output}")
+    removed = _prune_backups(output.parent, args.keep) if not args.output else []
+    print(f"backup={output} keep={args.keep}")
     for item in files:
         print(f"  {item['file']} {item['size']} bytes sha256={item['sha256'][:16]}…")
     if pg is not None:
         print(f"  postgres ok={pg.get('ok')} {pg.get('error') or pg.get('file', '')}")
+    if removed:
+        print(f"pruned={','.join(removed)}")
     return 0
 
 

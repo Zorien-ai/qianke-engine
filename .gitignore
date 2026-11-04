@@ -107,3 +107,6 @@ data/eval/
 
 # 本地私有 holdout：不进入公共仓库、不用于 Prompt 调优
 tests/evals/agent/private_holdout/
+
+# 运维备份（含数据库，不入库）
+backups/

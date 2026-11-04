@@ -1,0 +1,93 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "textMode": "auto"},
+      "targets": [{"expr": "qianke_up", "legendFormat": "up", "refId": "A"}],
+      "title": "Qianke Up",
+      "type": "stat"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 5, "x": 4, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "qianke_tenants", "legendFormat": "tenants", "refId": "A"}],
+      "title": "Tenants",
+      "type": "stat"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 5, "x": 9, "y": 0},
+      "id": 3,
+      "targets": [{"expr": "time() - qianke_process_start_time_seconds", "legendFormat": "uptime", "refId": "A"}],
+      "title": "API Uptime",
+      "type": "stat"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "id": 4,
+      "targets": [{"expr": "sum by (status) (qianke_queue_jobs)", "legendFormat": "{{status}}", "refId": "A"}],
+      "title": "Queue Jobs by Status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "id": 5,
+      "targets": [{"expr": "sum by (status) (qianke_work_items)", "legendFormat": "{{status}}", "refId": "A"}],
+      "title": "Work Items by Status",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "id": 6,
+      "targets": [{"expr": "sum by (status) (qianke_approvals)", "legendFormat": "{{status}}", "refId": "A"}],
+      "title": "Approvals / Executions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "id": 7,
+      "targets": [{"expr": "qianke_queue_jobs{status=\"dead\"}", "legendFormat": "dead", "refId": "A"}],
+      "title": "Dead Jobs",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["qianke", "ops"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Prometheus",
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Qianke Ops",
+  "uid": "qianke-ops",
+  "version": 1
+}

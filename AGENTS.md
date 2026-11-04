@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 2.37.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 2.38.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v2.37.0 |
+| AGENTS.md | v2.38.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -549,3 +549,4 @@ IM 社交载体
 | 2.35.0 | 2026-11-04 | 小时级审计筛选、策略 CSV、CSV 5000 行、测试审计清理 |
 | 2.36.0 | 2026-11-04 | 运维底座：/ready、/metrics、控制面备份与恢复脚本 |
 | 2.37.0 | 2026-11-04 | 租户开通：租户+owner+默认策略一步完成，管理页接入 |
+| 2.38.0 | 2026-11-04 | 定时备份保留/校验、Prometheus 配置、Grafana 看板 |
