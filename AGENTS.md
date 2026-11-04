@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 2.40.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 2.41.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v2.40.0 |
+| AGENTS.md | v2.41.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -552,3 +552,4 @@ IM 社交载体
 | 2.38.0 | 2026-11-04 | 定时备份保留/校验、Prometheus 配置、Grafana 看板 |
 | 2.39.0 | 2026-11-04 | 控制面 PostgreSQL 迁移方案 v0.1（未实施） |
 | 2.40.0 | 2026-11-04 | PostgreSQL 控制面 P1：28 表 schema、repository 骨架、双后端契约测试 |
+| 2.41.0 | 2026-11-04 | PostgreSQL 控制面 P2-A：sa_* 回填、Job 统一 sa_queue、只读 repository |

@@ -1,8 +1,9 @@
 # 控制面 PostgreSQL 迁移方案 v0.1
 
-> 日期：2026-11-04 · 状态：P1 已实施（schema/repository 骨架）· 范围：C 端 mock + Super-agent 控制面
+> 日期：2026-11-04 · 状态：P1/P2-A 已实施（schema、回填、只读 repository）· 范围：C 端 mock + Super-agent 控制面
 >
 > P1 实施记录：[control_plane_postgres_migration_p1.md](control_plane_postgres_migration_p1.md)
+> P2-A 实施记录：[control_plane_postgres_migration_p2a.md](control_plane_postgres_migration_p2a.md)
 
 ## 1. 结论
 
