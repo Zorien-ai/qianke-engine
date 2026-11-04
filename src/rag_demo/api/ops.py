@@ -27,12 +27,19 @@ def _check(name: str, fn: Callable[[], Any]) -> dict[str, Any]:
 
 
 def readiness() -> tuple[bool, dict[str, Any]]:
-    from rag_demo.c_end import store as c_store
+    from rag_demo.control import get_control_repository
     from rag_demo.merchant import get_merchant_repository
     from rag_demo.superagent import store as sa_store
 
+    def control_health():
+        repo = get_control_repository()
+        try:
+            return repo.health()
+        finally:
+            repo.close()
+
     checks = [
-        _check("control_db", lambda: c_store.init()),
+        _check("control_store", control_health),
         _check("superagent_store", lambda: sa_store.work_item_stats()),
         _check("queue", lambda: sa_store.job_stats()),
         _check(

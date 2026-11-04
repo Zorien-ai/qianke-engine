@@ -31,7 +31,7 @@ def test_readiness_reports_all_checks(c_store, monkeypatch):
     assert ok is True
     assert payload["status"] == "ok"
     names = {item["name"] for item in payload["checks"]}
-    assert names == {"control_db", "superagent_store", "queue", "merchant_store"}
+    assert names == {"control_store", "superagent_store", "queue", "merchant_store"}
     assert all(item["ok"] for item in payload["checks"])
 
 

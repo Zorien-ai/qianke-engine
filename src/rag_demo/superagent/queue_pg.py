@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-SCHEMA = "sa_queue"
+SCHEMA = os.environ.get("QIANKE_QUEUE_SCHEMA") or "sa_queue"
 
 
 def _now() -> str:

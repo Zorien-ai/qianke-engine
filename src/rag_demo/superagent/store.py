@@ -112,10 +112,41 @@ _APPROVAL_MIGRATIONS = (
 )
 
 
+_PG_INITIALIZED_SCHEMA: str | None = None
+
+
+def _control_pg_enabled() -> bool:
+    value = (os.environ.get("QIANKE_CONTROL_BACKEND") or "sqlite").strip().lower()
+    return value in {"postgres", "postgresql", "pg"}
+
+
+def _connect():
+    if _control_pg_enabled():
+        from rag_demo.control.pg_compat import connect
+
+        return connect()
+    return store._connect()
+
+
 def init() -> None:
+    global _PG_INITIALIZED_SCHEMA
+    if _control_pg_enabled():
+        from rag_demo.control.postgres_repository import PostgresControlRepository
+        from rag_demo.control.settings import pg_settings
+
+        schema = pg_settings()["schema"]
+        if _PG_INITIALIZED_SCHEMA == schema:
+            return
+        repo = PostgresControlRepository()
+        try:
+            repo.init_schema()
+        finally:
+            repo.close()
+        _PG_INITIALIZED_SCHEMA = schema
+        return
     store.init()
     with store._DB_LOCK:
-        conn = store._connect()
+        conn = _connect()
         try:
             conn.executescript(_SCHEMA)
             columns = {
@@ -163,7 +194,7 @@ def create_trigger(
     # 默认租户保持历史 key；非默认租户加前缀，避免跨商家碰撞。
     thread_key = raw_key if merchant_id == DEFAULT_MERCHANT_ID else f"{merchant_id}:{raw_key}"
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         thread = conn.execute(
@@ -223,7 +254,7 @@ def create_trigger(
 
 def get_trigger(trigger_id: str) -> dict[str, Any] | None:
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute(
             "SELECT * FROM sa_trigger WHERE trigger_id = ?", (trigger_id,)
@@ -235,7 +266,7 @@ def get_trigger(trigger_id: str) -> dict[str, Any] | None:
 
 def get_thread(thread_id: str) -> dict[str, Any] | None:
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute(
             "SELECT * FROM sa_thread WHERE thread_id = ?", (thread_id,)
@@ -269,7 +300,7 @@ def list_threads(limit: int = 50, merchant_id: str | None = None) -> list[dict[s
         where = "WHERE merchant_id = ?"
         params.append(merchant_id)
     params.append(max(1, min(int(limit), 200)))
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             f"SELECT * FROM sa_thread {where} ORDER BY updated_at DESC LIMIT ?",
@@ -300,7 +331,7 @@ def list_work_items(limit: int = 50, merchant_id: str | None = None) -> list[dic
         where = "WHERE merchant_id = ?"
         params.append(merchant_id)
     params.append(max(1, min(int(limit), 200)))
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             f"SELECT * FROM sa_work_item {where} ORDER BY created_at DESC LIMIT ?",
@@ -313,7 +344,7 @@ def list_work_items(limit: int = 50, merchant_id: str | None = None) -> list[dic
 
 def get_work_item(work_item_id: str) -> dict[str, Any] | None:
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute(
             "SELECT * FROM sa_work_item WHERE work_item_id = ?", (work_item_id,)
@@ -338,7 +369,7 @@ def get_work_item(work_item_id: str) -> dict[str, Any] | None:
 def start_work_item(work_item_id: str) -> dict[str, Any]:
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute(
             "UPDATE sa_work_item SET status = 'RUNNING', started_at = COALESCE(started_at, ?), "
@@ -364,11 +395,11 @@ def finish_work_item(
 ) -> dict[str, Any]:
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "UPDATE sa_work_item SET status = CASE WHEN ? THEN 'WAITING_APPROVAL' ELSE 'DONE' END, "
+            "UPDATE sa_work_item SET status = CASE WHEN ? = 1 THEN 'WAITING_APPROVAL' ELSE 'DONE' END, "
             "updated_at = ?, finished_at = ?, result_json = ?, approval_status = ? "
             "WHERE work_item_id = ? AND status = 'RUNNING'",
             (1 if approval else 0, now, now, _json(result), "PENDING" if approval else "NONE", work_item_id),
@@ -376,8 +407,11 @@ def finish_work_item(
         if approval:
             approval_id = f"saa_{uuid.uuid4().hex[:16]}"
             conn.execute(
-                "INSERT OR REPLACE INTO sa_approval(approval_id, work_item_id, status, created_at, action_json) "
-                "VALUES (?, ?, 'PENDING', ?, ?)",
+                "INSERT INTO sa_approval(approval_id, work_item_id, status, created_at, action_json) "
+                "VALUES (?, ?, 'PENDING', ?, ?) "
+                "ON CONFLICT(work_item_id) DO UPDATE SET "
+                "approval_id = EXCLUDED.approval_id, status = EXCLUDED.status, "
+                "created_at = EXCLUDED.created_at, action_json = EXCLUDED.action_json",
                 (approval_id, work_item_id, now, _json(action or {})),
             )
         conn.commit()
@@ -393,7 +427,7 @@ def cancel_work_item(work_item_id: str, note: str = "cancelled by user") -> dict
     """取消 PENDING/RUNNING 工作项；Worker 结束后不会再覆盖取消状态。"""
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute(
             "UPDATE sa_work_item SET status = 'CANCELLED', error = ?, updated_at = ?, finished_at = ? "
@@ -409,7 +443,7 @@ def cancel_work_item(work_item_id: str, note: str = "cancelled by user") -> dict
 def fail_work_item(work_item_id: str, error: str) -> dict[str, Any]:
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute(
             "UPDATE sa_work_item SET status = 'FAILED', error = ?, updated_at = ?, finished_at = ? "
@@ -426,7 +460,7 @@ def decide_approval(work_item_id: str, *, approved: bool, note: str = "") -> dic
     init()
     now = _now()
     status = "APPROVED" if approved else "REJECTED"
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
@@ -458,7 +492,7 @@ def complete_execution(
     """记录审批动作执行结果；失败不回滚已成功的外部动作，由审计和人工处理。"""
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
@@ -466,15 +500,19 @@ def complete_execution(
             "executed_at = ? WHERE work_item_id = ?",
             ("EXECUTED" if success else "FAILED", _json(result), now, work_item_id),
         )
+        row = conn.execute(
+            "SELECT result_json FROM sa_work_item WHERE work_item_id = ?", (work_item_id,)
+        ).fetchone()
+        payload = json.loads(row["result_json"] or "{}") if row else {}
+        payload["execution"] = {"success": success, **result, "error": error}
         conn.execute(
             "UPDATE sa_work_item SET status = ?, updated_at = ?, finished_at = ?, "
-            "result_json = json_set(result_json, '$.execution', json(?)), "
-            "error = ? WHERE work_item_id = ?",
+            "result_json = ?, error = ? WHERE work_item_id = ?",
             (
                 "DONE" if success else "EXECUTION_FAILED",
                 now,
                 now,
-                _json({"success": success, **result, "error": error}),
+                _json(payload),
                 (str(error)[:2000] or None) if not success else None,
                 work_item_id,
             ),
@@ -490,7 +528,7 @@ def complete_execution(
 
 def get_approval(work_item_id: str) -> dict[str, Any] | None:
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute(
             "SELECT * FROM sa_approval WHERE work_item_id = ?", (work_item_id,)
@@ -507,7 +545,7 @@ def set_card_response_code(work_item_id: str, code: str, *, source: str = "send"
     if not value:
         return
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute(
             f"UPDATE sa_approval SET {column} = ? WHERE work_item_id = ?",
@@ -520,7 +558,7 @@ def set_card_response_code(work_item_id: str, code: str, *, source: str = "send"
 
 def get_card_response_codes(work_item_id: str) -> dict[str, str]:
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute(
             "SELECT card_send_response_code, card_event_response_code "
@@ -574,13 +612,19 @@ def list_action_audit(
         params.extend([like, like, like])
     ts = "COALESCE(a.executed_at, a.decided_at, a.created_at)"
     if date_from:
-        where.append(f"datetime({ts}) >= datetime(?)")
+        if _control_pg_enabled():
+            where.append(f"({ts})::timestamptz >= ?::timestamptz")
+        else:
+            where.append(f"datetime({ts}) >= datetime(?)")
         params.append(_audit_time_bound(date_from))
     if date_to:
-        where.append(f"datetime({ts}) <= datetime(?)")
+        if _control_pg_enabled():
+            where.append(f"({ts})::timestamptz <= ?::timestamptz")
+        else:
+            where.append(f"datetime({ts}) <= datetime(?)")
         params.append(_audit_time_bound(date_to, end=True))
     clause = " AND ".join(where)
-    conn = store._connect()
+    conn = _connect()
     try:
         total = conn.execute(
             f"SELECT COUNT(*) AS n FROM sa_approval a JOIN sa_work_item w "
@@ -623,8 +667,14 @@ def list_action_audit(
         return {"items": result, "total": int(total), "limit": limit, "offset": offset}
     finally:
         conn.close()
+
+
 def _queue_is_pg() -> bool:
-    return (os.environ.get("QIANKE_QUEUE_BACKEND") or "sqlite").strip().lower() in {"postgres", "postgresql", "pg"}
+    if _control_pg_enabled():
+        return True
+    return (os.environ.get("QIANKE_QUEUE_BACKEND") or "sqlite").strip().lower() in {
+        "postgres", "postgresql", "pg"
+    }
 
 
 def _pg_queue():
@@ -650,7 +700,7 @@ def enqueue_job(
         return _pg_queue().enqueue_job(work_item_id, kind=kind, max_attempts=max_attempts)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         existing = conn.execute(
@@ -681,7 +731,7 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     if _queue_is_pg():
         return _pg_queue().get_job(job_id)
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute("SELECT * FROM sa_job WHERE job_id = ?", (job_id,)).fetchone()
         return _job_payload(row) if row else None
@@ -718,7 +768,7 @@ def list_jobs(
         params.extend([like, like, like, like])
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     params.extend([max(1, min(int(limit), 200)), max(0, int(offset))])
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             f"SELECT * FROM sa_job {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -753,7 +803,7 @@ def count_jobs(
         )
         params.extend([like, like, like, like])
     clause = f"WHERE {' AND '.join(where)}" if where else ""
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute(f"SELECT COUNT(*) AS n FROM sa_job {clause}", params).fetchone()
         return int(row["n"])
@@ -763,7 +813,7 @@ def count_jobs(
 
 def work_item_stats() -> dict[str, int]:
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             "SELECT status, COUNT(*) AS n FROM sa_work_item GROUP BY status"
@@ -775,7 +825,7 @@ def work_item_stats() -> dict[str, int]:
 
 def approval_stats() -> dict[str, int]:
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             "SELECT status, execution_status, COUNT(*) AS n FROM sa_approval "
@@ -793,7 +843,7 @@ def job_stats() -> dict[str, Any]:
     if _queue_is_pg():
         return _pg_queue().job_stats()
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             "SELECT status, COUNT(*) AS n FROM sa_job GROUP BY status"
@@ -821,7 +871,7 @@ def replay_job(job_id: str) -> dict[str, Any] | None:
         return _pg_queue().replay_job(job_id)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         row = conn.execute("SELECT * FROM sa_job WHERE job_id = ?", (job_id,)).fetchone()
         if row is None:
@@ -845,7 +895,7 @@ def claim_job(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> dict
         return _pg_queue().claim_job(job_id, worker_id, lease_seconds=lease_seconds)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM sa_job WHERE job_id = ?", (job_id,)).fetchone()
@@ -887,7 +937,7 @@ def finish_job(job_id: str, status: str, *, error: str = "") -> dict[str, Any] |
         return _pg_queue().finish_job(job_id, status, error=error)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute(
             "UPDATE sa_job SET status = ?, last_error = ?, lease_until = NULL, updated_at = ? "
@@ -905,7 +955,7 @@ def retry_job(job_id: str, *, error: str = "", delay_seconds: int = 5) -> dict[s
         return _pg_queue().retry_job(job_id, error=error, delay_seconds=delay_seconds)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute(
             "UPDATE sa_job SET status = 'PENDING', available_at = ?, lease_until = NULL, "
@@ -926,7 +976,7 @@ def claim_next_job(
         return _pg_queue().claim_next_job(worker_id, lease_seconds=lease_seconds)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
@@ -969,7 +1019,7 @@ def renew_lease(job_id: str, worker_id: str, *, lease_seconds: int = 1800) -> bo
         return _pg_queue().renew_lease(job_id, worker_id, lease_seconds=lease_seconds)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         cursor = conn.execute(
             "UPDATE sa_job SET lease_until = ?, updated_at = ? "
@@ -988,7 +1038,7 @@ def requeue_expired_jobs() -> int:
         return _pg_queue().requeue_expired_jobs()
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             "SELECT * FROM sa_job WHERE status = 'RUNNING' AND lease_until IS NOT NULL "
@@ -1019,7 +1069,7 @@ def pending_jobs(limit: int = 20) -> list[dict[str, Any]]:
         return _pg_queue().pending_jobs(limit=limit)
     init()
     now = _now()
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             "SELECT * FROM sa_job WHERE status = 'PENDING' AND available_at <= ? "
@@ -1038,7 +1088,7 @@ def update_approval_action(work_item_id: str, patch: dict[str, Any]) -> dict[str
     if not clean:
         return get_approval(work_item_id) or {}
     init()
-    conn = store._connect()
+    conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
@@ -1068,7 +1118,7 @@ def scan_stuck_work_items(timeout_seconds: int = 180) -> list[dict[str, Any]]:
     from datetime import datetime, timedelta, timezone
 
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(10, int(timeout_seconds)))).isoformat()
-    conn = store._connect()
+    conn = _connect()
     try:
         rows = conn.execute(
             "SELECT * FROM sa_work_item WHERE status = 'RUNNING' AND started_at < ?",
