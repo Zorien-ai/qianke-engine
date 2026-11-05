@@ -389,3 +389,10 @@ DROP TRIGGER IF EXISTS trg_c_policy_audit_anchor_no_delete
 CREATE TRIGGER trg_c_policy_audit_anchor_no_delete
     BEFORE DELETE ON __SCHEMA__.c_policy_audit_anchor
     FOR EACH ROW EXECUTE FUNCTION __SCHEMA__.c_policy_audit_anchor_append_only();
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_login_attempt (
+  "attempt_key" TEXT PRIMARY KEY,
+  "window_start" DOUBLE PRECISION NOT NULL,
+  "attempts" INTEGER NOT NULL DEFAULT 0,
+  "updated_at" DOUBLE PRECISION NOT NULL
+);

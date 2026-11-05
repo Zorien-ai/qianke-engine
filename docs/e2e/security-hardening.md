@@ -18,7 +18,7 @@
 | CSP Report-Only | ✅ 本次新增 | 不强制执行，先观察违规 |
 | SQL 只读防御 | ✅ 已有 | SELECT-only / 白名单 / LIMIT |
 | 安全响应头 | ✅ 本次新增 | `api/security.py` + 2 tests |
-| 登录失败限流 | ✅ 本次新增 | 5 次 / 300s，单进程内存 |
+| 登录失败限流 | ✅ 本次新增 | PostgreSQL 固定窗口（5 次 / 300s），多进程共享 |
 | 生产监控告警 | ✅ 本次部署 | Prometheus/Grafana/Alertmanager |
 
 安全响应头：
@@ -113,7 +113,6 @@ work_items_scoped
 ```text
 SSO / MFA
 PII 存储加密 / 数据分级
-分布式登录限流（当前为单进程内存）
 WAF / IP 白名单
 审计 WORM / 异地备份（本机锚点已只追加）
 Secrets Manager（当前 .env）
@@ -122,6 +121,13 @@ CSP 强制执行（当前 Report-Only）
 渗透测试
 数据保留与删除策略
 租户级配额/计费
+```
+
+登录限流：
+
+```text
+QIANKE_LOGIN_RATE_BACKEND=postgres 时使用 c_login_attempt
+PG 不可用时自动回退单进程内存
 ```
 
 ## 4. 上线前最低清单

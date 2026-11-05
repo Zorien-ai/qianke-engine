@@ -526,6 +526,13 @@ BEGIN
     SELECT RAISE(ABORT, 'c_policy_audit_anchor is append-only');
 END;
 
+CREATE TABLE IF NOT EXISTS c_login_attempt (
+    attempt_key  TEXT PRIMARY KEY,
+    window_start REAL NOT NULL,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    updated_at   REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS c_compensation (
     compensation_id TEXT PRIMARY KEY,
     order_id        TEXT NOT NULL,
