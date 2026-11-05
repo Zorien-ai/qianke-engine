@@ -139,13 +139,27 @@ docker run -d --name qianke-grafana --restart unless-stopped \
 
 本机 8000 落在 Windows 动态排除段 `7942–8041`，当前 API 跑在 8080。
 
-等管理员清理端口排除后：
+固定域名已通过本地 cloudflared ingress 指向 8080：
 
 ```text
-1. API 改回 8000
-2. ops/prometheus.yml targets 改回 host.docker.internal:8000
-3. 重启 qianke-prometheus
+qianke.qiankeagent.com → http://127.0.0.1:8080
 ```
+
+本地配置：
+
+```text
+ops/cloudflared.yml（不入库，含本机凭据路径）
+ops/cloudflared.example.yml（模板）
+```
+
+实测：
+
+```text
+https://qianke.qiankeagent.com/health → 200 {"status":"ok"}
+https://qianke.qiankeagent.com/ready  → 200 四项全绿
+```
+
+等管理员清理端口排除后，可把 ingress 改回 8000。
 
 ## 7. 已知限制
 

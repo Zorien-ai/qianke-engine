@@ -110,3 +110,6 @@ tests/evals/agent/private_holdout/
 
 # 运维备份（含数据库，不入库）
 backups/
+
+# 本机 cloudflared ingress（含本机凭据路径，不入库）
+ops/cloudflared.yml
