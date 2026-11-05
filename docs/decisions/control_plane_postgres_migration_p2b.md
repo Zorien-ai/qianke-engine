@@ -1,6 +1,6 @@
-# 控制面 PostgreSQL 迁移 P2-B：Super-agent 运行时切换
+﻿# 控制面 PostgreSQL 迁移 P2-B：Super-agent 运行时切换
 
-> 日期：2026-11-04 · 状态：运行时开关完成；生产切换未执行，仅隔离预演
+> 日期：2026-11-05 · 状态：已在本机执行 sa_* 维护窗口切换；API 因 8000 端口被 WinNAT 动态排除，临时运行在 8080
 
 ## 1. 运行时开关
 
@@ -9,7 +9,10 @@ QIANKE_CONTROL_BACKEND=postgres
 QIANKE_CONTROL_PG_SCHEMA=qianke_control
 QIANKE_QUEUE_BACKEND=postgres
 QIANKE_QUEUE_SCHEMA=sa_queue
+QIANKE_QUEUE_PG_DB=vec_db
 ```
+
+队列默认库已与控制面统一到 `vec_db`；旧部署仍可用 `QIANKE_QUEUE_PG_DB` 指回独立库。
 
 - `QIANKE_CONTROL_BACKEND=sqlite` 保持原行为
 - 切换需要重启 API/Worker
@@ -145,7 +148,7 @@ start/finish/decide/complete
 队列 enqueue/claim/finish
 ```
 
-## 4. 生产切换 runbook（未执行）
+## 4. 切换 runbook（本次已按此执行）
 
 ```text
 1. 备份 SQLite（backup_control_plane.py）
@@ -165,7 +168,64 @@ start/finish/decide/complete
 
 注意：切换后新写入不会自动回到 SQLite；维护窗口内切换。
 
-## 5. 已知限制
+## 5. 本机实际切换（2026-11-05）
+
+```text
+备份：backups/20261105-144618/c_end_mock.sqlite
+回填：
+  sa_thread     371
+  sa_trigger    375
+  sa_work_item  372
+  sa_approval   366
+  sa_queue.sa_job 348
+目标计数全部一致
+```
+
+启动：
+
+```bash
+QIANKE_CONTROL_BACKEND=postgres
+QIANKE_CONTROL_PG_SCHEMA=qianke_control
+QIANKE_QUEUE_BACKEND=postgres
+QIANKE_QUEUE_SCHEMA=sa_queue
+QIANKE_QUEUE_PG_DB=vec_db
+```
+
+/ready：
+
+```text
+control_store     34.12ms
+superagent_store  37.28ms
+queue             74.16ms
+merchant_store    87.52ms
+status=ok
+```
+
+/metrics：
+
+```text
+qianke_queue_jobs{status="done"} 348
+qianke_work_items{status="waiting_approval"} 347
+```
+
+B 工作台实测：
+
+```text
+Super-agent 工作项 共 50 项
+数据来自 PostgreSQL qianke_control
+```
+
+端口问题：
+
+```text
+8000 被 Windows 动态排除段 7942–8041 占用
+无法绑定；本次 API 运行在 8080
+需管理员清理端口排除或重启后刷新 WinNAT，才能恢复 8000
+```
+
+观察期：尚未满 24h，需继续观察 `/ready`、队列、审计、审批。
+
+## 6. 已知限制（切换后）
 
 ```text
 C 端交易/IM 仍在 SQLite
@@ -177,7 +237,7 @@ JSON/TEXT 类型尚未规范化
 没有真正执行生产切换
 ```
 
-## 6. 下一步
+## 7. 下一步
 
 ```text
 1. 维护窗口真实切换 sa_*
@@ -186,3 +246,4 @@ JSON/TEXT 类型尚未规范化
 4. 类型规范化：JSONB / TIMESTAMPTZ / BOOLEAN
 5. 连接池与并发压测
 ```
+

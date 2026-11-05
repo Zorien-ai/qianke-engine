@@ -30,8 +30,9 @@ def _params() -> dict[str, Any]:
         or os.environ.get("RAG_PG_PASSWORD")
         or "",
         "dbname": os.environ.get("QIANKE_QUEUE_PG_DB")
-        or os.environ.get("RAG_AUTH_PG_DB")
-        or "rag_auth",
+        or os.environ.get("RAG_PG_DBNAME")
+        or os.environ.get("QIANKE_CONTROL_PG_DBNAME")
+        or "vec_db",
     }
 
 
