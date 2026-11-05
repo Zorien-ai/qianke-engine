@@ -357,3 +357,35 @@ ALTER TABLE __SCHEMA__.c_merchant_policy_audit
     ADD COLUMN IF NOT EXISTS "prev_hash" TEXT NOT NULL DEFAULT '';
 ALTER TABLE __SCHEMA__.c_merchant_policy_audit
     ADD COLUMN IF NOT EXISTS "entry_hash" TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_policy_audit_anchor (
+  "anchor_id" TEXT PRIMARY KEY,
+  "merchant_id" TEXT NOT NULL,
+  "checked" INTEGER NOT NULL,
+  "head_hash" TEXT NOT NULL,
+  "created_at" TEXT NOT NULL,
+  "prev_anchor_hash" TEXT NOT NULL DEFAULT '',
+  "anchor_hash" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_policy_audit_anchor_merchant
+    ON __SCHEMA__.c_policy_audit_anchor (merchant_id, created_at);
+
+CREATE OR REPLACE FUNCTION __SCHEMA__.c_policy_audit_anchor_append_only()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'c_policy_audit_anchor is append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_c_policy_audit_anchor_no_update
+    ON __SCHEMA__.c_policy_audit_anchor;
+CREATE TRIGGER trg_c_policy_audit_anchor_no_update
+    BEFORE UPDATE ON __SCHEMA__.c_policy_audit_anchor
+    FOR EACH ROW EXECUTE FUNCTION __SCHEMA__.c_policy_audit_anchor_append_only();
+
+DROP TRIGGER IF EXISTS trg_c_policy_audit_anchor_no_delete
+    ON __SCHEMA__.c_policy_audit_anchor;
+CREATE TRIGGER trg_c_policy_audit_anchor_no_delete
+    BEFORE DELETE ON __SCHEMA__.c_policy_audit_anchor
+    FOR EACH ROW EXECUTE FUNCTION __SCHEMA__.c_policy_audit_anchor_append_only();

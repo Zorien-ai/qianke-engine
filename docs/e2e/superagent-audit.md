@@ -75,24 +75,26 @@ CSV 导出：
       prev_hash, entry_hash
 ```
 
-策略审计哈希链：
+策略审计哈希链 + 锚点：
 
 ```text
 GET /api/superagent/audit/policy/verify
+python scripts/anchor_policy_audit.py --merchant m_gear_002
 python scripts/verify_policy_audit_chain.py --merchant m_gear_002
 ```
 
 返回：
 
 ```json
-{"ok": true, "checked": 2, "head_hash": "..."}
+{"ok": true, "checked": 2, "head_hash": "...",
+ "anchor": {"ok": true, "anchors": 1}}
 ```
 
-链式字段：
+锚点表：
 
 ```text
-prev_hash / entry_hash
-entry_hash = SHA256(prev_hash | canonical(payload))
+c_policy_audit_anchor
+只允许 INSERT；UPDATE/DELETE 由 SQLite/PG 触发器拒绝
 ```
 
 UTF-8 BOM，Excel 可直接打开；CSV 会带上当前筛选参数。

@@ -13,8 +13,9 @@ def main() -> int:
     args = parser.parse_args()
     store.init()
     result = store.verify_policy_audit_chain(args.merchant)
+    result["anchor"] = store.verify_policy_audit_anchor(args.merchant)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["ok"] else 1
+    return 0 if result["ok"] and result["anchor"]["ok"] else 1
 
 
 if __name__ == "__main__":

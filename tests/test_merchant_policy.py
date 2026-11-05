@@ -1,6 +1,8 @@
 """商家级动作策略与额度。"""
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from rag_demo.c_end import store
@@ -199,3 +201,47 @@ def test_policy_audit_hash_chain(c_store):
     broken = c_store.verify_policy_audit_chain("m_chain_001")
     assert broken["ok"] is False
     assert broken["reason"] == "HASH_MISMATCH"
+
+
+def test_policy_audit_anchor_detects_tamper_and_is_append_only(c_store):
+    for amount in (10, 20):
+        c_store.upsert_merchant_policy(
+            "m_anchor_001", allowed_actions=["CANCEL_ORDER"],
+            compensation_max_amount=amount, refund_max_amount=100, updated_by="admin",
+        )
+    anchor = c_store.anchor_policy_audit("m_anchor_001")
+    assert anchor["checked"] == 2
+    assert c_store.verify_policy_audit_anchor("m_anchor_001")["ok"] is True
+
+    c_store.upsert_merchant_policy(
+        "m_anchor_001", allowed_actions=["CANCEL_ORDER"],
+        compensation_max_amount=30, refund_max_amount=100, updated_by="admin",
+    )
+    assert c_store.verify_policy_audit_anchor("m_anchor_001")["ok"] is True
+
+    conn = c_store._connect()
+    try:
+        row = conn.execute(
+            "SELECT policy_audit_id FROM c_merchant_policy_audit "
+            "WHERE merchant_id = 'm_anchor_001' ORDER BY changed_at ASC LIMIT 1"
+        ).fetchone()
+        conn.execute(
+            "DELETE FROM c_merchant_policy_audit WHERE policy_audit_id = ?",
+            (row["policy_audit_id"],),
+        )
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE c_policy_audit_anchor SET checked = 0 WHERE anchor_id = ?",
+                (anchor["anchor_id"],),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "DELETE FROM c_policy_audit_anchor WHERE anchor_id = ?",
+                (anchor["anchor_id"],),
+            )
+    finally:
+        conn.close()
+    broken = c_store.verify_policy_audit_anchor("m_anchor_001")
+    assert broken["ok"] is False
+    assert broken["reason"] == "ANCHOR_MISMATCH"

@@ -1824,7 +1824,7 @@ function auditView() {
     <div class="b-card b-audit-card">
       <h2 class="b-card-title">策略变更</h2>
       <div class="b-audit-policy-tools">
-        <span class="b-muted">审计链：${state.auditChain && state.auditChain.ok ? "正常" : "异常"} · ${Number(state.auditChain?.checked || 0)} 条</span>
+        <span class="b-muted">审计链：${state.auditChain?.ok && state.auditChain?.anchor?.ok ? "正常" : "异常"} · ${Number(state.auditChain?.checked || 0)} 条 · 锚点 ${Number(state.auditChain?.anchor?.anchors || 0)}</span>
         <a class="b-btn b-btn-ghost" href="${escapeHtml(auditPolicyExportUrl())}" download>导出策略 CSV</a>
       </div>
       <ul class="b-audit-policy">${policyRows}</ul>

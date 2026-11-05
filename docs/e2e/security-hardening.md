@@ -13,6 +13,7 @@
 | 动作策略/金额上限 | ✅ 已有 | `c_merchant_policy` |
 | 执行审计 | ✅ 已有 | `sa_approval` + 审计页 |
 | 策略审计哈希链 | ✅ 本次新增 | SHA-256 链式 `prev_hash/entry_hash` |
+| 审计锚点 / 只追加 | ✅ 本次新增 | `c_policy_audit_anchor` + 触发器 |
 | 日志 PII 脱敏 | ✅ 本次新增 | 手机号 / 邮箱 / 身份证 |
 | CSP Report-Only | ✅ 本次新增 | 不强制执行，先观察违规 |
 | SQL 只读防御 | ✅ 已有 | SELECT-only / 白名单 / LIMIT |
@@ -39,16 +40,19 @@ alice@example.com → a***@example.com
 110101199001011234 → 110101********1234
 ```
 
-策略审计哈希链：
+策略审计哈希链 + 锚点：
 
 ```text
 每条策略变更记录 prev_hash + entry_hash
 entry_hash = SHA256(prev_hash | canonical(payload))
+锚点表 c_policy_audit_anchor 只允许 INSERT
+锚点记录 checked / head_hash，用于发现尾部删除
 ```
 
 校验：
 
 ```bash
+python scripts/anchor_policy_audit.py --merchant m_gear_002
 python scripts/verify_policy_audit_chain.py --merchant m_gear_002
 # 或 GET /api/superagent/audit/policy/verify
 ```
@@ -57,7 +61,7 @@ python scripts/verify_policy_audit_chain.py --merchant m_gear_002
 
 ```text
 历史记录不回填（从启用后开始校验）
-删除尾部记录无法仅凭链发现，需要外部锚点/WORM 备份
+锚点在本机 PG，灾难级删除仍需异地 WORM 备份
 ```
 
 B 工作台：
@@ -104,7 +108,7 @@ SSO / MFA
 PII 存储加密 / 数据分级
 分布式登录限流（当前为单进程内存）
 WAF / IP 白名单
-审计 WORM / 外部锚点 / 异地备份
+审计 WORM / 异地备份（本机锚点已只追加）
 Secrets Manager（当前 .env）
 CSP 强制执行（当前 Report-Only）
 依赖漏洞扫描与 SBOM

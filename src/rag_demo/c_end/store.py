@@ -501,6 +501,31 @@ CREATE TABLE IF NOT EXISTS c_merchant_policy_audit (
     entry_hash      TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS c_policy_audit_anchor (
+    anchor_id        TEXT PRIMARY KEY,
+    merchant_id      TEXT NOT NULL,
+    checked          INTEGER NOT NULL,
+    head_hash        TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    prev_anchor_hash TEXT NOT NULL DEFAULT '',
+    anchor_hash      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_policy_audit_anchor_merchant
+    ON c_policy_audit_anchor (merchant_id, created_at);
+
+CREATE TRIGGER IF NOT EXISTS trg_c_policy_audit_anchor_no_update
+BEFORE UPDATE ON c_policy_audit_anchor
+BEGIN
+    SELECT RAISE(ABORT, 'c_policy_audit_anchor is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_c_policy_audit_anchor_no_delete
+BEFORE DELETE ON c_policy_audit_anchor
+BEGIN
+    SELECT RAISE(ABORT, 'c_policy_audit_anchor is append-only');
+END;
+
 CREATE TABLE IF NOT EXISTS c_compensation (
     compensation_id TEXT PRIMARY KEY,
     order_id        TEXT NOT NULL,
@@ -1002,6 +1027,101 @@ def query_policy_audit(
             for row in rows
         ]
         return {"items": items, "total": int(total), "limit": limit, "offset": offset}
+    finally:
+        conn.close()
+
+
+def anchor_policy_audit(merchant_id: str) -> dict[str, Any]:
+    """把当前审计链头写入只追加锚点表，用于检测删除尾部/截断。"""
+    merchant_id = str(merchant_id or "").strip()
+    chain = verify_policy_audit_chain(merchant_id)
+    if not chain.get("ok"):
+        raise CStoreError("AUDIT_CHAIN_BROKEN", "策略审计链校验失败，拒绝写入锚点")
+    init()
+    conn = _connect()
+    try:
+        last = conn.execute(
+            "SELECT anchor_hash FROM c_policy_audit_anchor WHERE merchant_id = ? "
+            "ORDER BY created_at DESC, anchor_id DESC LIMIT 1",
+            (merchant_id,),
+        ).fetchone()
+        prev_hash = str(last["anchor_hash"]) if last else ""
+        created_at = _now()
+        anchor_id = f"paa_{uuid.uuid4().hex[:16]}"
+        payload = {
+            "anchor_id": anchor_id,
+            "merchant_id": merchant_id,
+            "checked": int(chain.get("checked") or 0),
+            "head_hash": str(chain.get("head_hash") or ""),
+            "created_at": created_at,
+        }
+        anchor_hash = _audit_chain_hash(prev_hash, payload)
+        conn.execute(
+            "INSERT INTO c_policy_audit_anchor(anchor_id, merchant_id, checked, head_hash, "
+            "created_at, prev_anchor_hash, anchor_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                anchor_id,
+                merchant_id,
+                payload["checked"],
+                payload["head_hash"],
+                created_at,
+                prev_hash,
+                anchor_hash,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {
+        "anchor_id": anchor_id,
+        "merchant_id": merchant_id,
+        "checked": payload["checked"],
+        "head_hash": payload["head_hash"],
+        "anchor_hash": anchor_hash,
+    }
+
+
+def verify_policy_audit_anchor(merchant_id: str) -> dict[str, Any]:
+    """校验锚点自身链，并检查当前审计链是否覆盖锚点前缀。"""
+    merchant_id = str(merchant_id or "").strip()
+    init()
+    conn = _connect()
+    try:
+        anchors = conn.execute(
+            "SELECT * FROM c_policy_audit_anchor WHERE merchant_id = ? "
+            "ORDER BY created_at ASC, anchor_id ASC",
+            (merchant_id,),
+        ).fetchall()
+        entries = conn.execute(
+            "SELECT entry_hash FROM c_merchant_policy_audit "
+            "WHERE merchant_id = ? AND entry_hash != '' "
+            "ORDER BY changed_at ASC, policy_audit_id ASC",
+            (merchant_id,),
+        ).fetchall()
+        prev_anchor_hash = ""
+        for anchor in anchors:
+            payload = {
+                "anchor_id": anchor["anchor_id"],
+                "merchant_id": anchor["merchant_id"],
+                "checked": int(anchor["checked"]),
+                "head_hash": anchor["head_hash"],
+                "created_at": anchor["created_at"],
+            }
+            expected = _audit_chain_hash(prev_anchor_hash, payload)
+            if anchor["prev_anchor_hash"] != prev_anchor_hash or anchor["anchor_hash"] != expected:
+                return {"ok": False, "anchors": len(anchors), "reason": "ANCHOR_CHAIN_BROKEN"}
+            checked = int(anchor["checked"])
+            if len(entries) < checked:
+                return {"ok": False, "anchors": len(anchors), "reason": "AUDIT_TRUNCATED"}
+            if checked > 0 and entries[checked - 1]["entry_hash"] != anchor["head_hash"]:
+                return {"ok": False, "anchors": len(anchors), "reason": "ANCHOR_MISMATCH"}
+            prev_anchor_hash = expected
+        return {
+            "ok": True,
+            "anchors": len(anchors),
+            "checked": len(entries),
+            "head_hash": prev_anchor_hash,
+        }
     finally:
         conn.close()
 

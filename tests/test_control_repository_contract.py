@@ -13,7 +13,7 @@ EXPECTED_TABLES = {
     "c_friend", "c_group", "c_group_member", "c_group_message", "c_mention", "c_message",
     "c_order", "c_order_item", "c_product", "c_quote", "c_reconciliation_alert",
     "c_reconciliation_run", "c_merchant_tenant", "c_merchant_member", "c_merchant_policy",
-    "c_merchant_policy_audit", "c_tenant_provision", "c_thread_read",
+    "c_merchant_policy_audit", "c_policy_audit_anchor", "c_tenant_provision", "c_thread_read",
     "sa_thread", "sa_trigger", "sa_work_item", "sa_approval", "sa_job",
 }
 
