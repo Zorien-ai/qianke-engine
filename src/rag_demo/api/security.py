@@ -1,9 +1,51 @@
-"""最小安全响应头中间件。"""
+"""最小安全响应头与登录限流。"""
 from __future__ import annotations
+
+import threading
+import time
+from collections import defaultdict
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+
+
+class LoginRateLimiter:
+    """单进程滑动窗口限流；多进程部署需换成 Redis/PG。"""
+
+    def __init__(self, max_attempts: int = 5, window_seconds: int = 300) -> None:
+        self.max_attempts = max(1, int(max_attempts))
+        self.window_seconds = max(1, int(window_seconds))
+        self._hits: dict[str, list[float]] = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def _prune(self, key: str, now: float) -> None:
+        cutoff = now - self.window_seconds
+        self._hits[key] = [ts for ts in self._hits.get(key, []) if ts >= cutoff]
+        if not self._hits[key]:
+            self._hits.pop(key, None)
+
+    def retry_after(self, key: str) -> int:
+        with self._lock:
+            now = time.monotonic()
+            self._prune(key, now)
+            hits = self._hits.get(key, [])
+            if len(hits) < self.max_attempts:
+                return 0
+            return max(1, int(self.window_seconds - (now - hits[0])) + 1)
+
+    def record_failure(self, key: str) -> None:
+        with self._lock:
+            now = time.monotonic()
+            self._prune(key, now)
+            self._hits[key].append(now)
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._hits.pop(key, None)
+
+
+LOGIN_RATE_LIMITER = LoginRateLimiter()
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

@@ -14,6 +14,7 @@
 | 执行审计 | ✅ 已有 | `sa_approval` + 审计页 |
 | SQL 只读防御 | ✅ 已有 | SELECT-only / 白名单 / LIMIT |
 | 安全响应头 | ✅ 本次新增 | `api/security.py` + 2 tests |
+| 登录失败限流 | ✅ 本次新增 | 5 次 / 300s，单进程内存 |
 | 生产监控告警 | ✅ 本次部署 | Prometheus/Grafana/Alertmanager |
 
 安全响应头：
@@ -57,7 +58,8 @@ work_items_scoped
 ```text
 SSO / MFA
 PII 字段识别、脱敏、加密
-登录限流 / WAF / IP 白名单
+分布式登录限流（当前为单进程内存）
+WAF / IP 白名单
 审计不可篡改 / WORM / 异地备份
 Secrets Manager（当前 .env）
 CSP（需先梳理 Vue/inline script）
@@ -74,7 +76,7 @@ CSP（需先梳理 Vue/inline script）
 [ ] Alertmanager 接真实通知渠道
 [ ] 审计日志只追加 + 备份
 [ ] 租户数据导出/删除流程
-[ ] 登录失败限流
+[ ] 登录失败限流改成 Redis/PG 分布式
 [ ] HTTPS/HSTS 在入口生效
 [ ] 依赖漏洞扫描通过
 ```

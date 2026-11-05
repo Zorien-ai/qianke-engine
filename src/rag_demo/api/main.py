@@ -63,7 +63,7 @@ from rag_demo.api.b_end import register_b_end
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
 from rag_demo.api.ops import register_ops
-from rag_demo.api.security import install_security_headers
+from rag_demo.api.security import LOGIN_RATE_LIMITER, install_security_headers
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache, dataset_data_version
 from rag_demo.config import (
@@ -968,7 +968,7 @@ def register(payload: RegisterIn) -> dict:
 
 
 @app.post("/auth/login")
-def login(payload: LoginIn, response: Response) -> dict:
+def login(payload: LoginIn, response: Response, request: Request) -> dict:
     """登录：校验密码 → 发会话 Cookie。
 
     待审核账号**允许登录**：登录后能看到「等待审核」。
@@ -982,10 +982,21 @@ def login(payload: LoginIn, response: Response) -> dict:
     account_id = (payload.account or payload.username or "").strip()
     if not account_id:
         raise HTTPException(status_code=400, detail="请输入手机号、邮箱或用户名")
+    client_ip = request.client.host if request.client else "unknown"
+    limiter_key = f"{client_ip}:{account_id.lower()}"
+    retry_after = LOGIN_RATE_LIMITER.retry_after(limiter_key)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail=f"登录尝试过于频繁，请 {retry_after} 秒后再试",
+            headers={"Retry-After": str(retry_after)},
+        )
     try:
         user = auth.authenticate(account_id, payload.password)
     except ValueError as e:
+        LOGIN_RATE_LIMITER.record_failure(limiter_key)
         raise HTTPException(status_code=401, detail=str(e)) from e
+    LOGIN_RATE_LIMITER.reset(limiter_key)
 
     ttl = auth.REMEMBER_TTL_SECONDS if payload.remember else auth.SESSION_TTL_SECONDS
     token = auth.create_session(user["id"], ttl)
