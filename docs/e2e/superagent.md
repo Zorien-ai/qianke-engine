@@ -296,6 +296,8 @@ Eval 全量 24×2 基线详见：[superagent-eval-baseline-runs2.md](superagent-
 动作执行审计详见：[superagent-audit.md](superagent-audit.md)
 租户开通流程详见：[superagent-tenant-provisioning.md](superagent-tenant-provisioning.md)
 运维就绪/指标/备份详见：[ops-readiness-backup.md](ops-readiness-backup.md)
+可观测性实际部署详见：[observability-deployment.md](observability-deployment.md)
+安全加固与租户试点详见：[security-hardening.md](security-hardening.md)
 定时备份与 Grafana 详见：[ops-backup-schedule-grafana.md](ops-backup-schedule-grafana.md)
 
 ## 8. 下一步

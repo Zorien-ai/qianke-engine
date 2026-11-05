@@ -1,0 +1,10 @@
+route:
+  receiver: default
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 2h
+
+receivers:
+  - name: default
+    # 本地默认只落 Alertmanager UI；需要外部通知时在这里加 webhook。

@@ -1,0 +1,38 @@
+groups:
+  - name: qianke
+    rules:
+      - alert: QiankeApiDown
+        expr: up{job="qianke"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Qianke API 不可达"
+          description: "Prometheus 连续 2 分钟抓不到 qianke /metrics。"
+
+      - alert: QiankeDeadJobs
+        expr: qianke_queue_jobs{status="dead"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "存在 DEAD 队列任务"
+          description: "qianke_queue_jobs{status=dead} > 0，请检查队列重放。"
+
+      - alert: QiankeQueueBacklog
+        expr: qianke_queue_jobs{status="pending"} > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "队列积压"
+          description: "PENDING 任务超过 50，Worker 可能未运行或处理变慢。"
+
+      - alert: QiankeStuckWorkItems
+        expr: qianke_work_items{status="stuck"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "存在 STUCK 工作项"
+          description: "Watchdog 标记了运行超时工作项，需要人工检查。"
