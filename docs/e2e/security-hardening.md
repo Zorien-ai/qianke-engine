@@ -44,6 +44,13 @@ owner: aaa / myc6666
 python scripts/tenant_pilot_smoke.py
 ```
 
+隔离契约测试：
+
+```bash
+pytest tests/test_tenant_isolation_pg.py -q
+# 1 passed
+```
+
 检查：
 
 ```text

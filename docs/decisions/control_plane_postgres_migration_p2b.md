@@ -225,6 +225,29 @@ Super-agent 工作项 共 50 项
 
 观察期：尚未满 24h，需继续观察 `/ready`、队列、审计、审批。
 
+观察脚本：
+
+```bash
+python scripts/observe_control_pg.py --once
+python scripts/observe_control_pg.py --duration 86400 --interval 60
+```
+
+输出：
+
+```text
+logs/control_pg_observation.jsonl
+```
+
+本机已采样 3 次：
+
+```text
+ready 200
+queue_done 348
+waiting_approval 347
+stuck 1
+```
+
+
 ## 6. 已知限制（切换后）
 
 ```text
