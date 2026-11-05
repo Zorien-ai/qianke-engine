@@ -3,5 +3,5 @@ credentials-file: C:\Users\<you>\.cloudflared\<TUNNEL_ID>.json
 no-autoupdate: true
 ingress:
   - hostname: qianke.qiankeagent.com
-    service: http://127.0.0.1:8080
+    service: http://127.0.0.1:8000
   - service: http_status:404

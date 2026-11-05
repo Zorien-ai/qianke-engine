@@ -186,6 +186,13 @@ def audit_policy(
     return {"merchant_id": target, **result}
 
 
+@router.get("/audit/policy/verify")
+def audit_policy_verify(merchant_id: str | None = None) -> dict[str, Any]:
+    account = _account()
+    target = _resolve_merchant(account, merchant_id)
+    return c_store.verify_policy_audit_chain(target)
+
+
 @router.get("/audit/policy.csv")
 def audit_policy_csv(
     date_from: str = "",

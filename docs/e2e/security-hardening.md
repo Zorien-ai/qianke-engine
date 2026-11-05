@@ -1,6 +1,6 @@
 # 生产安全加固与租户试点
 
-> 日期：2026-11-05 · 状态：已落地安全头、租户试点烟测；SSO/PII/限流仍未做
+> 日期：2026-11-05 · 状态：已落地安全头、限流、策略审计哈希链与租户试点；SSO/PII/WORM 仍未做
 
 ## 1. 已落地
 
@@ -12,6 +12,7 @@
 | 高风险动作人工审批 | ✅ 已有 | Super-agent HITL |
 | 动作策略/金额上限 | ✅ 已有 | `c_merchant_policy` |
 | 执行审计 | ✅ 已有 | `sa_approval` + 审计页 |
+| 策略审计哈希链 | ✅ 本次新增 | SHA-256 链式 `prev_hash/entry_hash` |
 | SQL 只读防御 | ✅ 已有 | SELECT-only / 白名单 / LIMIT |
 | 安全响应头 | ✅ 本次新增 | `api/security.py` + 2 tests |
 | 登录失败限流 | ✅ 本次新增 | 5 次 / 300s，单进程内存 |
@@ -25,6 +26,27 @@ X-Frame-Options: SAMEORIGIN
 Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: geolocation=(), microphone=(), camera=()
 Strict-Transport-Security（仅 HTTPS）
+```
+
+策略审计哈希链：
+
+```text
+每条策略变更记录 prev_hash + entry_hash
+entry_hash = SHA256(prev_hash | canonical(payload))
+```
+
+校验：
+
+```bash
+python scripts/verify_policy_audit_chain.py --merchant m_gear_002
+# 或 GET /api/superagent/audit/policy/verify
+```
+
+限制：
+
+```text
+历史记录不回填（从启用后开始校验）
+删除尾部记录无法仅凭链发现，需要外部锚点/WORM 备份
 ```
 
 ## 2. 租户试点
@@ -67,7 +89,7 @@ SSO / MFA
 PII 字段识别、脱敏、加密
 分布式登录限流（当前为单进程内存）
 WAF / IP 白名单
-审计不可篡改 / WORM / 异地备份
+审计 WORM / 外部锚点 / 异地备份
 Secrets Manager（当前 .env）
 CSP（需先梳理 Vue/inline script）
 依赖漏洞扫描与 SBOM

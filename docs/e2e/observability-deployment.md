@@ -9,7 +9,7 @@
 | Prometheus | `qianke-prometheus` | http://127.0.0.1:9090 |
 | Grafana | `qianke-grafana` | http://127.0.0.1:3000 |
 | Alertmanager | `qianke-alertmanager` | http://127.0.0.1:9093 |
-| API | 本机 | http://127.0.0.1:8080 |
+| API | 本机 | http://127.0.0.1:8000 |
 
 Grafana 本地账号：
 
@@ -30,7 +30,7 @@ ops/prometheus.yml
 抓取目标：
 
 ```text
-http://host.docker.internal:8080/metrics
+http://host.docker.internal:8000/metrics
 ```
 
 验证：
@@ -137,12 +137,12 @@ docker run -d --name qianke-grafana --restart unless-stopped \
 
 ## 6. 端口说明
 
-本机 8000 落在 Windows 动态排除段 `7942–8041`，当前 API 跑在 8080。
+8000 已由管理员重启 WinNAT 释放，API 跑在 8000。
 
-固定域名已通过本地 cloudflared ingress 指向 8080：
+固定域名已通过本地 cloudflared ingress 指向 8000：
 
 ```text
-qianke.qiankeagent.com → http://127.0.0.1:8080
+qianke.qiankeagent.com → http://127.0.0.1:8000
 ```
 
 本地配置：
@@ -159,7 +159,7 @@ https://qianke.qiankeagent.com/health → 200 {"status":"ok"}
 https://qianke.qiankeagent.com/ready  → 200 四项全绿
 ```
 
-等管理员清理端口排除后，可把 ingress 改回 8000。
+
 
 ## 7. 已知限制
 

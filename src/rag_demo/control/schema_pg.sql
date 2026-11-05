@@ -242,7 +242,9 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_policy_audit (
   "changed_by" TEXT NOT NULL DEFAULT '',
   "before_json" TEXT NOT NULL DEFAULT '{}',
   "after_json" TEXT NOT NULL DEFAULT '{}',
-  "changed_at" TEXT NOT NULL
+  "changed_at" TEXT NOT NULL,
+  "prev_hash" TEXT NOT NULL DEFAULT '',
+  "entry_hash" TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_tenant_provision (
@@ -350,3 +352,8 @@ CREATE INDEX IF NOT EXISTS idx_sa_job_claim
     ON __SCHEMA__.sa_job (status, available_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sa_job_work_item
     ON __SCHEMA__.sa_job (work_item_id, kind);
+
+ALTER TABLE __SCHEMA__.c_merchant_policy_audit
+    ADD COLUMN IF NOT EXISTS "prev_hash" TEXT NOT NULL DEFAULT '';
+ALTER TABLE __SCHEMA__.c_merchant_policy_audit
+    ADD COLUMN IF NOT EXISTS "entry_hash" TEXT NOT NULL DEFAULT '';

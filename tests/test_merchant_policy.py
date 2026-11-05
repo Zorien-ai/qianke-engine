@@ -167,3 +167,35 @@ def test_action_audit_lists_executed_action(c_store):
     )
     assert hourly["total"] >= 1
     assert sa_store.list_action_audit("m_gear_002", date_from="2099-01-01")["total"] == 0
+
+
+def test_policy_audit_hash_chain(c_store):
+    c_store.upsert_merchant_policy(
+        "m_chain_001", allowed_actions=["CANCEL_ORDER"],
+        compensation_max_amount=10, refund_max_amount=100, updated_by="admin",
+    )
+    c_store.upsert_merchant_policy(
+        "m_chain_001", allowed_actions=["CANCEL_ORDER"],
+        compensation_max_amount=20, refund_max_amount=100, updated_by="admin",
+    )
+    result = c_store.verify_policy_audit_chain("m_chain_001")
+    assert result["ok"] is True
+    assert result["checked"] == 2
+    assert len(result["head_hash"]) == 64
+
+    conn = c_store._connect()
+    try:
+        row = conn.execute(
+            "SELECT policy_audit_id FROM c_merchant_policy_audit "
+            "WHERE merchant_id = 'm_chain_001' ORDER BY changed_at ASC LIMIT 1"
+        ).fetchone()
+        conn.execute(
+            "UPDATE c_merchant_policy_audit SET after_json = '{}' WHERE policy_audit_id = ?",
+            (row["policy_audit_id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    broken = c_store.verify_policy_audit_chain("m_chain_001")
+    assert broken["ok"] is False
+    assert broken["reason"] == "HASH_MISMATCH"

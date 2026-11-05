@@ -496,7 +496,9 @@ CREATE TABLE IF NOT EXISTS c_merchant_policy_audit (
     changed_by      TEXT NOT NULL DEFAULT '',
     before_json     TEXT NOT NULL DEFAULT '{}',
     after_json      TEXT NOT NULL DEFAULT '{}',
-    changed_at      TEXT NOT NULL
+    changed_at      TEXT NOT NULL,
+    prev_hash       TEXT NOT NULL DEFAULT '',
+    entry_hash      TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS c_compensation (
@@ -612,6 +614,16 @@ def init() -> None:
                 "UPDATE c_companion SET name = ? WHERE name = '小伴' AND user_nickname = ''",
                 (c_persona.DEFAULT_NAME,),
             )
+            audit_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(c_merchant_policy_audit)").fetchall()
+            }
+            for column_name in ("prev_hash", "entry_hash"):
+                if column_name not in audit_columns:
+                    conn.execute(
+                        f"ALTER TABLE c_merchant_policy_audit ADD COLUMN {column_name} "
+                        "TEXT NOT NULL DEFAULT ''"
+                    )
             conn.commit()
         finally:
             conn.close()
@@ -826,6 +838,11 @@ def get_merchant_policy(merchant_id: str) -> dict[str, Any]:
         conn.close()
 
 
+def _audit_chain_hash(prev_hash: str, payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"{prev_hash}|{canonical}".encode("utf-8")).hexdigest()
+
+
 def upsert_merchant_policy(
     merchant_id: str,
     *,
@@ -890,16 +907,37 @@ def upsert_merchant_policy(
             ),
         )
         if changed:
+            changed_at = _now()
+            audit_id = f"pau_{uuid.uuid4().hex[:16]}"
+            last = conn.execute(
+                "SELECT entry_hash FROM c_merchant_policy_audit "
+                "WHERE merchant_id = ? AND entry_hash != '' "
+                "ORDER BY changed_at DESC, policy_audit_id DESC LIMIT 1",
+                (merchant_id,),
+            ).fetchone()
+            prev_hash = str(last["entry_hash"]) if last else ""
+            payload = {
+                "policy_audit_id": audit_id,
+                "merchant_id": merchant_id,
+                "changed_by": str(updated_by or "")[:64],
+                "before": before,
+                "after": after,
+                "changed_at": changed_at,
+            }
+            entry_hash = _audit_chain_hash(prev_hash, payload)
             conn.execute(
                 "INSERT INTO c_merchant_policy_audit(policy_audit_id, merchant_id, changed_by, "
-                "before_json, after_json, changed_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "before_json, after_json, changed_at, prev_hash, entry_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    f"pau_{uuid.uuid4().hex[:16]}",
+                    audit_id,
                     merchant_id,
                     str(updated_by or "")[:64],
                     json.dumps(before, ensure_ascii=False),
                     json.dumps(after, ensure_ascii=False),
-                    _now(),
+                    changed_at,
+                    prev_hash,
+                    entry_hash,
                 ),
             )
         conn.commit()
@@ -958,6 +996,8 @@ def query_policy_audit(
                 "before": json.loads(row["before_json"] or "{}"),
                 "after": json.loads(row["after_json"] or "{}"),
                 "changed_at": row["changed_at"],
+                "prev_hash": row["prev_hash"] or "",
+                "entry_hash": row["entry_hash"] or "",
             }
             for row in rows
         ]
@@ -968,6 +1008,47 @@ def query_policy_audit(
 
 def list_policy_audit(merchant_id: str, limit: int = 50) -> list[dict[str, Any]]:
     return query_policy_audit(merchant_id, limit=limit)["items"]
+
+
+def verify_policy_audit_chain(merchant_id: str) -> dict[str, Any]:
+    """校验策略审计哈希链；只校验启用链式哈希后的记录。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_merchant_policy_audit "
+            "WHERE merchant_id = ? AND entry_hash != '' "
+            "ORDER BY changed_at ASC, policy_audit_id ASC",
+            (str(merchant_id or "").strip(),),
+        ).fetchall()
+        prev_hash = ""
+        for row in rows:
+            payload = {
+                "policy_audit_id": row["policy_audit_id"],
+                "merchant_id": row["merchant_id"],
+                "changed_by": row["changed_by"],
+                "before": json.loads(row["before_json"] or "{}"),
+                "after": json.loads(row["after_json"] or "{}"),
+                "changed_at": row["changed_at"],
+            }
+            expected = _audit_chain_hash(prev_hash, payload)
+            if row["prev_hash"] != prev_hash or row["entry_hash"] != expected:
+                return {
+                    "ok": False,
+                    "merchant_id": merchant_id,
+                    "checked": len(rows),
+                    "broken_at": row["policy_audit_id"],
+                    "reason": "HASH_MISMATCH",
+                }
+            prev_hash = expected
+        return {
+            "ok": True,
+            "merchant_id": merchant_id,
+            "checked": len(rows),
+            "head_hash": prev_hash,
+        }
+    finally:
+        conn.close()
 
 
 def check_action_policy(

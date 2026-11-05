@@ -74,6 +74,26 @@ CSV 导出：
       动作 before-after, require_note before-after
 ```
 
+策略审计哈希链：
+
+```text
+GET /api/superagent/audit/policy/verify
+python scripts/verify_policy_audit_chain.py --merchant m_gear_002
+```
+
+返回：
+
+```json
+{"ok": true, "checked": 2, "head_hash": "..."}
+```
+
+链式字段：
+
+```text
+prev_hash / entry_hash
+entry_hash = SHA256(prev_hash | canonical(payload))
+```
+
 UTF-8 BOM，Excel 可直接打开；CSV 会带上当前筛选参数。
 
 权限：
