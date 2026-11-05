@@ -59,6 +59,9 @@ CREATE INDEX IF NOT EXISTS idx_c_group_message_owner_group
 
 
 def init() -> None:
+    if store._cend_pg_enabled():
+        store._ensure_pg_schema()
+        return
     store.init()
     with store._DB_LOCK:
         conn = store._connect()

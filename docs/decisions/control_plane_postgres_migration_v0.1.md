@@ -1,10 +1,12 @@
 # 控制面 PostgreSQL 迁移方案 v0.1
 
-> 日期：2026-11-04 · 状态：P1/P2 已实施（schema、回填、运行时开关；生产切换待执行）· 范围：C 端 mock + Super-agent 控制面
+> 日期：2026-11-05 · 状态：P1/P2/P3 已实施（控制面与 C 端均已切 PG；生产观察与高可用待补）
 >
 > P1 实施记录：[control_plane_postgres_migration_p1.md](control_plane_postgres_migration_p1.md)
 > P2-A 实施记录：[control_plane_postgres_migration_p2a.md](control_plane_postgres_migration_p2a.md)
 > P2-B 实施记录：[control_plane_postgres_migration_p2b.md](control_plane_postgres_migration_p2b.md)
+> P3-A 回填：[control_plane_postgres_migration_p3a.md](control_plane_postgres_migration_p3a.md)
+> P3-B 运行时：[control_plane_postgres_migration_p3b.md](control_plane_postgres_migration_p3b.md)
 
 ## 1. 结论
 

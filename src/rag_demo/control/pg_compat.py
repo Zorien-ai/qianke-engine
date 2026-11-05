@@ -31,7 +31,13 @@ _JSON_EXTRACT = re.compile(
 def translate_sql(sql: str) -> str:
     sql = sql.replace("BEGIN IMMEDIATE", "BEGIN")
     sql = _JSON_EXTRACT.sub(r"(\1::jsonb ->> '\2')", sql)
-    return sql.replace("?", "%s")
+    if re.search(r"INSERT\s+OR\s+IGNORE\s+INTO", sql, flags=re.IGNORECASE):
+        sql = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql, flags=re.IGNORECASE)
+        if "ON CONFLICT" not in sql.upper():
+            sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+    sql = sql.replace("?", "%s")
+    # psycopg2 参数化时会把字面量 % 当格式符；转义非占位符的 %。
+    return re.sub(r"%(?!s)", "%%", sql)
 
 
 class PGCursor:

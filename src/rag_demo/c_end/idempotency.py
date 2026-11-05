@@ -71,6 +71,9 @@ def fingerprint(message: str, thread_id: str | None = None) -> str:
 
 
 def init() -> None:
+    if store._cend_pg_enabled():
+        store._ensure_pg_schema()
+        return
     with _LOCK:
         conn = store._connect()
         try:

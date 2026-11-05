@@ -293,7 +293,36 @@ def _next_message_time() -> str:
 _next_app_message_time = _next_message_time
 
 
+_CEND_PG_INITIALIZED_SCHEMA: str | None = None
+
+
+def _cend_pg_enabled() -> bool:
+    value = (os.environ.get("QIANKE_CEND_BACKEND") or "sqlite").strip().lower()
+    return value in {"postgres", "postgresql", "pg"}
+
+
+def _ensure_pg_schema() -> None:
+    global _CEND_PG_INITIALIZED_SCHEMA
+    from rag_demo.control.postgres_repository import PostgresControlRepository
+    from rag_demo.control.settings import pg_settings
+
+    schema = pg_settings()["schema"]
+    if _CEND_PG_INITIALIZED_SCHEMA == schema:
+        return
+    repo = PostgresControlRepository()
+    try:
+        repo.init_schema()
+    finally:
+        repo.close()
+    _CEND_PG_INITIALIZED_SCHEMA = schema
+
+
 def _connect() -> sqlite3.Connection:
+    if _cend_pg_enabled():
+        from rag_demo.control.pg_compat import connect
+
+        _ensure_pg_schema()
+        return connect()  # type: ignore[return-value]
     conn = sqlite3.connect(str(_db_path()), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -516,6 +545,9 @@ _SEED = (
 
 
 def init() -> None:
+    if _cend_pg_enabled():
+        _ensure_pg_schema()
+        return
     with _DB_LOCK:
         conn = _connect()
         try:
@@ -895,10 +927,16 @@ def query_policy_audit(
     where = ["merchant_id = ?"]
     params: list[Any] = [merchant_id]
     if date_from:
-        where.append("datetime(changed_at) >= datetime(?)")
+        if _cend_pg_enabled():
+            where.append("(changed_at)::timestamptz >= ?::timestamptz")
+        else:
+            where.append("datetime(changed_at) >= datetime(?)")
         params.append(_audit_time_bound(date_from))
     if date_to:
-        where.append("datetime(changed_at) <= datetime(?)")
+        if _cend_pg_enabled():
+            where.append("(changed_at)::timestamptz <= ?::timestamptz")
+        else:
+            where.append("datetime(changed_at) <= datetime(?)")
         params.append(_audit_time_bound(date_to, end=True))
     clause = " AND ".join(where)
     init()
