@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>千客引擎 · 架构图源文件</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #fff;
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+  .stage { position: relative; background: #fff; overflow: hidden; }
+  .node {
+    position: absolute;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    border-radius: 9px; border: 1.6px solid;
+    text-align: center; line-height: 1.4;
+    padding: 4px 10px;
+  }
+  .node .t { font-size: 15.5px; font-weight: 700; letter-spacing: .2px; }
+  .node .s { font-size: 11.5px; margin-top: 2px; font-weight: 400; opacity: .8; }
+  .col-label {
+    position: absolute; text-align: center;
+    font-size: 12.5px; font-weight: 700; color: #94A3B8; letter-spacing: 2px;
+  }
+  .caption {
+    position: absolute; text-align: center;
+    font-size: 12px; color: #94A3B8;
+  }
+  svg.wires { position: absolute; left: 0; top: 0; overflow: visible; }
+
+  .blue   { border-color:#3B82F6; background:#DBEAFE; color:#1E40AF; }
+  .green  { border-color:#10B981; background:#D1FAE5; color:#047857; }
+  .amber  { border-color:#F59E0B; background:#FEF3C7; color:#B45309; }
+  .purple { border-color:#A855F7; background:#F3E8FF; color:#7E22CE; }
+  .indigo { border-color:#6366F1; background:#E0E7FF; color:#4338CA; }
+  .red    { border-color:#EF4444; background:#FEE2E2; color:#B91C1C; }
+  .cyan   { border-color:#06B6D4; background:#CFFAFE; color:#0E7490; }
+  .slate  { border-color:#94A3B8; background:#E2E8F0; color:#475569; }
+</style>
+</head>
+<body>
+
+<!-- ================= 图 3 · 离线数据接入 ================= -->
+<div class="stage" id="fig3" style="width:1300px;height:485px">
+
+  <div class="col-label" style="left:80px;  width:240px; top:64px;">数据源</div>
+  <div class="col-label" style="left:380px; width:240px; top:64px;">构建</div>
+  <div class="col-label" style="left:680px; width:240px; top:64px;">向量化</div>
+  <div class="col-label" style="left:980px; width:240px; top:64px;">存储</div>
+
+  <div class="node blue" style="left:80px; top:130px; width:240px; height:74px;">
+    <div class="t">CSV 交易数据</div>
+    <div class="s">结构化表格</div>
+  </div>
+
+  <div class="node green" style="left:80px; top:262px; width:240px; height:74px;">
+    <div class="t">Markdown 知识库</div>
+    <div class="s">非结构化文档</div>
+  </div>
+
+  <div class="node amber" style="left:380px; top:186px; width:240px; height:94px;">
+    <div class="t">增量 / 全量构建</div>
+    <div class="s">清洗 · 切分 · 去重 · 元数据</div>
+  </div>
+
+  <div class="node purple" style="left:680px; top:186px; width:240px; height:94px;">
+    <div class="t">BGE-M3 稠密 / 稀疏</div>
+    <div class="s">BM25 关键词索引</div>
+    <div class="s">多路段向量</div>
+  </div>
+
+  <svg class="wires" width="1300" height="485">
+    <defs>
+      <marker id="ar3" viewBox="0 0 10 10" refX="9.5" refY="5"
+              markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#94A3B8"/>
+      </marker>
+    </defs>
+    <path d="M320 167 C352 167 348 233 380 233" stroke="#94A3B8" stroke-width="1.7" fill="none" marker-end="url(#ar3)"/>
+    <path d="M320 299 C352 299 348 233 380 233" stroke="#94A3B8" stroke-width="1.7" fill="none" marker-end="url(#ar3)"/>
+    <line x1="620" y1="233" x2="674" y2="233" stroke="#94A3B8" stroke-width="1.7" marker-end="url(#ar3)"/>
+    <line x1="920" y1="233" x2="991" y2="233" stroke="#94A3B8" stroke-width="1.7" marker-end="url(#ar3)"/>
+  </svg>
+
+  <!-- PostgreSQL 圆柱体 -->
+  <svg style="position:absolute;left:980px;top:170px;" width="240" height="130" viewBox="0 0 240 130">
+    <path d="M16 22 V104 A104 14 0 0 0 224 104 V22" fill="#EEF2F6" stroke="#94A3B8" stroke-width="1.6"/>
+    <ellipse cx="120" cy="22" rx="104" ry="14" fill="#E2E8F0" stroke="#94A3B8" stroke-width="1.6"/>
+    <text x="120" y="60" text-anchor="middle" font-size="14.5" font-weight="700" fill="#475569">PostgreSQL</text>
+    <text x="120" y="82" text-anchor="middle" font-size="11.5" fill="#64748B">pgvector / search_index</text>
+    <text x="120" y="100" text-anchor="middle" font-size="11.5" fill="#64748B">向量 + 倒排索引共存</text>
+  </svg>
+
+  <div class="caption" style="left:100px; width:1100px; top:392px;">
+    结构化交易数据与非结构化文档统一进入构建管线，经 BGE-M3 生成稠密/稀疏向量后，连同 BM25 倒排索引一并写入 pgvector。
+  </div>
+</div>
+
+</body>
+</html>

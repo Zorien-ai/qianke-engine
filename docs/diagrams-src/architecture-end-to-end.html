@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>千客引擎 · 分层架构与端到端数据流</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #fff;
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+  .stage { position: relative; background: #fff; overflow: hidden; }
+  .node {
+    position: absolute;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    border-radius: 8px; border: 1.5px solid;
+    text-align: center; line-height: 1.3;
+    padding: 3px 6px;
+  }
+  .node .t { font-size: 13.5px; font-weight: 700; letter-spacing: .2px; }
+  .node .s { font-size: 9.5px; margin-top: 1px; font-weight: 400; opacity: .82; }
+  .node.sm .t { font-size: 10.5px; white-space: nowrap; }
+  .grp {
+    position: absolute; text-align: center;
+    font-size: 11px; font-weight: 700; letter-spacing: 1.2px;
+  }
+  .edge-label {
+    position: absolute; font-size: 9px; color: #94A3B8;
+    background: #fff; padding: 0 2px; line-height: 1.2; white-space: nowrap;
+  }
+  svg.wires { position: absolute; left: 0; top: 0; overflow: visible; }
+
+  .blue   { border-color:#3B82F6; background:#DBEAFE; color:#1E40AF; }
+  .green  { border-color:#10B981; background:#D1FAE5; color:#047857; }
+  .amber  { border-color:#F59E0B; background:#FEF3C7; color:#B45309; }
+  .purple { border-color:#A855F7; background:#F3E8FF; color:#7E22CE; }
+  .indigo { border-color:#6366F1; background:#E0E7FF; color:#4338CA; }
+  .slate  { border-color:#94A3B8; background:#E2E8F0; color:#475569; }
+  .cyan   { border-color:#06B6D4; background:#CFFAFE; color:#0E7490; }
+</style>
+</head>
+<body>
+
+<div class="stage" id="e2e" style="width:1440px;height:730px">
+
+  <div class="grp" style="left:30px;  width:120px; top:92px; color:#3B82F6;">前端 · Vue 3</div>
+  <div class="grp" style="left:180px; width:140px; top:92px; color:#3B82F6;">接入层 · FastAPI</div>
+  <div class="grp" style="left:655px; width:500px; top:158px; color:#A855F7;">混合检索</div>
+
+  <!-- ===== 节点 ===== -->
+  <div class="node blue" style="left:30px; top:220px; width:120px; height:90px;">
+    <div class="t">工作台</div>
+    <div class="s">登录 / 权限</div>
+    <div class="s">历史 / 偏好</div>
+  </div>
+
+  <div class="node blue" style="left:180px; top:205px; width:140px; height:120px;">
+    <div class="t">身份 / 会话</div>
+    <div class="s">用户上下文</div>
+  </div>
+
+  <div class="node slate" style="left:500px; top:115px; width:125px; height:55px;">
+    <div class="t">固定回复</div>
+    <div class="s">固定话术</div>
+  </div>
+
+  <div class="node purple" style="left:500px; top:220px; width:125px; height:90px;">
+    <div class="t">查询处理</div>
+    <div class="s">消歧 / 简化 / 扩写</div>
+    <div class="s">HyDE / 剪枝文档</div>
+  </div>
+
+  <div class="node green" style="left:500px; top:400px; width:100px; height:55px;">
+    <div class="t">Text2SQL</div>
+    <div class="s">temperature: 0</div>
+  </div>
+
+  <div class="node green" style="left:630px; top:400px; width:130px; height:55px;">
+    <div class="t">安全审查</div>
+    <div class="s">SELECT-only / LIMIT</div>
+  </div>
+
+  <div class="node green" style="left:790px; top:390px; width:170px; height:75px;">
+    <div class="t">结构化聚合</div>
+    <div class="s">只读账号 → sql_reader</div>
+    <div class="s">→ 结构化结果</div>
+  </div>
+
+  <div class="node amber" style="left:1175px; top:225px; width:120px; height:80px;">
+    <div class="t">DeepSeek 生成</div>
+    <div class="s">事实 / 推断</div>
+    <div class="s">引用 [N]</div>
+  </div>
+
+  <div class="node cyan" style="left:1320px; top:225px; width:100px; height:80px;">
+    <div class="t">答案</div>
+    <div class="s">+ 来源</div>
+  </div>
+
+  <div class="node purple" style="left:500px; top:540px; width:300px; height:80px;">
+    <div class="t">离线评测</div>
+    <div class="s">LLM-as-a-Judge · 33 题 · 85% 门禁</div>
+  </div>
+
+  <!-- 意图路由菱形 -->
+  <svg style="position:absolute;left:345px;top:208px;" width="132" height="114">
+    <polygon points="66,2 130,57 66,112 2,57" fill="#F3E8FF" stroke="#A855F7" stroke-width="1.5"/>
+  </svg>
+  <div style="position:absolute;left:345px;top:208px;width:132px;height:114px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;line-height:1.25;color:#7E22CE;">
+    <div style="font-size:11.5px;font-weight:700;">意图路由</div>
+    <div style="font-size:8px;opacity:.82;margin-top:1px;">Dense + LLM 兜底</div>
+  </div>
+
+  <!-- ===== 混合检索大框 ===== -->
+  <div style="position:absolute;left:655px;top:180px;width:500px;height:172px;border:1.6px solid #A855F7;background:#FAF5FF;border-radius:11px;"></div>
+
+  <div class="node indigo sm" style="left:668px; top:200px; width:120px; height:40px;">
+    <div class="t">BGE-M3 稠密</div>
+  </div>
+  <div class="node indigo sm" style="left:668px; top:270px; width:120px; height:40px;">
+    <div class="t">BGE-M3 稠密 / BM25</div>
+  </div>
+
+  <div class="node purple sm" style="left:930px; top:203px; width:210px; height:35px;">
+    <div class="t">RRF 融合　top 30</div>
+  </div>
+  <div class="node purple sm" style="left:930px; top:254px; width:210px; height:35px;">
+    <div class="t">bge-reranker-v2-m3 精排</div>
+  </div>
+  <div class="node purple sm" style="left:930px; top:305px; width:210px; height:35px;">
+    <div class="t">画像池 Top-3 · 文档</div>
+  </div>
+
+  <!-- 圆柱体 -->
+  <svg style="position:absolute;left:802px;top:195px;" width="110" height="58" viewBox="0 0 110 58">
+    <path d="M6 12 V45 A49 8 0 0 0 104 45 V12" fill="#EEF2F6" stroke="#8B93A7" stroke-width="1.3"/>
+    <ellipse cx="55" cy="12" rx="49" ry="8" fill="#E2E8F0" stroke="#8B93A7" stroke-width="1.3"/>
+    <text x="55" y="38" text-anchor="middle" font-size="10.5" font-weight="600" fill="#475569">pgvector</text>
+  </svg>
+
+  <svg style="position:absolute;left:802px;top:265px;" width="110" height="62" viewBox="0 0 110 62">
+    <path d="M6 12 V49 A49 8 0 0 0 104 49 V12" fill="#EEF2F6" stroke="#8B93A7" stroke-width="1.3"/>
+    <ellipse cx="55" cy="12" rx="49" ry="8" fill="#E2E8F0" stroke="#8B93A7" stroke-width="1.3"/>
+    <text x="55" y="32" text-anchor="middle" font-size="9.5" font-weight="600" fill="#475569">tsvector +</text>
+    <text x="55" y="45" text-anchor="middle" font-size="9.5" font-weight="600" fill="#475569">sparsevec</text>
+  </svg>
+
+  <!-- ===== 连线 ===== -->
+  <svg class="wires" width="1440" height="730">
+    <defs>
+      <marker id="s2" viewBox="0 0 10 10" refX="9.5" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#94A3B8"/>
+      </marker>
+      <marker id="d2" viewBox="0 0 10 10" refX="9.5" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#A855F7"/>
+      </marker>
+    </defs>
+
+    <line x1="150" y1="265" x2="175" y2="265" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#s2)"/>
+    <line x1="320" y1="265" x2="340" y2="265" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#s2)"/>
+
+    <!-- 路由 → 固定回复 -->
+    <path d="M411 206 L411 143 L495 143" stroke="#94A3B8" stroke-width="1.5" fill="none" marker-end="url(#s2)"/>
+    <!-- 路由 → 查询处理 -->
+    <line x1="477" y1="265" x2="495" y2="265" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#s2)"/>
+    <!-- 路由 → Text2SQL -->
+    <path d="M411 322 L411 428 L495 428" stroke="#94A3B8" stroke-width="1.5" fill="none" marker-end="url(#s2)"/>
+
+    <!-- 查询处理 → 混合检索 -->
+    <line x1="625" y1="265" x2="650" y2="265" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#s2)"/>
+
+    <!-- 模型 → 圆柱 -->
+    <line x1="788" y1="220" x2="797" y2="220" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#s2)"/>
+    <line x1="788" y1="290" x2="797" y2="290" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#s2)"/>
+
+    <!-- 圆柱 → RRF -->
+    <line x1="912" y1="222" x2="925" y2="222" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#s2)"/>
+    <path d="M912 293 L919 293 L919 238 L925 238" stroke="#94A3B8" stroke-width="1.4" fill="none" marker-end="url(#s2)"/>
+
+    <!-- RRF → reranker → 画像池 -->
+    <line x1="1035" y1="238" x2="1035" y2="249" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#s2)"/>
+    <line x1="1035" y1="289" x2="1035" y2="300" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#s2)"/>
+
+    <!-- 画像池 → 生成（走上路 x=1158） -->
+    <path d="M1140 322 L1158 322 L1158 275 L1170 275" stroke="#94A3B8" stroke-width="1.5" fill="none" marker-end="url(#s2)"/>
+
+    <!-- Text2SQL → 安全审查 → 结构化聚合 -->
+    <line x1="600" y1="428" x2="625" y2="428" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#s2)"/>
+    <line x1="760" y1="428" x2="785" y2="428" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#s2)"/>
+
+    <!-- 结构化聚合 → 生成（走外圈 x=1235，进生成框底部） -->
+    <path d="M960 428 L1235 428 L1235 312" stroke="#94A3B8" stroke-width="1.5" fill="none" marker-end="url(#s2)"/>
+
+    <!-- 生成 → 答案 -->
+    <line x1="1295" y1="265" x2="1315" y2="265" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#s2)"/>
+
+    <!-- 答案 → 离线评测（虚线） -->
+    <path d="M1370 310 L1370 580 L805 580" stroke="#A855F7" stroke-width="1.5"
+          stroke-dasharray="6 4" fill="none" marker-end="url(#d2)"/>
+  </svg>
+
+  <!-- 边标签 -->
+  <div class="edge-label" style="left:419px; top:180px;">闲聊</div>
+  <div class="edge-label" style="left:467px; top:242px; font-size:8.5px;">知识问答</div>
+  <div class="edge-label" style="left:419px; top:352px;">统计聚合</div>
+  <div class="edge-label" style="left:1000px; top:562px; color:#A855F7;">全量回归</div>
+
+  <!-- 图例 -->
+  <div style="position:absolute;left:30px;top:662px;display:flex;align-items:center;gap:26px;font-size:10.5px;color:#64748B;">
+    <span style="display:flex;align-items:center;gap:6px;">
+      <i style="display:block;width:11px;height:11px;border-radius:3px;background:#F3E8FF;border:1.5px solid #A855F7;"></i>知识问答链路
+    </span>
+    <span style="display:flex;align-items:center;gap:6px;">
+      <i style="display:block;width:11px;height:11px;border-radius:3px;background:#D1FAE5;border:1.5px solid #10B981;"></i>统计聚合链路
+    </span>
+    <span style="display:flex;align-items:center;gap:6px;">
+      <i style="display:block;width:11px;height:11px;border-radius:3px;background:#E2E8F0;border:1.5px solid #94A3B8;"></i>固定回复
+    </span>
+    <span style="display:flex;align-items:center;gap:6px;">
+      <i style="display:block;width:22px;height:0;border-top:1.5px dashed #A855F7;"></i>离线评测闭环
+    </span>
+  </div>
+</div>
+
+</body>
+</html>
