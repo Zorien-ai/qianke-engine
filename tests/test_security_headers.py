@@ -20,6 +20,8 @@ def test_security_headers_present():
     assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
     assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
     assert "geolocation=()" in response.headers["Permissions-Policy"]
+    assert "Content-Security-Policy-Report-Only" in response.headers
+    assert "default-src 'self'" in response.headers["Content-Security-Policy-Report-Only"]
     assert "Strict-Transport-Security" not in response.headers
 
 

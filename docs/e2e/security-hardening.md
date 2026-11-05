@@ -13,6 +13,8 @@
 | 动作策略/金额上限 | ✅ 已有 | `c_merchant_policy` |
 | 执行审计 | ✅ 已有 | `sa_approval` + 审计页 |
 | 策略审计哈希链 | ✅ 本次新增 | SHA-256 链式 `prev_hash/entry_hash` |
+| 日志 PII 脱敏 | ✅ 本次新增 | 手机号 / 邮箱 / 身份证 |
+| CSP Report-Only | ✅ 本次新增 | 不强制执行，先观察违规 |
 | SQL 只读防御 | ✅ 已有 | SELECT-only / 白名单 / LIMIT |
 | 安全响应头 | ✅ 本次新增 | `api/security.py` + 2 tests |
 | 登录失败限流 | ✅ 本次新增 | 5 次 / 300s，单进程内存 |
@@ -25,7 +27,16 @@ X-Content-Type-Options: nosniff
 X-Frame-Options: SAMEORIGIN
 Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: geolocation=(), microphone=(), camera=()
+Content-Security-Policy-Report-Only（不强制，先收集违规）
 Strict-Transport-Security（仅 HTTPS）
+```
+
+PII 脱敏：
+
+```text
+13800138000 → 138****8000
+alice@example.com → a***@example.com
+110101199001011234 → 110101********1234
 ```
 
 策略审计哈希链：
@@ -90,12 +101,12 @@ work_items_scoped
 
 ```text
 SSO / MFA
-PII 字段识别、脱敏、加密
+PII 存储加密 / 数据分级
 分布式登录限流（当前为单进程内存）
 WAF / IP 白名单
 审计 WORM / 外部锚点 / 异地备份
 Secrets Manager（当前 .env）
-CSP（需先梳理 Vue/inline script）
+CSP 强制执行（当前 Report-Only）
 依赖漏洞扫描与 SBOM
 渗透测试
 数据保留与删除策略

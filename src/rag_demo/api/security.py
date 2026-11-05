@@ -58,6 +58,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         headers.setdefault(
             "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
         )
+        headers.setdefault(
+            "Content-Security-Policy-Report-Only",
+            "default-src 'self'; img-src 'self' data: https:; "
+            "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "connect-src 'self' ws: wss: https:; frame-ancestors 'self'; base-uri 'self'",
+        )
         if request.url.scheme == "https":
             headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains"

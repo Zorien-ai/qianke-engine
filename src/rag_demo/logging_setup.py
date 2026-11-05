@@ -30,11 +30,55 @@
 import logging
 import logging.handlers
 import os
+import re
 
 from rag_demo.config import BASE_DIR
 
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 LOG_FILE = os.path.join(LOG_DIR, "rag_demo.log")
+
+_PII_PATTERNS = (
+    # 手机号：138****8000
+    (re.compile(r"(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)"), r"\1****\2"),
+    # 邮箱：a***@example.com
+    (re.compile(r"([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})"), r"\1***@\2"),
+    # 身份证：110101********1234
+    (re.compile(r"(?<!\d)([1-9]\d{5})(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}([\dXx])(?!\d)"), r"\1********\2"),
+)
+
+
+def redact_pii(text: str) -> str:
+    """日志输出前脱敏手机号 / 邮箱 / 身份证。"""
+    value = str(text or "")
+    for pattern, replacement in _PII_PATTERNS:
+        value = pattern.sub(replacement, value)
+    return value
+
+
+class PiiRedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str):
+                record.msg = redact_pii(record.msg)
+            if isinstance(record.args, tuple):
+                record.args = tuple(
+                    redact_pii(item) if isinstance(item, str) else item
+                    for item in record.args
+                )
+            elif isinstance(record.args, dict):
+                record.args = {
+                    key: redact_pii(value) if isinstance(value, str) else value
+                    for key, value in record.args.items()
+                }
+        except Exception:  # noqa: BLE001 日志脱敏失败不能中断业务
+            pass
+        return True
+
+
+def _attach_pii_filter(handler: logging.Handler) -> None:
+    if any(isinstance(item, PiiRedactionFilter) for item in handler.filters):
+        return
+    handler.addFilter(PiiRedactionFilter())
 
 # 文件里带模块名与行号：排查时能直接定位到代码
 FILE_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s:%(lineno)d | %(message)s"
@@ -81,6 +125,8 @@ def _attach_to_uvicorn(file_handler: logging.Handler) -> None:
                 h.close()
         setattr(file_handler, _OURS, True)
         lg.addHandler(file_handler)
+        for handler in lg.handlers:
+            _attach_pii_filter(handler)
 
 
 def setup_logging(level: int = logging.INFO, to_file: bool = True,
@@ -104,6 +150,7 @@ def setup_logging(level: int = logging.INFO, to_file: bool = True,
 
     console = logging.StreamHandler()
     console.setFormatter(logging.Formatter(CONSOLE_FORMAT))
+    _attach_pii_filter(console)
     root.addHandler(console)
 
     if not to_file:
@@ -118,6 +165,7 @@ def setup_logging(level: int = logging.INFO, to_file: bool = True,
     )
     file_handler.suffix = "%Y-%m-%d"
     file_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    _attach_pii_filter(file_handler)
     root.addHandler(file_handler)
 
     # uvicorn 的 logger 不继承根配置，需单独接上（否则请求日志落不了盘）
