@@ -71,7 +71,8 @@ CSV 导出：
 动作：work_item_id, order_id, action_type, work_status,
       approval_status, execution_status, result, error, executed_at
 策略：changed_at, changed_by, 补偿/退款 before-after,
-      动作 before-after, require_note before-after
+      动作 before-after, require_note before-after,
+      prev_hash, entry_hash
 ```
 
 策略审计哈希链：

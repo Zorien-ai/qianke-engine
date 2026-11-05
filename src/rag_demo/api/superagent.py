@@ -210,6 +210,7 @@ def audit_policy_csv(
         "changed_at", "changed_by", "compensation_before", "compensation_after",
         "refund_before", "refund_after", "actions_before", "actions_after",
         "require_note_before", "require_note_after",
+        "prev_hash", "entry_hash",
     ])
     for row in result["items"]:
         before = row.get("before") or {}
@@ -225,6 +226,8 @@ def audit_policy_csv(
             ",".join(after.get("allowed_actions") or []),
             before.get("require_note", ""),
             after.get("require_note", ""),
+            row.get("prev_hash", ""),
+            row.get("entry_hash", ""),
         ])
     content = "\ufeff" + buffer.getvalue()
     return Response(

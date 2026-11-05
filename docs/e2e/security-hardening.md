@@ -49,6 +49,10 @@ python scripts/verify_policy_audit_chain.py --merchant m_gear_002
 删除尾部记录无法仅凭链发现，需要外部锚点/WORM 备份
 ```
 
+B 工作台：
+
+![策略审计哈希链](audit-hash-chain.png)
+
 ## 2. 租户试点
 
 试点租户：

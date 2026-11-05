@@ -111,6 +111,7 @@ const state = {
   policySaving: false,
   auditActions: [],
   auditPolicy: [],
+  auditChain: null,
   auditTotal: 0,
   auditPolicyTotal: 0,
   auditLoaded: false,
@@ -471,14 +472,16 @@ async function loadAudit() {
     });
     if (f.date_from) policyParams.set("date_from", f.date_from);
     if (f.date_to) policyParams.set("date_to", f.date_to);
-    const [actions, policy] = await Promise.all([
+    const [actions, policy, chain] = await Promise.all([
       api(`/api/superagent/audit/actions?${params.toString()}`),
       api(`/api/superagent/audit/policy?${policyParams.toString()}`),
+      api("/api/superagent/audit/policy/verify"),
     ]);
     state.auditActions = actions.items || [];
     state.auditTotal = Number(actions.total || 0);
     state.auditPolicy = policy.items || [];
     state.auditPolicyTotal = Number(policy.total || 0);
+    state.auditChain = chain || null;
     state.auditLoaded = true;
   } catch (error) {
     if (handleAuthFailure(error)) return;
@@ -1821,6 +1824,7 @@ function auditView() {
     <div class="b-card b-audit-card">
       <h2 class="b-card-title">策略变更</h2>
       <div class="b-audit-policy-tools">
+        <span class="b-muted">审计链：${state.auditChain && state.auditChain.ok ? "正常" : "异常"} · ${Number(state.auditChain?.checked || 0)} 条</span>
         <a class="b-btn b-btn-ghost" href="${escapeHtml(auditPolicyExportUrl())}" download>导出策略 CSV</a>
       </div>
       <ul class="b-audit-policy">${policyRows}</ul>
