@@ -18,6 +18,7 @@ from rag_demo.config import (
     DTYPE,
     KEYWORD_RETRIEVER,
     MODEL_PATH,
+    RRF_K,
     SEARCH_INDEX_TABLE,
     TOP_K_BM25,
     TOP_K_RRF,
@@ -37,6 +38,39 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 jieba.setLogLevel(20)  # 关掉 jieba 初始化日志
+
+# ---------- RRF k：默认值 + 运行时覆盖 ----------
+# 默认取 config.RRF_K（60，可用环境变量 RAG_RRF_K 覆盖）。
+# 运行时覆盖只为离线消融实验服务（scripts/run_ablation_k.py 需要在同一个进程里
+# 依次用 k=10/30/60/100 跑同一份测试集），用进程级变量而不是改 config——
+# config 是部署启动配置，实验结束必须能**无损回到默认 60**（set_rrf_k(None)）。
+_rrf_k_runtime: int | None = None
+
+
+def get_rrf_k() -> int:
+    """当前生效的 RRF k：运行时覆盖值优先，否则 config.RRF_K（默认 60）。"""
+    return _rrf_k_runtime if _rrf_k_runtime is not None else RRF_K
+
+
+def set_rrf_k(k: int | None) -> None:
+    """
+    运行时覆盖 RRF k；传 None 恢复默认（config.RRF_K = 60）。
+
+    只影响本进程后续的融合，不写回 config、不落盘。仅供离线实验与排障使用：
+    生产请求链路不要调用它，否则同一份缓存键在不同 k 下会返回不同答案
+    （缓存键已带 rrf_k，见 cache.AnswerCache.make_key，不会串结果）。
+    """
+    global _rrf_k_runtime
+    if k is None:
+        _rrf_k_runtime = None
+        return
+    # 类型必须严格：bool 是 int 子类（True 会被当成 1）、"7"/7.9 也不能悄悄截断，
+    # 否则实验里传错值会得到「看起来也跑通了」的错误对照。
+    if isinstance(k, bool) or not isinstance(k, int):
+        raise TypeError(f"RRF k 必须是 int（收到 {type(k).__name__}: {k!r}）")
+    if k < 1:
+        raise ValueError(f"RRF k 必须 >= 1（收到 {k}）")
+    _rrf_k_runtime = k
 
 # 纯标点/空白 token 过滤器
 _PUNCT_ONLY = re.compile(r"^[\W_]+$", re.UNICODE)
@@ -253,12 +287,16 @@ def bm25_search(query, top_k=TOP_K_BM25):
     ]
 
 
-def rrf_fusion(result_lists, k=60, top_n=TOP_K_RRF):
+def rrf_fusion(result_lists, k=RRF_K, top_n=TOP_K_RRF):
     """
     Reciprocal Rank Fusion
 
     按 id 去重，名次累加 1/(k+rank+1)——只用名次不用原始分数，
     因为向量相似度、BM25 分、稀疏内积三者的量纲不可比。
+
+    k 是公式常量（默认 config.RRF_K=60）：k 越大，名次差异被压得越平，
+    融合结果越偏向「多路都出现」的共识项；k 越小，越偏向单路的头部命中。
+    它既可显式传入（消融实验 / A/B 对比），也可用 set_rrf_k() 做运行时覆盖。
 
     strategies 做**并集**：同一条资料被多路命中时，要把各路的名字都记下来
     （这正是"多路共识"的依据）。此前 item 只在首次出现时保留，
@@ -288,7 +326,7 @@ def rrf_fusion(result_lists, k=60, top_n=TOP_K_RRF):
     ]
 
 
-def keyword_search(query, top_k=TOP_K_BM25, mode=None):
+def keyword_search(query, top_k=TOP_K_BM25, mode=None, rrf_k: int | None = None):
     """
     关键词召回——按配置走 BM25 / BGE-M3 稀疏向量 / 两者组合
 
@@ -298,9 +336,12 @@ def keyword_search(query, top_k=TOP_K_BM25, mode=None):
     故做成可切换、可组合，而不是固定死一种。
 
     参数:
-        mode: "bm25" 仅 BM25（默认）
-              "sparse" 仅稀疏向量
-              "both" 两路都跑后 RRF 融合
+        mode:   "bm25" 仅 BM25（默认）
+                "sparse" 仅稀疏向量
+                "both" 两路都跑后 RRF 融合
+        rrf_k:  仅 "both" 用到——两路稀疏结果融合的 k；None = 当前生效值
+                （hybrid_search 会把已解析的 k 透传进来，保证同一次检索里
+                两级 RRF 用的是同一个 k）
     """
     mode = mode or KEYWORD_RETRIEVER
 
@@ -314,21 +355,27 @@ def keyword_search(query, top_k=TOP_K_BM25, mode=None):
     if mode == "both":
         bm_hits = bm25_search(query, top_k)
         sp_hits = sparse_search(query, top_k)
-        return rrf_fusion([bm_hits, sp_hits], top_n=top_k)
+        k = get_rrf_k() if rrf_k is None else int(rrf_k)
+        return rrf_fusion([bm_hits, sp_hits], k=k, top_n=top_k)
 
     return bm25_search(query, top_k)
 
 
-def hybrid_search(query, top_k=TOP_K_RRF, dept=None, keyword_mode=None):
+def hybrid_search(query, top_k=TOP_K_RRF, dept=None, keyword_mode=None,
+                  rrf_k: int | None = None):
     """
     对外主入口：向量 + 关键词（BM25 / 稀疏 / 组合）+ RRF
 
     keyword_mode 缺省时读 config.KEYWORD_RETRIEVER；Web 端可按请求覆盖，
     以便同一套服务在不同场景下切换检索策略。
+
+    rrf_k 缺省（None）= 当前生效的 k：运行时覆盖值优先，否则 config.RRF_K（60）。
+    显式传值只用于离线消融实验，线上请求链路不要传，保证全站同一个 k。
     """
+    k = get_rrf_k() if rrf_k is None else int(rrf_k)
     vec_results = vector_search(query, top_k=TOP_K_VECTOR, dept=dept)
-    kw_results = keyword_search(query, top_k=TOP_K_BM25, mode=keyword_mode)
-    fused = rrf_fusion([vec_results, kw_results], top_n=top_k)
+    kw_results = keyword_search(query, top_k=TOP_K_BM25, mode=keyword_mode, rrf_k=k)
+    fused = rrf_fusion([vec_results, kw_results], k=k, top_n=top_k)
     # 父块与图片只有 wiki_vectors / search_index 里各存一半，融合后统一回表补一次：
     # 放在精排之前，reranker 才能直接拿 parent_text 做章节级回填。
     return attach_wiki_meta(fused)

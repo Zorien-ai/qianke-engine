@@ -175,6 +175,9 @@ def _terminate(state: AgentState, status: AgentStatus, message: str) -> dict[str
 def build_system_prompt(config: AgentConfig | None = None) -> str:
     """按 Runtime Config 生成 System Prompt，并注入当前数据集表结构。
 
+    B 端人设段由 run_agent / run_agent_with_retry 通过 persona_prompt 参数
+    在调用本函数后前置拼接（保持本函数签名稳定，避免破坏既有测试与调用方）。
+
     execute_sql 接收的是 SQL 而不是自然语言，模型必须知道表名/字段名；
     否则会猜 users/orders 之类的表，被 validate_sql 全部拦掉。
     """
@@ -312,6 +315,18 @@ def build_graph(
     return graph.compile(**compile_kwargs)
 
 
+def _compose_system_prompt(config: AgentConfig, persona_prompt: str | None = None) -> str:
+    """System Prompt = B 端人设段（可选）+ 工具/规则/表结构。
+
+    persona 只负责称呼与语气；冲突时以工具与规则为准。
+    """
+    base = build_system_prompt(config)
+    persona = (persona_prompt or "").strip()
+    if persona:
+        return f"{persona}\n\n{base}"
+    return base
+
+
 def run_agent(
     question: str,
     config: AgentConfig | None = None,
@@ -323,6 +338,7 @@ def run_agent(
     allowed_tools: Sequence[str] | None = None,
     checkpointer: Any = None,
     thread_id: str | None = None,
+    persona_prompt: str | None = None,
 ) -> dict[str, Any]:
     """执行一轮 Agent，返回最终答案、状态、执行身份与事件轨迹。"""
     config = config or AgentConfig()
@@ -345,7 +361,7 @@ def run_agent(
     )
     initial: AgentState = {
         "messages": [
-            SystemMessage(content=build_system_prompt(config)),
+            SystemMessage(content=_compose_system_prompt(config, persona_prompt)),
             HumanMessage(content=question),
         ],
         "step_count": 0,
@@ -450,6 +466,7 @@ def run_agent_with_retry(
     cancel_event: Any = None,
     allowed_tools: Sequence[str] | None = None,
     checkpointer: Any = None,
+    persona_prompt: str | None = None,
 ) -> dict[str, Any]:
     """在同一 request_id 下执行；每次 retry 使用新的 execution_id。
 
@@ -475,6 +492,8 @@ def run_agent_with_retry(
             run_kwargs["allowed_tools"] = allowed_tools
         if checkpointer is not None:
             run_kwargs["checkpointer"] = checkpointer
+        if persona_prompt is not None:
+            run_kwargs["persona_prompt"] = persona_prompt
         result = run_agent(question, **run_kwargs)
         attempt_row = {
             "attempt": attempt + 1,

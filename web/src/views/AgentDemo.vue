@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { postJson } from "../api";
 
-const DEFAULT_QUERY = "帮我给上海的黑卡流失用户写一段美妆产品的召回短信";
+const DEFAULT_QUERY = "统计钻石会员数量，并给出占比口径";
 
 const query = ref(DEFAULT_QUERY);
 const running = ref(false);
@@ -11,10 +11,7 @@ const error = ref("");
 const copied = ref(false);
 
 const pendingSteps = [
-  { agent: "supervisor", label: "主管", message: "正在判断任务分派…", status: "running" },
-  { agent: "analyst", label: "数据分析师", message: "准备查询用户画像", status: "pending" },
-  { agent: "copywriter", label: "文案专家", message: "准备调取运营 SOP", status: "pending" },
-  { agent: "finalizer", label: "主管汇总", message: "等待最终结果", status: "pending" },
+  { agent: "finalizer", label: "经营分析 Agent", message: "正在调用工具并分析…", status: "running" },
 ];
 
 const displaySteps = computed(() => (result.value?.steps?.length ? result.value.steps : pendingSteps));
@@ -22,7 +19,6 @@ const userCards = computed(() => result.value?.user_cards || []);
 const sopSources = computed(() => result.value?.sop?.sources || []);
 const finalReply = computed(() => result.value?.final_reply || "");
 const isGated = computed(() => finalReply.value.includes("未找到匹配用户"));
-
 const pendingActions = computed(() => result.value?.pending_actions || []);
 const actionBusy = ref("");
 
@@ -40,15 +36,8 @@ async function confirmAction(actionId) {
   }
 }
 
-const STEP_ICON = {
-  supervisor: "🧭",
-  analyst: "🔍",
-  copywriter: "✍️",
-  finalizer: "✅",
-};
-
-function stepIcon(step) {
-  return STEP_ICON[step.agent] || "•";
+function stepIcon() {
+  return "•";
 }
 
 function stepClass(step) {
@@ -110,16 +99,18 @@ async function copyReply() {
 <template>
   <div class="agent-page">
     <header class="agent-hero">
-      <div class="hero-kicker">LANGGRAPH · MULTI-AGENT</div>
-      <h2>Agent 智能助理</h2>
+      <div class="hero-kicker">AGENT · 经营分析</div>
+      <h2>经营分析 Agent</h2>
       <p>
-        主管理解需求，数据分析师查真实用户，文案专家读取运营 SOP，
-        最后生成千人千面的召回短信。
+        小千是一个单体 ReAct Agent：按需调用 RAG 检索企业知识与业务口径、
+        SQL 查询业务数据、计算器完成算术，再基于工具返回的证据组织回答。
+        需要落地动作时，只生成待确认的运营跟进任务，用户确认后才写入。
       </p>
       <div class="hero-tags">
-        <span>Supervisor</span>
-        <span>Analyst</span>
-        <span>Copywriter</span>
+        <span>RAG</span>
+        <span>SQL</span>
+        <span>Calculator</span>
+        <span>Write · HITL</span>
       </div>
     </header>
 
@@ -132,7 +123,7 @@ async function copyReply() {
         v-model="query"
         rows="3"
         :disabled="running"
-        placeholder="例如：帮我给上海的黑卡流失用户写一段美妆产品的召回短信"
+        placeholder="例如：统计钻石会员数量，并给出占比口径"
         @keydown.ctrl.enter="runAgent"
         @keydown.meta.enter="runAgent"
       />
@@ -140,13 +131,12 @@ async function copyReply() {
         <span class="hint">Ctrl / ⌘ + Enter 发送</span>
         <button class="run-btn" type="button" :disabled="running || !query.trim()" @click="runAgent">
           <span v-if="running" class="spinner" />
-          <span>{{ running ? "多智能体协作中…" : "启动多智能体" }}</span>
+          <span>{{ running ? "Agent 运行中…" : "运行 Agent" }}</span>
         </button>
       </div>
     </section>
 
     <p v-if="error" class="error-line">
-      <span>⚠</span>
       {{ error }}
     </p>
 
@@ -231,7 +221,6 @@ async function copyReply() {
 
         <div v-if="sopSources.length" class="sop-block">
           <div class="sop-head">
-            <span>📖</span>
             运营规则依据
             <small>{{ sopSources.length }} 条</small>
           </div>
@@ -248,7 +237,7 @@ async function copyReply() {
         <div class="panel-head">
           <h3>专属召回短信</h3>
           <button v-if="!isGated" class="copy-btn" type="button" :disabled="!finalReply" @click="copyReply">
-            {{ copied ? "已复制 ✓" : "一键复制" }}
+            {{ copied ? "已复制" : "一键复制" }}
           </button>
           <span v-else class="gated-tag">未生成文案</span>
         </div>
@@ -258,7 +247,7 @@ async function copyReply() {
           <span class="sms-count">{{ finalReply.length }} 字</span>
         </div>
         <div class="copy-note">
-          <span>🧬 千人千面</span>
+          <span>千人千面</span>
           结合用户偏好与 SOP 权益生成，未通过模板套用。
         </div>
       </div>
@@ -384,6 +373,8 @@ textarea:disabled { opacity: 0.65; }
 .flow-step.is-error .flow-icon { color: var(--danger); background: var(--danger-soft); }
 .flow-step.is-final .flow-icon { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
+.result-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 18px; align-items: start; }
+
 .action-card {
   margin-top: 18px;
   padding: 18px 20px;
@@ -391,6 +382,7 @@ textarea:disabled { opacity: 0.65; }
   border-radius: var(--radius);
   background: var(--surface);
 }
+
 .action-row {
   display: flex;
   align-items: flex-start;
@@ -400,6 +392,7 @@ textarea:disabled { opacity: 0.65; }
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+
 .action-copy strong { font-size: 13px; }
 .action-copy p { margin-top: 4px; color: var(--text-2); font-size: 12px; }
 .action-meta { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
@@ -413,6 +406,7 @@ textarea:disabled { opacity: 0.65; }
   font-size: 9px;
 }
 .action-status.confirmed { color: var(--success); background: var(--success-soft); }
+.action-status.cancelled { color: var(--muted); background: var(--surface-2); }
 .action-confirm {
   padding: 6px 10px;
   border: 1px solid var(--primary);
@@ -425,7 +419,6 @@ textarea:disabled { opacity: 0.65; }
 }
 .action-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.result-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 18px; align-items: start; }
 .panel { padding: 18px 20px; }
 .panel-head > span { color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .user-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }

@@ -116,6 +116,33 @@ def source_recall(expected, actual) -> dict:
     }
 
 
+def first_hit_rank(expected, ranked_sources) -> dict:
+    """
+    期望来源在**有序**候选来源列表里的最高名次（MRR 的单题口径）
+
+    与 `source_recall` 的区别：那个只问「在不在」，这个问「排第几」——
+    RRF 的 k 改的是名次权重，只看召回的集合就把名次变化全掩盖了。
+
+    口径：
+      - 名次从 1 开始；`rank` 是第一个命中的期望来源所在位置；
+      - 未命中时 `rank=None`、`rr=0.0`。**必须记 0 而不是剔除**：
+        剔除了等于「排到 30 名之外」不扣分，MRR 会虚高；
+      - `expected` 为空（负样本 / 纯 SQL 题）时 `rank=None`、`rr=None`，
+        调用方据此把该题排除在 MRR 分母外（它本来就没有可排的来源）。
+    """
+    expected_list = unique_sources(expected)
+    ranked_list = [str(s or "").strip() for s in ranked_sources or []]
+    if not expected_list:
+        return {"expected": [], "rank": None, "rr": None}
+
+    expected_set = set(expected_list)
+    for index, source in enumerate(ranked_list, 1):
+        if source in expected_set:
+            return {"expected": expected_list, "rank": index, "rr": 1.0 / index}
+    return {"expected": expected_list, "rank": None, "rr": 0.0}
+
+
+
 def _avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 

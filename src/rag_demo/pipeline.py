@@ -38,6 +38,7 @@ import logging
 from openai import APIError
 
 from rag_demo import answer_guard
+from rag_demo.b_end import persona as b_persona
 from rag_demo.cache import answer_cache, dataset_data_version
 from rag_demo.chitchat import build_reply
 from rag_demo.config import ENABLE_MULTI_QUERY, TOP_K_PROFILE, TOP_K_RRF
@@ -48,6 +49,7 @@ from rag_demo.prompts import (
     PREDICTION_BLOCKED_REPLY,
     RETRIEVAL_UNAVAILABLE_REPLY,
 )
+from rag_demo.retrieval.hybrid_retriever import get_rrf_k
 from rag_demo.retrieval.query_processor import (
     STRATEGY_DIRECT,
     QueryPlan,
@@ -70,6 +72,8 @@ def answer_question(
     deep_thinking: bool | None = None,
     memory_context: str | None = None,
     history_key: str = "",
+    persona_name: str | None = None,
+    persona_key: str = "",
 ) -> dict:
     """
     统一问答入口（带缓存）
@@ -94,12 +98,15 @@ def answer_question(
     不会因为加了权限而失能。
     """
     # 数据集必须进键：demo 与 user 是两个库，同一问题答案不同（见 cache.make_key）
+    # rrf_k 同样必须进键：k 变则融合排序变、答案变，不能命中另一套 k 的旧结果
     dataset = current_dataset()
     key = answer_cache.make_key(
         question, dept, keyword_mode, profile_limit, deep_thinking,
         dataset=dataset,
         history_key=history_key,
         data_version=dataset_data_version(dataset),
+        persona_key=persona_key,
+        rrf_k=get_rrf_k(),
     )
 
     if use_cache:
@@ -110,7 +117,7 @@ def answer_question(
 
     try:
         result = _answer_uncached(question, dept, keyword_mode, profile_limit, deep_thinking,
-                                  memory_context=memory_context)
+                                  memory_context=memory_context, persona_name=persona_name)
     except APIError as e:
         # LLM 接口故障（超时 / 限流 / 5xx）：不写缓存（恢复后要能正常回答），
         # 返回固定文案 + 独立 route，让用户知道该重试、排查的人知道查 LLM 侧
@@ -122,13 +129,14 @@ def answer_question(
     return {**result, "cached": False}
 
 
-def _chitchat_result() -> dict:
+def _chitchat_result(persona_name: str | None = None) -> dict:
     """
     闲聊 / 域外：不检索、不调模型，直接给拒答引导
 
-    文案不是常量：能力清单固定，示例问句按当前数据集生成（见 chitchat.build_reply）。
+    文案不是常量：能力清单固定，示例问句按当前数据集生成（见 chitchat.build_reply）；
+    AI 名字来自账号级人设（persona_name），保证与对话链路同一个身份。
     """
-    return {"answer": build_reply(), "sources": [], "route": ROUTE_CHITCHAT}
+    return {"answer": build_reply(persona_name), "sources": [], "route": ROUTE_CHITCHAT}
 
 
 # 第三种 route：既不是正常回答（rag），也不是闲聊（chitchat），而是检索基础设施挂了。
@@ -279,6 +287,7 @@ def _answer_uncached(
     profile_limit: int | None = None,
     deep_thinking: bool | None = None,
     memory_context: str | None = None,
+    persona_name: str | None = None,
 ) -> dict:
     """
     实际问答流程
@@ -289,7 +298,7 @@ def _answer_uncached(
               命中 SQL 路时额外带 "sql" / "rows_count"
     """
     if route(question) == ROUTE_CHITCHAT:
-        return _chitchat_result()
+        return _chitchat_result(persona_name)
 
     try:
         plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit)
@@ -300,7 +309,7 @@ def _answer_uncached(
 
     if plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
-        return _chitchat_result()
+        return _chitchat_result(persona_name)
 
     # 「返回多少个用户」不在这里截断：画像池的全局名额在检索阶段
     # （search_variants 统一精排取 Top-k）就已生效，拿到的已是最终份数。
@@ -325,6 +334,13 @@ def _answer_uncached(
         logger.warning("答案被后置审查替换：%s", answer_guard.summarize(guard))
         result["answer"] = PREDICTION_BLOCKED_REPLY
         result["guard"] = guard
+    else:
+        # 事实安全之后再过一遍人设守卫（形）：命中禁词 / emoji / 感叹号整句换兜底。
+        persona_guard = b_persona.guard(result.get("answer", ""), tier="L2")
+        if persona_guard.violations:
+            logger.info("答案命中 B 端人设守卫: %s", persona_guard.violations)
+            result["answer"] = persona_guard.text
+            result["persona_guard"] = list(persona_guard.violations)
 
     if sql_result is not None:
         result["sql"] = sql_result.get("sql", "")
@@ -342,6 +358,7 @@ def prepare(
     dept: str | None = None,
     keyword_mode: str | None = None,
     profile_limit: int | None = None,
+    persona_name: str | None = None,
 ) -> dict:
     """
     问答前置阶段：路由 + 多路检索 + 精排 + （按需）SQL（**不含生成**）
@@ -358,7 +375,7 @@ def prepare(
             LLM 的 SQL 判定结果），供前端把中间步骤展示出来
     """
     if route(question) == ROUTE_CHITCHAT:
-        return {"route": ROUTE_CHITCHAT, "answer": build_reply(), "sources": []}
+        return {"route": ROUTE_CHITCHAT, "answer": build_reply(persona_name), "sources": []}
 
     try:
         plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit)
@@ -375,7 +392,7 @@ def prepare(
 
     if plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
-        return {"route": ROUTE_CHITCHAT, "answer": build_reply(), "sources": []}
+        return {"route": ROUTE_CHITCHAT, "answer": build_reply(persona_name), "sources": []}
 
     # candidates 已是最终份数（画像池名额在检索阶段就已生效），
     # 下方 sources 与它用的是**同一份**结果——不会出现

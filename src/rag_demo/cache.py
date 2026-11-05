@@ -32,6 +32,8 @@ import threading
 import time
 from collections import OrderedDict
 
+from rag_demo.config import RRF_K
+
 DEFAULT_MAXSIZE = 256
 DEFAULT_TTL = 3600  # 秒
 _VERSION_TTL = 2.0  # 数据版本短期缓存，避免每次问答都读 meta 表
@@ -90,7 +92,8 @@ class AnswerCache:
     @staticmethod
     def make_key(question: str, dept: str | None = None, keyword_mode: str | None = None,
                  profile_limit: int | None = None, deep_thinking: bool | None = None,
-                 *, dataset: str, history_key: str = "", data_version: str = "") -> str:
+                 *, dataset: str, history_key: str = "", data_version: str = "",
+                 persona_key: str = "", rrf_k: int = RRF_K) -> str:
         """
         生成缓存键
 
@@ -112,11 +115,18 @@ class AnswerCache:
         而且看起来完全像「开关没生效」。
 
         None 与 False 归一到同一个键（都表示不思考），避免两种写法各占一份缓存。
+
+        `rrf_k` 也必须进键：RRF 融合的 k 决定「向量路 / 关键词路」的名次如何加权，
+        进而改变候选排序与最终答案。若不进键，离线消融实验切换 k 后会直接命中
+        上一次 k 的结果——表面看是「k 没有影响」，实际是缓存串了结果。
+        缺省值取 config.RRF_K（60），与线上默认行为一致；调用方（pipeline / api）
+        传 `get_rrf_k()` 把运行时生效值带进来。
         """
         raw = (f"{dataset}|{question.strip()}|{dept or '-'}|{keyword_mode or '-'}"
                f"|{profile_limit if profile_limit else '-'}"
                f"|{1 if deep_thinking else 0}"
-               f"|{history_key or '-'}|{data_version or '-'}")
+               f"|{history_key or '-'}|{data_version or '-'}|{persona_key or '-'}"
+               f"|rrf_k={rrf_k}")
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict | None:

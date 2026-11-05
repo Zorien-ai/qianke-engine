@@ -119,15 +119,20 @@ def _examples(tables) -> list[str | None]:
     return examples
 
 
-def build_reply() -> str:
+def build_reply(assistant_name: str | None = None) -> str:
     """
     生成当前数据集下的拒答兜底文案
 
     调用时机：入口路由判 chitchat、或多路规划复核改道 chitchat（都是低频路径，
     一次采集的缓存成本可以接受）。
+
+    assistant_name: B 端账号级人设解析出的 AI 名字；不传时回落到数据集 UI 配置 /
+    默认名（兼容评测脚本与未登录路径）。
     """
     cfg = _safe_config()
-    name = (cfg.get("assistant_name") or "").strip() or DEFAULT_ASSISTANT_NAME
+    name = (str(assistant_name or "").strip()
+            or (cfg.get("assistant_name") or "").strip()
+            or DEFAULT_ASSISTANT_NAME)
 
     examples = _examples(_safe_tables())
     lines = []

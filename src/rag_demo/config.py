@@ -157,6 +157,22 @@ TOP_K_RRF = 30      # RRF 融合后候选数量
 TOP_K_PROFILE = 3   # 画像池保留条数（**全局**：跨路合并统一精排后取 Top-K，不是每路）
 TOP_K_WIKI = 3      # 文档池保留条数（**每路**上限，非强制填满）
 
+# RRF 融合常量 k：score += 1/(k + rank + 1)。
+# 默认 60：公式常量，沿用 RRF 原始论文与主流实现的工业默认值。
+# 它原来写死在 rrf_fusion 的签名里，现在提到 config 并开放为参数——
+# 离线消融实验（scripts/run_ablation_k.py）需要在运行时切换 k 做对比，
+# 而线上也允许用 RAG_RRF_K 在部署侧统一覆盖（默认值不变，行为与改造前一致）。
+# 运行时临时切换用 retrieval.hybrid_retriever.set_rrf_k()，不写回这里。
+# 非法值（非整数 / 小于 1）一律回落默认 60：配置写错不能把服务打挂，
+# 也不静默 clamp 成 1 —— 那会让「配错」看起来像「配成 1 生效了」。
+_rrf_k_raw = os.environ.get("RAG_RRF_K", "60")
+try:
+    RRF_K = int(_rrf_k_raw)
+except (TypeError, ValueError):
+    RRF_K = 60
+if RRF_K < 1:
+    RRF_K = 60
+
 # ---------- 「返回多少个用户」的可调范围（接口层按角色放行） ----------
 # 只有运营及以上角色能调（见 permissions.CAP_TOPK）。
 # 它调的就是 TOP_K_PROFILE——画像池的全局名额，在统一精排时直接生效

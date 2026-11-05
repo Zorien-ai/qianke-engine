@@ -49,6 +49,7 @@ from pydantic import BaseModel
 
 from rag_demo import ai_monitor, answer_guard, auth, chat_history, chat_memory, config, conversation, marketing, permissions, tenant_eval
 from rag_demo.agent import actions as agent_actions
+from rag_demo.b_end import persona as b_persona, store as b_persona_store
 from rag_demo.api.demo_showcase import (
     DEFAULT_LIMIT as DEMO_SHOWCASE_LIMIT,
     DEMO_QUERY_TITLE,
@@ -58,6 +59,7 @@ from rag_demo.api.demo_showcase import (
     serialize_user as serialize_demo_user,
 )
 from rag_demo.api.c_end import register_c_end
+from rag_demo.api.b_end import register_b_end
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
 from rag_demo.api.ops import register_ops
@@ -93,6 +95,7 @@ from rag_demo.retrieval.hybrid_retriever import (
     _load_bm25_corpus,
     bm25_search,
     get_model,
+    get_rrf_k,
     reload_bm25,
     sparse_search,  # 可能为 None（FlagEmbedding 未安装时降级）
 )
@@ -182,6 +185,30 @@ def _require_system_admin() -> dict:
     if account is None or not account.get("is_system_admin"):
         raise HTTPException(status_code=403, detail="仅系统管理员可执行该操作")
     return account
+
+
+# ================= B 端账号级人设 =================
+def _b_identity(account: dict | None) -> dict:
+    """当前账号生效的人设（名字 / 称呼 / 语气档位）；离线模式回落默认值。"""
+    account_id = account.get("id") if account else None
+    row = b_persona_store.get_persona(account_id)
+    return b_persona.resolve_identity(account, row)
+
+
+def _b_persona_prompt(account: dict | None, mode: str) -> tuple[str, dict]:
+    identity = _b_identity(account)
+    prompt = b_persona.build_from_identity(identity, mode=mode)
+    return prompt, identity
+
+
+def _b_persona_key(identity: dict) -> str:
+    """缓存键的人设维度：不同人设生成的是不同答案。"""
+    return f"{identity.get('name')}|{identity.get('user_address')}|{identity.get('tone_profile')}"
+
+
+def _apply_b_persona_guard(text: str, tier: str = "L2") -> tuple[str, list[str]]:
+    guarded = b_persona.guard(text, tier=tier)
+    return guarded.text, list(guarded.violations)
 
 
 def _require_manager(enterprise_id: int | None = None) -> dict:
@@ -658,6 +685,9 @@ register_kb(app)
 # C 端 mock 商品/模拟订单：/api/c/products、/api/c/orders/*
 register_c_end(app)
 
+# B 端账号级 AI 人设：/api/b/persona（名字 / 称呼 / 语气档位，只影响表现层）
+register_b_end(app)
+
 # AI 监控 / Token 账单控制面（VIP）：/api/monitor/*、/api/billing/*、/api/admin/*。
 # 采集/账本在 rag_demo/ai_monitor.py，接口在 rag_demo/api/monitor.py。
 register_monitor(app)
@@ -1074,6 +1104,8 @@ def qa(
     dept = req.dept if permissions.has(role, permissions.CAP_OPS, user) else None
 
     account = auth.current_account()
+    identity = _b_identity(account)
+    persona_prompt = b_persona.build_from_identity(identity, mode="chat")
     dataset = _tenant_dataset()
     session, history = _load_chat_session(req, account, dataset)
     turn_id = uuid.uuid4().hex
@@ -1103,8 +1135,13 @@ def qa(
             result = answer_question(
                 search_question, dept, keyword_mode=req.retriever, profile_limit=limit,
                 deep_thinking=req.deep_thinking,
-                memory_context=chat_memory.system_prompt(memory, history) if session is not None else "",
+                memory_context=b_persona.compose_system_message(
+                    persona_prompt,
+                    chat_memory.system_prompt(memory, history) if session is not None else "",
+                ),
                 history_key=history_key,
+                persona_name=identity.get("name"),
+                persona_key=_b_persona_key(identity),
             )
         except Exception:
             if session is not None:
@@ -1170,11 +1207,17 @@ def _build_agent_response(result: dict, dataset: str, query: str) -> dict:
             "message": f"调用工具：{call.get('name')}",
         })
 
+    # 人设守卫只处理模型自由生成的回答；工具调用记录与审计字段不动。
+    final_reply, persona_violations = _apply_b_persona_guard(
+        str(result.get("final_answer") or ""), tier="L2"
+    )
+
     return {
         "ok": True,
         "dataset": dataset,
         "user_query": query,
-        "final_reply": result.get("final_answer", ""),
+        "final_reply": final_reply,
+        "persona_guard": persona_violations,
         "status": result.get("status"),
         "request_id": result.get("request_id"),
         "execution_id": result.get("execution_id"),
@@ -1205,6 +1248,7 @@ def agent_run(req: AgentRunIn) -> dict:
 
     account = _require_login()
     dataset = _agent_dataset(account)
+    persona_prompt, _identity = _b_persona_prompt(account, "agent")
     if not _tenant_ready(dataset):
         raise HTTPException(
             status_code=403,
@@ -1245,7 +1289,10 @@ def agent_run(req: AgentRunIn) -> dict:
             allowed_tools=allowed_tools,
             wall_timeout_seconds=max(1.0, wall_timeout),
             checkpointer=get_checkpointer(),
-            runner_kwargs={"max_retries": max(0, min(req.max_retries, 3))},
+            runner_kwargs={
+                "max_retries": max(0, min(req.max_retries, 3)),
+                "persona_prompt": persona_prompt,
+            },
         )
     except AgentRequestInProgress as exc:
         detail = "同一个 request_id 正在执行中，请勿重复提交"
@@ -1526,6 +1573,8 @@ def qa_stream(
     # Context 副本里（见 _dataset_pinned_stream），不能指望它自己切库。
     dataset = _tenant_dataset()
     account = auth.current_account()
+    identity = _b_identity(account)
+    persona_prompt = b_persona.build_from_identity(identity, mode="chat")
     session, history = _load_chat_session(req, account, dataset)
 
     # 先钉住数据集，改写调用（非流式）产生的 token 也要记到正确租户下。
@@ -1559,7 +1608,10 @@ def qa_stream(
     history_key = ""
     if session is not None:
         history_key = f"{session['id']}:{history[-1]['id'] if history else 'first'}"
-    memory_context = chat_memory.system_prompt(memory, history) if session is not None else ""
+    memory_context = b_persona.compose_system_message(
+        persona_prompt,
+        chat_memory.system_prompt(memory, history) if session is not None else "",
+    )
     chat_extra = {}
     if session is not None:
         chat_extra["session_id"] = session["id"]
@@ -1618,12 +1670,15 @@ def qa_stream(
             # 命中缓存时直接吐完，不用走生成。
             # 键里带 deep_thinking：开与不开是两份不同的答案，不能互相命中。
             # 有历史时还带 history_key，避免同一句「那女性呢」在不同会话串答案。
+            # 键里带 rrf_k：k 变则检索排序变、答案变（与 pipeline.answer_question 同口径）。
             # 缓存里**不存思维链**——它只是展示物、不进答案，存下来让缓存翻倍不划算；
             # 代价是命中缓存时前端拿不到思维链（此时下面也不会发 reasoning 事件）。
             key = answer_cache.make_key(
                 search_question, dept, req.retriever, limit,
                 req.deep_thinking, dataset=dataset, history_key=history_key,
                 data_version=dataset_data_version(dataset),
+                persona_key=_b_persona_key(identity),
+                rrf_k=get_rrf_k(),
             )
             hit = answer_cache.get(key)
             if hit is not None:
@@ -1651,7 +1706,8 @@ def qa_stream(
 
             yield _sse("stage", {"stage": "retrieving"})
             prepare_started = time.perf_counter()
-            ctx = prepare(search_question, dept, req.retriever, profile_limit=limit)
+            ctx = prepare(search_question, dept, req.retriever, profile_limit=limit,
+                          persona_name=identity.get("name"))
             ai_monitor.record_span(
                 kind="retrieval",
                 name="prepare",
@@ -1750,6 +1806,14 @@ def qa_stream(
                 logger.warning("流式答案被后置审查替换：%s", answer_guard.summarize(guard))
                 answer = PREDICTION_BLOCKED_REPLY
                 yield _sse("replace", {"answer": answer, "guard": guard})
+            else:
+                # 事实安全通过后再看人设（形）：命中禁词 / emoji / 感叹号整句换兜底。
+                guarded_text, persona_violations = _apply_b_persona_guard(answer)
+                if persona_violations and guarded_text != answer:
+                    trace_guard_hit = True
+                    logger.info("流式答案命中 B 端人设守卫: %s", persona_violations)
+                    answer = guarded_text
+                    yield _sse("replace", {"answer": answer, "persona_guard": persona_violations})
 
             assistant_state["answer"] = answer
             yield _sse("done", {})

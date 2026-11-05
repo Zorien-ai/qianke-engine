@@ -4,6 +4,7 @@ from rag_demo.eval_utils import (
     JUDGE_SYSTEM_PROMPT,
     build_judge_messages,
     excerpt,
+    first_hit_rank,
     parse_judge_json,
     render_markdown_report,
     source_recall,
@@ -58,6 +59,33 @@ def test_source_recall_partial_and_missing_expected():
 
 def test_unique_sources_keeps_order():
     assert unique_sources(["a", "", "b", "a", None, "c"]) == ["a", "b", "c"]
+
+
+def test_first_hit_rank_uses_earliest_position():
+    ranked = ["segmentation.md", "user_profile", "tag_definitions.md", "user_profile"]
+    hit = first_hit_rank(["tag_definitions.md", "user_profile"], ranked)
+    assert hit["rank"] == 2  # user_profile 在第 2 位，比 tag_definitions.md 的第 3 位更早
+    assert hit["rr"] == 0.5
+    assert hit["expected"] == ["tag_definitions.md", "user_profile"]
+
+
+def test_first_hit_rank_miss_scores_zero():
+    hit = first_hit_rank(["tag_definitions.md"], ["user_profile", "segmentation.md"])
+    assert hit["rank"] is None
+    # 未命中必须记 0.0，不能返回 None —— 否则「排到 30 名外」会被排除在 MRR 分母外
+    assert hit["rr"] == 0.0
+
+
+def test_first_hit_rank_empty_expected_is_excluded():
+    hit = first_hit_rank([], ["user_profile"])
+    assert hit["rank"] is None
+    assert hit["rr"] is None  # 负样本 / 纯 SQL 题不计入 MRR
+
+
+def test_first_hit_rank_repeated_source_counts_once():
+    ranked = ["user_profile", "user_profile", "cs_sop.md"]
+    assert first_hit_rank(["user_profile"], ranked)["rr"] == 1.0
+    assert first_hit_rank(["cs_sop.md"], ranked)["rank"] == 3
 
 
 def test_summarize_results_and_modules():

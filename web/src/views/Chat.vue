@@ -28,6 +28,19 @@ const EXAMPLE_QUESTIONS = [
   "各会员等级的用户分别有多少",
 ];
 
+/* 首屏空态里的 AI 名字：GET /api/b/persona 读取，失败静默回落「小千」。 */
+const personaName = ref("小千");
+
+async function loadPersona() {
+  try {
+    const data = await getJson("/api/b/persona");
+    const name = String((data && (data.resolved?.name || data.name)) || "").trim();
+    if (name) personaName.value = Array.from(name).slice(0, 12).join("");
+  } catch {
+    // 人设接口未就绪 / 无权限：保持默认名字，不打扰用户
+  }
+}
+
 const question = ref("");
 const sending = ref(false);
 const DEMO_MAX_QUESTION = 200;
@@ -653,6 +666,7 @@ async function initHistory() {
 }
 
 onMounted(initHistory);
+onMounted(loadPersona);
 
 watch(
   () => route.query.session,
@@ -865,11 +879,10 @@ onBeforeUnmount(() => {
     <!-- 首屏空态 -->
     <section v-if="phase === 'idle' && !answer && !errorText && !historyMessages.length && !currentQuestion" class="card chat-welcome" style="margin-top: 8px">
       <div class="empty-state">
-        <div class="empty-emoji">✨</div>
-        <div class="empty-title">向你的企业知识库提问</div>
+        <div class="empty-title">向 {{ personaName }} 提问</div>
         <div class="empty-desc">
           回答会流式生成，并附带来源与检索过程（可见范围取决于账号等级）。
-          数据来自当前登录账号的数据空间，前端不会传数据集参数。
+          数据来自当前登录账号的数据空间，不需要手动选择数据集。
         </div>
         <div class="row-actions">
           <span class="badge" v-if="!canSources">来源列表：当前等级不可见</span>

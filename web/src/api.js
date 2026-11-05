@@ -99,6 +99,14 @@ export function putJson(url, body) {
   });
 }
 
+export function patchJson(url, body) {
+  return apiJson(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body == null ? {} : body),
+  });
+}
+
 export function del(url) {
   return apiJson(url, { method: "DELETE" });
 }
