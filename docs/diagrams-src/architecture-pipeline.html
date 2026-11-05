@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>千客引擎 · 端到端数据流</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #fff;
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+  .stage { position: relative; background: #fff; overflow: hidden; }
+  .node {
+    position: absolute;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    border-radius: 9px; border: 1.6px solid;
+    text-align: center; line-height: 1.36;
+    padding: 4px 8px;
+  }
+  .node .t { font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+  .node .s { font-size: 10.5px; margin-top: 2px; font-weight: 400; opacity: .82; }
+  .grp {
+    position: absolute; text-align: center;
+    font-size: 11.5px; font-weight: 700; letter-spacing: 1.6px;
+  }
+  .caption { position: absolute; text-align: center; font-size: 11.5px; color: #94A3B8; }
+  .edge-label {
+    position: absolute; font-size: 9.5px; color: #94A3B8;
+    background: #fff; padding: 0 2px; line-height: 1.25; white-space: nowrap;
+  }
+  svg.wires { position: absolute; left: 0; top: 0; overflow: visible; }
+
+  .blue   { border-color:#3B82F6; background:#DBEAFE; color:#1E40AF; }
+  .green  { border-color:#10B981; background:#D1FAE5; color:#047857; }
+  .amber  { border-color:#F59E0B; background:#FEF3C7; color:#B45309; }
+  .purple { border-color:#A855F7; background:#F3E8FF; color:#7E22CE; }
+  .red    { border-color:#EF4444; background:#FEE2E2; color:#B91C1C; }
+  .cyan   { border-color:#06B6D4; background:#CFFAFE; color:#0E7490; }
+  .slate  { border-color:#94A3B8; background:#E2E8F0; color:#475569; }
+</style>
+</head>
+<body>
+
+<div class="stage" id="pipeline" style="width:1300px;height:700px">
+
+  <!-- 组标题 -->
+  <div class="grp" style="left:50px;   width:115px; top:76px; color:#3B82F6;">数据接入层</div>
+  <div class="grp" style="left:195px;  width:165px; top:76px; color:#3B82F6;">索引层</div>
+  <div class="grp" style="left:375px;  width:180px; top:76px; color:#A855F7;">路由层</div>
+  <div class="grp" style="left:600px;  width:220px; top:76px; color:#A855F7;">检索执行层</div>
+  <div class="grp" style="left:845px;  width:120px; top:76px; color:#F59E0B;">生成层</div>
+  <div class="grp" style="left:990px;  width:120px; top:76px; color:#EF4444;">安全层</div>
+  <div class="grp" style="left:1135px; width:120px; top:76px; color:#06B6D4;">输出层</div>
+
+  <!-- 节点 -->
+  <div class="node blue" style="left:50px; top:228px; width:115px; height:80px;">
+    <div class="t">数据接入</div>
+    <div class="s">CSV 画像</div>
+    <div class="s">Markdown 文档</div>
+  </div>
+
+  <div class="node blue" style="left:195px; top:228px; width:165px; height:80px;">
+    <div class="t">索引构建</div>
+    <div class="s">BGE-M3 稠密 + BM25 稀疏</div>
+    <div class="s">→ pgvector</div>
+    <div class="s" style="font-size:9px;opacity:.62;">详见索引构建技术方案</div>
+  </div>
+
+  <div class="node purple" style="left:600px; top:128px; width:220px; height:80px;">
+    <div class="t">混合检索</div>
+    <div class="s">Dense + Sparse + BM25</div>
+    <div class="s">→ RRF 融合 → Rerank</div>
+  </div>
+
+  <div class="node green" style="left:600px; top:228px; width:220px; height:80px;">
+    <div class="t">Text2SQL</div>
+    <div class="s">只读账号 · SELECT-only · LIMIT 防护</div>
+  </div>
+
+  <div class="node slate" style="left:600px; top:340px; width:220px; height:64px;">
+    <div class="t">闲聊</div>
+    <div class="s">固定回复模板</div>
+  </div>
+
+  <div class="node amber" style="left:845px; top:228px; width:120px; height:80px;">
+    <div class="t">生成</div>
+    <div class="s">DeepSeek</div>
+    <div class="s">+ [来源N] 引用</div>
+  </div>
+
+  <div class="node red" style="left:990px; top:228px; width:120px; height:80px;">
+    <div class="t">生成后审查</div>
+    <div class="s">answer guard</div>
+    <div class="s">PII 脱敏</div>
+  </div>
+
+  <div class="node cyan" style="left:1135px; top:228px; width:120px; height:80px;">
+    <div class="t">答案</div>
+    <div class="s">+ 来源引用</div>
+  </div>
+
+  <div class="node purple" style="left:420px; top:450px; width:320px; height:85px;">
+    <div class="t">离线评测</div>
+    <div class="s">LLM-as-a-Judge · 33 题黄金集</div>
+    <div class="s">85% 通过率门禁</div>
+  </div>
+
+  <!-- 意图路由菱形 -->
+  <svg style="position:absolute;left:375px;top:208px;" width="180" height="120">
+    <polygon points="90,2 178,60 90,118 2,60" fill="#F3E8FF" stroke="#A855F7" stroke-width="1.6"/>
+  </svg>
+  <div style="position:absolute;left:375px;top:208px;width:180px;height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;line-height:1.3;color:#7E22CE;">
+    <div style="font-size:14px;font-weight:700;">意图路由</div>
+    <div style="font-size:9.5px;opacity:.82;margin-top:2px;">规则 + LLM 兜底</div>
+  </div>
+
+  <!-- 连线 -->
+  <svg class="wires" width="1300" height="700">
+    <defs>
+      <marker id="a-solid" viewBox="0 0 10 10" refX="9.5" refY="5"
+              markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#94A3B8"/>
+      </marker>
+      <marker id="a-dash" viewBox="0 0 10 10" refX="9.5" refY="5"
+              markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="#A855F7"/>
+      </marker>
+    </defs>
+
+    <!-- 主链路 -->
+    <line x1="165" y1="268" x2="190" y2="268" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#a-solid)"/>
+    <line x1="360" y1="268" x2="380" y2="268" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#a-solid)"/>
+
+    <!-- 路由 → 混合检索 -->
+    <path d="M513 239 L600 172" stroke="#94A3B8" stroke-width="1.6" fill="none" marker-end="url(#a-solid)"/>
+    <!-- 路由 → Text2SQL -->
+    <line x1="558" y1="268" x2="595" y2="268" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#a-solid)"/>
+    <!-- 路由 → 闲聊 -->
+    <path d="M465 330 L465 372 L595 372" stroke="#94A3B8" stroke-width="1.6" fill="none" marker-end="url(#a-solid)"/>
+
+    <!-- 混合检索 → 生成 -->
+    <path d="M820 190 L843 243" stroke="#94A3B8" stroke-width="1.6" fill="none" marker-end="url(#a-solid)"/>
+    <!-- Text2SQL → 生成 -->
+    <line x1="820" y1="268" x2="840" y2="268" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#a-solid)"/>
+
+    <!-- 生成 → 审查 → 输出 -->
+    <line x1="965" y1="268" x2="985" y2="268" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#a-solid)"/>
+    <line x1="1110" y1="268" x2="1130" y2="268" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#a-solid)"/>
+
+    <!-- 输出 → 离线评测（虚线） -->
+    <path d="M1205 312 L1205 492 L745 492" stroke="#A855F7" stroke-width="1.5"
+          stroke-dasharray="6 4" fill="none" marker-end="url(#a-dash)"/>
+    <!-- 离线评测 → 路由（虚线） -->
+    <path d="M465 445 L465 336" stroke="#A855F7" stroke-width="1.5"
+          stroke-dasharray="6 4" fill="none" marker-end="url(#a-dash)"/>
+  </svg>
+
+  <!-- 边标签 -->
+  <div class="edge-label" style="left:506px; top:184px; transform: rotate(-45deg);">知识问答</div>
+  <div class="edge-label" style="left:552px; top:248px;">统计聚合</div>
+  <div class="edge-label" style="left:472px; top:340px;">闲聊</div>
+  <div class="edge-label" style="left:990px; top:470px; color:#A855F7;">全量回归</div>
+  <div class="edge-label" style="left:478px; top:372px; color:#A855F7;">Prompt / 检索 / SQL 修复</div>
+
+  <!-- 图例 -->
+  <svg class="wires" width="420" height="40" style="left:50px;top:588px;">
+    <line x1="0" y1="10" x2="34" y2="10" stroke="#94A3B8" stroke-width="1.6" marker-end="url(#a-solid)"/>
+    <line x1="0" y1="30" x2="34" y2="30" stroke="#A855F7" stroke-width="1.5"
+          stroke-dasharray="6 4" marker-end="url(#a-dash)"/>
+  </svg>
+  <div style="position:absolute;left:94px;top:591px;font-size:11px;color:#64748B;">在线推理主链路</div>
+  <div style="position:absolute;left:94px;top:611px;font-size:11px;color:#64748B;">离线评测闭环（迭代修复回路）</div>
+
+  <div class="caption" style="left:80px; width:1140px; top:648px;">
+    在线链路：数据 → 索引 → 路由 → 三路执行 → 生成 → 审查 → 输出；离线链路：黄金集全量回归评测，不达标时修复 Prompt、检索策略与 SQL 后回到路由。
+  </div>
+</div>
+
+</body>
+</html>
