@@ -1,4 +1,4 @@
-﻿# 控制面 PostgreSQL 迁移 P2-B：Super-agent 运行时切换
+# 控制面 PostgreSQL 迁移 P2-B：Super-agent 运行时切换
 
 > 日期：2026-11-05 · 状态：已在本机执行 sa_* 维护窗口切换；API 因 8000 端口被 WinNAT 动态排除，临时运行在 8080
 
@@ -246,4 +246,3 @@ JSON/TEXT 类型尚未规范化
 4. 类型规范化：JSONB / TIMESTAMPTZ / BOOLEAN
 5. 连接池与并发压测
 ```
-
