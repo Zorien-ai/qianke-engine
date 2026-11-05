@@ -1,6 +1,7 @@
-"""最小安全响应头与登录限流。"""
+"""最小安全响应头、CSP 上报与登录限流。"""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import defaultdict
@@ -8,6 +9,8 @@ from collections import defaultdict
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+
+logger = logging.getLogger(__name__)
 
 
 class LoginRateLimiter:
@@ -62,7 +65,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Content-Security-Policy-Report-Only",
             "default-src 'self'; img-src 'self' data: https:; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "connect-src 'self' ws: wss: https:; frame-ancestors 'self'; base-uri 'self'",
+            "connect-src 'self' ws: wss: https:; frame-ancestors 'self'; base-uri 'self'; "
+            "report-uri /security/csp-report",
         )
         if request.url.scheme == "https":
             headers.setdefault(
@@ -73,3 +77,28 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 def install_security_headers(app: FastAPI) -> None:
     app.add_middleware(SecurityHeadersMiddleware)
+
+
+_csp_lock = threading.Lock()
+_csp_window_start = 0.0
+_csp_count = 0
+_CSP_MAX_PER_MINUTE = 120
+
+
+def install_csp_report(app: FastAPI) -> None:
+    @app.post("/security/csp-report", status_code=204, include_in_schema=False)
+    async def csp_report(request: Request) -> Response:
+        global _csp_window_start, _csp_count
+        raw = await request.body()
+        now = time.monotonic()
+        should_log = False
+        with _csp_lock:
+            if now - _csp_window_start >= 60:
+                _csp_window_start = now
+                _csp_count = 0
+            _csp_count += 1
+            should_log = _csp_count <= _CSP_MAX_PER_MINUTE
+        if should_log:
+            text = raw[:2000].decode("utf-8", errors="replace")
+            logger.warning("CSP violation: %s", text)
+        return Response(status_code=204)

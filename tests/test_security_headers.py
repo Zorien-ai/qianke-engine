@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag_demo.api.security import LoginRateLimiter, install_security_headers
+from rag_demo.api.security import LoginRateLimiter, install_csp_report, install_security_headers
 
 
 def test_security_headers_present():
@@ -22,6 +22,7 @@ def test_security_headers_present():
     assert "geolocation=()" in response.headers["Permissions-Policy"]
     assert "Content-Security-Policy-Report-Only" in response.headers
     assert "default-src 'self'" in response.headers["Content-Security-Policy-Report-Only"]
+    assert "report-uri /security/csp-report" in response.headers["Content-Security-Policy-Report-Only"]
     assert "Strict-Transport-Security" not in response.headers
 
 
@@ -48,3 +49,20 @@ def test_login_rate_limiter_blocks_and_resets():
     assert limiter.retry_after(key) > 0
     limiter.reset(key)
     assert limiter.retry_after(key) == 0
+
+
+def test_csp_report_endpoint_accepts_payload():
+    app = FastAPI()
+    install_security_headers(app)
+    install_csp_report(app)
+
+    @app.get("/ping")
+    def ping() -> dict:
+        return {"ok": True}
+
+    client = TestClient(app)
+    response = client.post(
+        "/security/csp-report",
+        json={"csp-report": {"blocked-uri": "https://evil.example"}},
+    )
+    assert response.status_code == 204

@@ -28,8 +28,15 @@ X-Content-Type-Options: nosniff
 X-Frame-Options: SAMEORIGIN
 Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: geolocation=(), microphone=(), camera=()
-Content-Security-Policy-Report-Only（不强制，先收集违规）
+Content-Security-Policy-Report-Only（report-uri /security/csp-report）
 Strict-Transport-Security（仅 HTTPS）
+```
+
+CSP 上报：
+
+```text
+POST /security/csp-report → 204
+最多记录 120 条/分钟，防止刷日志
 ```
 
 PII 脱敏：

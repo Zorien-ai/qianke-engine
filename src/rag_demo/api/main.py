@@ -63,7 +63,7 @@ from rag_demo.api.b_end import register_b_end
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
 from rag_demo.api.ops import register_ops
-from rag_demo.api.security import LOGIN_RATE_LIMITER, install_security_headers
+from rag_demo.api.security import LOGIN_RATE_LIMITER, install_csp_report, install_security_headers
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache, dataset_data_version
 from rag_demo.config import (
@@ -694,6 +694,7 @@ register_b_end(app)
 register_monitor(app)
 register_ops(app)
 install_security_headers(app)
+install_csp_report(app)
 
 # Vue 3 新界面（M3）：把构建产物挂到 /v2。
 # 项目根从本文件位置向上推导（api/main.py → api → rag_demo → src → 项目根），
