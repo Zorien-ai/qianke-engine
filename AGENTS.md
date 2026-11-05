@@ -562,4 +562,3 @@ IM 社交载体
 | 2.48.0 | 2026-11-05 | cloudflared ingress 指向 8080，恢复 qianke.qiankeagent.com；24h 观察已启动 |
 | 2.49.0 | 2026-11-05 | 8000 端口恢复；策略审计哈希链与 verify API；664 tests |
 | 2.50.0 | 2026-11-05 | 审计链 UI 验证状态、策略 CSV 哈希列；build 6.81s |
-
