@@ -87,3 +87,21 @@ tests/test_password_change.py
 改密后旧会话失效
 ```
 
+
+## 浏览器 E2E
+
+2026-11-09 使用 Playwright 实测：
+
+```text
+临时账号登录 → 打开 /password
+填写当前密码 / 新密码 / 确认
+点击「修改密码」
+页面显示：密码已修改，请重新登录
+旧密码 API 登录 → 401
+新密码 API 登录 → 200
+临时账号已清理
+```
+
+截图：
+
+![修改密码页面](password-change.png)
