@@ -79,6 +79,26 @@ _PG_BASE = {
 AUTH_DB_NAME = os.environ.get("RAG_AUTH_PG_DB", "rag_auth")
 PG_CONFIG = {**_PG_BASE, "dbname": AUTH_DB_NAME, "connect_timeout": 5}
 
+
+def _current_pg_config() -> dict:
+    """连接池创建时再读环境变量，避免 auth 在 config 加载 .env 前缓存旧密码。"""
+    try:
+        from rag_demo import config as _config  # noqa: F401 触发 .env 加载
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "host": os.environ.get("RAG_AUTH_PG_HOST", "localhost"),
+        "port": int(os.environ.get("RAG_AUTH_PG_PORT", "5432")),
+        "user": os.environ.get("RAG_AUTH_PG_USER", "postgres"),
+        "password": (
+            os.environ.get("RAG_AUTH_PG_PASSWORD")
+            or os.environ.get("RAG_PG_PASSWORD")
+            or "123456"
+        ),
+        "dbname": os.environ.get("RAG_AUTH_PG_DB", "rag_auth"),
+        "connect_timeout": 5,
+    }
+
 # 旧账号库（迁移用；迁移完成后不再读写）
 SQLITE_MIGRATION_PATH = os.environ.get("RAG_AUTH_SQLITE") or os.path.join(
     _BASE_DIR, "var", "app.db"
@@ -220,7 +240,9 @@ def _ensure_database() -> None:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", AUTH_DB_NAME):
         raise ValueError(f"账号库名非法: {AUTH_DB_NAME!r}")
     try:
-        conn = psycopg2.connect(dbname="postgres", **_PG_BASE, connect_timeout=5)
+        cfg = _current_pg_config()
+        cfg.pop("dbname", None)
+        conn = psycopg2.connect(dbname="postgres", **cfg)
     except psycopg2.Error as e:  # 连不上就别装死，启动时明确报错
         raise RuntimeError(
             f"连不上 PostgreSQL（{_PG_BASE['host']}:{_PG_BASE['port']}）：{e}"
@@ -264,7 +286,7 @@ def _get_pool() -> Any:
     with _pool_lock:
         if _pool is None:
             _ensure_database()
-            _pool = psycopg2.pool.ThreadedConnectionPool(1, 8, **PG_CONFIG)
+            _pool = psycopg2.pool.ThreadedConnectionPool(1, 8, **_current_pg_config())
             _init_schema()
     return _pool
 
