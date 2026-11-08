@@ -1,4 +1,4 @@
-﻿# Qianke Agent 项目级 AI Coding Agent 工作协议
+# Qianke Agent 项目级 AI Coding Agent 工作协议
 
 > **Version:** 2.68.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
@@ -578,7 +578,8 @@ IM 社交载体
 | 2.64.0 | 2026-11-09 | /metrics 启用 Bearer token 鉴权；678 tests |
 | 2.65.0 | 2026-11-09 | 观察器携带 metrics token；679 tests |
 | 2.66.0 | 2026-11-09 | 改密页面 Playwright E2E 通过 |
-| 2.68.0 | 2026-11-09 | PG 备份 Docker 回退与恢复清单验证；680 tests |
+| 2.67.0 | 2026-11-09 | PG 备份 Docker 回退与恢复清单验证；680 tests |
+| 2.68.0 | 2026-11-09 | gitignore 运行时/测试产物 |
 
 
 
