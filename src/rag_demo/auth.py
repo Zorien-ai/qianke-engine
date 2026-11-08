@@ -795,6 +795,26 @@ def authenticate(account: str, password: str) -> dict[str, Any]:
     return user
 
 
+def change_password(user_id: int, current_password: str, new_password: str) -> None:
+    """登录用户修改密码：校验旧密码，写入新哈希，吊销全部会话。"""
+    user = find_user_by_id(user_id)
+    if user is None:
+        raise ValueError("账号不存在")
+    if not verify_password(current_password or "", user["password_hash"]):
+        raise ValueError("当前密码不正确")
+    if len(new_password or "") < 10:
+        raise ValueError("新密码至少 10 位")
+    if current_password == new_password:
+        raise ValueError("新密码不能与当前密码相同")
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE app_user SET password_hash = %s WHERE id = %s",
+            (hash_password(new_password), int(user_id)),
+        )
+        cur.execute("DELETE FROM session WHERE user_id = %s", (int(user_id),))
+    logger.info("密码已修改并吊销全部会话: %s", user["username"])
+
+
 def approve(user_id: int, role: str, actor: str) -> dict[str, Any]:
     """
     审核通过：企业账号会顺带创建企业、企业库与邀请码

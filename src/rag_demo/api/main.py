@@ -836,6 +836,11 @@ class LoginIn(BaseModel):
     remember: bool = False
 
 
+class ChangePasswordIn(BaseModel):
+    current_password: str
+    new_password: str
+
+
 # ---------- 图形验证码 ----------
 # 为什么自己画 SVG：不引入 PIL / 验证码库，一个接口就能返回可直接 <img> 的图。
 # 存内存（单进程）；多进程部署时应换成 Redis——这里与 auth 的 SQLite 定位一致，
@@ -1026,6 +1031,27 @@ def login(payload: LoginIn, response: Response, request: Request) -> dict:
         "is_enterprise_admin": account["is_enterprise_admin"],
         "is_demo": bool(account.get("is_demo")),
     }
+
+
+@app.post("/auth/change-password")
+def change_password(payload: ChangePasswordIn, response: Response) -> dict:
+    """登录后修改密码；成功后吊销全部会话，要求重新登录。"""
+    account = auth.current_account()
+    if account is None:
+        raise HTTPException(status_code=401, detail="请先登录")
+    if account.get("is_demo"):
+        raise HTTPException(status_code=403, detail="演示账号不能修改密码")
+    try:
+        auth.change_password(
+            int(account["id"]),
+            payload.current_password,
+            payload.new_password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response.delete_cookie(auth.SESSION_COOKIE, path="/")
+    logger.info("密码修改成功，已要求重新登录: %s", account.get("username"))
+    return {"status": "ok", "message": "密码已修改，请重新登录"}
 
 
 def _purge_demo_runtime_data() -> None:
