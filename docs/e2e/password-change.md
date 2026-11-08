@@ -1,4 +1,4 @@
-# 修改密码
+﻿# 修改密码
 
 > 日期：2026-11-09 · 状态：新增登录后改密接口
 
@@ -37,7 +37,7 @@ POST /auth/change-password
 
 演示账号返回 403。
 
-## 浏览器控制台
+## 页面\n\n登录后打开：\n\n```text\nhttps://qianke.qiankeagent.com/password\n```\n\n填写当前密码、新密码、确认新密码即可。\n\n## 浏览器控制台
 
 登录后打开：
 
@@ -86,3 +86,4 @@ tests/test_password_change.py
 新旧相同
 改密后旧会话失效
 ```
+

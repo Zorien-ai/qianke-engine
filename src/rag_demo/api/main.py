@@ -1054,6 +1054,11 @@ def change_password(payload: ChangePasswordIn, response: Response) -> dict:
     return {"status": "ok", "message": "密码已修改，请重新登录"}
 
 
+@app.get("/password", include_in_schema=False)
+def password_page() -> FileResponse:
+    return FileResponse(os.path.join(config.BASE_DIR, "web", "password.html"))
+
+
 def _purge_demo_runtime_data() -> None:
     """清理上一批访客留下的演示 trace / usage；失败只降级不影响登录。"""
     try:
