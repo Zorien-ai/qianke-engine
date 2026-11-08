@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -15,14 +16,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def _get(url: str, timeout: float = 5.0) -> tuple[int, str]:
+def _get(url: str, timeout: float = 5.0, headers: dict[str, str] | None = None) -> tuple[int, str]:
+    request = urllib.request.Request(url, headers=headers or {})
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", errors="replace")
     except Exception as exc:  # noqa: BLE001
         return 0, f"{type(exc).__name__}: {exc}"
+
+
+def _metrics_token() -> str:
+    token = (os.environ.get("QIANKE_METRICS_TOKEN") or "").strip()
+    if token:
+        return token
+    path = Path(__file__).resolve().parents[1] / "ops" / "metrics_token.txt"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _metric_value(text: str, name: str, label: str | None = None) -> float | None:
@@ -40,7 +53,9 @@ def _metric_value(text: str, name: str, label: str | None = None) -> float | Non
 
 def sample(api: str) -> dict:
     ready_status, ready_body = _get(f"{api}/ready")
-    metrics_status, metrics = _get(f"{api}/metrics")
+    token = _metrics_token()
+    headers = {"X-Metrics-Token": token} if token else None
+    metrics_status, metrics = _get(f"{api}/metrics", headers=headers)
     return {
         "at": datetime.now(timezone.utc).isoformat(),
         "ready_status": ready_status,

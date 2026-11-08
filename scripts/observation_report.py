@@ -86,7 +86,7 @@ def main() -> int:
     parser.add_argument("--required-hours", type=float, default=24)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    files = args.file or ["logs/control_pg_observation_final.jsonl"]
+    files = args.file or ["logs/control_pg_observation_stable.jsonl"]
     rows: list[dict] = []
     for name in files:
         path = Path(name)
