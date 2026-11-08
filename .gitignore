@@ -116,3 +116,9 @@ ops/cloudflared.yml
 
 # Prometheus Bearer token（本机，不入库）
 ops/metrics_token.txt
+
+# 本地浏览器/测试/运行时产物
+.mcp/
+tmp/
+src/rag_demo/api/var/
+schema_dump.txt
