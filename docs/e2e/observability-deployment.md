@@ -1,4 +1,4 @@
-﻿# 可观测性实际部署：Prometheus + Grafana + Alertmanager
+# 可观测性实际部署：Prometheus + Grafana + Alertmanager
 
 > 日期：2026-11-05 · 状态：本机 Docker 已运行并验证
 
@@ -173,5 +173,3 @@ Alertmanager 未接外部通知
 没有日志聚合（Loki）
 没有告警值守/分组策略
 ```
-
-

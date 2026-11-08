@@ -1,4 +1,4 @@
-﻿"""生产预检：一次检查 PG 控制面、队列、C 端、监控、域名与安全基线。
+"""生产预检：一次检查 PG 控制面、队列、C 端、监控、域名与安全基线。
 
 用法：
     python scripts/production_preflight.py
@@ -146,4 +146,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
