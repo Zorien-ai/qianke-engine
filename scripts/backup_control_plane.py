@@ -39,29 +39,44 @@ def _sqlite_backup(source: Path, target: Path) -> None:
 
 
 def _pg_dump(target: Path) -> dict:
+    """优先用宿主 pg_dump；没有时回退到 Docker 容器内 pg_dump。"""
     binary = shutil.which("pg_dump")
-    if not binary:
-        return {"ok": False, "error": "pg_dump not found"}
+    docker = shutil.which("docker")
+    container = (os.environ.get("QIANKE_PG_CONTAINER") or "pgvector").strip()
     settings = {
         "host": os.environ.get("QIANKE_MERCHANT_PG_HOST") or os.environ.get("RAG_PG_HOST") or "127.0.0.1",
         "port": os.environ.get("QIANKE_MERCHANT_PG_PORT") or os.environ.get("RAG_PG_PORT") or "5432",
-        "user": os.environ.get("QIANKE_MERCHANT_PG_USER") or os.environ.get("RAG_PG_USER") or "",
+        "user": os.environ.get("QIANKE_MERCHANT_PG_USER") or os.environ.get("RAG_PG_USER") or "postgres",
         "password": os.environ.get("QIANKE_MERCHANT_PG_PASSWORD") or os.environ.get("RAG_PG_PASSWORD") or "",
         "dbname": os.environ.get("QIANKE_MERCHANT_PG_DBNAME") or os.environ.get("RAG_PG_DBNAME") or "vec_db",
-        "schema": os.environ.get("QIANKE_MERCHANT_PG_SCHEMA") or "merchant_v1",
     }
-    command = [
-        binary, "-h", settings["host"], "-p", str(settings["port"]),
-        "-U", settings["user"], "-d", settings["dbname"],
-        "-n", settings["schema"], "-Fc", "-f", str(target),
+    common = [
+        "-h", settings["host"], "-p", str(settings["port"]),
+        "-U", settings["user"], "-d", settings["dbname"], "-Fc",
     ]
-    env = dict(os.environ)
-    if settings["password"]:
-        env["PGPASSWORD"] = settings["password"]
     try:
-        subprocess.run(command, check=True, capture_output=True, env=env, timeout=300)
-        return {"ok": True, "schema": settings["schema"], "file": target.name}
+        if binary:
+            command = [binary, *common, "-f", str(target)]
+            env = dict(os.environ)
+            if settings["password"]:
+                env["PGPASSWORD"] = settings["password"]
+            subprocess.run(command, check=True, capture_output=True, env=env, timeout=300)
+            mode = "host"
+        elif docker:
+            command = [docker, "exec"]
+            if settings["password"]:
+                command += ["-e", f"PGPASSWORD={settings['password']}"]
+            command += [container, "pg_dump", *common]
+            with target.open("wb") as handle:
+                subprocess.run(command, check=True, stdout=handle, stderr=subprocess.PIPE, timeout=300)
+            mode = "docker"
+        else:
+            return {"ok": False, "error": "pg_dump/docker not found"}
+        if not target.exists() or target.read_bytes()[:5] != b"PGDMP":
+            return {"ok": False, "error": "pg_dump 输出不是 PGDMP 格式"}
+        return {"ok": True, "file": target.name, "database": settings["dbname"], "mode": mode}
     except Exception as exc:  # noqa: BLE001
+        target.unlink(missing_ok=True)
         return {"ok": False, "error": str(exc)[:300]}
 
 
@@ -113,7 +128,11 @@ def main() -> int:
 
     pg = None
     if args.include_pg:
-        pg = _pg_dump(output / "merchant_v1.dump")
+        pg = _pg_dump(output / "vec_db.dump")
+        if pg.get("ok"):
+            dump_path = output / pg["file"]
+            pg["sha256"] = _sha256(dump_path)
+            pg["size"] = dump_path.stat().st_size
 
     manifest = {
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),

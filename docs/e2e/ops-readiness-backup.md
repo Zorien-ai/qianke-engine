@@ -85,23 +85,26 @@ python scripts/backup_control_plane.py --include-pg
 SQLite 一致性 backup API
 → 复制控制面 DB（c_end_mock.sqlite）
 → 可选 SQLite 商家库
-→ 可选 pg_dump 商家 schema
+→ 可选 pg_dump 全库 vec_db（宿主机 pg_dump，缺失时回退 docker exec pgvector）
 → manifest.json（sha256 + size + source）
 ```
 
 实测：
 
 ```text
-backup=backups/test-backup
-c_end_mock.sqlite 2,760,704 bytes
-sha256=b2f3acf479163f5d…
+backup=var/backup-pg-check-20261109-014648
+c_end_mock.sqlite 2,781,184 bytes sha256=e75aa1deeac1db54…
+vec_db.dump 39,862,731 bytes
+postgres ok=true mode=docker
+pg_restore -l 可读，319 个条目，含 qianke_control
 ```
 
 注意：
 
 ```text
-当前环境没有 pg_dump，--include-pg 返回 ok=false / pg_dump not found
-PostgreSQL 备份需安装 postgresql-client
+当前宿主机没有 pg_dump；--include-pg 自动回退 docker exec pgvector pg_dump
+需要 Docker Desktop 与 pgvector 容器运行
+容器名可用 QIANKE_PG_CONTAINER 覆盖，默认 pgvector
 ```
 
 ## 4. 恢复
