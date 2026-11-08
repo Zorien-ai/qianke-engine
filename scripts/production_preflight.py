@@ -1,4 +1,4 @@
-"""生产预检：一次检查 PG 控制面、队列、C 端、监控、域名与安全基线。
+﻿"""生产预检：一次检查 PG 控制面、队列、C 端、监控、域名与安全基线。
 
 用法：
     python scripts/production_preflight.py
@@ -93,14 +93,14 @@ def run() -> dict:
     except Exception as exc:  # noqa: BLE001
         checks.append(_check("postgres", False, f"{type(exc).__name__}: {exc}"))
 
-    prom_status, prom_body = _http("http://127.0.0.1:9090/-/ready")
+    prom_status, prom_body = _http("http://127.0.0.1:19090/-/ready")
     checks.append(_check("prometheus_ready", prom_status == 200, f"{prom_status} {prom_body[:80]}"))
-    targets_status, targets_body = _http("http://127.0.0.1:9090/api/v1/targets")
+    targets_status, targets_body = _http("http://127.0.0.1:19090/api/v1/targets")
     target_up = targets_status == 200 and "host.docker.internal:8000" in targets_body and '"health":"up"' in targets_body
     checks.append(_check("prometheus_target", target_up, f"{targets_status} qianke_target_up={target_up}"))
     grafana_status, _ = _http("http://127.0.0.1:3000/api/health")
     checks.append(_check("grafana_health", grafana_status == 200, str(grafana_status)))
-    alert_status, alert_body = _http("http://127.0.0.1:9093/-/ready")
+    alert_status, alert_body = _http("http://127.0.0.1:19093/-/ready")
     checks.append(_check("alertmanager_ready", alert_status == 200, f"{alert_status} {alert_body[:40]}"))
 
     header_status, _ = _http(f"{DOMAIN}/health")
@@ -146,3 +146,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -1,4 +1,4 @@
-# 可观测性实际部署：Prometheus + Grafana + Alertmanager
+﻿# 可观测性实际部署：Prometheus + Grafana + Alertmanager
 
 > 日期：2026-11-05 · 状态：本机 Docker 已运行并验证
 
@@ -6,9 +6,11 @@
 
 | 组件 | 容器 | 地址 |
 |---|---|---|
-| Prometheus | `qianke-prometheus` | http://127.0.0.1:9090 |
+| Prometheus | `qianke-prometheus` | http://127.0.0.1:19090 |
 | Grafana | `qianke-grafana` | http://127.0.0.1:3000 |
-| Alertmanager | `qianke-alertmanager` | http://127.0.0.1:9093 |
+| Alertmanager | `qianke-alertmanager` | http://127.0.0.1:19093 |
+
+> 宿主 9090/9093 可能被临时连接占用，当前映射为 19090/19093；容器内仍监听 9090/9093。
 | API | 本机 | http://127.0.0.1:8000 |
 
 Grafana 本地账号：
@@ -87,7 +89,7 @@ ops/grafana/dashboards/qianke-ops.json
 数据源：
 
 ```text
-Prometheus → http://host.docker.internal:9090
+Prometheus → http://host.docker.internal:19090
 ```
 
 Dashboard：
@@ -115,13 +117,13 @@ Grafana datasource proxy query qianke_up → 1
 
 ```bash
 docker run -d --name qianke-prometheus --restart unless-stopped \
-  -p 9090:9090 \
+  -p 19090:9090 \
   -v "$PWD/ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
   -v "$PWD/ops/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro" \
   prom/prometheus:latest
 
 docker run -d --name qianke-alertmanager --restart unless-stopped \
-  -p 9093:9093 \
+  -p 19093:9093 \
   -v "$PWD/ops/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro" \
   prom/alertmanager:latest
 
@@ -171,3 +173,5 @@ Alertmanager 未接外部通知
 没有日志聚合（Loki）
 没有告警值守/分组策略
 ```
+
+
