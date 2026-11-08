@@ -19,6 +19,7 @@
 | SQL 只读防御 | ✅ 已有 | SELECT-only / 白名单 / LIMIT |
 | 安全响应头 | ✅ 本次新增 | `api/security.py` + 2 tests |
 | 登录失败限流 | ✅ 本次新增 | PostgreSQL 固定窗口（5 次 / 300s），多进程共享 |
+| 会话 Cookie Secure | ✅ 本次新增 | HTTPS 或 `X-Forwarded-Proto: https` 时设置 |
 | 生产监控告警 | ✅ 本次部署 | Prometheus/Grafana/Alertmanager |
 
 安全响应头：
@@ -128,6 +129,12 @@ CSP 强制执行（当前 Report-Only）
 ```text
 QIANKE_LOGIN_RATE_BACKEND=postgres 时使用 c_login_attempt
 PG 不可用时自动回退单进程内存
+```
+
+会话 Cookie：
+
+```text
+HttpOnly + SameSite=Lax + Secure（HTTPS / 反代头）
 ```
 
 ## 4. 上线前最低清单

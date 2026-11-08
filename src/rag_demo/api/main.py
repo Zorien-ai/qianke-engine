@@ -63,7 +63,7 @@ from rag_demo.api.b_end import register_b_end
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
 from rag_demo.api.ops import register_ops
-from rag_demo.api.security import LOGIN_RATE_LIMITER, install_csp_report, install_security_headers
+from rag_demo.api.security import LOGIN_RATE_LIMITER, cookie_secure, install_csp_report, install_security_headers
 from rag_demo.api.wizard import register_wizard
 from rag_demo.cache import answer_cache, dataset_data_version
 from rag_demo.config import (
@@ -1017,6 +1017,7 @@ def login(payload: LoginIn, response: Response, request: Request) -> dict:
         max_age=ttl if payload.remember else None,
         httponly=True,
         samesite="lax",
+        secure=cookie_secure(request),
         path="/",
     )
     logger.info("登录成功: %s（%s）", account["username"], account["status"])
@@ -1068,7 +1069,7 @@ def _purge_demo_runtime_data() -> None:
 
 
 @app.post("/api/auth/demo-login")
-def demo_login(response: Response) -> dict:
+def demo_login(response: Response, request: Request) -> dict:
     """官网「免费体验 Demo」一键登录。
 
     不校验密码 / 验证码，直接下发固定演示账号的短会话。账号绑定 demo 数据集，
@@ -1091,6 +1092,7 @@ def demo_login(response: Response) -> dict:
         max_age=auth.DEMO_TTL_SECONDS,
         httponly=True,
         samesite="lax",
+        secure=cookie_secure(request),
         path="/",
     )
     response.headers["Cache-Control"] = "no-store"

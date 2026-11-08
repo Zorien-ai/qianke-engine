@@ -1,8 +1,14 @@
 """安全响应头测试。"""
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
-from rag_demo.api.security import LoginRateLimiter, install_csp_report, install_security_headers
+from rag_demo.api.security import (
+    LoginRateLimiter,
+    cookie_secure,
+    install_csp_report,
+    install_security_headers,
+)
 
 
 def test_security_headers_present():
@@ -49,6 +55,20 @@ def test_login_rate_limiter_blocks_and_resets():
     assert limiter.retry_after(key) > 0
     limiter.reset(key)
     assert limiter.retry_after(key) == 0
+
+
+def test_cookie_secure_follows_scheme_and_proxy_header():
+    def request(scheme: str, headers=None) -> Request:
+        return Request({
+            "type": "http", "scheme": scheme, "http_version": "1.1",
+            "method": "GET", "path": "/", "raw_path": b"/", "query_string": b"",
+            "headers": headers or [], "client": ("127.0.0.1", 1234),
+            "server": ("testserver", 80), "root_path": "",
+        })
+
+    assert cookie_secure(request("https")) is True
+    assert cookie_secure(request("http")) is False
+    assert cookie_secure(request("http", [(b"x-forwarded-proto", b"https")])) is True
 
 
 def test_csp_report_endpoint_accepts_payload():

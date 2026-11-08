@@ -188,6 +188,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def cookie_secure(request: Request) -> bool:
+    """HTTPS 或反代声明 X-Forwarded-Proto=https 时给会话 Cookie 加 Secure。"""
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded == "https":
+        return True
+    if request.url.scheme == "https":
+        return True
+    return (os.environ.get("QIANKE_COOKIE_SECURE") or "").strip().lower() in {"1", "true", "yes"}
+
+
 def install_security_headers(app: FastAPI) -> None:
     app.add_middleware(SecurityHeadersMiddleware)
 
