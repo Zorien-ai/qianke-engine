@@ -113,3 +113,6 @@ backups/
 
 # 本机 cloudflared ingress（含本机凭据路径，不入库）
 ops/cloudflared.yml
+
+# Prometheus Bearer token（本机，不入库）
+ops/metrics_token.txt

@@ -1,4 +1,4 @@
-# 生产安全加固与租户试点
+﻿# 生产安全加固与租户试点
 
 > 日期：2026-11-05 · 状态：已落地安全头、限流、策略审计哈希链与租户试点；SSO/PII/WORM 仍未做
 
@@ -20,6 +20,7 @@
 | 安全响应头 | ✅ 本次新增 | `api/security.py` + 2 tests |
 | 登录失败限流 | ✅ 本次新增 | PostgreSQL 固定窗口（5 次 / 300s），多进程共享 |
 | 会话 Cookie Secure | ✅ 本次新增 | HTTPS 或 `X-Forwarded-Proto: https` 时设置 |
+| Metrics 鉴权 | ✅ 本次新增 | 外网无 token 返回 401；Prometheus Bearer token |
 | 生产监控告警 | ✅ 本次部署 | Prometheus/Grafana/Alertmanager |
 
 安全响应头：
@@ -148,3 +149,4 @@ HttpOnly + SameSite=Lax + Secure（HTTPS / 反代头）
 [ ] HTTPS/HSTS 在入口生效
 [ ] 依赖漏洞扫描通过
 ```
+

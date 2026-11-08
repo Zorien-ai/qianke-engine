@@ -1,8 +1,9 @@
 """安全响应头测试。"""
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from rag_demo.api.ops import _check_metrics_token
 from rag_demo.api.security import (
     LoginRateLimiter,
     cookie_secure,
@@ -86,3 +87,21 @@ def test_csp_report_endpoint_accepts_payload():
         json={"csp-report": {"blocked-uri": "https://evil.example"}},
     )
     assert response.status_code == 204
+
+def _metrics_request(headers):
+    return Request({
+        "type": "http", "scheme": "http", "http_version": "1.1",
+        "method": "GET", "path": "/metrics", "raw_path": b"/metrics",
+        "query_string": b"", "headers": headers,
+        "client": ("172.17.0.1", 1234), "server": ("testserver", 80), "root_path": "",
+    })
+
+
+def test_metrics_token_accepts_bearer(monkeypatch):
+    import pytest
+
+    monkeypatch.setenv("QIANKE_METRICS_TOKEN", "secret-token")
+    _check_metrics_token(_metrics_request([(b"authorization", b"Bearer secret-token")]), None)
+    _check_metrics_token(_metrics_request([(b"x-metrics-token", b"secret-token")]), None)
+    with pytest.raises(HTTPException):
+        _check_metrics_token(_metrics_request([(b"authorization", b"Bearer wrong")]), None)

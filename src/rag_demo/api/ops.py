@@ -97,6 +97,7 @@ def _check_metrics_token(request: Request, token: str | None) -> None:
         return
     provided = (
         request.headers.get("X-Metrics-Token")
+        or (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
         or (request.query_params.get("token") if token is None else token)
         or ""
     ).strip()
