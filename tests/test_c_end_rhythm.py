@@ -16,6 +16,18 @@ def c_store(tmp_path, monkeypatch):
     return store
 
 
+@pytest.fixture(autouse=True)
+def completed_merchant(monkeypatch):
+    monkeypatch.setattr(
+        store,
+        "_merchant_order_state",
+        lambda owner_id, order_id: (
+            "COMPLETED",
+            (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat(),
+        ),
+    )
+
+
 def _confirmed_order() -> dict:
     draft = store.prepare_order("buyer_1", [{"product_id": "P001", "quantity": 1}])
     return store.confirm_order("buyer_1", draft["order_id"], draft["confirmation_token"])
@@ -77,3 +89,24 @@ def test_pause_blocks_delivery(c_store):
     store.update_rhythm("buyer_1", enabled=True, pause_hours=2)
     now = datetime.now(timezone.utc) + timedelta(hours=1)
     assert store.claim_due_checkin("buyer_1", now=now) is None
+
+
+def test_not_delivered_order_does_not_trigger_followup(c_store, monkeypatch):
+    order = _confirmed_order()
+    _set_due_past("buyer_1", order["order_id"])
+    store.update_rhythm("buyer_1", enabled=True)
+    monkeypatch.setattr(store, "_merchant_order_state", lambda owner_id, order_id: ("SHIPPED", None))
+    assert store.claim_due_checkin("buyer_1", now=datetime.now(timezone.utc) + timedelta(days=3)) is None
+
+
+def test_followup_waits_24h_after_signed(c_store, monkeypatch):
+    order = _confirmed_order()
+    _set_due_past("buyer_1", order["order_id"])
+    store.update_rhythm("buyer_1", enabled=True)
+    signed = datetime.now(timezone.utc) - timedelta(hours=1)
+    monkeypatch.setattr(
+        store,
+        "_merchant_order_state",
+        lambda owner_id, order_id: ("COMPLETED", signed.isoformat()),
+    )
+    assert store.claim_due_checkin("buyer_1", now=datetime.now(timezone.utc)) is None
