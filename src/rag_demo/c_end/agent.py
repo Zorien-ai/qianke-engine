@@ -31,13 +31,62 @@ C_TOOL_RULES = """你可以：
 - 如果商品或预算不匹配，如实说明。
 """
 
+MODE_COMPANION = "companion"
+MODE_ADVISOR = "advisor"
+MODE_TRANSACTION = "transaction"
+VALID_MODES = (MODE_COMPANION, MODE_ADVISOR, MODE_TRANSACTION)
 
-def build_system_prompt(buyer_id: str) -> str:
-    """人设段 + 工具规则段；人设来自用户可配置的伙伴字段。"""
+_COMPANION_RULES = """【本次模式：陪伴】
+本轮只做陪伴和倾听，不主动推荐商品、不生成订单、不查询订单。
+用户只是聊天、倾诉、分享日常时，先接住情绪，再决定要不要给建议。
+不要为了完成销售把话题拉回商品；不要使用"买点东西会开心"这类引导消费的话。
+如果用户明确问商品、价格、订单，告诉用户可以切到"帮我挑东西"或直接说需求，再进入购物模式。
+"""
+
+_ADVISOR_RULES = """【本次模式：购物参谋】
+本轮可以调用 recommend_products 帮助用户挑商品、比价、判断是否值得买。
+只能推荐真实商品，价格、库存、活动必须来自工具结果。
+本轮不要生成订单草稿；用户明确要下单时，让用户确认进入交易流程，再生成订单草稿。
+不要催单，不要把"陪伴"当作推销理由。
+"""
+
+_MODE_RULES = {
+    MODE_COMPANION: _COMPANION_RULES,
+    MODE_ADVISOR: _ADVISOR_RULES,
+    MODE_TRANSACTION: C_TOOL_RULES,
+}
+
+_TRANSACTION_HINTS = (
+    "下单", "买", "购买", "订单", "物流", "发货", "收货", "退货", "退款",
+    "售后", "支付", "付款", "取消", "草稿", "确认订单", "到哪", "快递", "运单",
+    "buy", "order", "checkout",
+)
+_ADVISOR_HINTS = (
+    "推荐", "挑", "选", "对比", "值不值", "预算", "价格", "多少钱", "活动",
+    "优惠", "便宜", "礼物", "送", "尺码", "库存", "哪个", "怎么选", "跑鞋",
+    "鞋", "衣服", "包", "推荐一下", "recommend",
+)
+
+
+def detect_mode(message: str, requested: str | None = None) -> str:
+    """规则优先：显式模式 > 交易意图 > 购物参谋意图 > 默认陪伴。"""
+    if requested in VALID_MODES:
+        return requested
+    text = (message or "").strip().lower()
+    if any(word in text for word in _TRANSACTION_HINTS):
+        return MODE_TRANSACTION
+    if any(word in text for word in _ADVISOR_HINTS):
+        return MODE_ADVISOR
+    return MODE_COMPANION
+
+
+def build_system_prompt(buyer_id: str, mode: str = MODE_TRANSACTION) -> str:
+    """人设段 + 本轮模式规则段；人设来自用户可配置的伙伴字段。"""
     try:
         companion = store.get_companion(buyer_id)
     except Exception:  # noqa: BLE001 - 伙伴读取失败不应阻断对话
         companion = {}
+    selected = mode if mode in VALID_MODES else MODE_TRANSACTION
     return (
         c_persona.build_persona_prompt(
             name=companion.get("name"),
@@ -46,7 +95,7 @@ def build_system_prompt(buyer_id: str) -> str:
             persona=companion.get("persona"),
         )
         + "\n"
-        + C_TOOL_RULES
+        + _MODE_RULES[selected]
     )
 
 
@@ -68,12 +117,13 @@ class CAgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     buyer_id: str
     thread_id: str
+    mode: str
     draft: dict[str, Any]
     order: dict[str, Any]
     status: str
 
 
-def _tools(buyer_id: str):
+def _tools(buyer_id: str, mode: str = MODE_TRANSACTION):
     @tool
     def recommend_products(need: str, budget: float | None = None) -> dict[str, Any]:
         """按需求关键词和预算推荐真实商家商品；返回价格、库存、SKU 和商品 ID。"""
@@ -148,6 +198,10 @@ def _tools(buyer_id: str):
         draft = store.prepare_order(buyer_id, normalized)
         return {"ok": True, "data": draft, **draft}
 
+    if mode == MODE_COMPANION:
+        return []
+    if mode == MODE_ADVISOR:
+        return [recommend_products]
     return [recommend_products, query_my_orders, prepare_order]
 
 
@@ -193,10 +247,16 @@ def _last_ai_text(messages: list[Any]) -> str:
     return ""
 
 
-def build_c_graph(buyer_id: str, checkpointer: Any, llm: Any | None = None):
-    tools = _tools(buyer_id)
+def build_c_graph(
+    buyer_id: str,
+    checkpointer: Any,
+    llm: Any | None = None,
+    mode: str = MODE_TRANSACTION,
+):
+    selected = mode if mode in VALID_MODES else MODE_TRANSACTION
+    tools = _tools(buyer_id, selected)
     llm = llm or _make_llm()
-    llm_with_tools = llm.bind_tools(tools)
+    llm_with_tools = llm.bind_tools(tools) if tools else llm
 
     def chatbot(state: CAgentState) -> dict[str, Any]:
         response = llm_with_tools.invoke(state.get("messages") or [])
@@ -205,6 +265,8 @@ def build_c_graph(buyer_id: str, checkpointer: Any, llm: Any | None = None):
     def route_after_chatbot(state: CAgentState) -> str:
         messages = state.get("messages") or []
         last = messages[-1] if messages else None
+        if not tools:
+            return END
         return "tools" if getattr(last, "tool_calls", None) else END
 
     def route_after_tools(state: CAgentState) -> str:
@@ -255,11 +317,14 @@ def build_c_graph(buyer_id: str, checkpointer: Any, llm: Any | None = None):
 
     graph = StateGraph(CAgentState)
     graph.add_node("chatbot", chatbot)
-    graph.add_node("tools", ToolNode(tools))
     graph.add_node("confirm", confirm)
     graph.add_edge(START, "chatbot")
-    graph.add_conditional_edges("chatbot", route_after_chatbot, {"tools": "tools", END: END})
-    graph.add_conditional_edges("tools", route_after_tools, {"confirm": "confirm", "chatbot": "chatbot"})
+    if tools:
+        graph.add_node("tools", ToolNode(tools))
+        graph.add_conditional_edges("chatbot", route_after_chatbot, {"tools": "tools", END: END})
+        graph.add_conditional_edges("tools", route_after_tools, {"confirm": "confirm", "chatbot": "chatbot"})
+    else:
+        graph.add_conditional_edges("chatbot", route_after_chatbot, {END: END})
     graph.add_edge("confirm", END)
     return graph.compile(checkpointer=checkpointer)
 
@@ -271,19 +336,22 @@ def run_c_agent(
     thread_id: str,
     checkpointer: Any,
     llm: Any | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    graph = build_c_graph(buyer_id, checkpointer, llm=llm)
+    selected = detect_mode(message, mode)
+    graph = build_c_graph(buyer_id, checkpointer, llm=llm, mode=selected)
     config = {"configurable": {"thread_id": thread_id}}
     if graph.get_state(config).values:
         raise ValueError("thread_id 已存在，请使用新的 thread_id")
     state = graph.invoke(
         {
             "messages": [
-                SystemMessage(content=build_system_prompt(buyer_id)),
+                SystemMessage(content=build_system_prompt(buyer_id, selected)),
                 HumanMessage(content=message),
             ],
             "buyer_id": buyer_id,
             "thread_id": thread_id,
+            "mode": selected,
             "status": "RUNNING",
         },
         config=config,
@@ -299,6 +367,7 @@ def run_c_agent(
         status = state.get("status") or "FAILED"
     return {
         "thread_id": thread_id,
+        "mode": selected,
         "interrupted": interrupted,
         "status": status,
         "draft": draft,
@@ -316,7 +385,8 @@ def resume_c_agent(
     checkpointer: Any,
     llm: Any | None = None,
 ) -> dict[str, Any]:
-    graph = build_c_graph(buyer_id, checkpointer, llm=llm)
+    # 只有交易模式会 interrupt；恢复时使用完整工具图，避免 checkpoint 节点不匹配。
+    graph = build_c_graph(buyer_id, checkpointer, llm=llm, mode=MODE_TRANSACTION)
     config = {"configurable": {"thread_id": thread_id}}
     before = graph.get_state(config)
     if not before.values:

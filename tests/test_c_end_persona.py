@@ -160,12 +160,34 @@ def test_agent_system_prompt_uses_companion_fields(c_store):
     from rag_demo.c_end import agent
 
     c_store.update_companion("buyer_1", name="阿团", user_nickname="小满")
-    prompt = agent.build_system_prompt("buyer_1")
+    prompt = agent.build_system_prompt("buyer_1", mode="transaction")
     assert "阿团" in prompt
     assert "小满" in prompt
-    # 工具规则仍在，人设不能把能力说明挤掉。
+    # 交易模式仍保留完整工具规则。
     assert "recommend_products" in prompt
     assert "prepare_order" in prompt
+
+
+def test_agent_prompt_modes_isolate_commerce_tools(c_store):
+    from rag_demo.c_end import agent
+
+    companion_prompt = agent.build_system_prompt("buyer_1", mode="companion")
+    advisor_prompt = agent.build_system_prompt("buyer_1", mode="advisor")
+    assert "recommend_products" not in companion_prompt
+    assert "prepare_order" not in companion_prompt
+    assert "recommend_products" in advisor_prompt
+    assert "prepare_order" not in advisor_prompt
+    assert "陪伴" in companion_prompt
+    assert "购物参谋" in advisor_prompt
+
+
+def test_detect_mode_defaults_to_companion():
+    from rag_demo.c_end import agent
+
+    assert agent.detect_mode("今天有点累，陪我聊聊") == "companion"
+    assert agent.detect_mode("500 元以内推荐一双跑鞋") == "advisor"
+    assert agent.detect_mode("买一双跑鞋，直接下单") == "transaction"
+    assert agent.detect_mode("随便聊聊", requested="advisor") == "advisor"
 
 
 def test_commentary_uses_shared_fallback(c_store):

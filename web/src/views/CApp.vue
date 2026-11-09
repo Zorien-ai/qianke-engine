@@ -88,6 +88,7 @@ const messagesByThread = ref({
 
 const activeId = ref("companion");
 const draft = ref("");
+const pendingMode = ref("");
 const mentionOpen = ref(false);
 const mentionQuery = ref("");
 const mentionIndex = ref(0);
@@ -1286,13 +1287,15 @@ async function send() {
   if (!text || typing.value) return;
   closeMention();
   const clientId = newClientMessageId();
+  const mode = pendingMode.value;
+  pendingMode.value = "";
   pushMessage({ role: "user", text });
   draft.value = "";
   const input = document.getElementById("c-app-input");
   if (input) input.style.height = "auto";
   pendingRetry.value = null;
   scrollToBottom();
-  await deliverText(text, false, clientId);
+  await deliverText(text, false, clientId, mode);
   // 发送后刷新未读（其它会话可能有新消息），当前会话保持已读
   await refreshUnread();
 }
@@ -1306,14 +1309,14 @@ async function retrySend() {
   }
   pendingRetry.value = null;
   agentError.value = "";
-  await deliverText(failed.text, true, failed.clientId);
+  await deliverText(failed.text, true, failed.clientId, failed.mode || "");
 }
 
 function clearRetry() {
   pendingRetry.value = null;
 }
 
-async function deliverText(text, isRetry = false, clientId = null) {
+async function deliverText(text, isRetry = false, clientId = null, mode = "") {
   if (isGroupThread(activeId.value)) {
     typing.value = true;
     agentError.value = "";
@@ -1406,6 +1409,7 @@ async function deliverText(text, isRetry = false, clientId = null) {
       message: text,
       thread_id: liveThreadId.value || undefined,
       client_message_id: clientId || undefined,
+      mode: mode || undefined,
     });
     liveThreadId.value = result.thread_id || liveThreadId.value;
     agentError.value = "";
@@ -1427,7 +1431,7 @@ async function deliverText(text, isRetry = false, clientId = null) {
     }
   } catch (error) {
     agentError.value = error?.detail || error?.message || "小鱼暂时无法回应";
-    pendingRetry.value = { threadId: activeId.value, text, clientId };
+    pendingRetry.value = { threadId: activeId.value, text, clientId, mode };
   } finally {
     typing.value = false;
     scrollToBottom();
@@ -1459,14 +1463,11 @@ async function confirmLiveOrder() {
   }
 }
 
-async function sendPrompt(prompt) {
+async function sendPrompt(prompt, mode = "") {
   if (typing.value) return;
+  pendingMode.value = mode;
   if (activeId.value === "store_demo") {
     draft.value = `@店宠 ${prompt}`;
-  } else if (activeId.value === "companion") {
-    draft.value = prompt === "看 500 元以内的跑鞋"
-      ? "看 500 元以内的跑鞋，买 1 双，直接生成待确认订单"
-      : prompt;
   } else {
     draft.value = prompt;
   }
@@ -2054,9 +2055,13 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-if="activeThread.kind !== 'group'" class="c-prompt-row">
-            <button type="button" class="c-prompt" @click="sendPrompt('看 500 元以内的跑鞋')">看 500 元以内的跑鞋</button>
-            <button type="button" class="c-prompt" @click="sendPrompt('查平台活动')">查平台活动</button>
-            <button type="button" class="c-prompt" @click="sendPrompt('问店宠售后')">问店宠售后</button>
+            <template v-if="activeId === 'companion'">
+              <button type="button" class="c-prompt" @click="sendPrompt('陪我聊聊', 'companion')">陪我聊聊</button>
+              <button type="button" class="c-prompt" @click="sendPrompt('帮我挑东西', 'advisor')">帮我挑东西</button>
+            </template>
+            <button type="button" class="c-prompt" @click="sendPrompt('看 500 元以内的跑鞋', 'advisor')">看 500 元以内的跑鞋</button>
+            <button type="button" class="c-prompt" @click="sendPrompt('查平台活动', 'advisor')">查平台活动</button>
+            <button type="button" class="c-prompt" @click="sendPrompt('问店宠售后', 'transaction')">问店宠售后</button>
             <button
               type="button"
               class="c-prompt is-negotiate"
@@ -2103,7 +2108,7 @@ onBeforeUnmount(() => {
                 id="c-app-input"
                 v-model="draft"
                 rows="1"
-                :placeholder="activeThread.kind === 'group' ? `在${activeThread.name}里发消息，可 @ 成员` : '问商品、活动或售后'"
+                :placeholder="activeThread.kind === 'group' ? `在${activeThread.name}里发消息，可 @ 成员` : (activeId === 'companion' ? '想聊什么，或者要买什么' : '问商品、活动或售后')"
                 @focus="onComposerFocus"
                 @blur="onComposerBlur"
                 @input="onComposerInput"

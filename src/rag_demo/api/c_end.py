@@ -104,6 +104,7 @@ class CAgentRunIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     thread_id: str | None = Field(default=None, max_length=128)
     client_message_id: str | None = Field(default=None, max_length=128)
+    mode: str | None = Field(default=None, pattern="^(companion|advisor|transaction)$")
 
 
 class CAgentResumeIn(BaseModel):
@@ -1043,7 +1044,7 @@ def c_agent_run(req: CAgentRunIn) -> dict:
     if not _THREAD_RE.fullmatch(thread_id):
         raise HTTPException(status_code=400, detail="thread_id 格式不合法")
 
-    request_fingerprint = idempotency.fingerprint(req.message, req.thread_id)
+    request_fingerprint = idempotency.fingerprint(req.message, req.thread_id, req.mode or "")
     if client_id:
         try:
             claim = idempotency.claim(
@@ -1067,6 +1068,7 @@ def c_agent_run(req: CAgentRunIn) -> dict:
             buyer_id=buyer_id,
             thread_id=thread_id,
             checkpointer=get_checkpointer(),
+            mode=req.mode,
         )
     except ValueError as exc:
         if client_id:
@@ -1079,6 +1081,7 @@ def c_agent_run(req: CAgentRunIn) -> dict:
 
     response = {
         "thread_id": thread_id,
+        "mode": result.get("mode", ""),
         "status": result["status"],
         "interrupted": result["interrupted"],
         "requires_confirmation": result["interrupted"],

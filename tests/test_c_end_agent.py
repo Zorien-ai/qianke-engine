@@ -128,6 +128,52 @@ def test_c_agent_recommend_without_order(c_store, tmp_path):
     assert result["draft"] is None
 
 
+def test_c_agent_companion_mode_does_not_expose_tools(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_companion.sqlite")
+    fake = _FakeLLM([AIMessage(content="今天先不聊商品，说说你今天怎么了。")])
+    result = c_agent.run_c_agent(
+        "今天有点累，陪我聊聊",
+        buyer_id="buyer_1",
+        thread_id="c_thread_companion_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    assert result["interrupted"] is False
+    assert result["status"] == "COMPLETED"
+    assert result["mode"] == "companion"
+    assert result["draft"] is None
+
+
+def test_c_agent_advisor_mode_recommends_without_order(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_advisor.sqlite")
+    fake = _FakeLLM([
+        AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "recommend_products",
+                "args": {"need": "跑鞋", "budget": 300},
+                "id": "call_advisor_1",
+                "type": "tool_call",
+            }],
+        ),
+        AIMessage(content="这两双可以对比一下，先不生成订单。"),
+    ])
+    result = c_agent.run_c_agent(
+        "帮我挑一双 300 以内的跑鞋",
+        buyer_id="buyer_1",
+        thread_id="c_thread_advisor_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    assert result["mode"] == "advisor"
+    assert result["interrupted"] is False
+    assert result["draft"] is None
+
+
 def test_c_agent_cannot_resume_other_buyer(c_store, tmp_path):
     from rag_demo.agent.checkpoint import sqlite_checkpointer
 

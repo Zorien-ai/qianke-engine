@@ -65,8 +65,8 @@ def _cutoff(max_age_seconds: int) -> str:
     return deadline.isoformat(timespec="seconds")
 
 
-def fingerprint(message: str, thread_id: str | None = None) -> str:
-    payload = f"{message.strip()}\n{thread_id or ''}".encode("utf-8")
+def fingerprint(message: str, thread_id: str | None = None, mode: str = "") -> str:
+    payload = f"{message.strip()}\n{thread_id or ''}\n{mode}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
