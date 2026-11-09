@@ -187,6 +187,7 @@ def test_detect_mode_defaults_to_companion():
     assert agent.detect_mode("今天有点累，陪我聊聊") == "companion"
     assert agent.detect_mode("500 元以内推荐一双跑鞋") == "advisor"
     assert agent.detect_mode("买一双跑鞋，直接下单") == "transaction"
+    assert agent.detect_mode("我喜欢跑步，我的预算 500 元，别给我推荐跑鞋") == "companion"
     assert agent.detect_mode("随便聊聊", requested="advisor") == "advisor"
 
 
