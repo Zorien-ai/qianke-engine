@@ -286,6 +286,9 @@ const companion = ref({
   avatar_url: "",
   user_avatar_url: "",
 });
+const memories = ref([]);
+const memoriesError = ref("");
+const memoryBusy = ref("");
 const liveThreadId = ref("");
 const liveDraft = ref(null);
 const liveOrder = ref(null);
@@ -1419,6 +1422,7 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
       text: replyText,
     });
     await persistAppMessage("companion", replyText);
+    if (result.memories_added) await loadMemories();
     if (result.draft) {
       liveDraft.value = result.draft;
       liveOrder.value = null;
@@ -1630,6 +1634,48 @@ async function loadCompanion() {
   }
 }
 
+async function loadMemories() {
+  memoriesError.value = "";
+  try {
+    const data = await getJson("/api/c/companion/memories");
+    memories.value = Array.isArray(data?.memories) ? data.memories : [];
+  } catch (error) {
+    memories.value = [];
+    memoriesError.value = error?.detail || error?.message || "记忆加载失败";
+  }
+}
+
+function memoryKindLabel(kind) {
+  return { preference: "偏好", boundary: "边界", fact: "信息", event: "事件" }[kind] || "记忆";
+}
+
+async function removeMemory(memoryId) {
+  if (!memoryId || memoryBusy.value) return;
+  memoryBusy.value = memoryId;
+  try {
+    await del(`/api/c/companion/memories/${encodeURIComponent(memoryId)}`);
+    await loadMemories();
+  } catch (error) {
+    memoriesError.value = error?.detail || error?.message || "删除记忆失败";
+  } finally {
+    memoryBusy.value = "";
+  }
+}
+
+async function clearMemories() {
+  if (memoryBusy.value || !memories.value.length) return;
+  if (!window.confirm("清空小鱼记得的事？此操作不可撤销。")) return;
+  memoryBusy.value = "all";
+  try {
+    await del("/api/c/companion/memories");
+    await loadMemories();
+  } catch (error) {
+    memoriesError.value = error?.detail || error?.message || "清空记忆失败";
+  } finally {
+    memoryBusy.value = "";
+  }
+}
+
 async function switchThread(id) {
   const leavingGroup = isGroupThread(activeId.value);
   closeGroupSocket();
@@ -1698,7 +1744,7 @@ function selectMobileThread(id) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders()]);
+  await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories()]);
   await refreshUnread();
   startUnreadPolling();
   document.addEventListener("visibilitychange", onVisibilityChange);
@@ -2154,6 +2200,36 @@ onBeforeUnmount(() => {
               <circle class="c-spark-point" cx="232" cy="18" r="2.5" />
             </svg>
             <div class="c-spark-axis"><span>周一</span><span>周日</span></div>
+          </section>
+
+          <section v-if="activeId === 'companion'" class="c-context-section">
+            <header>
+              <span>小鱼记得的事</span>
+              <button
+                v-if="memories.length"
+                type="button"
+                class="c-context-link c-memory-clear"
+                :disabled="!!memoryBusy"
+                @click="clearMemories"
+              >清空</button>
+            </header>
+            <p v-if="memoriesError" class="c-inline-error" role="status">{{ memoriesError }}</p>
+            <p v-else-if="!memories.length" class="c-memory-empty">
+              直接说“我喜欢…”或“别推荐…”，小鱼会记住；你随时可以删除。
+            </p>
+            <ul v-else class="c-memory-list">
+              <li v-for="item in memories" :key="item.memory_id" class="c-memory-item">
+                <span class="c-memory-kind">{{ memoryKindLabel(item.kind) }}</span>
+                <span class="c-memory-text">{{ item.content }}</span>
+                <button
+                  type="button"
+                  class="c-memory-remove"
+                  :disabled="memoryBusy === item.memory_id"
+                  aria-label="删除这条记忆"
+                  @click="removeMemory(item.memory_id)"
+                >删</button>
+              </li>
+            </ul>
           </section>
 
           <section class="c-context-section">
@@ -3407,6 +3483,70 @@ onBeforeUnmount(() => {
   color: var(--c-text-3);
   font-size: 9px;
   text-decoration: none;
+}
+
+.c-memory-clear {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.c-memory-empty {
+  margin: 0;
+  color: var(--c-text-3);
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.c-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.c-memory-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--c-line-soft);
+  border-radius: 8px;
+  background: var(--c-bg-soft);
+  color: var(--c-text-2);
+  font-size: 10px;
+}
+
+.c-memory-kind {
+  flex: none;
+  color: var(--c-text-3);
+  font-size: 9px;
+}
+
+.c-memory-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-memory-remove {
+  flex: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--c-text-3);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.c-memory-remove:hover,
+.c-memory-clear:hover {
+  color: var(--c-text);
 }
 
 .c-danger-link {

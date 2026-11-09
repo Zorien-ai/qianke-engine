@@ -233,6 +233,24 @@ def update_companion(req: CompanionPatchIn) -> dict:
         raise _http_error(exc) from exc
 
 
+@router.get("/companion/memories")
+def list_companion_memories() -> dict:
+    buyer_id, _ = _buyer()
+    return {"memories": store.list_memories(buyer_id, limit=20)}
+
+
+@router.delete("/companion/memories/{memory_id}")
+def delete_companion_memory(memory_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    return {"deleted": store.delete_memory(buyer_id, memory_id)}
+
+
+@router.delete("/companion/memories")
+def clear_companion_memories() -> dict:
+    buyer_id, _ = _buyer()
+    return {"deleted": store.clear_memories(buyer_id)}
+
+
 def _avatar_kind(kind: str) -> str:
     if not _AVATAR_KIND_RE.fullmatch(str(kind or "")):
         raise HTTPException(
@@ -1079,6 +1097,12 @@ def c_agent_run(req: CAgentRunIn) -> dict:
             idempotency.release(client_id=client_id, owner_id=buyer_id, endpoint="c_agent_run")
         raise HTTPException(status_code=502, detail=f"C 端 Agent 运行失败：{exc}") from exc
 
+    try:
+        memories_added = store.save_memories(buyer_id, req.message)
+    except Exception:  # noqa: BLE001 - 记忆写入失败不应影响对话主链路
+        memories_added = []
+        logger.warning("C 端记忆保存失败，已忽略", exc_info=True)
+
     response = {
         "thread_id": thread_id,
         "mode": result.get("mode", ""),
@@ -1087,6 +1111,7 @@ def c_agent_run(req: CAgentRunIn) -> dict:
         "requires_confirmation": result["interrupted"],
         "draft": result["draft"],
         "order": result["order"],
+        "memories_added": len(memories_added),
         # 模型输出统一过 persona guard；确认/取消文案由代码生成，不走这里。
         "reply": c_persona.guard(_last_ai_text(result["messages"]), tier="L2").text
         if _last_ai_text(result["messages"])

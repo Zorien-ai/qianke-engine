@@ -66,37 +66,52 @@ _ADVISOR_HINTS = (
     "优惠", "便宜", "礼物", "送", "尺码", "库存", "哪个", "怎么选", "跑鞋",
     "鞋", "衣服", "包", "推荐一下", "recommend",
 )
+_MEMORY_DECLARATION_MARKERS = (
+    "我喜欢", "我不喜欢", "我的预算", "我预算", "别给我推荐",
+    "不要推荐", "别推荐", "我对", "我穿",
+)
 
 
 def detect_mode(message: str, requested: str | None = None) -> str:
-    """规则优先：显式模式 > 交易意图 > 购物参谋意图 > 默认陪伴。"""
+    """规则优先：显式模式 > 交易意图 > 记忆陈述 > 购物参谋意图 > 默认陪伴。"""
     if requested in VALID_MODES:
         return requested
     text = (message or "").strip().lower()
     if any(word in text for word in _TRANSACTION_HINTS):
         return MODE_TRANSACTION
+    if any(marker in text for marker in _MEMORY_DECLARATION_MARKERS):
+        return MODE_COMPANION
     if any(word in text for word in _ADVISOR_HINTS):
         return MODE_ADVISOR
     return MODE_COMPANION
 
 
 def build_system_prompt(buyer_id: str, mode: str = MODE_TRANSACTION) -> str:
-    """人设段 + 本轮模式规则段；人设来自用户可配置的伙伴字段。"""
+    """人设段 + 记忆段 + 本轮模式规则段。"""
     try:
         companion = store.get_companion(buyer_id)
     except Exception:  # noqa: BLE001 - 伙伴读取失败不应阻断对话
         companion = {}
+    try:
+        memories = store.list_memories(buyer_id, limit=8)
+    except Exception:  # noqa: BLE001 - 记忆读取失败不应阻断对话
+        memories = []
     selected = mode if mode in VALID_MODES else MODE_TRANSACTION
-    return (
-        c_persona.build_persona_prompt(
-            name=companion.get("name"),
-            user_nickname=companion.get("user_nickname"),
-            species=companion.get("species"),
-            persona=companion.get("persona"),
-        )
-        + "\n"
-        + _MODE_RULES[selected]
+    text = c_persona.build_persona_prompt(
+        name=companion.get("name"),
+        user_nickname=companion.get("user_nickname"),
+        species=companion.get("species"),
+        persona=companion.get("persona"),
     )
+    if memories:
+        lines = [f"- {item['kind']}：{item['content']}" for item in memories]
+        text += (
+            "\n【你记得的事】\n"
+            + "\n".join(lines)
+            + "\n这些是用户明确说过的偏好或边界，只作为上下文参考；"
+            "价格、库存、订单仍以工具结果为准，用户当前说法与记忆冲突时以当前说法为准。"
+        )
+    return text + "\n" + _MODE_RULES[selected]
 
 
 class ItemSchema(BaseModel):

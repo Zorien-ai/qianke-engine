@@ -390,6 +390,20 @@ CREATE TABLE IF NOT EXISTS c_companion (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_companion_memory (
+    memory_id  TEXT PRIMARY KEY,
+    owner_id   TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'explicit',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (owner_id, kind, content)
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_memory_owner
+    ON c_companion_memory (owner_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS c_app_message (
     message_id  TEXT PRIMARY KEY,
     owner_id    TEXT NOT NULL,
@@ -2952,6 +2966,133 @@ def update_companion(
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+MEMORY_KINDS = ("preference", "boundary", "fact", "event")
+_MEMORY_PII_RE = re.compile(
+    r"\b1[3-9]\d{9}\b|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\d{17}[\dXx]\b|\b\d{16,19}\b"
+)
+_MEMORY_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    (re.compile(r"我(?:更|最)?喜欢([^，。！？\n]{1,40})"), "preference", "喜欢"),
+    (re.compile(r"我不喜欢([^，。！？\n]{1,40})"), "preference", "不喜欢"),
+    (re.compile(r"我(?:穿|用)([0-9A-Za-z\u4e00-\u9fff]{1,12}码)"), "preference", "尺码"),
+    (re.compile(r"我(?:的)?预算(?:是|为)?\s*([0-9]{2,7})\s*元"), "preference", "预算"),
+    (re.compile(r"(?:不要|别)(?:再)?(?:给我)?推荐([^，。！？\n]{1,30})"), "boundary", "不推荐"),
+    (re.compile(r"我对([^，。！？\n]{1,20})过敏"), "boundary", "对"),
+)
+
+
+def _clean_memory_content(value: str) -> str:
+    return value.strip().strip("，,。.!！?？；;：: \t")[:80]
+
+
+def extract_memories(message: str) -> list[dict[str, str]]:
+    """从用户明确自述中抽取少量长期记忆；规则优先，不调用 LLM。"""
+    text = str(message or "").strip()
+    if not text or len(text) > 300 or _MEMORY_PII_RE.search(text):
+        return []
+    # 疑问句/回忆问句不是用户在陈述偏好，不能写进长期记忆。
+    if any(mark in text for mark in ("吗", "？", "?", "什么", "哪些", "哪款")):
+        return []
+    found: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for pattern, kind, prefix in _MEMORY_PATTERNS:
+        for match in pattern.finditer(text):
+            raw = _clean_memory_content(match.group(1))
+            if not raw:
+                continue
+            if prefix == "喜欢":
+                content = f"喜欢{raw}"
+            elif prefix == "不喜欢":
+                content = f"不喜欢{raw}"
+            elif prefix == "尺码":
+                content = f"尺码 {raw}"
+            elif prefix == "预算":
+                content = f"预算 {raw} 元"
+            elif prefix == "不推荐":
+                content = f"不要推荐{raw}"
+            elif prefix == "对":
+                content = f"对{raw}过敏"
+            else:
+                content = f"{prefix}{raw}"
+            key = (kind, content)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append({"kind": kind, "content": content})
+    return found
+
+
+def save_memories(owner_id: str, message: str, *, source: str = "extracted") -> list[dict[str, Any]]:
+    """保存抽取出的记忆；重复内容不重复写入。"""
+    items = extract_memories(message)
+    if not items:
+        return []
+    init()
+    now = _now()
+    added: list[dict[str, Any]] = []
+    conn = _connect()
+    try:
+        for item in items:
+            exists = conn.execute(
+                "SELECT memory_id FROM c_companion_memory WHERE owner_id = ? AND kind = ? AND content = ?",
+                (owner_id, item["kind"], item["content"]),
+            ).fetchone()
+            if exists is not None:
+                continue
+            memory_id = f"mem_{uuid.uuid4().hex[:20]}"
+            conn.execute(
+                "INSERT INTO c_companion_memory(memory_id, owner_id, kind, content, source, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (memory_id, owner_id, item["kind"], item["content"], source, now, now),
+            )
+            added.append({"memory_id": memory_id, **item, "source": source, "created_at": now})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return added
+
+
+def list_memories(owner_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT memory_id, kind, content, source, created_at FROM c_companion_memory "
+            "WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?",
+            (owner_id, max(1, min(int(limit), 50))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def delete_memory(owner_id: str, memory_id: str) -> bool:
+    init()
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "DELETE FROM c_companion_memory WHERE owner_id = ? AND memory_id = ?",
+            (owner_id, str(memory_id)),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def clear_memories(owner_id: str) -> int:
+    init()
+    conn = _connect()
+    try:
+        cur = conn.execute("DELETE FROM c_companion_memory WHERE owner_id = ?", (owner_id,))
+        conn.commit()
+        return int(cur.rowcount or 0)
     finally:
         conn.close()
 

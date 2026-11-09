@@ -174,6 +174,20 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion (
   "user_avatar_path" TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_memory (
+  "memory_id" TEXT PRIMARY KEY,
+  "owner_id" TEXT NOT NULL,
+  "kind" TEXT NOT NULL,
+  "content" TEXT NOT NULL,
+  "source" TEXT NOT NULL DEFAULT 'explicit',
+  "created_at" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL,
+  UNIQUE ("owner_id", "kind", "content")
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_memory_owner
+    ON __SCHEMA__.c_companion_memory ("owner_id", "created_at" DESC);
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_client_request (
   "client_id" TEXT NOT NULL,
   "owner_id" TEXT NOT NULL,
