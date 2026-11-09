@@ -120,6 +120,13 @@ class CompanionPatchIn(BaseModel):
     appearance: str | None = Field(default=None, max_length=60)
 
 
+class RhythmPatchIn(BaseModel):
+    enabled: bool | None = None
+    quiet_start: str | None = Field(default=None, pattern="^([01]\\d|2[0-3]):[0-5]\\d$")
+    quiet_end: str | None = Field(default=None, pattern="^([01]\\d|2[0-3]):[0-5]\\d$")
+    pause_hours: int | None = Field(default=None, ge=0, le=720)
+
+
 class SendMessageIn(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
     client_message_id: str | None = Field(default=None, max_length=128)
@@ -237,6 +244,44 @@ def update_companion(req: CompanionPatchIn) -> dict:
 def list_companion_memories() -> dict:
     buyer_id, _ = _buyer()
     return {"memories": store.list_memories(buyer_id, limit=20)}
+
+
+@router.get("/companion/rhythm")
+def get_companion_rhythm() -> dict:
+    buyer_id, _ = _buyer()
+    return store.get_rhythm(buyer_id)
+
+
+@router.patch("/companion/rhythm")
+def update_companion_rhythm(req: RhythmPatchIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return store.update_rhythm(
+            buyer_id,
+            enabled=req.enabled,
+            quiet_start=req.quiet_start,
+            quiet_end=req.quiet_end,
+            pause_hours=req.pause_hours,
+        )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/companion/checkin")
+def poll_companion_checkin() -> dict:
+    """用户打开 App 时领取一条站内回访；默认关闭，免打扰与频率在服务端兜底。"""
+    buyer_id, _ = _buyer()
+    checkin = store.claim_due_checkin(buyer_id)
+    if checkin is None:
+        return {"checkin": None}
+    store.save_app_message(
+        buyer_id,
+        "companion",
+        "companion",
+        checkin["content"],
+        {"checkin_id": checkin["checkin_id"], "kind": checkin["kind"]},
+    )
+    return {"checkin": checkin}
 
 
 @router.delete("/companion/memories/{memory_id}")

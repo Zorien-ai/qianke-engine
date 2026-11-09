@@ -9,7 +9,8 @@ from rag_demo.c_end import store
 from rag_demo.control.sqlite_repository import SQLiteControlRepository
 
 EXPECTED_TABLES = {
-    "c_after_sale", "c_app_message", "c_client_request", "c_companion", "c_companion_memory", "c_compensation",
+    "c_after_sale", "c_app_message", "c_client_request", "c_companion", "c_companion_memory",
+    "c_companion_rhythm", "c_companion_checkin", "c_compensation",
     "c_friend", "c_group", "c_group_member", "c_group_message", "c_mention", "c_message",
     "c_order", "c_order_item", "c_product", "c_quote", "c_reconciliation_alert",
     "c_reconciliation_run", "c_merchant_tenant", "c_merchant_member", "c_merchant_policy",

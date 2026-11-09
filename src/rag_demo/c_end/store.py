@@ -404,6 +404,36 @@ CREATE TABLE IF NOT EXISTS c_companion_memory (
 CREATE INDEX IF NOT EXISTS idx_c_companion_memory_owner
     ON c_companion_memory (owner_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS c_companion_rhythm (
+    owner_id          TEXT PRIMARY KEY,
+    enabled           INTEGER NOT NULL DEFAULT 0,
+    timezone          TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+    quiet_start       TEXT NOT NULL DEFAULT '22:00',
+    quiet_end         TEXT NOT NULL DEFAULT '09:00',
+    last_active_at    TEXT,
+    last_checkin_at   TEXT,
+    pause_until       TEXT,
+    unanswered_count  INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS c_companion_checkin (
+    checkin_id  TEXT PRIMARY KEY,
+    owner_id    TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    ref_id      TEXT NOT NULL DEFAULT '',
+    content     TEXT NOT NULL DEFAULT '',
+    due_at      TEXT NOT NULL,
+    delivered_at TEXT,
+    status      TEXT NOT NULL DEFAULT 'PENDING',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_checkin_owner
+    ON c_companion_checkin (owner_id, status, due_at);
+
 CREATE TABLE IF NOT EXISTS c_app_message (
     message_id  TEXT PRIMARY KEY,
     owner_id    TEXT NOT NULL,
@@ -1711,6 +1741,7 @@ def confirm_order(
                 (draft["quote_id"],),
             )
         _reward_companion_conn(conn, buyer_id)
+        _schedule_order_followup_conn(conn, buyer_id, order_id)
         conn.commit()
         order = conn.execute("SELECT * FROM c_order WHERE order_id = ?", (order_id,)).fetchone()
         return _order_payload(conn, order)
@@ -3093,6 +3124,327 @@ def clear_memories(owner_id: str) -> int:
         cur = conn.execute("DELETE FROM c_companion_memory WHERE owner_id = ?", (owner_id,))
         conn.commit()
         return int(cur.rowcount or 0)
+    finally:
+        conn.close()
+
+
+_RHYTHM_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+RHYTHM_TIMEZONE_DEFAULT = "Asia/Shanghai"
+CHECKIN_ORDER_FOLLOWUP = "order_followup"
+CHECKIN_COMEBACK = "comeback"
+
+
+def _rhythm_payload(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    data["enabled"] = bool(data.get("enabled"))
+    data["unanswered_count"] = int(data.get("unanswered_count") or 0)
+    return data
+
+
+def _ensure_rhythm_conn(conn: sqlite3.Connection, owner_id: str) -> Any:
+    row = conn.execute(
+        "SELECT * FROM c_companion_rhythm WHERE owner_id = ?", (owner_id,)
+    ).fetchone()
+    if row is not None:
+        return row
+    now = _now()
+    try:
+        conn.execute(
+            "INSERT INTO c_companion_rhythm(owner_id, enabled, timezone, quiet_start, quiet_end, "
+            "created_at, updated_at) VALUES (?, 0, ?, '22:00', '09:00', ?, ?)",
+            (owner_id, RHYTHM_TIMEZONE_DEFAULT, now, now),
+        )
+        conn.commit()
+    except Exception:  # noqa: BLE001 - 并发初始化时由唯一键兜底
+        conn.rollback()
+    return conn.execute(
+        "SELECT * FROM c_companion_rhythm WHERE owner_id = ?", (owner_id,)
+    ).fetchone()
+
+
+def get_rhythm(owner_id: str) -> dict[str, Any]:
+    init()
+    conn = _connect()
+    try:
+        row = _ensure_rhythm_conn(conn, owner_id)
+        return _rhythm_payload(row)
+    finally:
+        conn.close()
+
+
+def update_rhythm(
+    owner_id: str,
+    *,
+    enabled: bool | None = None,
+    quiet_start: str | None = None,
+    quiet_end: str | None = None,
+    pause_hours: int | None = None,
+) -> dict[str, Any]:
+    for value in (quiet_start, quiet_end):
+        if value is not None and not _RHYTHM_TIME_RE.fullmatch(value):
+            raise CStoreError("INVALID_QUIET_HOURS", "免打扰时间必须是 HH:MM")
+    fields: list[tuple[str, Any]] = []
+    if enabled is not None:
+        fields.append(("enabled", 1 if enabled else 0))
+        if enabled:
+            fields.append(("pause_until", None))
+    if quiet_start is not None:
+        fields.append(("quiet_start", quiet_start))
+    if quiet_end is not None:
+        fields.append(("quiet_end", quiet_end))
+    if pause_hours is not None:
+        hours = max(0, min(int(pause_hours), 24 * 30))
+        pause_until = (
+            (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+            if hours
+            else None
+        )
+        fields.append(("pause_until", pause_until))
+    init()
+    conn = _connect()
+    try:
+        _ensure_rhythm_conn(conn, owner_id)
+        if fields:
+            fields.append(("updated_at", _now()))
+            assignments = ", ".join(f"{key} = ?" for key, _ in fields)
+            conn.execute(
+                f"UPDATE c_companion_rhythm SET {assignments} WHERE owner_id = ?",
+                [value for _, value in fields] + [owner_id],
+            )
+            conn.commit()
+        row = conn.execute(
+            "SELECT * FROM c_companion_rhythm WHERE owner_id = ?", (owner_id,)
+        ).fetchone()
+        return _rhythm_payload(row)
+    finally:
+        conn.close()
+
+
+def _schedule_order_followup_conn(
+    conn: sqlite3.Connection,
+    owner_id: str,
+    order_id: str,
+    *,
+    due_hours: int = 48,
+) -> None:
+    exists = conn.execute(
+        "SELECT checkin_id FROM c_companion_checkin WHERE owner_id = ? AND kind = ? AND ref_id = ?",
+        (owner_id, CHECKIN_ORDER_FOLLOWUP, order_id),
+    ).fetchone()
+    if exists is not None:
+        return
+    now = datetime.now(timezone.utc)
+    conn.execute(
+        "INSERT INTO c_companion_checkin(checkin_id, owner_id, kind, ref_id, content, due_at, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)",
+        (
+            f"chk_{uuid.uuid4().hex[:20]}", owner_id, CHECKIN_ORDER_FOLLOWUP, order_id,
+            "上次那单到手了吗？用着如果有不合适的地方，直接跟我说。",
+            (now + timedelta(hours=max(1, due_hours))).isoformat(),
+            now.isoformat(), now.isoformat(),
+        ),
+    )
+
+
+def schedule_order_followup(
+    owner_id: str,
+    order_id: str,
+    *,
+    due_hours: int = 48,
+) -> dict[str, Any] | None:
+    """订单确认后安排一次购后回访；是否真正投递由 rhythm 开关决定。"""
+    init()
+    conn = _connect()
+    try:
+        exists = conn.execute(
+            "SELECT checkin_id FROM c_companion_checkin WHERE owner_id = ? AND kind = ? AND ref_id = ?",
+            (owner_id, CHECKIN_ORDER_FOLLOWUP, order_id),
+        ).fetchone()
+        if exists is not None:
+            return None
+        now = datetime.now(timezone.utc)
+        checkin = {
+            "checkin_id": f"chk_{uuid.uuid4().hex[:20]}",
+            "owner_id": owner_id,
+            "kind": CHECKIN_ORDER_FOLLOWUP,
+            "ref_id": order_id,
+            "content": "上次那单到手了吗？用着如果有不合适的地方，直接跟我说。",
+            "due_at": (now + timedelta(hours=max(1, due_hours))).isoformat(),
+            "status": "PENDING",
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        conn.execute(
+            "INSERT INTO c_companion_checkin(checkin_id, owner_id, kind, ref_id, content, due_at, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                checkin["checkin_id"], owner_id, checkin["kind"], order_id,
+                checkin["content"], checkin["due_at"], checkin["status"],
+                checkin["created_at"], checkin["updated_at"],
+            ),
+        )
+        conn.commit()
+        return checkin
+    finally:
+        conn.close()
+
+
+def _local_zone(rhythm: dict[str, Any]) -> Any:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(str(rhythm.get("timezone") or RHYTHM_TIMEZONE_DEFAULT))
+    except Exception:  # noqa: BLE001 - Windows 缺少 tzdata 时退化为 UTC+8
+        return timezone(timedelta(hours=8))
+
+
+def _local_hour(rhythm: dict[str, Any], now: datetime) -> int:
+    return now.astimezone(_local_zone(rhythm)).hour
+
+
+def _is_quiet(rhythm: dict[str, Any], now: datetime) -> bool:
+    start = str(rhythm.get("quiet_start") or "22:00")
+    end = str(rhythm.get("quiet_end") or "09:00")
+    hour = _local_hour(rhythm, now)
+    start_hour = int(start[:2])
+    end_hour = int(end[:2])
+    if start_hour == end_hour:
+        return True
+    if start_hour < end_hour:
+        return start_hour <= hour < end_hour
+    return hour >= start_hour or hour < end_hour
+
+
+def _delivered_count(conn: sqlite3.Connection, owner_id: str, since: datetime) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM c_companion_checkin "
+        "WHERE owner_id = ? AND status = 'DELIVERED' AND delivered_at >= ?",
+        (owner_id, since.isoformat()),
+    ).fetchone()
+    return int(row["n"] if row is not None else 0)
+
+
+def claim_due_checkin(owner_id: str, *, now: datetime | None = None) -> dict[str, Any] | None:
+    """领取一条到期回访；默认关闭、免打扰、频率限制均在服务端兜底。"""
+    init()
+    current = now or datetime.now(timezone.utc)
+    conn = _connect()
+    try:
+        rhythm_row = _ensure_rhythm_conn(conn, owner_id)
+        rhythm = _rhythm_payload(rhythm_row)
+        pause_until = rhythm.get("pause_until")
+        if pause_until:
+            try:
+                if datetime.fromisoformat(str(pause_until)) > current:
+                    return None
+            except ValueError:
+                pass
+        if not rhythm["enabled"]:
+            conn.execute(
+                "UPDATE c_companion_rhythm SET last_active_at = ?, updated_at = ? WHERE owner_id = ?",
+                (current.isoformat(), current.isoformat(), owner_id),
+            )
+            conn.commit()
+            return None
+        if _is_quiet(rhythm, current):
+            return None
+        if _delivered_count(conn, owner_id, current - timedelta(days=7)) >= 3:
+            return None
+        last_checkin = rhythm.get("last_checkin_at")
+        if last_checkin:
+            try:
+                last_dt = datetime.fromisoformat(str(last_checkin))
+                zone = _local_zone(rhythm)
+                if last_dt.astimezone(zone).date() == current.astimezone(zone).date():
+                    return None
+            except ValueError:
+                pass
+
+        due_rows = conn.execute(
+            "SELECT * FROM c_companion_checkin WHERE owner_id = ? AND status = 'PENDING' "
+            "AND due_at <= ? ORDER BY due_at ASC LIMIT 10",
+            (owner_id, current.isoformat()),
+        ).fetchall()
+        for row in due_rows:
+            due_at = datetime.fromisoformat(str(row["due_at"]))
+            if (current - due_at).days > 14:
+                conn.execute(
+                    "UPDATE c_companion_checkin SET status = 'SKIPPED', updated_at = ? WHERE checkin_id = ?",
+                    (current.isoformat(), row["checkin_id"]),
+                )
+                continue
+            if row["kind"] == CHECKIN_ORDER_FOLLOWUP:
+                order = conn.execute(
+                    "SELECT status FROM c_order WHERE order_id = ? AND buyer_id = ?",
+                    (row["ref_id"], owner_id),
+                ).fetchone()
+                if order is None or str(order["status"]).upper() not in {"CONFIRMED", "COMPLETED"}:
+                    conn.execute(
+                        "UPDATE c_companion_checkin SET status = 'SKIPPED', updated_at = ? WHERE checkin_id = ?",
+                        (current.isoformat(), row["checkin_id"]),
+                    )
+                    continue
+            content = str(row["content"] or "").strip()
+            if not content:
+                content = "最近还好吗？不用急着买东西，想聊两句也行。"
+            conn.execute(
+                "UPDATE c_companion_checkin SET status = 'DELIVERED', delivered_at = ?, updated_at = ? "
+                "WHERE checkin_id = ? AND status = 'PENDING'",
+                (current.isoformat(), current.isoformat(), row["checkin_id"]),
+            )
+            conn.execute(
+                "UPDATE c_companion_rhythm SET last_active_at = ?, last_checkin_at = ?, updated_at = ? WHERE owner_id = ?",
+                (current.isoformat(), current.isoformat(), current.isoformat(), owner_id),
+            )
+            conn.commit()
+            return {
+                "checkin_id": row["checkin_id"],
+                "kind": row["kind"],
+                "ref_id": row["ref_id"],
+                "content": c_persona.guard(content, tier="L2").text,
+            }
+
+        previous_active = rhythm.get("last_active_at")
+        if previous_active:
+            try:
+                idle_days = (current - datetime.fromisoformat(str(previous_active))).days
+            except ValueError:
+                idle_days = 0
+            if idle_days >= 7:
+                recent_comeback = conn.execute(
+                    "SELECT 1 FROM c_companion_checkin WHERE owner_id = ? AND kind = ? "
+                    "AND status = 'DELIVERED' AND delivered_at >= ? LIMIT 1",
+                    (owner_id, CHECKIN_COMEBACK, (current - timedelta(days=14)).isoformat()),
+                ).fetchone()
+                if recent_comeback is None:
+                    checkin_id = f"chk_{uuid.uuid4().hex[:20]}"
+                    content = "好些天没见你了。最近还好吗？不用急着买东西，想聊两句也行。"
+                    conn.execute(
+                        "INSERT INTO c_companion_checkin(checkin_id, owner_id, kind, ref_id, content, due_at, "
+                        "delivered_at, status, created_at, updated_at) VALUES (?, ?, ?, '', ?, ?, ?, 'DELIVERED', ?, ?)",
+                        (
+                            checkin_id, owner_id, CHECKIN_COMEBACK, content,
+                            current.isoformat(), current.isoformat(),
+                            current.isoformat(), current.isoformat(),
+                        ),
+                    )
+                    conn.execute(
+                        "UPDATE c_companion_rhythm SET last_active_at = ?, last_checkin_at = ?, updated_at = ? WHERE owner_id = ?",
+                        (current.isoformat(), current.isoformat(), current.isoformat(), owner_id),
+                    )
+                    conn.commit()
+                    return {
+                        "checkin_id": checkin_id,
+                        "kind": CHECKIN_COMEBACK,
+                        "ref_id": "",
+                        "content": c_persona.guard(content, tier="L2").text,
+                    }
+        conn.execute(
+            "UPDATE c_companion_rhythm SET last_active_at = ?, updated_at = ? WHERE owner_id = ?",
+            (current.isoformat(), current.isoformat(), owner_id),
+        )
+        conn.commit()
+        return None
     finally:
         conn.close()
 

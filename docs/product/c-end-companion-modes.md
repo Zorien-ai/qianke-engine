@@ -93,7 +93,7 @@ python -m pytest tests/
 web: npm run build
 ```
 
-## P1\n\n长期记忆已实现，见 [c-end-memory.md](c-end-memory.md)。\n\n## 已知限制
+## P1\n\n长期记忆已实现，见 [c-end-memory.md](c-end-memory.md)。\n\n关系节奏已实现，见 [c-end-rhythm.md](c-end-rhythm.md)。\n\n## 已知限制
 
 - P0 不做长期关系记忆，只依赖当前线程消息与伙伴配置。
 - 模式识别是规则优先，不是 LLM 分类；后续可用评测数据校准。
@@ -114,4 +114,5 @@ web: npm run build
 截图：
 
 ![C 端三模式入口](c-end-modes.png)
+
 

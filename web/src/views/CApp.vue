@@ -1,7 +1,7 @@
-<script setup>
+﻿<script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
-import { getJson, postJson, del, postForm } from "../api";
+import { getJson, postJson, patchJson, del, postForm } from "../api";
 
 const threads = ref([
   {
@@ -289,6 +289,14 @@ const companion = ref({
 const memories = ref([]);
 const memoriesError = ref("");
 const memoryBusy = ref("");
+const rhythm = ref({
+  enabled: false,
+  quiet_start: "22:00",
+  quiet_end: "09:00",
+  pause_until: null,
+});
+const rhythmError = ref("");
+const rhythmSaving = ref(false);
 const liveThreadId = ref("");
 const liveDraft = ref(null);
 const liveOrder = ref(null);
@@ -1676,6 +1684,57 @@ async function clearMemories() {
   }
 }
 
+async function loadRhythm() {
+  rhythmError.value = "";
+  try {
+    const data = await getJson("/api/c/companion/rhythm");
+    if (data) rhythm.value = { ...rhythm.value, ...data };
+  } catch (error) {
+    rhythmError.value = error?.detail || error?.message || "关系节奏加载失败";
+  }
+}
+
+async function setRhythmEnabled(enabled) {
+  if (rhythmSaving.value) return;
+  rhythmSaving.value = true;
+  rhythmError.value = "";
+  try {
+    const data = await patchJson("/api/c/companion/rhythm", { enabled: Boolean(enabled) });
+    if (data) rhythm.value = { ...rhythm.value, ...data };
+  } catch (error) {
+    rhythmError.value = error?.detail || error?.message || "保存关系节奏失败";
+  } finally {
+    rhythmSaving.value = false;
+  }
+}
+
+async function pauseRhythm() {
+  if (rhythmSaving.value) return;
+  rhythmSaving.value = true;
+  rhythmError.value = "";
+  try {
+    const data = await patchJson("/api/c/companion/rhythm", { pause_hours: 24 * 7 });
+    if (data) rhythm.value = { ...rhythm.value, ...data };
+  } catch (error) {
+    rhythmError.value = error?.detail || error?.message || "暂停失败";
+  } finally {
+    rhythmSaving.value = false;
+  }
+}
+
+async function pollCheckin() {
+  try {
+    const data = await postJson("/api/c/companion/checkin", {});
+    const checkin = data?.checkin;
+    if (checkin?.content) {
+      pushMessage({ role: "companion", text: cleanReply(checkin.content) });
+      scrollToBottom();
+    }
+  } catch {
+    // 主动回访失败不影响正常聊天。
+  }
+}
+
 async function switchThread(id) {
   const leavingGroup = isGroupThread(activeId.value);
   closeGroupSocket();
@@ -1744,7 +1803,8 @@ function selectMobileThread(id) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories()]);
+  await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm()]);
+  await pollCheckin();
   await refreshUnread();
   startUnreadPolling();
   document.addEventListener("visibilitychange", onVisibilityChange);
@@ -2230,6 +2290,32 @@ onBeforeUnmount(() => {
                 >删</button>
               </li>
             </ul>
+          </section>
+
+          <section v-if="activeId === 'companion'" class="c-context-section">
+            <header>
+              <span>关系节奏</span>
+              <span class="c-context-link">{{ rhythm.enabled ? "已开启" : "默认关闭" }}</span>
+            </header>
+            <label class="c-rhythm-row">
+              <input
+                type="checkbox"
+                :checked="rhythm.enabled"
+                :disabled="rhythmSaving"
+                @change="setRhythmEnabled($event.target.checked)"
+              />
+              <span>允许小鱼偶尔主动问候</span>
+            </label>
+            <p class="c-memory-empty">
+              仅站内消息，不免打扰 {{ rhythm.quiet_start }}–{{ rhythm.quiet_end }}；每天最多 1 条，每周最多 3 条。
+            </p>
+            <button
+              type="button"
+              class="c-context-link c-rhythm-pause"
+              :disabled="rhythmSaving || !rhythm.enabled"
+              @click="pauseRhythm"
+            >暂停一周</button>
+            <p v-if="rhythmError" class="c-inline-error" role="status">{{ rhythmError }}</p>
           </section>
 
           <section class="c-context-section">
@@ -3549,6 +3635,34 @@ onBeforeUnmount(() => {
   color: var(--c-text);
 }
 
+.c-rhythm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-2);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.c-rhythm-row input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--c-text);
+}
+
+.c-rhythm-pause {
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.c-rhythm-pause:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .c-danger-link {
   align-self: flex-start;
   padding: 0;
@@ -4788,3 +4902,4 @@ onBeforeUnmount(() => {
 }
 
 </style>
+

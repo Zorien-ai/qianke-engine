@@ -188,6 +188,36 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_memory (
 CREATE INDEX IF NOT EXISTS idx_c_companion_memory_owner
     ON __SCHEMA__.c_companion_memory ("owner_id", "created_at" DESC);
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_rhythm (
+  "owner_id" TEXT PRIMARY KEY,
+  "enabled" INTEGER NOT NULL DEFAULT 0,
+  "timezone" TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+  "quiet_start" TEXT NOT NULL DEFAULT '22:00',
+  "quiet_end" TEXT NOT NULL DEFAULT '09:00',
+  "last_active_at" TEXT,
+  "last_checkin_at" TEXT,
+  "pause_until" TEXT,
+  "unanswered_count" INTEGER NOT NULL DEFAULT 0,
+  "created_at" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_checkin (
+  "checkin_id" TEXT PRIMARY KEY,
+  "owner_id" TEXT NOT NULL,
+  "kind" TEXT NOT NULL,
+  "ref_id" TEXT NOT NULL DEFAULT '',
+  "content" TEXT NOT NULL DEFAULT '',
+  "due_at" TEXT NOT NULL,
+  "delivered_at" TEXT,
+  "status" TEXT NOT NULL DEFAULT 'PENDING',
+  "created_at" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_checkin_owner
+    ON __SCHEMA__.c_companion_checkin ("owner_id", "status", "due_at");
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_client_request (
   "client_id" TEXT NOT NULL,
   "owner_id" TEXT NOT NULL,
