@@ -88,6 +88,37 @@ const trackingByOrder = ref({});
 const trackingBusy = ref("");
 const trackingErrors = ref({});
 
+const CARRIER_CODES = {
+  SF: "shunfeng",
+  SHUNFENG: "shunfeng",
+  顺丰: "shunfeng",
+  顺丰速运: "shunfeng",
+  ZTO: "zhongtong",
+  ZHONGTONG: "zhongtong",
+  中通: "zhongtong",
+  YTO: "yuantong",
+  YUANTONG: "yuantong",
+  圆通: "yuantong",
+  STO: "shentong",
+  SHENTONG: "shentong",
+  申通: "shentong",
+  YUNDA: "yunda",
+  韵达: "yunda",
+  JD: "jd",
+  京东: "jd",
+  EMS: "ems",
+  邮政: "youzhengguonei",
+};
+
+function trackingJumpUrl(order) {
+  const trackingNo = String(order?.merchant_tracking_no || "").trim();
+  if (!trackingNo) return "";
+  const rawCarrier = String(order?.merchant_carrier || "").trim();
+  const carrierCode = CARRIER_CODES[rawCarrier.toUpperCase()] || CARRIER_CODES[rawCarrier] || rawCarrier;
+  if (!carrierCode) return "";
+  return `https://www.kuaidi100.com/chaxun?com=${encodeURIComponent(carrierCode)}&nu=${encodeURIComponent(trackingNo)}`;
+}
+
 async function loadTracking(order) {
   const orderId = order?.order_id;
   if (!orderId || trackingBusy.value) return;
@@ -704,6 +735,13 @@ onMounted(loadOrders);
             :disabled="trackingBusy === order.order_id"
             @click="loadTracking(order)"
           >{{ trackingBusy === order.order_id ? "查询中…" : "查询实时物流" }}</button>
+          <a
+            v-if="trackingJumpUrl(order)"
+            class="tracking-link"
+            :href="trackingJumpUrl(order)"
+            target="_blank"
+            rel="noopener noreferrer"
+          >去快递100查询</a>
           <p v-if="trackingErrors[order.order_id]" class="tracking-error" role="status">
             {{ trackingErrors[order.order_id] }}
           </p>
@@ -1433,6 +1471,18 @@ onMounted(loadOrders);
 .tracking-btn:disabled {
   cursor: wait;
   opacity: 0.6;
+}
+
+.tracking-link {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--accent, #2563eb);
+  font-size: 10px;
+  text-decoration: none;
+}
+
+.tracking-link:hover {
+  text-decoration: underline;
 }
 
 .tracking-error {
