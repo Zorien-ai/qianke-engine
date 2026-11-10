@@ -80,8 +80,8 @@ AUTH_DB_NAME = os.environ.get("RAG_AUTH_PG_DB", "rag_auth")
 PG_CONFIG = {**_PG_BASE, "dbname": AUTH_DB_NAME, "connect_timeout": 5}
 
 
-def _current_pg_config() -> dict:
-    """连接池创建时再读环境变量，避免 auth 在 config 加载 .env 前缓存旧密码。"""
+def current_pg_config() -> dict:
+    """动态读取 PG 配置；避免模块导入早于 .env 加载时缓存旧端口/密码。"""
     try:
         from rag_demo import config as _config  # noqa: F401 触发 .env 加载
     except Exception:  # noqa: BLE001
@@ -98,6 +98,11 @@ def _current_pg_config() -> dict:
         "dbname": os.environ.get("RAG_AUTH_PG_DB", "rag_auth"),
         "connect_timeout": 5,
     }
+
+
+def _current_pg_config() -> dict:
+    """兼容旧调用点；实际实现已改为动态读取。"""
+    return current_pg_config()
 
 # 旧账号库（迁移用；迁移完成后不再读写）
 SQLITE_MIGRATION_PATH = os.environ.get("RAG_AUTH_SQLITE") or os.path.join(

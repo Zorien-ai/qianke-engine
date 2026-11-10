@@ -191,7 +191,7 @@ SEED_PACKS = [
 
 
 def _connect():
-    return psycopg2.connect(**auth.PG_CONFIG)
+    return psycopg2.connect(**auth.current_pg_config())
 
 
 def ensure_schema(conn=None) -> None:

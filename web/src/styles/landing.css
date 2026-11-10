@@ -1051,7 +1051,7 @@
   padding: 26px 0 34px;
 }
 .l-footer-brand {
-  color: var(--l-muted);
+  color: #6b665d;
   font-size: 12.5px;
 }
 .l-footer-links {
@@ -1061,7 +1061,7 @@
   font-size: 12.5px;
 }
 .l-footer-links a {
-  color: var(--l-muted);
+  color: #6b665d;
   transition: color 0.18s ease;
 }
 .l-footer-links a:hover {
@@ -2320,6 +2320,11 @@ button.l-btn {
 }
 [data-theme="dark"] .l-footer {
   background: rgba(15, 15, 20, 0.62);
+}
+
+[data-theme="dark"] .l-footer-brand,
+[data-theme="dark"] .l-footer-links a {
+  color: #a5a3ad;
 }
 [data-theme="dark"] .l-highlight {
   border-color: rgba(245, 158, 11, 0.9);
