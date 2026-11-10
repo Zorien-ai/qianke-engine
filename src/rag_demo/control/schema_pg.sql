@@ -218,6 +218,19 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_checkin (
 CREATE INDEX IF NOT EXISTS idx_c_companion_checkin_owner
     ON __SCHEMA__.c_companion_checkin ("owner_id", "status", "due_at");
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_logistics_event (
+  "event_id" TEXT PRIMARY KEY,
+  "provider" TEXT NOT NULL DEFAULT '',
+  "order_id" TEXT NOT NULL,
+  "status" TEXT NOT NULL,
+  "occurred_at" TEXT,
+  "payload_hash" TEXT NOT NULL DEFAULT '',
+  "created_at" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_logistics_event_order
+    ON __SCHEMA__.c_logistics_event ("order_id", "created_at" DESC);
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_client_request (
   "client_id" TEXT NOT NULL,
   "owner_id" TEXT NOT NULL,

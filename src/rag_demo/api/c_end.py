@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
+import os
 import re
+import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -15,7 +19,7 @@ from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
 from rag_demo.c_end import companion_agent, group, idempotency, negotiation, persona as c_persona, social, store, store_agent
-from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
+from rag_demo.merchant import MerchantConflictError, MerchantError, MerchantNotFoundError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
 logger = logging.getLogger(__name__)
@@ -125,6 +129,16 @@ class RhythmPatchIn(BaseModel):
     quiet_start: str | None = Field(default=None, pattern="^([01]\\d|2[0-3]):[0-5]\\d$")
     quiet_end: str | None = Field(default=None, pattern="^([01]\\d|2[0-3]):[0-5]\\d$")
     pause_hours: int | None = Field(default=None, ge=0, le=720)
+
+
+class LogisticsSignedIn(BaseModel):
+    event_id: str = Field(pattern="^[A-Za-z0-9_.:-]{8,128}$")
+    provider: str = Field(default="", max_length=40)
+    order_id: str = Field(pattern="^[A-Za-z0-9_-]{1,128}$")
+    status: str = Field(default="SIGNED", max_length=20)
+    occurred_at: str | None = Field(default=None, max_length=40)
+    tracking_no: str | None = Field(default=None, max_length=64)
+    carrier: str | None = Field(default=None, max_length=64)
 
 
 class SendMessageIn(BaseModel):
@@ -282,6 +296,144 @@ def poll_companion_checkin() -> dict:
         {"checkin_id": checkin["checkin_id"], "kind": checkin["kind"]},
     )
     return {"checkin": checkin}
+
+
+_LOGISTICS_SIGNED_STATUSES = {"SIGNED", "DELIVERED", "COMPLETED"}
+
+
+def _valid_logistics_signature(raw: bytes, timestamp: str | None, signature: str | None) -> bool:
+    secret = (os.environ.get("QIANKE_LOGISTICS_WEBHOOK_SECRET") or "").strip()
+    if not secret or not timestamp or not signature:
+        return False
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        return False
+    if abs(int(time.time()) - ts) > 300:
+        return False
+    provided = signature[7:] if signature.startswith("sha256=") else signature
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        f"{ts}.".encode("utf-8") + raw,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, provided)
+
+
+@router.post("/webhooks/logistics/signed")
+async def logistics_signed_callback(request: Request) -> dict:
+    """物流签收回调：只接受 SIGNED/DELIVERED/COMPLETED，HMAC 验签 + 事件幂等。
+
+    这是供应商无关的接入点；真实物流需要把“已签收”事件转发到这里。
+    未配置 QIANKE_LOGISTICS_WEBHOOK_SECRET 时直接拒绝，不会静默放行。
+    """
+    secret = (os.environ.get("QIANKE_LOGISTICS_WEBHOOK_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "LOGISTICS_WEBHOOK_DISABLED", "message": "物流回调未配置密钥"},
+        )
+    raw = await request.body()
+    if not _valid_logistics_signature(
+        raw,
+        request.headers.get("X-Qianke-Timestamp"),
+        request.headers.get("X-Qianke-Signature"),
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "INVALID_SIGNATURE", "message": "物流回调签名无效或已过期"},
+        )
+    try:
+        payload = LogisticsSignedIn.model_validate_json(raw)
+    except Exception as exc:  # noqa: BLE001 - 回调体不合法统一 400
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_LOGISTICS_EVENT", "message": "物流回调体不合法"},
+        ) from exc
+    status = payload.status.strip().upper()
+    if status not in _LOGISTICS_SIGNED_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "NOT_SIGNED_EVENT", "message": "只接受已签收事件，运输中事件请忽略"},
+        )
+
+    existing = store.get_logistics_event(payload.event_id)
+    if existing is not None:
+        if existing["order_id"] != payload.order_id:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "EVENT_CONFLICT", "message": "event_id 已用于其他订单"},
+            )
+        return {"ok": True, "duplicate": True, "order_id": payload.order_id, "status": "COMPLETED"}
+
+    merchant_id = store._MERCHANT_ID
+    try:
+        merchant_order = get_merchant_repository().get_order(
+            payload.order_id,
+            merchant_id=merchant_id,
+        )
+    except MerchantError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "MERCHANT_UNAVAILABLE", "message": "商家订单读取失败"},
+        ) from exc
+    if merchant_order is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "ORDER_NOT_FOUND", "message": "订单不存在"},
+        )
+    if str(merchant_order.status).upper() in {"CANCELLED", "REFUNDED"}:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ORDER_NOT_SIGNABLE", "message": "已取消/已退款订单不能签收"},
+        )
+    if str(merchant_order.status).upper() != "COMPLETED":
+        try:
+            get_merchant_write_repository().update_order_status(
+                merchant_id,
+                payload.order_id,
+                "COMPLETED",
+            )
+        except MerchantConflictError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "ORDER_STATUS_CONFLICT", "message": "订单当前状态不能签收"},
+            ) from exc
+        except MerchantNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "ORDER_NOT_FOUND", "message": "订单不存在"},
+            ) from exc
+        except MerchantError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"code": "MERCHANT_UNAVAILABLE", "message": "商家订单更新失败"},
+            ) from exc
+
+    buyer_id = store.get_c_order_buyer(payload.order_id)
+    followup_scheduled = False
+    if buyer_id:
+        try:
+            followup_scheduled = store.schedule_order_followup(buyer_id, payload.order_id) is not None
+        except Exception:  # noqa: BLE001 - 回访失败不能影响物流签收主链路
+            logger.warning("物流签收后安排回访失败 order=%s", payload.order_id, exc_info=True)
+
+    store.record_logistics_event(
+        event_id=payload.event_id,
+        provider=payload.provider,
+        order_id=payload.order_id,
+        status=status,
+        occurred_at=payload.occurred_at,
+        payload_hash=hashlib.sha256(raw).hexdigest(),
+    )
+    logger.info("物流签收成功 order=%s event=%s", payload.order_id, payload.event_id)
+    return {
+        "ok": True,
+        "duplicate": False,
+        "order_id": payload.order_id,
+        "status": "COMPLETED",
+        "followup_scheduled": followup_scheduled,
+    }
 
 
 @router.delete("/companion/memories/{memory_id}")

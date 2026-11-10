@@ -434,6 +434,19 @@ CREATE TABLE IF NOT EXISTS c_companion_checkin (
 CREATE INDEX IF NOT EXISTS idx_c_companion_checkin_owner
     ON c_companion_checkin (owner_id, status, due_at);
 
+CREATE TABLE IF NOT EXISTS c_logistics_event (
+    event_id     TEXT PRIMARY KEY,
+    provider     TEXT NOT NULL DEFAULT '',
+    order_id     TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    occurred_at  TEXT,
+    payload_hash TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_logistics_event_order
+    ON c_logistics_event (order_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS c_app_message (
     message_id  TEXT PRIMARY KEY,
     owner_id    TEXT NOT NULL,
@@ -3257,11 +3270,11 @@ def schedule_order_followup(
     conn = _connect()
     try:
         exists = conn.execute(
-            "SELECT checkin_id FROM c_companion_checkin WHERE owner_id = ? AND kind = ? AND ref_id = ?",
+            "SELECT * FROM c_companion_checkin WHERE owner_id = ? AND kind = ? AND ref_id = ?",
             (owner_id, CHECKIN_ORDER_FOLLOWUP, order_id),
         ).fetchone()
         if exists is not None:
-            return None
+            return dict(exists)
         now = datetime.now(timezone.utc)
         checkin = {
             "checkin_id": f"chk_{uuid.uuid4().hex[:20]}",
@@ -3492,6 +3505,60 @@ def claim_due_checkin(owner_id: str, *, now: datetime | None = None) -> dict[str
         )
         conn.commit()
         return None
+    finally:
+        conn.close()
+
+
+def get_c_order_buyer(order_id: str) -> str | None:
+    """物流回调只知道订单号，这里反查 C 端买家。"""
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT buyer_id FROM c_order WHERE order_id = ? LIMIT 1", (order_id,)
+        ).fetchone()
+        return str(row["buyer_id"]) if row is not None else None
+    finally:
+        conn.close()
+
+
+def get_logistics_event(event_id: str) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_logistics_event WHERE event_id = ?", (str(event_id),)
+        ).fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def record_logistics_event(
+    *,
+    event_id: str,
+    provider: str,
+    order_id: str,
+    status: str,
+    occurred_at: str | None,
+    payload_hash: str,
+) -> bool:
+    """记录已签收事件；重复 event_id 返回 False，保证回调幂等。"""
+    init()
+    if get_logistics_event(event_id) is not None:
+        return False
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_logistics_event(event_id, provider, order_id, status, occurred_at, payload_hash, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (event_id, provider[:40], order_id, status, occurred_at, payload_hash, _now()),
+        )
+        conn.commit()
+        return True
+    except Exception:  # noqa: BLE001 - 并发重复事件由主键兜底
+        conn.rollback()
+        return False
     finally:
         conn.close()
 

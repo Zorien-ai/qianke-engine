@@ -87,10 +87,10 @@ POST  /api/c/companion/checkin
 
 ![关系节奏](c-end-rhythm.png)
 
-## 验证
+## 物流签收回调\n\n真实物流商只需转发“已签收”事件：\n\n```text\nPOST /api/c/webhooks/logistics/signed\nX-Qianke-Timestamp: <unix seconds>\nX-Qianke-Signature: sha256=<HMAC(secret, timestamp + "." + raw_body)>\n\n{\n  "event_id": "carrier-event-001",\n  "provider": "sf",\n  "order_id": "order_xxx",\n  "status": "SIGNED",\n  "tracking_no": "SF123456789",\n  "carrier": "SF"\n}\n```\n\n规则：\n\n```text\n密钥来自 QIANKE_LOGISTICS_WEBHOOK_SECRET；未配置 -> 503\n时间戳偏差 > 300s -> 401\n只接受 SIGNED / DELIVERED / COMPLETED；SHIPPED 等运输中事件 -> 400\nevent_id 唯一；重复回调返回 duplicate=true，不重复改状态/排回访\nCANCELLED / REFUNDED -> 409\n```\n\n签收成功后：\n\n```text\n商家订单置为 COMPLETED（写 completed_at）\nC 端已有回访占位则直接复用；没有则补建\n24h 后用户打开 App 才投递\n```\n\n## 验证
 
 ```text
-696 passed, 5 skipped
+700 passed, 5 skipped
 ```
 
 引擎测试覆盖：
@@ -126,6 +126,7 @@ C App -> 小鱼 -> 关系节奏
 - 只有站内回访，没有真正的 Push / IM 外呼。
 - 免打扰时间后端可配置，但当前 UI 只展示默认时间，未提供时间编辑控件。
 - `unanswered_count` 已预留，但“连续未回复自动停”尚未接入回复统计；当前靠频率上限和暂停兜底。
-- 签收状态依赖商家订单 `COMPLETED`；真实物流签收回调仍需接入。
+- 通用签收回调已提供，但还没有对接具体物流商的推送配置；需要部署时配置密钥并由物流商转发事件。\n- 回调只按事件时间/接收时间更新商家订单，不校验物流单号是否与发货记录一致；后续可加 tracking_no 绑定校验。
 - 不做营销触达，避免陪伴变成销售漏斗。
+
 
