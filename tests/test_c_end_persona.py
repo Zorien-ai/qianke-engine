@@ -175,8 +175,12 @@ def test_agent_prompt_modes_isolate_commerce_tools(c_store):
     advisor_prompt = agent.build_system_prompt("buyer_1", mode="advisor")
     assert "recommend_products" not in companion_prompt
     assert "prepare_order" not in companion_prompt
+    assert "query_tracking" not in companion_prompt
     assert "recommend_products" in advisor_prompt
     assert "prepare_order" not in advisor_prompt
+    assert "query_tracking" not in advisor_prompt
+    transaction_prompt = agent.build_system_prompt("buyer_1", mode="transaction")
+    assert "query_tracking" in transaction_prompt
     assert "陪伴" in companion_prompt
     assert "购物参谋" in advisor_prompt
 

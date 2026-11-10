@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, group, idempotency, negotiation, persona as c_persona, social, store, store_agent
+from rag_demo.c_end import companion_agent, express, group, idempotency, negotiation, persona as c_persona, social, store, store_agent
 from rag_demo.merchant import MerchantConflictError, MerchantError, MerchantNotFoundError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
@@ -1140,6 +1140,37 @@ def confirm_order(draft_id: str, req: ConfirmOrderIn) -> dict:
         )
     except store.CStoreError as exc:
         raise _http_error(exc) from exc
+
+
+@router.get("/orders/{order_id}/tracking")
+def get_order_tracking(order_id: str) -> dict:
+    """查询当前买家订单的物流轨迹；只查本人订单，未配置服务商时 503。"""
+    buyer_id, _ = _buyer()
+    order = store.get_order(order_id)
+    if order is None or order.get("buyer_id") != buyer_id:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "ORDER_NOT_FOUND", "message": "订单不存在"},
+        )
+    tracking_no = str(order.get("merchant_tracking_no") or "").strip()
+    if not tracking_no:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "TRACKING_NOT_AVAILABLE", "message": "这笔订单还没有物流单号"},
+        )
+    try:
+        tracking = express.query_tracking(order.get("merchant_carrier"), tracking_no)
+    except express.ExpressError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    return {
+        "ok": True,
+        "order_id": order_id,
+        "carrier": order.get("merchant_carrier") or tracking["carrier_code"],
+        **tracking,
+    }
 
 
 @router.get("/orders/{order_id}")

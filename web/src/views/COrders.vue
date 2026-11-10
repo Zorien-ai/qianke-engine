@@ -84,6 +84,28 @@ function hasLogistics(order) {
   return !!(order?.merchant_tracking_no || order?.merchant_carrier);
 }
 
+const trackingByOrder = ref({});
+const trackingBusy = ref("");
+const trackingErrors = ref({});
+
+async function loadTracking(order) {
+  const orderId = order?.order_id;
+  if (!orderId || trackingBusy.value) return;
+  trackingBusy.value = orderId;
+  trackingErrors.value = { ...trackingErrors.value, [orderId]: "" };
+  try {
+    const data = await getJson(`/api/c/orders/${encodeURIComponent(orderId)}/tracking`);
+    trackingByOrder.value = { ...trackingByOrder.value, [orderId]: data };
+  } catch (err) {
+    trackingErrors.value = {
+      ...trackingErrors.value,
+      [orderId]: err?.detail || err?.message || "物流查询失败",
+    };
+  } finally {
+    trackingBusy.value = "";
+  }
+}
+
 function shortMinute(value) {
   const text = String(value || "").replace("T", " ");
   const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
@@ -666,7 +688,7 @@ onMounted(loadOrders);
           </ol>
         </section>
 
-        <!-- 物流信息：承运商 + 运单号 -->
+        <!-- 物流信息：承运商 + 运单号 + 实时轨迹 -->
         <div v-if="hasLogistics(order)" class="order-logistics">
           <div class="logistics-row">
             <span>承运商</span>
@@ -675,6 +697,28 @@ onMounted(loadOrders);
           <div class="logistics-row">
             <span>运单号</span>
             <code>{{ order.merchant_tracking_no || "—" }}</code>
+          </div>
+          <button
+            class="tracking-btn"
+            type="button"
+            :disabled="trackingBusy === order.order_id"
+            @click="loadTracking(order)"
+          >{{ trackingBusy === order.order_id ? "查询中…" : "查询实时物流" }}</button>
+          <p v-if="trackingErrors[order.order_id]" class="tracking-error" role="status">
+            {{ trackingErrors[order.order_id] }}
+          </p>
+          <div v-if="trackingByOrder[order.order_id]" class="tracking-panel">
+            <p class="tracking-state">
+              {{ trackingByOrder[order.order_id].state_text || "物流状态未知" }}
+              <span v-if="trackingByOrder[order.order_id].from_cache">· 缓存</span>
+            </p>
+            <ul v-if="trackingByOrder[order.order_id].events?.length" class="tracking-events">
+              <li v-for="(event, index) in trackingByOrder[order.order_id].events" :key="index">
+                <time>{{ shortMinute(event.time) }}</time>
+                <span>{{ event.text }}</span>
+              </li>
+            </ul>
+            <p v-else class="field-hint">快递公司暂未返回轨迹节点。</p>
           </div>
         </div>
 
@@ -1372,6 +1416,76 @@ onMounted(loadOrders);
   font-family: var(--mono);
   font-size: 10px;
   word-break: break-all;
+}
+
+.tracking-btn {
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.tracking-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.tracking-error {
+  width: 100%;
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.tracking-panel {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.tracking-state {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tracking-state span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.tracking-events {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tracking-events li {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.tracking-events time {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
 }
 
 /* ---------- 已取消 / 退款 ---------- */

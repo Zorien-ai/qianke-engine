@@ -13,17 +13,20 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
 from rag_demo.c_end import persona as c_persona
-from rag_demo.c_end import store, store_agent
+from rag_demo.c_end import express, store, store_agent
 from rag_demo.merchant import MerchantError, get_merchant_repository
 
 C_TOOL_RULES = """你可以：
 1. recommend_products(need, budget)：按需求/预算推荐真实商家商品；
 2. query_my_orders(order_id, status)：查询当前买家的真实商家订单/物流状态；
-3. prepare_order(items)：根据商品和数量准备订单草稿。
+3. query_tracking(order_id)：查询当前买家订单的实时快递轨迹；
+4. prepare_order(items)：根据商品和数量准备订单草稿。
 
 规则：
 - 商品价格、库存、订单金额只能来自工具结果，禁止编造。
-- 用户问物流、订单到哪、发货状态时，调用 query_my_orders，不要说自己没有工具。
+- 用户问物流、订单到哪、发货状态时，调用 query_my_orders；需要轨迹时再调用 query_tracking。
+- 用户问快递轨迹时，不要说自己没有工具；先拿订单号，再查轨迹。
+- 物流服务商未配置或查询失败时，如实说明暂时查不到，禁止编造物流节点。
 - 用户表达购买意向后，调用 prepare_order 生成待确认订单。
 - 用户明确说"下单 / 买一件 / 直接出草稿"时，直接调用 prepare_order；数量按用户说的，
   系统里没有的字段（尺码、颜色、材质）不要追问，也不要替用户补。
@@ -128,6 +131,10 @@ class OrderQuerySchema(BaseModel):
     status: str | None = Field(default=None, max_length=20)
 
 
+class TrackingQuerySchema(BaseModel):
+    order_id: str = Field(..., min_length=1, max_length=80)
+
+
 class CAgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     buyer_id: str
@@ -203,6 +210,32 @@ def _tools(buyer_id: str, mode: str = MODE_TRANSACTION):
         except MerchantError as exc:
             return {"ok": False, "error": {"code": "MERCHANT_UNAVAILABLE", "message": str(exc)}}
 
+    @tool(args_schema=TrackingQuerySchema)
+    def query_tracking(order_id: str) -> dict[str, Any]:
+        """查询当前买家订单的实时快递轨迹；只查本人订单，不伪造物流节点。"""
+        order = store.get_order(order_id)
+        if order is None or order.get("buyer_id") != buyer_id:
+            return {"ok": False, "error": {"code": "ORDER_NOT_FOUND", "message": "没有找到这笔订单"}}
+        tracking_no = str(order.get("merchant_tracking_no") or "").strip()
+        if not tracking_no:
+            return {
+                "ok": False,
+                "error": {"code": "TRACKING_NOT_AVAILABLE", "message": "这笔订单还没有物流单号"},
+            }
+        try:
+            return {
+                "ok": True,
+                "order_id": order_id,
+                **express.query_tracking(order.get("merchant_carrier"), tracking_no),
+            }
+        except express.ExpressError as exc:
+            return {"ok": False, "error": {"code": exc.code, "message": exc.message}}
+        except Exception:  # noqa: BLE001 - 物流通道异常不阻塞 Agent
+            return {
+                "ok": False,
+                "error": {"code": "EXPRESS_UNAVAILABLE", "message": "物流查询暂不可用"},
+            }
+
     @tool(args_schema=PrepareOrderSchema)
     def prepare_order(items: list[ItemSchema]) -> dict[str, Any]:
         """准备待确认订单；只生成草稿，不扣库存、不创建正式订单。"""
@@ -217,7 +250,7 @@ def _tools(buyer_id: str, mode: str = MODE_TRANSACTION):
         return []
     if mode == MODE_ADVISOR:
         return [recommend_products]
-    return [recommend_products, query_my_orders, prepare_order]
+    return [recommend_products, query_my_orders, query_tracking, prepare_order]
 
 
 def _make_llm():
