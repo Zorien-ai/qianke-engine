@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import { getJson, postJson, patchJson, del, postForm } from "../api";
@@ -92,6 +92,7 @@ const pendingMode = ref("");
 const mentionOpen = ref(false);
 const mentionQuery = ref("");
 const mentionIndex = ref(0);
+const isDemoAccount = ref(false);
 
 /* ---------- 未读 / @ 提及（全部以接口数据为准） ---------- */
 const THREAD_IDS = ["companion", "store_demo", "friend_demo"];
@@ -575,9 +576,9 @@ const threadDotClass = computed(() => {
 });
 const pendingCount = computed(() => {
   if (liveDraft.value || storeQuote.value) return 1;
-  // 已拒绝：不生成报价卡，计数归零；初始静态演示卡仍算 1
+  // 已拒绝：不生成报价卡，计数归零；演示账号保留静态演示卡。
   if (liveOrder.value || negotiationRejected.value) return 0;
-  return 1;
+  return isDemoAccount.value ? 1 : 0;
 });
 
 function cleanReply(text) {
@@ -1044,7 +1045,7 @@ async function loadGroups() {
     groupsError.value = "";
     const preferred =
       groups.value.find((item) => item.name === "周末徒步群") || groups.value[0];
-    if (preferred && activeId.value === "companion") {
+    if (preferred && activeId.value === "companion" && isDemoAccount.value) {
       await switchThread(preferred.group_id);
     }
   } catch (error) {
@@ -1722,6 +1723,22 @@ async function pauseRhythm() {
   }
 }
 
+async function loadAccountContext() {
+  try {
+    const data = await getJson("/whoami");
+    isDemoAccount.value = Boolean(data?.account?.is_demo);
+  } catch {
+    // 读取失败按真实账号处理，避免把演示数据当成用户历史。
+    isDemoAccount.value = false;
+  }
+}
+
+function stripDemoSeedForRealAccount() {
+  if (isDemoAccount.value) return;
+  threads.value = threads.value.filter((thread) => thread.id === "companion");
+  messagesByThread.value = { companion: [] };
+}
+
 async function pollCheckin() {
   try {
     const data = await postJson("/api/c/companion/checkin", {});
@@ -1803,6 +1820,8 @@ function selectMobileThread(id) {
 }
 
 onMounted(async () => {
+  await loadAccountContext();
+  stripDemoSeedForRealAccount();
   await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm()]);
   await pollCheckin();
   await refreshUnread();
@@ -2245,21 +2264,27 @@ onBeforeUnmount(() => {
 
           <section class="c-overview">
             <p class="c-eyebrow">本月支出</p>
-            <div class="c-overview-value">
-              <strong>¥1,286</strong>
-              <span class="c-trend">+12% vs 上月</span>
+            <template v-if="isDemoAccount">
+              <div class="c-overview-value">
+                <strong>¥1,286</strong>
+                <span class="c-trend">+12% vs 上月</span>
+              </div>
+              <svg class="c-spark" viewBox="0 0 232 84" role="img" aria-label="最近七天消费趋势">
+                <g class="c-spark-grid" aria-hidden="true">
+                  <line x1="0" y1="20" x2="232" y2="20" />
+                  <line x1="0" y1="42" x2="232" y2="42" />
+                  <line x1="0" y1="64" x2="232" y2="64" />
+                </g>
+                <path class="c-spark-area" d="M0 67 L0 60 L33 52 L66 56 L99 38 L132 44 L165 27 L198 33 L232 18 L232 84 L0 84 Z" />
+                <polyline class="c-spark-line" points="0,60 33,52 66,56 99,38 132,44 165,27 198,33 232,18" />
+                <circle class="c-spark-point" cx="232" cy="18" r="2.5" />
+              </svg>
+              <div class="c-spark-axis"><span>周一</span><span>周日</span></div>
+            </template>
+            <div v-else class="c-overview-value">
+              <strong>—</strong>
+              <span class="c-trend">暂无消费数据</span>
             </div>
-            <svg class="c-spark" viewBox="0 0 232 84" role="img" aria-label="最近七天消费趋势">
-              <g class="c-spark-grid" aria-hidden="true">
-                <line x1="0" y1="20" x2="232" y2="20" />
-                <line x1="0" y1="42" x2="232" y2="42" />
-                <line x1="0" y1="64" x2="232" y2="64" />
-              </g>
-              <path class="c-spark-area" d="M0 67 L0 60 L33 52 L66 56 L99 38 L132 44 L165 27 L198 33 L232 18 L232 84 L0 84 Z" />
-              <polyline class="c-spark-line" points="0,60 33,52 66,56 99,38 132,44 165,27 198,33 232,18" />
-              <circle class="c-spark-point" cx="232" cy="18" r="2.5" />
-            </svg>
-            <div class="c-spark-axis"><span>周一</span><span>周日</span></div>
           </section>
 
           <section v-if="activeId === 'companion'" class="c-context-section">
@@ -2356,7 +2381,7 @@ onBeforeUnmount(() => {
                 查看报价 <span>→</span>
               </RouterLink>
             </div>
-            <div v-else-if="!negotiationRejected" class="c-quote-card">
+            <div v-else-if="isDemoAccount && !negotiationRejected" class="c-quote-card">
               <div class="c-quote-card-top">
                 <span class="c-quote-card-label">来自店宠的报价</span>
                 <span class="c-dot waiting" />
