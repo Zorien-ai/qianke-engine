@@ -144,6 +144,39 @@ def test_inventory_alerts_scan_and_ack(c_store, monkeypatch):
     assert any(alert["alert_id"] == alert_id and alert["status"] == "PENDING" for alert in reopened["alerts"])
 
 
+def test_dispatch_inventory_alerts_marks_sent(c_store, monkeypatch):
+    _admin(monkeypatch)
+    b_workbench.workbench_inventory_scan()
+    captured = {}
+
+    def fake_deliver(alerts):
+        captured["alerts"] = alerts
+        return {"sent": True, "msgid": "msg-1", "channel": "wecom_app"}
+
+    monkeypatch.setattr(b_workbench.alert_notifier, "deliver_inventory_alerts_wecom", fake_deliver)
+    result = b_workbench.workbench_inventory_dispatch()
+    assert result["sent"] is True
+    assert result["dispatched"] >= 1
+    assert result["remaining"] == 0
+    assert captured["alerts"]
+    sent = c_store.list_inventory_alerts(b_workbench.DEFAULT_MERCHANT_ID, status="SENT")
+    assert sent and sent[0]["status"] == "SENT"
+
+
+def test_dispatch_inventory_alerts_without_recipient_keeps_queue(c_store, monkeypatch):
+    _admin(monkeypatch)
+    b_workbench.workbench_inventory_scan()
+    monkeypatch.setattr(
+        b_workbench.alert_notifier,
+        "deliver_inventory_alerts_wecom",
+        lambda alerts: {"sent": False, "reason": "NO_RECIPIENT"},
+    )
+    result = b_workbench.workbench_inventory_dispatch()
+    assert result["sent"] is False
+    assert result["dispatched"] == 0
+    assert result["remaining"] >= 1
+
+
 def test_staff_cannot_scan_inventory_alerts(c_store, monkeypatch):
     store.bind_merchant_member(43, b_workbench.DEFAULT_MERCHANT_ID, role="staff")
     monkeypatch.setattr(

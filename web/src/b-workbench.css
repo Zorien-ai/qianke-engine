@@ -462,6 +462,10 @@ code,
   font-size: 10px;
 }
 
+.b-alert-queue-head .b-btn {
+  flex: none;
+}
+
 .b-alert-row {
   display: flex;
   align-items: center;

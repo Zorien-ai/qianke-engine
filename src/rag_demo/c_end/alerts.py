@@ -1,4 +1,4 @@
-"""对账告警外部通道（通用 JSON Webhook）。
+﻿"""对账告警外部通道（通用 JSON Webhook）。
 
 安全边界：
 - URL/Token 只从环境变量读取，不接受请求参数，避免 SSRF/密钥从接口注入；
@@ -157,3 +157,56 @@ def deliver_reconciliation_alerts(
         return {"sent": True, "status": status, "alert_count": len(alerts), "format": fmt}
     logger.warning("对账告警推送失败 run=%s format=%s error=%s", run_id, fmt, error)
     return {"sent": False, "reason": "DELIVERY_FAILED", "error": error, "format": fmt}
+
+# ---------------------------------------------------------------------------
+# 库存告警：企业微信应用消息
+# ---------------------------------------------------------------------------
+
+INVENTORY_TOUSER_ENV = "QIANKE_INVENTORY_ALERT_WECOM_TOUSER"
+INVENTORY_AGENT_ID_ENV = "QIANKE_INVENTORY_ALERT_WECOM_AGENT_ID"
+
+
+def inventory_text(alerts: list[dict[str, Any]], *, limit: int = 20) -> str:
+    lines = ["千客库存告警"]
+    if alerts:
+        lines.append(f"商家：{alerts[0].get('merchant_id') or '—'}")
+    lines.append(f"低库存事件：{len(alerts)} 条")
+    for item in alerts[:limit]:
+        title = item.get("product_id") or "商品"
+        spec = str(item.get("sku_spec") or "").strip()
+        spec_text = f" / {spec}" if spec else ""
+        lines.append(
+            f"- {title}{spec_text}：可售 {item.get('available_qty') or 0}，"
+            f"安全库存 {item.get('safety_stock') or 0}，建议补货 {item.get('reorder_qty') or 0} 件"
+        )
+    if len(alerts) > limit:
+        lines.append(f"……其余 {len(alerts) - limit} 条见 B 工作台待发送队列")
+    lines.append("请到 B 工作台确认处理；不是自动采购指令。")
+    return "\n".join(lines)[:1200]
+
+
+def deliver_inventory_alerts_wecom(alerts: list[dict[str, Any]]) -> dict[str, Any]:
+    """通过企业微信应用消息推送库存告警；接收人必须显式配置。"""
+    if not alerts:
+        return {"sent": False, "reason": "NO_ALERTS"}
+    recipient = (os.environ.get(INVENTORY_TOUSER_ENV) or "").strip()
+    if not recipient:
+        return {"sent": False, "reason": "NO_RECIPIENT"}
+    try:
+        from rag_demo.superagent import wecom_send
+
+        if not wecom_send.configured():
+            return {"sent": False, "reason": "NOT_CONFIGURED"}
+        result = wecom_send.send_text(
+            recipient,
+            inventory_text(alerts),
+            agent_id=(os.environ.get(INVENTORY_AGENT_ID_ENV) or "").strip() or None,
+        )
+    except Exception as exc:  # noqa: BLE001 - 外部通道失败不阻塞本地队列
+        logger.warning("库存告警企业微信推送失败: %s", exc)
+        return {"sent": False, "reason": "DELIVERY_FAILED", "error": str(exc)[:300]}
+    if result.get("sent"):
+        logger.info("库存告警企业微信推送成功 alerts=%s", len(alerts))
+        return {**result, "channel": "wecom_app", "alert_count": len(alerts)}
+    logger.warning("库存告警企业微信推送未成功: %s", result.get("reason"))
+    return {**result, "channel": "wecom_app"}

@@ -4081,3 +4081,22 @@ def ack_inventory_alert(merchant_id: str, alert_id: str, account_id: int) -> dic
     finally:
         conn.close()
 
+def mark_inventory_alerts_sent(merchant_id: str, alert_ids: list[str]) -> int:
+    """推送成功后标记 SENT；acknowledged_at 记录发送时间（系统操作，by=0）。"""
+    ids = [str(item).strip() for item in alert_ids if str(item).strip()]
+    if not ids:
+        return 0
+    init()
+    now = _now()
+    placeholders = ",".join("?" for _ in ids)
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            f"UPDATE c_inventory_alert SET status = 'SENT', acknowledged_at = ?, acknowledged_by = 0 "
+            f"WHERE merchant_id = ? AND status = 'PENDING' AND alert_id IN ({placeholders})",
+            (now, str(merchant_id or "").strip(), *ids),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0)
+    finally:
+        conn.close()

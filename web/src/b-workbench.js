@@ -111,6 +111,7 @@ const state = {
   inventoryAlerts: [],
   inventoryAlertsLoaded: false,
   inventoryScanning: false,
+  inventoryDispatching: false,
   policy: null,
   policyLoaded: false,
   policySaving: false,
@@ -461,6 +462,35 @@ async function ackInventoryAlert(alertId) {
     showToast(errorMessage(error), "error");
   } finally {
     state.busy = "";
+    render();
+  }
+}
+
+async function dispatchInventoryAlerts() {
+  if (state.inventoryDispatching) return;
+  state.inventoryDispatching = true;
+  render();
+  try {
+    const data = await api("/api/b/workbench/inventory/alerts/dispatch", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (data?.sent) {
+      showToast(`已推送 ${Number(data.dispatched || 0)} 条库存告警到企业微信。`);
+    } else if (data?.reason === "NO_RECIPIENT") {
+      showToast("未配置企业微信接收人：请设置 QIANKE_INVENTORY_ALERT_WECOM_TOUSER。", "error");
+    } else if (data?.reason === "NOT_CONFIGURED") {
+      showToast("企业微信应用消息未配置 Secret/AgentId。", "error");
+    } else {
+      showToast(`告警未发送：${data?.reason || "UNKNOWN"}`, "error");
+    }
+    await loadInventoryAlerts();
+    await loadProducts();
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    showToast(errorMessage(error), "error");
+  } finally {
+    state.inventoryDispatching = false;
     render();
   }
 }
@@ -1831,7 +1861,8 @@ function productsView() {
     ? `<div class="b-alert-queue">
         <div class="b-alert-queue-head">
           <strong>待发送库存告警 · ${queued.length} 条</strong>
-          <span>未配置企业微信/邮件渠道，先进入站内待发送队列。</span>
+          <span>企业微信应用消息 · 接收人由服务端配置</span>
+          ${can("operate_inventory") ? `<button type="button" class="b-btn b-btn-primary" data-dispatch-inventory ${state.inventoryDispatching ? "disabled" : ""}>${state.inventoryDispatching ? "推送中…" : "推送告警"}</button>` : ""}
         </div>
         ${queued.map((item) => `<div class="b-alert-row">
           <div>
@@ -2305,6 +2336,10 @@ function bindEvents() {
     }
     if (target.closest("[data-scan-inventory]")) {
       await scanInventoryAlerts();
+      return;
+    }
+    if (target.closest("[data-dispatch-inventory]")) {
+      await dispatchInventoryAlerts();
       return;
     }
     const ackInventoryButton = target.closest("[data-ack-inventory]");

@@ -1,4 +1,4 @@
-﻿"""B 端商家工作台 API（商家租户作用域）。
+"""B 端商家工作台 API（商家租户作用域）。
 
 与 /api/c/admin/* 的区别：
 - 不要求系统管理员，而是要求当前账号已绑定商家；
@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
+from rag_demo.c_end import alerts as alert_notifier
 from rag_demo.c_end import store
 from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
 
@@ -190,6 +191,29 @@ def workbench_inventory_alert_ack(alert_id: str) -> dict[str, Any]:
     if alert is None:
         raise HTTPException(status_code=404, detail="告警不存在、已被处理或不属于当前商家")
     return {"merchant_id": member["merchant_id"], "alert": alert}
+
+
+@router.post("/inventory/alerts/dispatch")
+def workbench_inventory_dispatch() -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "operate_inventory")
+    merchant_id = member["merchant_id"]
+    alerts = store.list_inventory_alerts(merchant_id, status="PENDING", limit=100)
+    if not alerts:
+        return {"merchant_id": merchant_id, "sent": False, "reason": "NO_ALERTS", "dispatched": 0}
+    result = alert_notifier.deliver_inventory_alerts_wecom(alerts)
+    dispatched = 0
+    if result.get("sent"):
+        dispatched = store.mark_inventory_alerts_sent(
+            merchant_id, [str(item["alert_id"]) for item in alerts]
+        )
+    remaining = len(store.list_inventory_alerts(merchant_id, status="PENDING", limit=100))
+    return {
+        "merchant_id": merchant_id,
+        **result,
+        "dispatched": dispatched,
+        "remaining": remaining,
+    }
 
 
 def _products_snapshot(merchant_id: str, *, limit: int = 100) -> dict[str, Any]:

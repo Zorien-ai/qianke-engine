@@ -131,6 +131,77 @@ QIANKE_INVENTORY_ALERT_SMTP_SSL=1
 - 邮件发送需要额外实现 SMTP sender；当前代码还没有这部分。
 - 企业邮箱通常要求发件人地址与登录账号一致，否则会被拒。
 
+## 2.5 企业微信应用消息（当前选用）
+
+适合已有企业微信应用、希望按人/部门发送的场景。与群机器人不同，这里用的是
+应用自身的 `corpsecret` 和 `agentid`，不是群 Webhook。
+
+### 前提
+
+```text
+QIANKE_WECOM_CORP_ID
+QIANKE_WECOM_CORP_SECRET
+QIANKE_WECOM_AGENT_ID
+```
+
+当前服务器已配置这三项。
+
+### 接收人
+
+新增：
+
+```dotenv
+QIANKE_INVENTORY_ALERT_WECOM_TOUSER=zhangsan
+# 多个：zhangsan|lisi
+# 全员：@all（必须显式写，系统不会默认群发）
+# 可选 AgentId 覆盖：QIANKE_INVENTORY_ALERT_WECOM_AGENT_ID=1000002
+```
+
+接收人从企业微信通讯录成员详情里的 **UserID** 获取，不是手机号/姓名。
+
+### 配置步骤
+
+1. 编辑 `.env`，填 `QIANKE_INVENTORY_ALERT_WECOM_TOUSER`。
+2. 重启 API。
+3. B 工作台 → 商品 → 扫描低库存 → 推送告警。
+4. 企业微信应用应收到文本消息。
+
+### 发送接口
+
+```text
+POST /api/b/workbench/inventory/alerts/dispatch
+```
+
+返回示例：
+
+```json
+{"sent": true, "dispatched": 1, "remaining": 0, "channel": "wecom_app"}
+```
+
+未配置接收人：
+
+```json
+{"sent": false, "reason": "NO_RECIPIENT", "dispatched": 0}
+```
+
+失败不会把队列标成已发送，仍保留 PENDING。
+
+### 常见错误
+
+```text
+NO_RECIPIENT       未配置 QIANKE_INVENTORY_ALERT_WECOM_TOUSER
+NOT_CONFIGURED     CorpSecret/AgentId 缺失
+WECOM_ERROR 60020  服务器 IP 不在应用可信 IP 列表
+WECOM_ERROR 81013  touser 不可用，且没有配置部门兜底
+```
+
+### 安全
+
+- 接收人显式配置，代码不默认 `@all`。
+- 发送失败保留队列，不伪造成功。
+- 消息内容不包含客户隐私，只包含商品/SKU/库存/建议补货数量。
+- 应用 Secret/AgentId 继续只放 `.env`。
+
 ## 3. 配置完成后的系统流程
 
 ```text
