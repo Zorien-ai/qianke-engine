@@ -34,6 +34,15 @@ def test_system_admin_is_bound_to_default_merchant(c_store, monkeypatch):
     assert data["counts"]["orders"] > 0
 
 
+def test_products_include_available_stock(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_products()
+    products = data["products"]
+    assert products
+    assert all("stock" in product and "available_qty" in product for product in products)
+    assert any(int(product["stock"]) > 0 for product in products)
+
+
 def test_unbound_non_admin_is_rejected(c_store, monkeypatch):
     monkeypatch.setattr(
         b_workbench.auth,

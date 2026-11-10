@@ -138,17 +138,34 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
     items = []
     for product in products:
         skus = repo.list_product_skus(product.product_id, merchant_id=merchant_id)
+        sku_items = []
+        available_total = 0
+        for sku in skus:
+            inventory = None
+            try:
+                inventory = repo.get_inventory(sku.sku, merchant_id=merchant_id)
+            except MerchantError:
+                inventory = None
+            item = {
+                "sku": sku.sku,
+                "spec": sku.spec,
+                "price": str(sku.price),
+                "status": sku.status,
+            }
+            if inventory is not None:
+                item.update({
+                    "available_qty": inventory.available_qty,
+                    "reserved_qty": inventory.reserved_qty,
+                    "in_stock": inventory.in_stock,
+                    "warehouse_count": len(inventory.warehouses),
+                })
+                available_total += inventory.available_qty
+            sku_items.append(item)
         items.append({
             **product.to_dict(),
-            "skus": [
-                {
-                    "sku": sku.sku,
-                    "spec": sku.spec,
-                    "price": str(sku.price),
-                    "status": sku.status,
-                }
-                for sku in skus
-            ],
+            "stock": available_total,
+            "available_qty": available_total,
+            "skus": sku_items,
         })
     return {"merchant_id": merchant_id, "products": items}
 
