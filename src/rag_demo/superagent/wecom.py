@@ -67,7 +67,9 @@ class WeComCrypto:
             msg_len = struct.unpack("!I", plain[16:20])[0]
             msg = plain[20:20 + msg_len]
             receive_id = plain[20 + msg_len:].decode("utf-8", errors="replace")
-            if self.receive_id and receive_id != self.receive_id:
+            # 企业微信「智能机器人」的回调 receive_id 可能为空，明文是机器人 ID；
+            # 普通应用回调仍要求 receive_id 与 corpId 一致。空值不绕过签名/AES 校验。
+            if self.receive_id and receive_id and receive_id != self.receive_id:
                 raise WeComCryptoError("receive_id 不匹配")
             return msg.decode("utf-8")
         except WeComCryptoError:

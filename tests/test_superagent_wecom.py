@@ -40,6 +40,15 @@ def test_wrong_corp_id_rejected():
         wrong.decrypt(encrypted)
 
 
+def test_robot_callback_with_empty_receive_id_is_accepted():
+    # 企业微信「智能机器人」URL 校验的回调包 receive_id 为空，明文是机器人 ID。
+    robot = wecom.WeComCrypto(TOKEN, AES_KEY, "")
+    encrypted, signature = robot.encrypt("1509685812692204012", timestamp="30", nonce="40")
+    server = _crypto()
+    assert server.verify_signature(signature, "30", "40", encrypted) is True
+    assert server.decrypt(encrypted) == "1509685812692204012"
+
+
 def test_parse_text_message_to_event():
     xml = (
         "<xml><ToUserName><![CDATA[ww_test_corp]]></ToUserName>"
