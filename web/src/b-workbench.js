@@ -1651,6 +1651,18 @@ function productCard(product) {
   const skuPrice = Array.isArray(product.skus) && product.skus.length ? product.skus[0].price : "";
   const price = product.price ?? product.unit_price ?? skuPrice;
   const stock = product.stock ?? product.available_stock ?? product.inventory?.available;
+  const skus = Array.isArray(product.skus) ? product.skus : [];
+  const lowStock = Boolean(product.low_stock);
+  const skuRows = skus.map((sku) => {
+    const available = sku.available_qty;
+    const reserved = sku.reserved_qty;
+    const isLow = Boolean(sku.low_stock);
+    return `<div class="b-sku-row${isLow ? " is-low" : ""}">
+      <span class="b-sku-name">${escapeHtml(text(sku.spec || sku.sku))}</span>
+      <span class="b-sku-qty">可售 ${available === null || available === undefined ? "—" : escapeHtml(available)} · 锁定 ${reserved === null || reserved === undefined ? "—" : escapeHtml(reserved)}</span>
+      ${isLow ? `<span class="b-sku-low">低库存</span>` : ""}
+    </div>`;
+  }).join("");
   const category = [product.category, product.brand].filter(Boolean).join(" · ");
   return `<article class="b-card b-product-card">
     <div class="b-card-head">
@@ -1658,14 +1670,16 @@ function productCard(product) {
         <strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong>
         <code class="b-mono">${escapeHtml(text(product.product_id))}</code>
       </div>
-      ${status ? `<span class="b-badge ${status === "ACTIVE" ? "is-success" : "is-muted"}">${escapeHtml(status === "ACTIVE" ? "在售" : status)}</span>` : ""}
+      <span class="b-badge ${status === "ACTIVE" ? "is-success" : "is-muted"}">${escapeHtml(status === "ACTIVE" ? "在售" : status || "—")}</span>
     </div>
     <dl class="b-meta">
       <div><dt>价格</dt><dd class="b-amount">${price === "" || price === null || price === undefined ? "—" : money(price)}</dd></div>
-      <div><dt>库存</dt><dd>${stock === null || stock === undefined ? "—" : escapeHtml(stock)}</dd></div>
+      <div><dt>库存</dt><dd class="${lowStock ? "b-stock-low" : ""}">${stock === null || stock === undefined ? "—" : escapeHtml(stock)}${lowStock ? ` <span class="b-badge is-warn">低库存</span>` : ""}</dd></div>
+      <div><dt>安全库存</dt><dd>${product.safety_stock === null || product.safety_stock === undefined ? "—" : escapeHtml(product.safety_stock)}</dd></div>
       <div><dt>分类</dt><dd>${escapeHtml(text(category))}</dd></div>
       <div><dt>更新时间</dt><dd>${escapeHtml(timeText(product.updated_at || product.created_at))}</dd></div>
     </dl>
+    ${skuRows ? `<details class="b-sku-details"><summary>SKU 明细 · ${skus.length}</summary><div class="b-sku-list">${skuRows}</div></details>` : ""}
   </article>`;
 }
 

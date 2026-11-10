@@ -140,6 +140,9 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
         skus = repo.list_product_skus(product.product_id, merchant_id=merchant_id)
         sku_items = []
         available_total = 0
+        reserved_total = 0
+        safety_total = 0
+        low_stock_skus = 0
         for sku in skus:
             inventory = None
             try:
@@ -153,18 +156,29 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
                 "status": sku.status,
             }
             if inventory is not None:
+                low = inventory.safety_stock > 0 and inventory.available_qty <= inventory.safety_stock
                 item.update({
                     "available_qty": inventory.available_qty,
                     "reserved_qty": inventory.reserved_qty,
+                    "safety_stock": inventory.safety_stock,
                     "in_stock": inventory.in_stock,
                     "warehouse_count": len(inventory.warehouses),
+                    "low_stock": low,
                 })
                 available_total += inventory.available_qty
+                reserved_total += inventory.reserved_qty
+                safety_total += inventory.safety_stock
+                if low:
+                    low_stock_skus += 1
             sku_items.append(item)
         items.append({
             **product.to_dict(),
             "stock": available_total,
             "available_qty": available_total,
+            "reserved_qty": reserved_total,
+            "safety_stock": safety_total,
+            "low_stock": safety_total > 0 and available_total <= safety_total,
+            "low_stock_skus": low_stock_skus,
             "skus": sku_items,
         })
     return {"merchant_id": merchant_id, "products": items}

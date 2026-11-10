@@ -40,7 +40,9 @@ def test_products_include_available_stock(c_store, monkeypatch):
     products = data["products"]
     assert products
     assert all("stock" in product and "available_qty" in product for product in products)
+    assert all("low_stock" in product and "safety_stock" in product for product in products)
     assert any(int(product["stock"]) > 0 for product in products)
+    assert any("available_qty" in sku for product in products for sku in product["skus"])
 
 
 def test_unbound_non_admin_is_rejected(c_store, monkeypatch):

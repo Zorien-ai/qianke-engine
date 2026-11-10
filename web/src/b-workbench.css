@@ -340,6 +340,72 @@ code,
   grid-template-columns: minmax(0, 1fr);
 }
 
+.b-stock-low {
+  color: var(--b-warn);
+  font-weight: 600;
+}
+
+.b-sku-details {
+  margin-top: 10px;
+  border-top: 1px dashed var(--b-line);
+  padding-top: 8px;
+  color: var(--b-text-2);
+  font-size: 11px;
+}
+
+.b-sku-details summary {
+  cursor: pointer;
+  color: var(--b-muted);
+  font-size: 10px;
+  user-select: none;
+}
+
+.b-sku-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.b-sku-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--b-line) 55%, transparent);
+}
+
+.b-sku-row:last-child {
+  border-bottom: 0;
+}
+
+.b-sku-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-sku-qty {
+  flex: none;
+  color: var(--b-muted);
+  font-family: var(--b-mono);
+  font-size: 9px;
+}
+
+.b-sku-low {
+  flex: none;
+  color: var(--b-warn);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.b-sku-row.is-low .b-sku-name {
+  color: var(--b-warn);
+}
+
 .b-card-head {
   display: flex;
   align-items: center;
