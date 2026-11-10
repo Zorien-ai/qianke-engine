@@ -1656,14 +1656,17 @@ function productCard(product) {
   const stock = product.stock ?? product.available_stock ?? product.inventory?.available;
   const skus = Array.isArray(product.skus) ? product.skus : [];
   const lowStock = Boolean(product.low_stock);
+  const reorderQty = Number(product.reorder_qty || 0);
   const skuRows = skus.map((sku) => {
     const available = sku.available_qty;
     const reserved = sku.reserved_qty;
     const isLow = Boolean(sku.low_stock);
+    const skuReorder = Number(sku.reorder_qty || 0);
     return `<div class="b-sku-row${isLow ? " is-low" : ""}">
       <span class="b-sku-name">${escapeHtml(text(sku.spec || sku.sku))}</span>
       <span class="b-sku-qty">可售 ${available === null || available === undefined ? "—" : escapeHtml(available)} · 锁定 ${reserved === null || reserved === undefined ? "—" : escapeHtml(reserved)}</span>
       ${isLow ? `<span class="b-sku-low">低库存</span>` : ""}
+      ${skuReorder > 0 ? `<span class="b-sku-reorder">建议补货 +${skuReorder}</span>` : ""}
     </div>`;
   }).join("");
   const category = [product.category, product.brand].filter(Boolean).join(" · ");
@@ -1677,7 +1680,7 @@ function productCard(product) {
     </div>
     <dl class="b-meta">
       <div><dt>价格</dt><dd class="b-amount">${price === "" || price === null || price === undefined ? "—" : money(price)}</dd></div>
-      <div><dt>库存</dt><dd class="${lowStock ? "b-stock-low" : ""}">${stock === null || stock === undefined ? "—" : escapeHtml(stock)}${lowStock ? ` <span class="b-badge is-warn">低库存</span>` : ""}</dd></div>
+      <div><dt>库存</dt><dd class="${lowStock ? "b-stock-low" : ""}">${stock === null || stock === undefined ? "—" : escapeHtml(stock)}${lowStock ? ` <span class="b-badge is-warn">低库存</span>` : ""}${reorderQty > 0 ? ` <span class="b-sku-reorder">建议补货 +${reorderQty}</span>` : ""}</dd></div>
       <div><dt>安全库存</dt><dd>${product.safety_stock === null || product.safety_stock === undefined ? "—" : escapeHtml(product.safety_stock)}</dd></div>
       <div><dt>分类</dt><dd>${escapeHtml(text(category))}</dd></div>
       <div><dt>更新时间</dt><dd>${escapeHtml(timeText(product.updated_at || product.created_at))}</dd></div>
@@ -1753,6 +1756,15 @@ function productsView() {
     : visibleProducts.length
       ? `<div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
       : emptyMarkup(state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
+  const alert = Number(summary.low_stock_products || 0) > 0
+    ? `<div class="b-stock-alert" role="status">
+        <div>
+          <strong>库存提醒</strong>
+          <span>${Number(summary.low_stock_products || 0)} 个商品 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存，建议补货 ${Number(summary.suggested_reorder_qty || 0)} 件。</span>
+        </div>
+        <button type="button" class="b-btn b-btn-ghost" data-low-stock-filter>只看低库存</button>
+      </div>`
+    : "";
   return `<section class="b-view" aria-label="商品">
     <div class="b-view-head">
       <div>
@@ -1769,6 +1781,7 @@ function productsView() {
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
     </div>
+    ${alert}
     ${body}
   </section>`;
 }
@@ -2208,6 +2221,11 @@ function bindEvents() {
     }
     if (target.closest("[data-dismiss-toast]")) {
       clearToast();
+      render();
+      return;
+    }
+    if (target.closest("[data-low-stock-filter]")) {
+      state.productFilter = "low";
       render();
       return;
     }

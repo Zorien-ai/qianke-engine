@@ -142,6 +142,7 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
         available_total = 0
         reserved_total = 0
         safety_total = 0
+        reorder_total = 0
         low_stock_skus = 0
         for sku in skus:
             inventory = None
@@ -157,6 +158,7 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
             }
             if inventory is not None:
                 low = inventory.safety_stock > 0 and inventory.available_qty <= inventory.safety_stock
+                reorder_qty = max(0, inventory.safety_stock - inventory.available_qty)
                 item.update({
                     "available_qty": inventory.available_qty,
                     "reserved_qty": inventory.reserved_qty,
@@ -164,10 +166,12 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
                     "in_stock": inventory.in_stock,
                     "warehouse_count": len(inventory.warehouses),
                     "low_stock": low,
+                    "reorder_qty": reorder_qty,
                 })
                 available_total += inventory.available_qty
                 reserved_total += inventory.reserved_qty
                 safety_total += inventory.safety_stock
+                reorder_total += reorder_qty
                 if low:
                     low_stock_skus += 1
             sku_items.append(item)
@@ -179,16 +183,19 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
             "safety_stock": safety_total,
             "low_stock": low_stock_skus > 0,
             "low_stock_skus": low_stock_skus,
+            "reorder_qty": reorder_total,
             "skus": sku_items,
         })
     low_stock_products = sum(1 for item in items if item["low_stock"])
     low_stock_skus = sum(int(item["low_stock_skus"]) for item in items)
+    suggested_reorder = sum(int(item["reorder_qty"]) for item in items)
     return {
         "merchant_id": merchant_id,
         "summary": {
             "total_products": len(items),
             "low_stock_products": low_stock_products,
             "low_stock_skus": low_stock_skus,
+            "suggested_reorder_qty": suggested_reorder,
         },
         "products": items,
     }

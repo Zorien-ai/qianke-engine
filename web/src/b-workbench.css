@@ -406,6 +406,36 @@ code,
   color: var(--b-warn);
 }
 
+.b-sku-reorder {
+  color: var(--b-accent);
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.b-stock-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--b-warn) 28%, var(--b-line));
+  border-radius: 10px;
+  background: var(--b-warn-soft);
+  color: var(--b-text-2);
+  font-size: 11px;
+}
+
+.b-stock-alert strong {
+  margin-right: 7px;
+  color: var(--b-warn);
+}
+
+.b-stock-alert span {
+  color: var(--b-muted);
+}
+
 .b-card-head {
   display: flex;
   align-items: center;
