@@ -39,6 +39,9 @@ def test_products_include_available_stock(c_store, monkeypatch):
     data = b_workbench.workbench_products()
     products = data["products"]
     assert products
+    assert data["summary"]["total_products"] == len(products)
+    assert data["summary"]["low_stock_products"] <= len(products)
+    assert data["summary"]["low_stock_skus"] >= 0
     assert all("stock" in product and "available_qty" in product for product in products)
     assert all("low_stock" in product and "safety_stock" in product for product in products)
     assert any(int(product["stock"]) > 0 for product in products)

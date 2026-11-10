@@ -177,11 +177,21 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
             "available_qty": available_total,
             "reserved_qty": reserved_total,
             "safety_stock": safety_total,
-            "low_stock": safety_total > 0 and available_total <= safety_total,
+            "low_stock": low_stock_skus > 0,
             "low_stock_skus": low_stock_skus,
             "skus": sku_items,
         })
-    return {"merchant_id": merchant_id, "products": items}
+    low_stock_products = sum(1 for item in items if item["low_stock"])
+    low_stock_skus = sum(int(item["low_stock_skus"]) for item in items)
+    return {
+        "merchant_id": merchant_id,
+        "summary": {
+            "total_products": len(items),
+            "low_stock_products": low_stock_products,
+            "low_stock_skus": low_stock_skus,
+        },
+        "products": items,
+    }
 
 
 @router.get("/orders")

@@ -106,6 +106,8 @@ const state = {
   afterSalesLoaded: false,
   products: [],
   productsLoaded: false,
+  productFilter: "all",
+  productSummary: null,
   policy: null,
   policyLoaded: false,
   policySaving: false,
@@ -390,6 +392,7 @@ async function loadProducts() {
   try {
     const data = await api("/api/b/workbench/products");
     state.products = collectionFrom(data, ["products"]);
+    state.productSummary = data?.summary || null;
     state.productsLoaded = true;
   } catch (error) {
     if (handleAuthFailure(error)) return;
@@ -1742,18 +1745,27 @@ function afterSalesView() {
 }
 
 function productsView() {
+  const summary = state.productSummary || {};
+  const lowProducts = state.products.filter((product) => product.low_stock);
+  const visibleProducts = state.productFilter === "low" ? lowProducts : state.products;
   const body = state.loading && !state.products.length
     ? skeletonMarkup(2)
-    : state.products.length
-      ? `<div class="b-product-grid">${state.products.map(productCard).join("")}</div>`
-      : emptyMarkup("暂无商品");
+    : visibleProducts.length
+      ? `<div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
+      : emptyMarkup(state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
   return `<section class="b-view" aria-label="商品">
     <div class="b-view-head">
       <div>
         <h1>商品</h1>
-        <p class="b-muted">只读 · 共 ${state.products.length} 个商品${state.loading ? " · 刷新中…" : ""}</p>
+        <p class="b-muted">只读 · 共 ${state.products.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
       </div>
       <div class="b-view-tools">
+        <label class="b-filter">库存
+          <select data-product-filter ${state.loading ? "disabled" : ""}>
+            <option value="all" ${state.productFilter === "all" ? "selected" : ""}>全部商品</option>
+            <option value="low" ${state.productFilter === "low" ? "selected" : ""}>仅低库存（${Number(summary.low_stock_products || lowProducts.length)}）</option>
+          </select>
+        </label>
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
     </div>
@@ -2143,6 +2155,11 @@ function bindEvents() {
   root.addEventListener("change", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+    if (target.matches("[data-product-filter]")) {
+      state.productFilter = target.value === "low" ? "low" : "all";
+      render();
+      return;
+    }
     if (target.matches("[data-audit-action-filter]")) {
       state.auditFilters.action_type = target.value;
       state.auditFilters.offset = 0;
