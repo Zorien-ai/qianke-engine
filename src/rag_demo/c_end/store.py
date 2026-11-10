@@ -1,4 +1,4 @@
-"""C 端模拟商品/订单存储（SQLite，第一版 mock）。
+﻿"""C 端模拟商品/订单存储（SQLite，第一版 mock）。
 
 设计约束：
 - 商品价格、库存、订单金额来自确定性存储，不由 LLM 生成。
@@ -446,6 +446,32 @@ CREATE TABLE IF NOT EXISTS c_logistics_event (
 
 CREATE INDEX IF NOT EXISTS idx_c_logistics_event_order
     ON c_logistics_event (order_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS c_inventory_alert (
+    alert_id       TEXT PRIMARY KEY,
+    merchant_id    TEXT NOT NULL,
+    product_id     TEXT NOT NULL,
+    sku            TEXT NOT NULL,
+    sku_spec       TEXT NOT NULL DEFAULT '',
+    available_qty  INTEGER NOT NULL,
+    safety_stock   INTEGER NOT NULL,
+    reorder_qty    INTEGER NOT NULL,
+    severity       TEXT NOT NULL DEFAULT 'WARNING',
+    status         TEXT NOT NULL DEFAULT 'PENDING',
+    channel        TEXT NOT NULL DEFAULT 'IN_APP',
+    message        TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    last_seen_at   TEXT NOT NULL,
+    acknowledged_at TEXT,
+    acknowledged_by INTEGER,
+    resolved_at    TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_c_inventory_alert_sku
+    ON c_inventory_alert (merchant_id, sku);
+
+CREATE INDEX IF NOT EXISTS idx_c_inventory_alert_queue
+    ON c_inventory_alert (merchant_id, status, last_seen_at DESC);
 
 CREATE TABLE IF NOT EXISTS c_app_message (
     message_id  TEXT PRIMARY KEY,
@@ -3895,3 +3921,163 @@ def get_order(order_id: str) -> dict[str, Any] | None:
         return _order_payload(conn, order) if order is not None else None
     finally:
         conn.close()
+# ---------------------------------------------------------------------------
+# B 端库存告警事件（站内待发送队列）
+# ---------------------------------------------------------------------------
+
+def _inventory_alert_id(merchant_id: str, sku: str) -> str:
+    raw = f"{merchant_id}|{sku}".encode("utf-8")
+    return "inv_" + hashlib.sha256(raw).hexdigest()[:24]
+
+
+def list_merchant_ids() -> list[str]:
+    """已绑定账号的商家 ID；供低库存扫描脚本遍历。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT merchant_id FROM c_merchant_member ORDER BY merchant_id ASC"
+        ).fetchall()
+        return [str(row["merchant_id"]) for row in rows]
+    finally:
+        conn.close()
+
+
+def sync_inventory_alerts(
+    merchant_id: str,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """把当前低库存 SKU 同步进告警队列；已处理保留，恢复后自动 RESOLVED。"""
+    merchant_id = str(merchant_id or "").strip()
+    if not merchant_id:
+        raise ValueError("merchant_id required")
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        existing_rows = conn.execute(
+            "SELECT * FROM c_inventory_alert WHERE merchant_id = ?", (merchant_id,)
+        ).fetchall()
+        existing = {str(row["sku"]): dict(row) for row in existing_rows}
+        current_skus: list[str] = []
+        created = 0
+        updated = 0
+        for item in items:
+            sku = str(item.get("sku") or "").strip()
+            if not sku:
+                continue
+            current_skus.append(sku)
+            title = str(item.get("product_title") or item.get("title") or item.get("product_id") or "商品")
+            spec = str(item.get("spec") or "")
+            available = int(item.get("available_qty") or 0)
+            safety = int(item.get("safety_stock") or 0)
+            reorder = int(item.get("reorder_qty") or 0)
+            message = f"{title}{(' / ' + spec) if spec else ''} 可售 {available}，低于安全库存 {safety}，建议补货 {reorder} 件。"
+            alert_id = _inventory_alert_id(merchant_id, sku)
+            exists = sku in existing
+            if exists:
+                updated += 1
+            else:
+                created += 1
+            conn.execute(
+                "INSERT INTO c_inventory_alert(alert_id, merchant_id, product_id, sku, sku_spec, "
+                "available_qty, safety_stock, reorder_qty, severity, status, channel, message, "
+                "created_at, last_seen_at, resolved_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'WARNING', 'PENDING', 'IN_APP', ?, ?, ?, NULL) "
+                "ON CONFLICT(alert_id) DO UPDATE SET "
+                "product_id = excluded.product_id, sku_spec = excluded.sku_spec, "
+                "available_qty = excluded.available_qty, safety_stock = excluded.safety_stock, "
+                "reorder_qty = excluded.reorder_qty, message = excluded.message, "
+                "last_seen_at = excluded.last_seen_at, resolved_at = NULL, "
+                "status = CASE WHEN c_inventory_alert.status = 'RESOLVED' THEN 'PENDING' ELSE c_inventory_alert.status END, "
+                "acknowledged_at = CASE WHEN c_inventory_alert.status = 'RESOLVED' THEN NULL ELSE c_inventory_alert.acknowledged_at END, "
+                "acknowledged_by = CASE WHEN c_inventory_alert.status = 'RESOLVED' THEN NULL ELSE c_inventory_alert.acknowledged_by END",
+                (
+                    alert_id, merchant_id, str(item.get("product_id") or ""), sku, spec,
+                    available, safety, reorder, message, now, now,
+                ),
+            )
+        resolved = 0
+        if current_skus:
+            placeholders = ",".join("?" for _ in current_skus)
+            cursor = conn.execute(
+                f"UPDATE c_inventory_alert SET status = 'RESOLVED', resolved_at = ? "
+                f"WHERE merchant_id = ? AND status != 'RESOLVED' AND sku NOT IN ({placeholders})",
+                (now, merchant_id, *current_skus),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE c_inventory_alert SET status = 'RESOLVED', resolved_at = ? "
+                "WHERE merchant_id = ? AND status != 'RESOLVED'",
+                (now, merchant_id),
+            )
+        resolved = int(cursor.rowcount or 0)
+        conn.commit()
+        pending = int(
+            conn.execute(
+                "SELECT COUNT(*) AS n FROM c_inventory_alert "
+                "WHERE merchant_id = ? AND status = 'PENDING'",
+                (merchant_id,),
+            ).fetchone()["n"]
+        )
+        return {
+            "merchant_id": merchant_id,
+            "created": created,
+            "updated": updated,
+            "resolved": resolved,
+            "pending": pending,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def list_inventory_alerts(
+    merchant_id: str,
+    *,
+    status: str | None = "PENDING",
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    init()
+    limit = max(1, min(int(limit or 100), 500))
+    where = "merchant_id = ?"
+    params: list[Any] = [str(merchant_id or "").strip()]
+    if status:
+        where += " AND status = ?"
+        params.append(str(status).upper())
+    params.append(limit)
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM c_inventory_alert WHERE {where} "
+            "ORDER BY CASE status WHEN 'PENDING' THEN 0 ELSE 1 END, last_seen_at DESC, sku ASC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def ack_inventory_alert(merchant_id: str, alert_id: str, account_id: int) -> dict[str, Any] | None:
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE c_inventory_alert SET status = 'ACKED', acknowledged_at = ?, acknowledged_by = ? "
+            "WHERE alert_id = ? AND merchant_id = ? AND status = 'PENDING'",
+            (now, int(account_id), str(alert_id), str(merchant_id)),
+        )
+        conn.commit()
+        if int(cursor.rowcount or 0) == 0:
+            return None
+        row = conn.execute(
+            "SELECT * FROM c_inventory_alert WHERE alert_id = ? AND merchant_id = ?",
+            (str(alert_id), str(merchant_id)),
+        ).fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+

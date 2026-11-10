@@ -108,6 +108,9 @@ const state = {
   productsLoaded: false,
   productFilter: "all",
   productSummary: null,
+  inventoryAlerts: [],
+  inventoryAlertsLoaded: false,
+  inventoryScanning: false,
   policy: null,
   policyLoaded: false,
   policySaving: false,
@@ -394,12 +397,70 @@ async function loadProducts() {
     state.products = collectionFrom(data, ["products"]);
     state.productSummary = data?.summary || null;
     state.productsLoaded = true;
+    await loadInventoryAlerts();
   } catch (error) {
     if (handleAuthFailure(error)) return;
     state.error = errorMessage(error);
     showToast(state.error, "error");
   } finally {
     state.loading = false;
+    render();
+  }
+}
+
+async function loadInventoryAlerts() {
+  try {
+    const data = await api("/api/b/workbench/inventory/alerts?status=PENDING&limit=100");
+    state.inventoryAlerts = collectionFrom(data, ["alerts"]);
+    state.inventoryAlertsLoaded = true;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.inventoryAlerts = [];
+    state.inventoryAlertsLoaded = false;
+  }
+}
+
+async function scanInventoryAlerts() {
+  if (state.inventoryScanning) return;
+  state.inventoryScanning = true;
+  render();
+  try {
+    const data = await api("/api/b/workbench/inventory/alerts/scan", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.inventoryAlerts = collectionFrom(data, ["alerts"]);
+    state.inventoryAlertsLoaded = true;
+    state.productSummary = state.productSummary || null;
+    const created = Number(data?.created || 0);
+    const resolved = Number(data?.resolved || 0);
+    showToast(`扫描完成：新增 ${created} 条，恢复 ${resolved} 条，待发送 ${Number(data?.pending || 0)} 条。`);
+    await loadProducts();
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    showToast(errorMessage(error), "error");
+  } finally {
+    state.inventoryScanning = false;
+    render();
+  }
+}
+
+async function ackInventoryAlert(alertId) {
+  if (!alertId || state.busy) return;
+  state.busy = "inventory-alert-ack";
+  render();
+  try {
+    await api(`/api/b/workbench/inventory/alerts/${encodeURIComponent(alertId)}/ack`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await loadInventoryAlerts();
+    showToast("库存告警已标记为已处理。");
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    showToast(errorMessage(error), "error");
+  } finally {
+    state.busy = "";
     render();
   }
 }
@@ -1765,6 +1826,22 @@ function productsView() {
         <button type="button" class="b-btn b-btn-ghost" data-low-stock-filter>只看低库存</button>
       </div>`
     : "";
+  const queued = state.inventoryAlerts || [];
+  const queue = queued.length
+    ? `<div class="b-alert-queue">
+        <div class="b-alert-queue-head">
+          <strong>待发送库存告警 · ${queued.length} 条</strong>
+          <span>未配置企业微信/邮件渠道，先进入站内待发送队列。</span>
+        </div>
+        ${queued.map((item) => `<div class="b-alert-row">
+          <div>
+            <strong>${escapeHtml(text(item.product_id))}${item.sku_spec ? ` · ${escapeHtml(text(item.sku_spec))}` : ""}</strong>
+            <span>${escapeHtml(text(item.message))}</span>
+          </div>
+          <button type="button" class="b-btn b-btn-ghost" data-ack-inventory="${escapeHtml(item.alert_id)}" ${can("operate_inventory") ? "" : "disabled"}>标记已处理</button>
+        </div>`).join("")}
+      </div>`
+    : "";
   return `<section class="b-view" aria-label="商品">
     <div class="b-view-head">
       <div>
@@ -1778,10 +1855,12 @@ function productsView() {
             <option value="low" ${state.productFilter === "low" ? "selected" : ""}>仅低库存（${Number(summary.low_stock_products || lowProducts.length)}）</option>
           </select>
         </label>
+        ${can("operate_inventory") ? `<button type="button" class="b-btn b-btn-ghost" data-scan-inventory ${state.inventoryScanning ? "disabled" : ""}>${state.inventoryScanning ? "扫描中…" : "扫描低库存"}</button>` : ""}
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
     </div>
     ${alert}
+    ${queue}
     ${body}
   </section>`;
 }
@@ -2222,6 +2301,15 @@ function bindEvents() {
     if (target.closest("[data-dismiss-toast]")) {
       clearToast();
       render();
+      return;
+    }
+    if (target.closest("[data-scan-inventory]")) {
+      await scanInventoryAlerts();
+      return;
+    }
+    const ackInventoryButton = target.closest("[data-ack-inventory]");
+    if (ackInventoryButton) {
+      await ackInventoryAlert(ackInventoryButton.dataset.ackInventory);
       return;
     }
     if (target.closest("[data-low-stock-filter]")) {

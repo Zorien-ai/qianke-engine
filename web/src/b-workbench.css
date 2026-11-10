@@ -436,6 +436,66 @@ code,
   color: var(--b-muted);
 }
 
+.b-alert-queue {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--b-line);
+  border-radius: 10px;
+  background: var(--b-surface);
+}
+
+.b-alert-queue-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.b-alert-queue-head strong {
+  font-size: 11px;
+  color: var(--b-text);
+}
+
+.b-alert-queue-head span {
+  color: var(--b-muted);
+  font-size: 10px;
+}
+
+.b-alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid color-mix(in srgb, var(--b-line) 60%, transparent);
+}
+
+.b-alert-row:first-of-type {
+  border-top: 0;
+}
+
+.b-alert-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.b-alert-row strong {
+  font-size: 11px;
+  color: var(--b-text-2);
+}
+
+.b-alert-row span {
+  font-size: 10px;
+  color: var(--b-muted);
+}
+
+.b-alert-row .b-btn {
+  flex: none;
+}
+
 .b-card-head {
   display: flex;
   align-items: center;

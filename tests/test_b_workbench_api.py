@@ -119,6 +119,43 @@ def test_admin_role_can_operate(c_store):
     assert "manage_members" in b_workbench.permissions_for("owner")
 
 
+def test_inventory_alerts_scan_and_ack(c_store, monkeypatch):
+    _admin(monkeypatch)
+    first = b_workbench.workbench_inventory_scan()
+    assert first["pending"] >= 1
+    assert first["alerts"]
+    alert_id = first["alerts"][0]["alert_id"]
+    assert first["dispatch"]["configured"] is False
+
+    # 重复扫描不产生重复事件。
+    second = b_workbench.workbench_inventory_scan()
+    assert second["created"] == 0
+    assert second["pending"] == first["pending"]
+
+    acked = b_workbench.workbench_inventory_alert_ack(alert_id)
+    assert acked["alert"]["status"] == "ACKED"
+    queues = b_workbench.workbench_inventory_alerts(status="PENDING")
+    assert all(alert["alert_id"] != alert_id for alert in queues["alerts"])
+
+    # 恢复后再次低库存：RESOLVED 的告警必须重新进入 PENDING。
+    store.sync_inventory_alerts(b_workbench.DEFAULT_MERCHANT_ID, [])
+    reopened = b_workbench.workbench_inventory_scan()
+    assert reopened["pending"] >= 1
+    assert any(alert["alert_id"] == alert_id and alert["status"] == "PENDING" for alert in reopened["alerts"])
+
+
+def test_staff_cannot_scan_inventory_alerts(c_store, monkeypatch):
+    store.bind_merchant_member(43, b_workbench.DEFAULT_MERCHANT_ID, role="staff")
+    monkeypatch.setattr(
+        b_workbench.auth,
+        "current_account",
+        lambda: {"id": 43, "username": "staff2", "status": "active", "is_system_admin": False},
+    )
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_inventory_scan()
+    assert exc.value.status_code == 403
+
+
 def test_after_sales_only_for_bound_merchant(c_store, monkeypatch):
     _admin(monkeypatch)
     # 没有工单时返回空列表即可；有工单时必须属于当前商家。

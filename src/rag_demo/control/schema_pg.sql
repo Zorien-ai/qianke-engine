@@ -231,6 +231,32 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_logistics_event (
 CREATE INDEX IF NOT EXISTS idx_c_logistics_event_order
     ON __SCHEMA__.c_logistics_event ("order_id", "created_at" DESC);
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_inventory_alert (
+  "alert_id" TEXT PRIMARY KEY,
+  "merchant_id" TEXT NOT NULL,
+  "product_id" TEXT NOT NULL,
+  "sku" TEXT NOT NULL,
+  "sku_spec" TEXT NOT NULL DEFAULT '',
+  "available_qty" INTEGER NOT NULL,
+  "safety_stock" INTEGER NOT NULL,
+  "reorder_qty" INTEGER NOT NULL,
+  "severity" TEXT NOT NULL DEFAULT 'WARNING',
+  "status" TEXT NOT NULL DEFAULT 'PENDING',
+  "channel" TEXT NOT NULL DEFAULT 'IN_APP',
+  "message" TEXT NOT NULL,
+  "created_at" TEXT NOT NULL,
+  "last_seen_at" TEXT NOT NULL,
+  "acknowledged_at" TEXT,
+  "acknowledged_by" INTEGER,
+  "resolved_at" TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_c_inventory_alert_sku
+    ON __SCHEMA__.c_inventory_alert ("merchant_id", "sku");
+
+CREATE INDEX IF NOT EXISTS idx_c_inventory_alert_queue
+    ON __SCHEMA__.c_inventory_alert ("merchant_id", "status", "last_seen_at" DESC);
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_client_request (
   "client_id" TEXT NOT NULL,
   "owner_id" TEXT NOT NULL,

@@ -1,4 +1,4 @@
-"""B 端商家工作台 API（商家租户作用域）。
+﻿"""B 端商家工作台 API（商家租户作用域）。
 
 与 /api/c/admin/* 的区别：
 - 不要求系统管理员，而是要求当前账号已绑定商家；
@@ -24,12 +24,12 @@ ROLE_PERMISSIONS = {
     "owner": {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
         "operate_orders", "resolve_after_sale", "receive_return",
-        "approve_superagent", "manage_members",
+        "approve_superagent", "manage_members", "operate_inventory",
     },
     "admin": {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
         "operate_orders", "resolve_after_sale", "receive_return",
-        "approve_superagent",
+        "approve_superagent", "operate_inventory",
     },
     "staff": {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
@@ -133,6 +133,66 @@ def workbench_me() -> dict[str, Any]:
 def workbench_products(limit: int = 100) -> dict[str, Any]:
     account = _account()
     merchant_id = _membership(account)["merchant_id"]
+    return _products_snapshot(merchant_id, limit=limit)
+
+
+@router.get("/inventory/alerts")
+def workbench_inventory_alerts(status: str | None = "PENDING", limit: int = 100) -> dict[str, Any]:
+    account = _account()
+    merchant_id = _membership(account)["merchant_id"]
+    alerts = store.list_inventory_alerts(merchant_id, status=status or None, limit=limit)
+    return {
+        "merchant_id": merchant_id,
+        "status": (status or "").upper() or None,
+        "alerts": alerts,
+    }
+
+
+@router.post("/inventory/alerts/scan")
+def workbench_inventory_scan() -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "operate_inventory")
+    merchant_id = member["merchant_id"]
+    snapshot = _products_snapshot(merchant_id)
+    low_items = []
+    for product in snapshot["products"]:
+        for sku in product["skus"]:
+            if not sku.get("low_stock"):
+                continue
+            low_items.append({
+                "product_id": product["product_id"],
+                "product_title": product.get("title") or product.get("name") or product["product_id"],
+                "sku": sku["sku"],
+                "spec": sku.get("spec") or "",
+                "available_qty": sku.get("available_qty") or 0,
+                "safety_stock": sku.get("safety_stock") or 0,
+                "reorder_qty": sku.get("reorder_qty") or 0,
+            })
+    result = store.sync_inventory_alerts(merchant_id, low_items)
+    alerts = store.list_inventory_alerts(merchant_id, status="PENDING", limit=100)
+    return {
+        "merchant_id": merchant_id,
+        **result,
+        "alerts": alerts,
+        "dispatch": {
+            "configured": False,
+            "channel": "IN_APP",
+            "note": "当前只写入站内待发送队列；企业微信/邮件渠道未配置。",
+        },
+    }
+
+
+@router.post("/inventory/alerts/{alert_id}/ack")
+def workbench_inventory_alert_ack(alert_id: str) -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "operate_inventory")
+    alert = store.ack_inventory_alert(member["merchant_id"], alert_id, int(account["id"]))
+    if alert is None:
+        raise HTTPException(status_code=404, detail="告警不存在、已被处理或不属于当前商家")
+    return {"merchant_id": member["merchant_id"], "alert": alert}
+
+
+def _products_snapshot(merchant_id: str, *, limit: int = 100) -> dict[str, Any]:
     repo = get_merchant_repository()
     products = repo.list_products(merchant_id, limit=limit)
     items = []
@@ -199,7 +259,6 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
         },
         "products": items,
     }
-
 
 @router.get("/orders")
 def workbench_orders(status: str | None = None, limit: int = 100) -> dict[str, Any]:
@@ -280,3 +339,4 @@ def register_b_workbench(app) -> None:
 
     app.include_router(router)
     app.include_router(tenants_router)
+
