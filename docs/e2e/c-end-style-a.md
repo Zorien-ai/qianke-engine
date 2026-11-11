@@ -62,6 +62,8 @@ C App 和 CShell 使用同一套暖白 Token，不再纯白。
 
 ## 截图
 
+![C 端市集暖白风 · 桌面](c-shop-warm-desktop.png)
+
 ![C 端市集暖白风](c-shop-warm-mobile.png)
 
 ![C App 暖白风](c-app-warm-mobile.png)

@@ -148,9 +148,9 @@ function isActive(tab) {
   padding: 0;
 }
 
-.c-shell-body .shop-grid,
-.c-shell-body .social-shell {
-  grid-template-columns: 1fr;
+.c-shell-frame .c-shell-body .shop-grid,
+.c-shell-frame .c-shell-body .social-shell {
+  grid-template-columns: 1fr !important;
 }
 
 .c-shell-body .social-shell {
