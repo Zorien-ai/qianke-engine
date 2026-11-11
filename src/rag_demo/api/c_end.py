@@ -169,6 +169,7 @@ class NegotiationIn(BaseModel):
     need: str = Field(..., min_length=1, max_length=80)
     budget: float = Field(..., gt=0, le=100000)
     quantity: int = Field(default=1, ge=1, le=20)
+    friend_id: str | None = Field(default=None, max_length=80)
 
 
 class AppMessageIn(BaseModel):
@@ -227,11 +228,14 @@ def negotiate(req: NegotiationIn) -> dict:
     """C 伙伴与商家店宠的受控谈判；只生成 PENDING 报价，不自动下单。"""
     buyer_id, _ = _buyer()
     try:
+        if req.friend_id and store.merchant_for_store_friend(req.friend_id) is None:
+            raise HTTPException(status_code=404, detail="店宠不存在或未绑定商家")
         return negotiation.run_negotiation(
             buyer_id,
             need=req.need,
             budget=req.budget,
             quantity=req.quantity,
+            friend_id=req.friend_id,
         )
     except negotiation.NegotiationError as exc:
         raise HTTPException(

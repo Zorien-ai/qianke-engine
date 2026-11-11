@@ -1872,8 +1872,8 @@ async function runNegotiation() {
   // 调用中禁止重复点击；typing 同时会禁用发送按钮/回车提交
   if (negotiating.value || typing.value) return;
   negotiateError.value = "";
-  // 谈判过程固定落在 companion 会话里；当前在别的会话时先切回
-  if (activeId.value !== "companion") await switchThread("companion");
+  const negotiationThread = activeThread.value.kind === "merchant" ? activeId.value : "companion";
+  if (activeId.value !== negotiationThread) await switchThread(negotiationThread);
   negotiating.value = true;
   typing.value = true;
   negotiationRejected.value = false;
@@ -1887,6 +1887,7 @@ async function runNegotiation() {
       need: NEGOTIATION_DEFAULT.need,
       budget: NEGOTIATION_DEFAULT.budget,
       quantity: NEGOTIATION_DEFAULT.quantity,
+      friend_id: negotiationThread !== "companion" ? negotiationThread : undefined,
     });
     const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
     for (const item of transcript) {

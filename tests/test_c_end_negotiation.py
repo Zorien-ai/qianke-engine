@@ -52,3 +52,21 @@ def test_negotiation_validates_input(c_store):
     assert exc.value.code == "NEGOTIATION_INVALID"
     with pytest.raises(negotiation.NegotiationError):
         negotiation.run_negotiation("buyer_1", need="跑鞋", budget=0)
+
+
+def test_tea_negotiation_uses_tea_merchant(c_store):
+    c_store.bind_store_friend("m_tea_001", "store_tea")
+    result = negotiation.run_negotiation(
+        "buyer_1",
+        need="龙井",
+        budget=400,
+        quantity=1,
+        friend_id="store_tea",
+    )
+    assert result["status"] == "ACCEPTED"
+    assert result["quote"]["merchant_id"] == "m_tea_001"
+    assert result["quote"]["merchant_name"] == "山雾茶业"
+    assert result["quote"]["product_refs"][0]["product_id"].startswith("P-TEA-")
+    assert any("山雾茶业店宠" == item["name"] for item in result["transcript"])
+    draft = c_store.prepare_order("buyer_1", [], quote_id=result["quote"]["quote_id"])
+    assert draft["merchant_id"] == "m_tea_001"

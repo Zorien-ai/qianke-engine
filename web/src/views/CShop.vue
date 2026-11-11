@@ -14,6 +14,7 @@ const quoteError = ref("");
 const quoteDraft = ref(null);
 const quoteOrder = ref(null);
 const quoteBusy = ref(false);
+const negotiationBusy = ref(false);
 const message = ref("我想买一双轻量跑鞋，预算 500 元以内");
 const running = ref(false);
 const agentError = ref("");
@@ -247,6 +248,38 @@ async function decide(approved) {
   }
 }
 
+async function runMerchantNegotiation() {
+  if (!isMerchantShop.value || negotiationBusy.value) return;
+  negotiationBusy.value = true;
+  agentError.value = "";
+  lastAction.value = "";
+  try {
+    const need =
+      quote.value?.product_refs?.[0]?.title ||
+      products.value[0]?.title ||
+      message.value.trim() ||
+      "商品";
+    const data = await postJson("/api/c/negotiations", {
+      need: need.slice(0, 80),
+      budget: 500,
+      quantity: 1,
+      friend_id: merchantFriendId.value,
+    });
+    const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
+    reply.value = transcript.map((item) => `${item.name}：${item.text}`).join("\n\n");
+    if (data?.quote?.quote_id) {
+      await loadQuoteById(data.quote.quote_id);
+      lastAction.value = "双宠谈判达成，报价已生成";
+    } else {
+      lastAction.value = "这轮没有谈成，可调整需求再试";
+    }
+  } catch (e) {
+    agentError.value = e?.detail || e?.message || "双宠谈判暂时不可用";
+  } finally {
+    negotiationBusy.value = false;
+  }
+}
+
 function useProduct(product) {
   message.value = `我想买 ${product.title}，预算 ${Math.ceil(product.price)} 元`;
 }
@@ -416,6 +449,16 @@ onMounted(() => {
             <span v-if="running" class="spinner" aria-hidden="true" />
             {{ running ? (isMerchantShop ? "店宠思考中…" : "导购思考中…") : isMerchantShop ? "发送给店宠" : "发送给导购" }}
           </button>
+        </div>
+
+        <div v-if="isMerchantShop" class="negotiation-row">
+          <button
+            class="ghost-btn"
+            type="button"
+            :disabled="negotiationBusy || running"
+            @click="runMerchantNegotiation"
+          >{{ negotiationBusy ? "双宠谈判中…" : "让小鱼去砍价" }}</button>
+          <span>平台满减规则内协商，成交仍需确认</span>
         </div>
 
         <p v-if="agentError" class="state-line state-error" role="alert">{{ agentError }}</p>
@@ -1328,5 +1371,18 @@ onMounted(() => {
   color: #b74b2d;
   background: #f8e6dd;
   font-size: 11px;
+}
+
+
+.negotiation-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+
+.negotiation-row span {
+  color: var(--muted);
+  font-size: 10px;
 }
 </style>

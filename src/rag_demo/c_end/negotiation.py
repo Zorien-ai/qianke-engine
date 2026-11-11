@@ -49,18 +49,18 @@ def _policy_refs(subtotal: float) -> list[dict[str, Any]]:
     ]
 
 
-def _merchant_candidates(need: str) -> list[dict[str, Any]]:
+def _merchant_candidates(need: str, merchant_id: str = STORE_MERCHANT_ID) -> list[dict[str, Any]]:
     """返回有库存的候选商品：关键词命中优先，其次同品类更便宜的替代。"""
     try:
         repo = get_merchant_repository()
-        keyword_products = repo.list_products(STORE_MERCHANT_ID, keyword=need, limit=20)
+        keyword_products = repo.list_products(merchant_id, keyword=need, limit=20)
         candidates: list[dict[str, Any]] = []
         for product in keyword_products:
-            skus = repo.list_product_skus(product.product_id, merchant_id=STORE_MERCHANT_ID)
+            skus = repo.list_product_skus(product.product_id, merchant_id=merchant_id)
             if not skus:
                 continue
             sku = skus[0]
-            inventory = repo.get_inventory(sku.sku, merchant_id=STORE_MERCHANT_ID)
+            inventory = repo.get_inventory(sku.sku, merchant_id=merchant_id)
             if inventory is None or inventory.available_qty <= 0:
                 continue
             candidates.append({
@@ -76,16 +76,16 @@ def _merchant_candidates(need: str) -> list[dict[str, Any]]:
             candidates.sort(key=lambda item: item["price"])
             categories = {str(item.get("category") or "") for item in candidates}
             seen = {item["product_id"] for item in candidates}
-            for product in repo.list_products(STORE_MERCHANT_ID, keyword="", limit=20):
+            for product in repo.list_products(merchant_id, keyword="", limit=20):
                 if product.product_id in seen:
                     continue
                 if str(product.category or "") not in categories:
                     continue
-                skus = repo.list_product_skus(product.product_id, merchant_id=STORE_MERCHANT_ID)
+                skus = repo.list_product_skus(product.product_id, merchant_id=merchant_id)
                 if not skus:
                     continue
                 sku = skus[0]
-                inventory = repo.get_inventory(sku.sku, merchant_id=STORE_MERCHANT_ID)
+                inventory = repo.get_inventory(sku.sku, merchant_id=merchant_id)
                 if inventory is None or inventory.available_qty <= 0:
                     continue
                 candidates.append({
@@ -139,8 +139,18 @@ def run_negotiation(
     need: str,
     budget: float,
     quantity: int = 1,
+    friend_id: str | None = None,
+    merchant_id: str | None = None,
 ) -> dict[str, Any]:
     """两个独立 Agent 的确定性多轮报价；达成时落 PENDING 报价。"""
+    resolved_friend = str(friend_id or "store_demo")
+    resolved_merchant = str(
+        merchant_id
+        or store.merchant_for_store_friend(resolved_friend)
+        or STORE_MERCHANT_ID
+    )
+    store_name = str((store.get_tenant(resolved_merchant) or {}).get("name") or "商家")
+    b_pet_name = f"{store_name}店宠"
     need = str(need or "").strip()
     if not need or len(need) > 80:
         raise NegotiationError("NEGOTIATION_INVALID", "谈判需求不能为空且不超过 80 字")
@@ -148,7 +158,7 @@ def run_negotiation(
         raise NegotiationError("NEGOTIATION_INVALID", "预算必须大于 0 且不超过 100000")
     quantity = max(1, min(int(quantity or 1), 20))
 
-    candidates = _merchant_candidates(need)
+    candidates = _merchant_candidates(need, resolved_merchant)
     if not candidates:
         return {
             "version": NEGOTIATION_VERSION,
@@ -156,7 +166,7 @@ def run_negotiation(
             "reason": "MERCHANT_NO_MATCH",
             "transcript": [
                 {"actor": "c_pet", "name": "小鱼", "text": f"我想在 ¥{budget:.2f} 内买{need}，有合适的吗？"},
-                {"actor": "b_pet", "name": "山野店宠", "text": "店里暂时没有匹配且有库存的商品。"},
+                {"actor": "b_pet", "name": b_pet_name, "text": "店里暂时没有匹配且有库存的商品。"},
                 {"actor": "c_pet", "name": "小鱼", "text": "那这次先不成交，等有合适商品再看。"},
             ],
             "quote": None,
@@ -182,7 +192,7 @@ def run_negotiation(
         policy_text = f"，平台满减 -¥{discount:.2f}" if discount else ""
         transcript.append({
             "actor": "b_pet",
-            "name": "山野店宠",
+            "name": b_pet_name,
             "text": (
                 f"{candidate['title']}，{qty} 件，单价 ¥{price:.2f}，"
                 f"小计 ¥{subtotal:.2f}{policy_text}，合计 ¥{total:.2f}。"
@@ -209,21 +219,24 @@ def run_negotiation(
             policy_refs = _policy_refs(subtotal)
             quote = store.create_quote(
                 buyer_id,
-                "store_demo",
+                resolved_friend,
                 {
                     "quote_id": quote_id,
+                    "merchant_id": resolved_merchant,
+                    "friend_id": resolved_friend,
                     "product_refs": [{
                         "product_id": candidate["product_id"],
                         "title": candidate["title"],
                         "price": price,
                         "quantity": qty,
+                        **({"sku": candidate["sku"]} if candidate.get("sku") else {}),
                     }],
                     "policy_refs": policy_refs,
                 },
             )
             transcript.append({
                 "actor": "b_pet",
-                "name": "山野店宠",
+                "name": b_pet_name,
                 "text": "报价已生成，成交仍需用户在商城逐单确认。",
             })
             return {
@@ -244,7 +257,7 @@ def run_negotiation(
 
     transcript.append({
         "actor": "b_pet",
-        "name": "山野店宠",
+        "name": b_pet_name,
         "text": "没有更低且在预算内的方案了；店宠不能擅自改价或发券。",
     })
     transcript.append({

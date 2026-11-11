@@ -188,9 +188,38 @@ GET /api/c/merchant/products?friend_id=store_tea
 _merchant_order_state(..., m_tea_001) 返回 CREATED
 ```
 
+## 双宠谈判按商家
+
+CShop 店宠面板新增：
+
+```text
+让小鱼去砍价
+→ POST /api/c/negotiations
+   need = 当前报价商品 / 当前店铺首个商品
+   friend_id = 当前店宠
+→ 服务端按 friend_id 解析 merchant_id
+→ 候选商品来自该商家
+→ 达成后生成带 merchant_id 的 PENDING 报价
+```
+
+实测：
+
+```text
+山雾茶业 CShop
+→ 让小鱼去砍价
+→ 明前龙井 1 件 ¥298
+→ quote_neg_0f8ad13fc1774139
+→ 准备/确认订单成功
+→ order_c6798f0761124995
+```
+
+截图：
+
+![茶商双宠谈判](c-tea-negotiation.png)
+
 ## 已知限制
 
 - 默认映射只有 `store_demo → m_gear_002`；其它商家需要管理员先绑定。
 - 店宠 SOP 仍然是平台共享的 `store_policy`，还没有按商家配置。
 - 发现页只展示已绑定映射，不展示未绑定商家。
-- C 端双宠谈判/议价仍默认山野户外商品库，还未按会话商家切换。
+- 谈判预算在当前 UI 固定为 ¥500，后续需要支持用户输入预算。
