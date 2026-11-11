@@ -120,6 +120,33 @@ GET /api/c/merchant/products?friend_id=store_tea
 
 无 `friend_id` 时保持原来的默认市集。
 
+## CShop 右侧顾问切到店宠 Agent
+
+带 `friend_id` 进入 CShop 时：
+
+```text
+右侧标题：问问店宠
+徽标：Store Pet
+商品按钮：问店宠
+发送：POST /api/c/friends/{friend_id}/messages
+内容自动补 @店宠
+返回 metadata.quote_id 后直接加载报价卡
+```
+
+实测：
+
+```text
+茶商页面询问 “这款明前龙井多少钱，有优惠吗？”
+→ 山雾茶业店宠回复价格/库存/活动口径
+→ 右侧出现 quote_876c7e8ba06d4fac
+→ 准备订单/确认订单成功
+→ order_5d7ce02aecf04b9a，应付 ¥298
+```
+
+截图：
+
+![茶商 CShop 店宠顾问](c-tea-shop-store-pet.png)
+
 ## 已知限制
 
 - 默认映射只有 `store_demo → m_gear_002`；其它商家需要管理员先绑定。

@@ -35,6 +35,7 @@ const merchantName = computed(() => {
   return merchantId.value;
 });
 const shopScopeLabel = computed(() => merchantName.value || "小鱼精选");
+const isMerchantShop = computed(() => Boolean(merchantFriendId.value));
 
 const featuredProduct = computed(() => products.value.find((p) => p.category === "运动") || products.value[0] || null);
 const hasDraft = computed(() => !!draft.value);
@@ -157,7 +158,7 @@ async function loadProducts() {
       category: product.category || "精选",
       stock: Number(product.stock ?? 0),
     }));
-    if (merchantFriendId.value && !message.value.includes("预算")) {
+    if (merchantFriendId.value && /轻量跑鞋/.test(message.value)) {
       message.value = `我想买${shopScopeLabel.value}的一件商品，预算 500 元以内`;
     }
   } catch (e) {
@@ -167,12 +168,40 @@ async function loadProducts() {
   }
 }
 
+async function loadQuoteById(quoteId) {
+  if (!quoteId) return;
+  quote.value = await getJson(`/api/c/quotes/${encodeURIComponent(quoteId)}`);
+  quoteDraft.value = null;
+  quoteOrder.value = null;
+  quoteError.value = "";
+}
+
 async function runAgent() {
   if (!canSend.value) return;
   running.value = true;
   agentError.value = "";
   lastAction.value = "";
   try {
+    if (isMerchantShop.value) {
+      const content = message.value.trim();
+      const woken = content.startsWith("@店宠") ? content : `@店宠 ${content}`;
+      const data = await postJson(
+        `/api/c/friends/${encodeURIComponent(merchantFriendId.value)}/messages`,
+        {
+          content: woken,
+          client_message_id: `cshop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        }
+      );
+      const replyData = data?.reply || {};
+      reply.value = replyData.content || "店宠暂时没有回复。";
+      if (replyData.metadata?.quote_id) {
+        await loadQuoteById(replyData.metadata.quote_id);
+        lastAction.value = "店宠已给出报价，可在上方确认";
+      } else {
+        lastAction.value = "店宠已回复";
+      }
+      return;
+    }
     const data = await postJson("/api/c/agent/run", { message: message.value.trim() });
     reply.value = data?.reply || "";
     threadId.value = data?.thread_id || "";
@@ -283,7 +312,9 @@ onMounted(() => {
               <p class="product-story">{{ productHint(product) }}</p>
               <div class="product-side">
                 <strong>¥{{ money(product.price) }}</strong>
-                <button class="ghost-btn" type="button" @click="useProduct(product)">问问小鱼</button>
+                <button class="ghost-btn" type="button" @click="useProduct(product)">
+                  {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
+                </button>
               </div>
             </div>
           </article>
@@ -293,13 +324,13 @@ onMounted(() => {
       <div class="assistant-panel">
         <div class="panel-head">
           <div>
-            <h3>和小鱼说说</h3>
-            <p>推荐 → 草稿 → 你确认 → 模拟下单</p>
+            <h3>{{ isMerchantShop ? "问问店宠" : "和小鱼说说" }}</h3>
+            <p>{{ isMerchantShop ? "商品咨询 → 报价 → 商城确认" : "推荐 → 草稿 → 你确认 → 模拟下单" }}</p>
           </div>
-          <span class="agent-badge">LangGraph</span>
+          <span class="agent-badge">{{ isMerchantShop ? "Store Pet" : "LangGraph" }}</span>
         </div>
 
-        <div v-if="companion" class="companion-box">
+        <div v-if="companion && !isMerchantShop" class="companion-box">
           <div class="companion-mark" aria-hidden="true">{{ companion.name.slice(0, 1) }}</div>
           <div class="companion-main">
             <span class="companion-label">我的伙伴</span>
@@ -368,14 +399,14 @@ onMounted(() => {
           </div>
         </section>
 
-        <label class="field-label" for="shop-message">你想买什么？</label>
+        <label class="field-label" for="shop-message">{{ isMerchantShop ? "想问店宠什么？" : "你想买什么？" }}</label>
         <textarea
           id="shop-message"
           v-model="message"
           class="shop-input"
           rows="3"
           :disabled="running || hasDraft"
-          placeholder="例如：我想买一双跑鞋，预算 500 元以内"
+          :placeholder="isMerchantShop ? '例如：这款茶多少钱，有优惠吗？' : '例如：我想买一双跑鞋，预算 500 元以内'"
           @keydown.ctrl.enter="runAgent"
           @keydown.meta.enter="runAgent"
         />
@@ -383,18 +414,18 @@ onMounted(() => {
           <span class="hint">Ctrl / ⌘ + Enter 发送</span>
           <button class="primary-btn" type="button" :disabled="!canSend" @click="runAgent">
             <span v-if="running" class="spinner" aria-hidden="true" />
-            {{ running ? "导购思考中…" : "发送给导购" }}
+            {{ running ? (isMerchantShop ? "店宠思考中…" : "导购思考中…") : isMerchantShop ? "发送给店宠" : "发送给导购" }}
           </button>
         </div>
 
         <p v-if="agentError" class="state-line state-error" role="alert">{{ agentError }}</p>
 
         <div v-if="reply" class="reply-box" aria-live="polite">
-          <span class="reply-label">导购回复</span>
+          <span class="reply-label">{{ isMerchantShop ? "店宠回复" : "导购回复" }}</span>
           <p>{{ reply }}</p>
         </div>
 
-        <section v-if="hasDraft" class="confirm-box" aria-live="polite">
+        <section v-if="hasDraft && !isMerchantShop" class="confirm-box" aria-live="polite">
           <div class="confirm-head">
             <div>
               <span class="confirm-kicker">待确认</span>
@@ -420,7 +451,7 @@ onMounted(() => {
           </div>
         </section>
 
-        <section v-if="hasOrder" class="order-box" aria-live="polite">
+        <section v-if="hasOrder && !isMerchantShop" class="order-box" aria-live="polite">
           <span class="confirm-kicker">已创建</span>
           <h4>模拟订单 {{ order.order_id }}</h4>
           <p>{{ order.items?.map((item) => `${item.title} × ${item.quantity}`).join(" / ") }}</p>
