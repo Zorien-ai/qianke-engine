@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>C 端风格方向预览</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 44px 52px; background: #ece8df; color: #1e1b16; font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+  h1 { margin: 0; font-size: 24px; letter-spacing: .02em; }
+  .sub { margin: 8px 0 28px; color: #6b6258; font-size: 13px; }
+  .row { display: flex; gap: 42px; align-items: flex-start; }
+  .col { width: 340px; }
+  .label { margin: 0 0 6px; font-size: 13px; font-weight: 700; }
+  .note { margin: 0 0 14px; color: #6b6258; font-size: 11px; line-height: 1.6; min-height: 34px; }
+  .phone { width: 320px; height: 620px; border-radius: 28px; overflow: hidden; border: 1px solid rgba(0,0,0,.12); box-shadow: 0 18px 46px rgba(30,27,22,.16); display: flex; flex-direction: column; }
+  .top { flex: none; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 12px; }
+  .body { flex: 1; overflow: hidden; padding: 14px; }
+  .tabs { flex: none; height: 56px; display: flex; align-items: center; justify-content: space-around; font-size: 10px; }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .dot { width: 17px; height: 17px; border-radius: 6px; border: 1.5px solid currentColor; opacity: .8; }
+  .tab.on { font-weight: 700; }
+  .tab.on .dot { background: currentColor; }
+
+  /* A */
+  .a { background: #f7f3ea; color: #1e1b16; }
+  .a .top { border-bottom: 1px solid #e4dccd; }
+  .a .tabs { border-top: 1px solid #e4dccd; background: #fffdf8; }
+  .a .brand { font-family: Georgia, "Noto Serif SC", serif; font-size: 25px; line-height: 1.25; margin: 2px 0 4px; }
+  .a .muted { color: #6b6258; font-size: 11px; }
+  .a .hero { margin: 12px 0; padding: 13px; border-radius: 14px; background: #fffdf8; border: 1px solid #e4dccd; }
+  .a .hero .k { color: #d95f3b; font-size: 9px; letter-spacing: .16em; }
+  .a .hero .t { font-family: Georgia, "Noto Serif SC", serif; font-size: 17px; margin: 4px 0; }
+  .a .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .a .card { background: #fffdf8; border: 1px solid #e4dccd; border-radius: 11px; overflow: hidden; }
+  .a .img { height: 92px; background: linear-gradient(145deg,#d8cbb6,#b9a58a 55%,#efe6d5); }
+  .a .img.alt { background: linear-gradient(145deg,#c9d2c2,#7f927a 60%,#e6e9df); }
+  .a .card .txt { padding: 8px; }
+  .a .card .name { font-size: 11px; font-weight: 700; line-height: 1.4; }
+  .a .card .say { margin-top: 4px; color: #6b6258; font-size: 9px; line-height: 1.5; }
+  .a .card .price { margin-top: 5px; color: #b4492f; font-size: 11px; font-weight: 700; }
+  .a .tab.on { color: #d95f3b; }
+
+  /* B */
+  .b { background: #101312; color: #e8eee9; }
+  .b .top { border-bottom: 1px solid rgba(255,255,255,.08); background: #151918; }
+  .b .tabs { border-top: 1px solid rgba(255,255,255,.08); background: #151918; }
+  .b .title { font-size: 24px; font-weight: 700; margin: 4px 0 14px; }
+  .b .chat { display: flex; gap: 10px; align-items: center; padding: 11px 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .b .ava { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg,#2f4a3c,#8ab59b); flex: none; }
+  .b .chat b { display: block; font-size: 12px; }
+  .b .chat span { display: block; margin-top: 3px; color: #8b9890; font-size: 10px; }
+  .b .online { margin-left: auto; color: #9ff29e; font-size: 9px; }
+  .b .tab.on { color: #9ff29e; }
+
+  /* C */
+  .c { background: #0b0b0c; color: #f4f4f4; }
+  .c .top { border-bottom: 1px solid #222; }
+  .c .tabs { border-top: 1px solid #222; background: #111; }
+  .c .big { height: 238px; margin: 2px 0 14px; background: linear-gradient(160deg,#30343a,#0d0e10 60%,#433b32); border-radius: 14px; position: relative; }
+  .c .big .badge { position: absolute; left: 12px; top: 12px; padding: 5px 8px; border: 1px solid rgba(255,255,255,.3); border-radius: 999px; font-size: 9px; letter-spacing: .12em; }
+  .c .big .name { position: absolute; left: 14px; bottom: 16px; font-size: 21px; font-weight: 800; line-height: 1.15; }
+  .c .price { margin: 0 0 4px; color: #ff6a3d; font-size: 22px; font-weight: 800; }
+  .c .desc { color: #9a9a9a; font-size: 10px; line-height: 1.6; }
+  .c .chips { display: flex; gap: 6px; margin: 12px 0; }
+  .c .chip { padding: 5px 8px; border: 1px solid #333; border-radius: 6px; color: #b9b9b9; font-size: 9px; }
+  .c .buy { margin-top: 12px; display: flex; gap: 8px; }
+  .c .buy div { flex: 1; text-align: center; padding: 10px; border-radius: 9px; background: #ff6a3d; color: #111; font-size: 11px; font-weight: 800; }
+  .c .buy div.ghost { background: transparent; border: 1px solid #444; color: #eee; }
+  .c .tab.on { color: #ff6a3d; }
+</style>
+</head>
+<body>
+  <h1>C 端换风格：三个方向</h1>
+  <p class="sub">同一套功能，不同视觉气候。左边推荐方向，右边是两种极端对照。</p>
+  <div class="row">
+    <div class="col">
+      <p class="label">A. 暖白市集 · 编辑风（推荐）</p>
+      <p class="note">像一本可以聊天的小杂志。纸白、墨黑、柿子强调色；商品是“笔记”；小鱼只说一句。</p>
+      <div class="phone a">
+        <div class="top"><span>小鱼 · 在线</span><span>搜索</span></div>
+        <div class="body">
+          <div class="brand">今天想逛什么？</div>
+          <div class="muted">小鱼替你挑了 3 件，不急着买。</div>
+          <div class="hero">
+            <div class="k">TODAY'S NOTE</div>
+            <div class="t">通勤也能穿的轻量跑鞋</div>
+            <div class="muted">轻量 / 透气 / 42 码 · 小鱼说：适合你上次说的 5 公里</div>
+          </div>
+          <div class="grid">
+            <div class="card"><div class="img"></div><div class="txt"><div class="name">山野轻量跑鞋</div><div class="say">通勤不累脚</div><div class="price">¥299</div></div></div>
+            <div class="card"><div class="img alt"></div><div class="txt"><div class="name">周末徒步包</div><div class="say">轻装出发</div><div class="price">¥199</div></div></div>
+          </div>
+        </div>
+        <div class="tabs"><div class="tab on"><i class="dot"></i>聊</div><div class="tab"><i class="dot"></i>逛</div><div class="tab"><i class="dot"></i>订单</div><div class="tab"><i class="dot"></i>我</div></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <p class="label">B. IM 深色社交风</p>
+      <p class="note">更像 Telegram / 微信。消息感强，但商城会像另一个 App，差异化弱。</p>
+      <div class="phone b">
+        <div class="top"><span>消息</span><span>+</span></div>
+        <div class="body">
+          <div class="title">聊天</div>
+          <div class="chat"><div class="ava"></div><div><b>小鱼</b><span>今天想逛点什么？</span></div><div class="online">在线</div></div>
+          <div class="chat"><div class="ava" style="background:linear-gradient(135deg,#4a3c2f,#b99b76)"></div><div><b>山野户外旗舰店</b><span>店宠：42 码有货</span></div><div class="online">3 分钟</div></div>
+          <div class="chat"><div class="ava" style="background:linear-gradient(135deg,#3e3550,#9d8cbc)"></div><div><b>周末徒步群</b><span>小满：这周六走起</span></div><div class="online">12 分钟</div></div>
+        </div>
+        <div class="tabs"><div class="tab on"><i class="dot"></i>聊天</div><div class="tab"><i class="dot"></i>联系人</div><div class="tab"><i class="dot"></i>发现</div><div class="tab"><i class="dot"></i>我</div></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <p class="label">C. 潮流买手店风</p>
+      <p class="note">商品感最强，像得物。适合户外/潮流商家，但小鱼和日记会被挤到边缘。</p>
+      <div class="phone c">
+        <div class="top"><span>DROP 112</span><span>⌕</span></div>
+        <div class="body">
+          <div class="big"><span class="badge">LIMITED</span><div class="name">山野<br>轻量跑鞋</div></div>
+          <div class="price">¥299</div>
+          <div class="desc">轻量中底 / 透气网面 / 通勤与 5 公里</div>
+          <div class="chips"><span class="chip">42 码有货</span><span class="chip">顺丰</span><span class="chip">7 天无理由</span></div>
+          <div class="buy"><div>立即购买</div><div class="ghost">问店宠</div></div>
+        </div>
+        <div class="tabs"><div class="tab"><i class="dot"></i>首页</div><div class="tab on"><i class="dot"></i>商城</div><div class="tab"><i class="dot"></i>收藏</div><div class="tab"><i class="dot"></i>我</div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
