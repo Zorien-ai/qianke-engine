@@ -367,3 +367,61 @@ def test_tea_quote_prepares_and_confirms_against_tea_merchant(c_store):
     )
     assert merchant_order is not None
     assert merchant_order.total_amount == 298
+
+
+def _tea_order(c_store, request_id: str):
+    c_store.create_quote(
+        "buyer_1",
+        "store_tea",
+        {
+            "quote_id": f"quote_{request_id}",
+            "merchant_id": "m_tea_001",
+            "product_refs": [{
+                "product_id": "P-TEA-001",
+                "title": "明前龙井",
+                "price": 298,
+                "quantity": 1,
+                "sku": "SKU-TEA-001-250G",
+            }],
+            "policy_refs": [],
+        },
+    )
+    draft = c_store.prepare_order("buyer_1", [], quote_id=f"quote_{request_id}")
+    return c_store.confirm_order(
+        "buyer_1", draft["order_id"], draft["confirmation_token"], request_id=request_id
+    )
+
+
+def test_tea_order_cancel_uses_tea_merchant(c_store):
+    order = _tea_order(c_store, "req_tea_cancel_001")
+    cancelled = c_store.cancel_confirmed_order(
+        "buyer_1", order["order_id"], request_id="req_tea_cancel_001"
+    )
+    assert cancelled["status"] == "CANCELLED"
+    merchant_order = get_merchant_repository().get_order(
+        order["order_id"], merchant_id="m_tea_001", buyer_id="b_2001"
+    )
+    assert merchant_order is not None
+    assert merchant_order.status == "CANCELLED"
+
+
+def test_tea_after_sale_refund_uses_tea_merchant(c_store):
+    order = _tea_order(c_store, "req_tea_after_sale_001")
+    writer = get_merchant_write_repository()
+    writer.update_order_status("m_tea_001", order["order_id"], "PAID")
+    writer.update_order_status(
+        "m_tea_001", order["order_id"], "SHIPPED",
+        tracking_no="SF1234567890", carrier="顺丰速运",
+    )
+    ticket = c_store.create_after_sale(
+        "buyer_1", order["order_id"], sale_type="REFUND_ONLY", reason="不想要了"
+    )
+    resolved = c_store.resolve_after_sale(ticket["ticket_id"], approved=True)
+    assert resolved["status"] == "APPROVED"
+    refreshed = c_store.get_order(order["order_id"])
+    assert refreshed["status"] == "REFUNDED"
+    merchant_order = get_merchant_repository().get_order(
+        order["order_id"], merchant_id="m_tea_001", buyer_id="b_2001"
+    )
+    assert merchant_order is not None
+    assert merchant_order.status == "REFUNDED"

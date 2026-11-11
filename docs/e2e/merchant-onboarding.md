@@ -147,9 +147,34 @@ GET /api/c/merchant/products?friend_id=store_tea
 
 ![茶商 CShop 店宠顾问](c-tea-shop-store-pet.png)
 
+## 取消 / 售后 / 退款按商家路由
+
+已改为默认读取 `c_order.merchant_id`：
+
+```text
+取消已确认订单
+→ 商家取消：m_tea_001
+
+售后审批通过
+→ 商家退款：m_tea_001
+
+退货验收通过
+→ 商家入库 + 商家退款：m_tea_001
+```
+
+实际验证：
+
+```text
+茶商订单 order_5d7ce02aecf04b9a
+→ POST /api/c/orders/{id}/cancel
+→ C 订单 CANCELLED
+→ merchant_id = m_tea_001
+→ 商家订单 CANCELLED
+```
+
 ## 已知限制
 
 - 默认映射只有 `store_demo → m_gear_002`；其它商家需要管理员先绑定。
 - 店宠 SOP 仍然是平台共享的 `store_policy`，还没有按商家配置。
 - 发现页只展示已绑定映射，不展示未绑定商家。
-- 商家订单的售后/退款入口仍按默认商家处理，茶商订单的售后还需要按 merchant_id 补齐。
+- 定时对账/回访里仍有一处按默认商家读取订单，需后续统一改为按订单 merchant_id。

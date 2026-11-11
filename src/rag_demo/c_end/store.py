@@ -2002,9 +2002,10 @@ def cancel_confirmed_order(
     if not row.get("merchant_order_id"):
         raise CStoreError("MERCHANT_ORDER_NOT_FOUND", "旧平台订单没有商家订单，无法执行商家退款")
 
+    resolved_merchant = str(merchant_id or row.get("merchant_id") or _MERCHANT_ID)
     try:
         get_merchant_write_repository().cancel_order(
-            merchant_id or _MERCHANT_ID,
+            resolved_merchant,
             order_id,
             request_id=request_id,
         )
@@ -2188,9 +2189,10 @@ def resolve_after_sale(
             conn.close()
         return get_after_sale(ticket_id)
 
+    resolved_merchant = str(merchant_id or order["merchant_id"] or _MERCHANT_ID)
     try:
         merchant_order = get_merchant_write_repository().refund_order(
-            merchant_id or _MERCHANT_ID,
+            resolved_merchant,
             order["order_id"],
             request_id=f"after_sale_{ticket_id}",
         )
@@ -2299,14 +2301,15 @@ def receive_after_sale(
             conn.close()
         return get_after_sale(ticket_id)
 
+    resolved_merchant = str(merchant_id or order["merchant_id"] or _MERCHANT_ID)
     try:
         merchant_order = get_merchant_write_repository().receive_return(
-            merchant_id or _MERCHANT_ID,
+            resolved_merchant,
             order["order_id"],
             request_id=f"return_{ticket_id}",
         )
         merchant_order = get_merchant_write_repository().refund_order(
-            merchant_id or _MERCHANT_ID,
+            resolved_merchant,
             order["order_id"],
             request_id=f"after_sale_{ticket_id}",
         )
@@ -2380,6 +2383,11 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         ).fetchall()
     }
     merchant_id = str(order["merchant_id"] or _MERCHANT_ID)
+    tenant_row = conn.execute(
+        "SELECT name FROM c_merchant_tenant WHERE merchant_id = ?",
+        (merchant_id,),
+    ).fetchone()
+    merchant_name = str(tenant_row["name"]) if tenant_row is not None else merchant_id
     merchant_order = None
     try:
         merchant_order = get_merchant_repository().get_order(
@@ -2432,6 +2440,8 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
         "original_amount": float(order["original_amount"] or order["total_amount"]),
         "discount_amount": float(order["discount_amount"] or 0),
         "quote_id": order["quote_id"],
+        "merchant_id": merchant_id,
+        "merchant_name": merchant_name,
         "policy_ids": json.loads(order["policy_ids_json"] or "[]"),
         "items": [
             {
