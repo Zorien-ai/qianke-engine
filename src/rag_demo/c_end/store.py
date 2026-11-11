@@ -335,6 +335,21 @@ def _ensure_pg_schema() -> None:
             conn.close()
     except Exception:  # noqa: BLE001 - 启动补种失败不阻断控制面
         pass
+    try:
+        from rag_demo.control.pg_compat import connect as pg_connect
+        conn = pg_connect()
+        try:
+            for row in _TEA_SEED:
+                conn.execute(
+                    "INSERT INTO c_product(product_id, merchant_id, title, category, price, stock) "
+                    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(product_id) DO NOTHING",
+                    row,
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - 商品补种失败不阻断控制面
+        pass
 
 
 def _connect() -> sqlite3.Connection:
@@ -368,6 +383,7 @@ CREATE TABLE IF NOT EXISTS c_order (
     original_amount   REAL NOT NULL DEFAULT 0,
     discount_amount   REAL NOT NULL DEFAULT 0,
     quote_id          TEXT,
+    merchant_id       TEXT,
     policy_ids_json   TEXT NOT NULL DEFAULT '[]',
     confirmation_hash TEXT,
     snapshot_json     TEXT NOT NULL,
@@ -381,6 +397,7 @@ CREATE TABLE IF NOT EXISTS c_quote (
     quote_id          TEXT PRIMARY KEY,
     buyer_id          TEXT NOT NULL,
     friend_id         TEXT NOT NULL,
+    merchant_id       TEXT NOT NULL DEFAULT 'm_gear_002',
     product_refs_json TEXT NOT NULL,
     policy_refs_json  TEXT NOT NULL,
     status            TEXT NOT NULL DEFAULT 'PENDING',
@@ -760,6 +777,13 @@ _SEED = (
     ("P006", "m_demo", "防晒衣", "户外", 159.0, 18),
 )
 
+# 商城下单需要的第二商家商品；与 data/merchant 的 P-TEA 系列对应。
+_TEA_SEED = (
+    ("P-TEA-001", "m_tea_001", "明前龙井", "绿茶", 298.0, 40),
+    ("P-TEA-002", "m_tea_001", "洞庭碧螺春", "绿茶", 268.0, 30),
+    ("P-TEA-003", "m_tea_001", "云南普洱熟茶", "普洱茶", 328.0, 20),
+)
+
 
 def init() -> None:
     if _cend_pg_enabled():
@@ -787,10 +811,16 @@ def init() -> None:
                 ("original_amount", "REAL NOT NULL DEFAULT 0"),
                 ("discount_amount", "REAL NOT NULL DEFAULT 0"),
                 ("quote_id", "TEXT"),
+                ("merchant_id", "TEXT"),
                 ("policy_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE c_order ADD COLUMN {name} {ddl}")
+            quote_columns = {row["name"] for row in conn.execute("PRAGMA table_info(c_quote)").fetchall()}
+            if "merchant_id" not in quote_columns:
+                conn.execute(
+                    "ALTER TABLE c_quote ADD COLUMN merchant_id TEXT NOT NULL DEFAULT 'm_gear_002'"
+                )
             count = conn.execute("SELECT COUNT(*) AS n FROM c_product").fetchone()["n"]
             if count == 0:
                 conn.executemany(
@@ -798,6 +828,11 @@ def init() -> None:
                     "VALUES (?, ?, ?, ?, ?, ?)",
                     _SEED,
                 )
+            conn.executemany(
+                "INSERT OR IGNORE INTO c_product(product_id, merchant_id, title, category, price, stock) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                _TEA_SEED,
+            )
             tenant_count = conn.execute("SELECT COUNT(*) AS n FROM c_merchant_tenant").fetchone()["n"]
             if tenant_count == 0:
                 conn.executemany(
@@ -1573,17 +1608,21 @@ def create_quote(
     quote_id = str(metadata.get("quote_id") or "").strip()
     if not quote_id:
         return None
+    merchant_id = str(metadata.get("merchant_id") or "").strip()
+    if not merchant_id:
+        merchant_id = merchant_for_store_friend(str(friend_id or "")) or _MERCHANT_ID
     init()
     conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "INSERT OR IGNORE INTO c_quote(quote_id, buyer_id, friend_id, product_refs_json, "
-            "policy_refs_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO c_quote(quote_id, buyer_id, friend_id, merchant_id, product_refs_json, "
+            "policy_refs_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 quote_id,
                 buyer_id,
                 friend_id,
+                merchant_id,
                 json.dumps(metadata.get("product_refs") or [], ensure_ascii=False),
                 json.dumps(metadata.get("policy_refs") or [], ensure_ascii=False),
                 _now(),
@@ -1607,10 +1646,13 @@ def get_quote(quote_id: str, buyer_id: str | None = None) -> dict[str, Any] | No
             return None
         if buyer_id is not None and row["buyer_id"] != buyer_id:
             raise CStoreError("QUOTE_FORBIDDEN", "不能访问其他用户的报价")
+        merchant_id = str(row["merchant_id"] or _MERCHANT_ID)
         return {
             "quote_id": row["quote_id"],
             "buyer_id": row["buyer_id"],
             "friend_id": row["friend_id"],
+            "merchant_id": merchant_id,
+            "merchant_name": (get_tenant(merchant_id) or {}).get("name") or merchant_id,
             "product_refs": json.loads(row["product_refs_json"] or "[]"),
             "policy_refs": json.loads(row["policy_refs_json"] or "[]"),
             "status": row["status"],
@@ -1620,7 +1662,7 @@ def get_quote(quote_id: str, buyer_id: str | None = None) -> dict[str, Any] | No
         conn.close()
 
 
-def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tuple[list[dict[str, Any]], list[str]]:
+def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tuple[list[dict[str, Any]], list[str], str]:
     row = conn.execute("SELECT * FROM c_quote WHERE quote_id = ?", (quote_id,)).fetchone()
     if row is None:
         raise CStoreError("QUOTE_NOT_FOUND", "报价不存在")
@@ -1631,14 +1673,19 @@ def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tupl
     products = json.loads(row["product_refs_json"] or "[]")
     policies = json.loads(row["policy_refs_json"] or "[]")
     items = [
-        {"product_id": str(item["product_id"]), "quantity": int(item.get("quantity") or 1)}
+        {
+            "product_id": str(item["product_id"]),
+            "quantity": int(item.get("quantity") or 1),
+            "sku": str(item.get("sku") or ""),
+        }
         for item in products
         if item.get("product_id")
     ]
     if not items:
         raise CStoreError("QUOTE_NO_PRODUCTS", "报价没有可购买商品")
     policy_ids = [str(item.get("policy_id")) for item in policies if item.get("policy_id")]
-    return items, policy_ids
+    merchant_id = str(row["merchant_id"] or _MERCHANT_ID)
+    return items, policy_ids, merchant_id
 
 
 def _quote_discount(original: float, policy_ids: list[str]) -> float:
@@ -1666,14 +1713,20 @@ def _reserve_merchant_stock(
     draft_id: str,
     buyer_id: str,
     products: list[dict[str, Any]],
+    merchant_id: str | None = None,
 ) -> None:
     """在商家库存域预占；失败时抛结构化 CStoreError，由调用方回滚 C 草稿。"""
+    resolved_merchant = str(merchant_id or _MERCHANT_ID)
     try:
         get_merchant_write_repository().reserve_inventory(
-            _MERCHANT_ID,
+            resolved_merchant,
             draft_id,
             [
-                {"product_id": item["product_id"], "quantity": item["quantity"]}
+                {
+                    "product_id": item["product_id"],
+                    "quantity": item["quantity"],
+                    **({"sku": item["sku"]} if item.get("sku") else {}),
+                }
                 for item in products
             ],
             ttl_seconds=900,
@@ -1683,10 +1736,12 @@ def _reserve_merchant_stock(
         raise _merchant_error(exc) from exc
 
 
-def _release_merchant_reservation(draft_id: str) -> None:
+def _release_merchant_reservation(draft_id: str, merchant_id: str | None = None) -> None:
     """取消草稿时尽力释放；已提交/已过期的预占不阻塞 C 端取消。"""
     try:
-        get_merchant_write_repository().release_reservation(_MERCHANT_ID, draft_id)
+        get_merchant_write_repository().release_reservation(
+            str(merchant_id or _MERCHANT_ID), draft_id
+        )
     except MerchantError:
         pass
 
@@ -1704,8 +1759,9 @@ def prepare_order(
     try:
         conn.execute("BEGIN IMMEDIATE")
         policy_ids: list[str] = []
+        merchant_id = _MERCHANT_ID
         if quote_id:
-            normalized, policy_ids = _quote_items(conn, quote_id, buyer_id)
+            normalized, policy_ids, merchant_id = _quote_items(conn, quote_id, buyer_id)
         else:
             normalized = _validate_items(items)
 
@@ -1727,6 +1783,7 @@ def prepare_order(
                 "title": row["title"],
                 "quantity": item["quantity"],
                 "unit_price": unit_price,
+                **({"sku": item["sku"]} if item.get("sku") else {}),
             })
 
         discount = _quote_discount(original, policy_ids)
@@ -1736,13 +1793,13 @@ def prepare_order(
         snapshot = _snapshot(products)
 
         # C 端草稿和商家预占使用同一个 draft_id：确认/取消时可精确找回预占。
-        _reserve_merchant_stock(order_id, buyer_id, products)
+        _reserve_merchant_stock(order_id, buyer_id, products, merchant_id)
         reservation_created = True
 
         conn.execute(
             "INSERT INTO c_order(order_id, buyer_id, status, total_amount, original_amount, "
-            "discount_amount, quote_id, policy_ids_json, confirmation_hash, snapshot_json, created_at) "
-            "VALUES (?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?)",
+            "discount_amount, quote_id, merchant_id, policy_ids_json, confirmation_hash, snapshot_json, created_at) "
+            "VALUES (?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 order_id,
                 buyer_id,
@@ -1750,6 +1807,7 @@ def prepare_order(
                 round(original, 2),
                 round(discount, 2),
                 quote_id,
+                merchant_id,
                 json.dumps(policy_ids, ensure_ascii=False),
                 _sha256(token),
                 snapshot,
@@ -1778,6 +1836,8 @@ def prepare_order(
         "original_amount": round(original, 2),
         "discount_amount": round(discount, 2),
         "quote_id": quote_id,
+        "merchant_id": merchant_id,
+        "merchant_name": (get_tenant(merchant_id) or {}).get("name") or merchant_id,
         "policy_ids": policy_ids,
         "confirmation_token": token,
         "confirmation_version": 1,
@@ -1845,10 +1905,11 @@ def confirm_order(
 
         order_id = "order_" + uuid.uuid4().hex[:16]
         merchant_total = round(float(draft["original_amount"] or draft["total_amount"]), 2)
+        merchant_id = str(draft["merchant_id"] or _MERCHANT_ID)
         try:
             writer = get_merchant_write_repository()
             writer.create_order(
-                _MERCHANT_ID,
+                merchant_id,
                 order_id,
                 _merchant_buyer_id(buyer_id),
                 [
@@ -1856,13 +1917,14 @@ def confirm_order(
                         "product_id": item["product_id"],
                         "quantity": item["quantity"],
                         "unit_price": item["unit_price"],
+                        **({"sku": item["sku"]} if item.get("sku") else {}),
                     }
                     for item in expected
                 ],
                 str(merchant_total),
                 source_ref=draft_id,
             )
-            writer.commit_reservation(_MERCHANT_ID, draft_id, order_id=order_id)
+            writer.commit_reservation(merchant_id, draft_id, order_id=order_id)
         except MerchantError as exc:
             raise _merchant_error(exc) from exc
 
@@ -1874,9 +1936,9 @@ def confirm_order(
 
         conn.execute(
             "INSERT INTO c_order(order_id, buyer_id, status, total_amount, original_amount, "
-            "discount_amount, quote_id, policy_ids_json, snapshot_json, idempotency_key, "
+            "discount_amount, quote_id, merchant_id, policy_ids_json, snapshot_json, idempotency_key, "
             "source_order_id, created_at, confirmed_at) "
-            "VALUES (?, ?, 'CONFIRMED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, 'CONFIRMED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 order_id,
                 buyer_id,
@@ -1884,6 +1946,7 @@ def confirm_order(
                 draft["original_amount"] or draft["total_amount"],
                 draft["discount_amount"] or 0,
                 draft["quote_id"],
+                merchant_id,
                 draft["policy_ids_json"] or "[]",
                 draft["snapshot_json"],
                 request_id,
@@ -2316,11 +2379,12 @@ def _order_payload(conn: sqlite3.Connection, order: sqlite3.Row) -> dict[str, An
             (order["order_id"],),
         ).fetchall()
     }
+    merchant_id = str(order["merchant_id"] or _MERCHANT_ID)
     merchant_order = None
     try:
         merchant_order = get_merchant_repository().get_order(
             order["order_id"],
-            merchant_id=_MERCHANT_ID,
+            merchant_id=merchant_id,
             buyer_id=_merchant_buyer_id(order["buyer_id"]),
         )
     except MerchantError:
@@ -2752,7 +2816,7 @@ def cancel_order_draft(buyer_id: str, draft_id: str) -> dict[str, Any]:
                 (row["quote_id"],),
             )
         conn.commit()
-        _release_merchant_reservation(draft_id)
+        _release_merchant_reservation(draft_id, row["merchant_id"])
         return {"order_id": draft_id, "status": "CANCELLED", "quote_id": row["quote_id"]}
     except Exception:
         conn.rollback()

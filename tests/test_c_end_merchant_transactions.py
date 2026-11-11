@@ -327,3 +327,43 @@ def test_return_refund_rejected_at_receipt_keeps_order(c_store):
     assert payload["status"] == "CONFIRMED"
     assert payload["merchant_status"] == "SHIPPED"
     assert writer.get_inventory("SKU-GEAR-P001-STD", merchant_id="m_gear_002").available_qty == stock_before - 1
+
+
+def test_tea_quote_prepares_and_confirms_against_tea_merchant(c_store):
+    quote = c_store.create_quote(
+        "buyer_1",
+        "store_tea",
+        {
+            "quote_id": "quote_tea_e2e_001",
+            "merchant_id": "m_tea_001",
+            "product_refs": [
+                {
+                    "product_id": "P-TEA-001",
+                    "title": "明前龙井",
+                    "price": 298,
+                    "quantity": 1,
+                    "sku": "SKU-TEA-001-250G",
+                }
+            ],
+            "policy_refs": [],
+        },
+    )
+    assert quote["merchant_id"] == "m_tea_001"
+    assert quote["merchant_name"] == "山雾茶业"
+
+    draft = c_store.prepare_order("buyer_1", [], quote_id="quote_tea_e2e_001")
+    assert draft["merchant_id"] == "m_tea_001"
+    assert draft["items"][0]["product_id"] == "P-TEA-001"
+
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_c_tea_order_001",
+    )
+    assert order["status"] == "CONFIRMED"
+    merchant_order = get_merchant_repository().get_order(
+        order["order_id"], merchant_id="m_tea_001", buyer_id="b_2001"
+    )
+    assert merchant_order is not None
+    assert merchant_order.total_amount == 298

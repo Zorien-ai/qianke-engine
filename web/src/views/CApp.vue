@@ -2905,7 +2905,15 @@ onBeforeUnmount(() => {
               </div>
               <p>报价只做引用，成交前需在商城逐单确认。</p>
               <RouterLink
-                :to="{ path: '/c', query: { quote: storeQuote.quote_id } }"
+                :to="{
+                  path: '/c',
+                  query: {
+                    quote: storeQuote.quote_id,
+                    friend_id: activeId,
+                    merchant_id: storeQuote.merchant_id,
+                    merchant_name: storeQuote.merchant_name,
+                  },
+                }"
                 class="c-text-link"
               >
                 查看报价 <span>→</span>

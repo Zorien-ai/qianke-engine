@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_order (
   "original_amount" NUMERIC(12,2) NOT NULL DEFAULT 0,
   "discount_amount" NUMERIC(12,2) NOT NULL DEFAULT 0,
   "quote_id" TEXT,
+  "merchant_id" TEXT,
   "policy_ids_json" TEXT NOT NULL DEFAULT '[]',
   UNIQUE ("idempotency_key")
 );
@@ -76,11 +77,15 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_quote (
   "quote_id" TEXT PRIMARY KEY,
   "buyer_id" TEXT NOT NULL,
   "friend_id" TEXT NOT NULL,
+  "merchant_id" TEXT NOT NULL DEFAULT 'm_gear_002',
   "product_refs_json" TEXT NOT NULL,
   "policy_refs_json" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'PENDING',
   "created_at" TEXT NOT NULL
 );
+
+ALTER TABLE __SCHEMA__.c_order ADD COLUMN IF NOT EXISTS "merchant_id" TEXT;
+ALTER TABLE __SCHEMA__.c_quote ADD COLUMN IF NOT EXISTS "merchant_id" TEXT NOT NULL DEFAULT 'm_gear_002';
 
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_message (
   "message_id" TEXT PRIMARY KEY,

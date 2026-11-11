@@ -280,7 +280,18 @@ onBeforeUnmount(closeSocket);
                 {{ product.title || product.product_id }}
               </span>
               <small>仅为咨询引用；成交前必须在商城逐单确认。</small>
-              <RouterLink class="quote-link" :to="{ path: '/c', query: { quote: message.metadata.quote_id } }">
+              <RouterLink
+                class="quote-link"
+                :to="{
+                  path: '/c',
+                  query: {
+                    quote: message.metadata.quote_id,
+                    friend_id: selected?.friend_id,
+                    merchant_id: message.metadata.merchant_id,
+                    merchant_name: message.metadata.merchant_name,
+                  },
+                }"
+              >
                 去商城确认
               </RouterLink>
             </div>

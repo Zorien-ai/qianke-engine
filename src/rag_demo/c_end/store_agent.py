@@ -253,11 +253,16 @@ def _reply_metadata(
     product_refs: list[dict[str, Any]],
     policy_refs: list[dict[str, Any]],
     order_refs: list[dict[str, Any]] | None = None,
+    *,
+    merchant_id: str = "",
+    merchant_name: str = "",
 ) -> dict[str, Any]:
     if not product_refs and not policy_refs and not order_refs:
         return {}
     metadata = {
         "quote_id": f"quote_{uuid.uuid4().hex[:16]}",
+        "merchant_id": merchant_id,
+        "merchant_name": merchant_name,
         "product_refs": product_refs[:8],
         "policy_refs": policy_refs[:8],
         "requires_user_confirmation": True,
@@ -306,7 +311,13 @@ def reply_with_meta(
                 return StoreReply(
                     content or "店宠暂时没有找到合适商品。",
                     True,
-                    _reply_metadata(product_refs, policy_refs, order_refs),
+                    _reply_metadata(
+                        product_refs,
+                        policy_refs,
+                        order_refs,
+                        merchant_id=resolved_merchant,
+                        merchant_name=merchant_display_name(resolved_merchant),
+                    ),
                 )
             messages.append(ai)
             for call in calls:
@@ -363,7 +374,13 @@ def reply_with_meta(
         return StoreReply(
             "店宠需要再确认一下商品信息，请稍后再问。",
             True,
-            _reply_metadata(product_refs, policy_refs, order_refs),
+            _reply_metadata(
+                product_refs,
+                policy_refs,
+                order_refs,
+                merchant_id=resolved_merchant,
+                merchant_name=merchant_display_name(resolved_merchant),
+            ),
         )
     except Exception:
         logger.exception("店宠 Agent 调用失败 buyer=%s merchant=%s", buyer_id, resolved_merchant)

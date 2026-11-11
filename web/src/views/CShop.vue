@@ -23,6 +23,18 @@ const order = ref(null);
 const threadId = ref("");
 const decisionLoading = ref(false);
 const lastAction = ref("");
+const merchantFriendId = computed(() =>
+  typeof route.query.friend_id === "string" ? route.query.friend_id : ""
+);
+const merchantId = computed(() =>
+  typeof route.query.merchant_id === "string" ? route.query.merchant_id : ""
+);
+const merchantName = computed(() => {
+  if (typeof route.query.merchant_name === "string") return route.query.merchant_name;
+  if (quote.value?.merchant_name) return quote.value.merchant_name;
+  return merchantId.value;
+});
+const shopScopeLabel = computed(() => merchantName.value || "小鱼精选");
 
 const featuredProduct = computed(() => products.value.find((p) => p.category === "运动") || products.value[0] || null);
 const hasDraft = computed(() => !!draft.value);
@@ -136,8 +148,18 @@ async function loadProducts() {
   productsLoading.value = true;
   productsError.value = "";
   try {
-    const data = await getJson("/api/c/products?limit=12");
-    products.value = data?.products || [];
+    const endpoint = merchantFriendId.value
+      ? `/api/c/merchant/products?friend_id=${encodeURIComponent(merchantFriendId.value)}&limit=12`
+      : "/api/c/products?limit=12";
+    const data = await getJson(endpoint);
+    products.value = (data?.products || []).map((product) => ({
+      ...product,
+      category: product.category || "精选",
+      stock: Number(product.stock ?? 0),
+    }));
+    if (merchantFriendId.value && !message.value.includes("预算")) {
+      message.value = `我想买${shopScopeLabel.value}的一件商品，预算 500 元以内`;
+    }
   } catch (e) {
     productsError.value = e?.detail || e?.message || "商品加载失败";
   } finally {
@@ -214,13 +236,16 @@ onMounted(() => {
         <p class="shop-kicker">C-END · MARKET</p>
         <h2>今天想逛什么？</h2>
         <p class="shop-subtitle">
-          小鱼替你从店里挑了这些。先看看，不急着买；需要时再问她。
+          {{ merchantFriendId ? `正在逛 ${shopScopeLabel}，价格和库存来自这家店。` : "小鱼替你从店里挑了这些。先看看，不急着买；需要时再问她。" }}
         </p>
       </div>
-      <span class="shop-status" role="status">
-        <span class="status-dot" />
-        模拟订单 · 不接真实支付
-      </span>
+      <div class="shop-head-meta">
+        <span v-if="merchantFriendId" class="shop-scope">{{ shopScopeLabel }}</span>
+        <span class="shop-status" role="status">
+          <span class="status-dot" />
+          模拟订单 · 不接真实支付
+        </span>
+      </div>
     </header>
 
     <section v-if="featuredProduct" class="market-note" aria-label="今日手记">
@@ -235,8 +260,8 @@ onMounted(() => {
       <div class="catalog-panel">
         <div class="panel-head">
           <div>
-            <h3>市集选物</h3>
-            <p>价格和库存来自真实商品库</p>
+            <h3>{{ merchantFriendId ? shopScopeLabel : "市集选物" }}</h3>
+            <p>{{ merchantFriendId ? "该商家的真实商品与库存" : "价格和库存来自真实商品库" }}</p>
           </div>
           <span class="count">{{ products.length }} 件</span>
         </div>
@@ -1256,4 +1281,21 @@ onMounted(() => {
   }
 }
 
+
+
+.shop-head-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.shop-scope {
+  padding: 5px 9px;
+  border: 1px solid #d95f3b;
+  border-radius: 999px;
+  color: #b74b2d;
+  background: #f8e6dd;
+  font-size: 11px;
+}
 </style>

@@ -77,9 +77,52 @@ friend_id → c_merchant_store_friend → merchant_id
 → system prompt 使用该商家名称
 ```
 
+## 报价 → 订单按商家路由
+
+验证链路：
+
+```text
+茶商店宠报价
+→ metadata.merchant_id = m_tea_001
+→ CShop 带 quote + friend_id + merchant_id 打开
+→ 商品列表切到山雾茶业
+→ 报价准备订单
+→ c_order.merchant_id = m_tea_001
+→ 商家订单写入 m_tea_001
+```
+
+实际验证：
+
+```text
+订单 order_75af1dbbb41b43da
+金额 298
+merchant_source = merchant_v1
+merchant_status = CREATED
+```
+
+截图：
+
+![茶商报价与订单](c-tea-shop-order.png)
+
+## C 端商城按会话商家切换
+
+CShop 支持 query：
+
+```text
+/c?quote=...&friend_id=store_tea&merchant_id=m_tea_001&merchant_name=山雾茶业
+```
+
+有 `friend_id` 时商品来自：
+
+```text
+GET /api/c/merchant/products?friend_id=store_tea
+```
+
+无 `friend_id` 时保持原来的默认市集。
+
 ## 已知限制
 
 - 默认映射只有 `store_demo → m_gear_002`；其它商家需要管理员先绑定。
 - 店宠 SOP 仍然是平台共享的 `store_policy`，还没有按商家配置。
 - 发现页只展示已绑定映射，不展示未绑定商家。
-- C 端商城入口仍默认山野户外；按当前会话切换商城商家是下一步。
+- 商家订单的售后/退款入口仍按默认商家处理，茶商订单的售后还需要按 merchant_id 补齐。
