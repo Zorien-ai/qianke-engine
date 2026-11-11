@@ -33,7 +33,7 @@ def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
-        handlers=[logging.StreamHandler(), logging.FileHandler(ROOT / "logs" / "b_profile_worker.log", encoding="utf-8")],
+        handlers=[logging.StreamHandler()],
     )
     while True:
         try:

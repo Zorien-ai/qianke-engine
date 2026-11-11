@@ -4589,6 +4589,19 @@ def get_chat_user_profile(merchant_id: str, buyer_id: str) -> dict[str, Any] | N
         conn.close()
 
 
+def has_chat_user_profile_vector(profile_id: str) -> bool:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT profile_id FROM b_chat_user_profile_vector WHERE profile_id = ?",
+            (profile_id,),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def list_chat_user_profiles(merchant_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     init()
     where = "status = 'ACTIVE'"

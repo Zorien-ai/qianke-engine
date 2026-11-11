@@ -157,12 +157,28 @@ def extract_profile(
         return None
 
 
-def _embed(profile_text: str) -> list[float] | None:
-    try:
+_LOCAL_EMBEDDER = None
+
+
+def embed_text(text: str) -> list[float]:
+    """远程 BGE 或本地 bge-m3；供画像写入和查询共用。"""
+    from rag_demo.config import MODEL_API_BASE, MODEL_PATH
+
+    if MODEL_API_BASE:
         from rag_demo.retrieval.remote_models import RemoteEmbedding
 
-        vector = RemoteEmbedding().encode(profile_text)
-        return [float(x) for x in vector]
+        return [float(x) for x in RemoteEmbedding().encode(text)]
+    global _LOCAL_EMBEDDER
+    if _LOCAL_EMBEDDER is None:
+        from sentence_transformers import SentenceTransformer
+
+        _LOCAL_EMBEDDER = SentenceTransformer(MODEL_PATH)
+    return [float(x) for x in _LOCAL_EMBEDDER.encode(text)]
+
+
+def _embed(profile_text: str) -> list[float] | None:
+    try:
+        return embed_text(profile_text)
     except Exception:  # noqa: BLE001 - embedding 失败仍可保存画像正文
         logger.warning("B 端画像 embedding 失败", exc_info=True)
         return None
@@ -185,6 +201,23 @@ def extract_for_owner(
         return {"owner_id": owner_id, "ok": False, "reason": "NOT_IDLE"}
     existing = store.get_chat_user_profile(STORE_MERCHANT_ID, owner_id)
     if existing and int(existing.get("source_message_count") or 0) >= len(messages):
+        # 老画像或 embedding 失败时，空闲扫描顺手补向量，不改画像内容。
+        if not store.has_chat_user_profile_vector(str(existing["profile_id"])):
+            text = str(existing.get("profile_text") or "")
+            embedding = (embedder or _embed)(text) if text else None
+            if embedding:
+                store.upsert_chat_user_profile(
+                    STORE_MERCHANT_ID,
+                    owner_id,
+                    profile=existing.get("profile") or {},
+                    profile_text=text,
+                    confidence=float(existing.get("confidence") or 0),
+                    source_message_count=int(existing.get("source_message_count") or 0),
+                    source_session_ids=existing.get("source_session_ids") or [],
+                    last_message_at=existing.get("last_message_at"),
+                    embedding=embedding,
+                )
+                return {"owner_id": owner_id, "ok": True, "reason": "VECTOR_BACKFILL"}
         return {"owner_id": owner_id, "ok": False, "reason": "NO_NEW_MESSAGES"}
     profile = extract_profile(owner_id, messages, llm=llm)
     if profile is None:

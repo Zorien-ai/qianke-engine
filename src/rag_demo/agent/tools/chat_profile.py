@@ -103,10 +103,9 @@ def search_chat_user_profiles(
         scope = _merchant_scope(merchant_id)
         embedding = None
         try:
-            from rag_demo.retrieval.remote_models import RemoteEmbedding
+            from rag_demo.c_end.chat_profile import embed_text
 
-            vector = RemoteEmbedding().encode(str(query))
-            embedding = [float(x) for x in vector]
+            embedding = embed_text(str(query))
         except Exception:  # noqa: BLE001 - 无 embedding 时退回文本匹配
             embedding = None
         rows = store.search_chat_user_profiles(scope, str(query), embedding, limit=limit)
