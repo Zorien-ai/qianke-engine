@@ -392,6 +392,16 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_tenant (
   "created_at" TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_store_friend (
+  "merchant_id" TEXT NOT NULL,
+  "friend_id" TEXT NOT NULL UNIQUE,
+  "created_at" TEXT NOT NULL,
+  PRIMARY KEY ("merchant_id", "friend_id")
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_merchant_store_friend_merchant
+    ON __SCHEMA__.c_merchant_store_friend ("merchant_id");
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_member (
   "account_id" INTEGER PRIMARY KEY,
   "merchant_id" TEXT NOT NULL,

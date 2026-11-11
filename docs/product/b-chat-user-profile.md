@@ -15,6 +15,16 @@
 UNIQUE(merchant_id, buyer_id)
 ```
 
+店宠 `friend_id` 与商家通过 `c_merchant_store_friend` 绑定：
+
+```text
+merchant_id + friend_id
+store_demo  → m_gear_002
+store_tea   → m_tea_001
+```
+
+同一个 C 用户在不同商家下是不同画像，跨商家不可见。
+
 同一个人在不同商家下是不同画像，跨商家不可见。
 
 表：
@@ -35,7 +45,7 @@ b_chat_user_profile_vector
 ## 抽取流程
 
 ```text
-c_message（store_demo 会话）
+c_message（所有已绑定商家的店宠会话）
 → 扫描最后消息 >= 30 分钟前
 → 消息数 > 上次抽取的消息数
 → LLM 输出结构化 JSON
@@ -86,9 +96,22 @@ DELETE /api/c/admin/chat-profiles/{merchant_id}/{buyer_id}
 
 仅系统管理员；只读列表 + 删除/失效。
 
+## 多商家
+
+扫描器会遍历 `c_merchant_store_friend` 中的所有映射，不要求每个商家都叫 `store_demo`。
+
+管理端绑定：
+
+```text
+GET  /api/c/admin/merchant-store-friends
+POST /api/c/admin/merchant-store-friends
+```
+
+默认只种 `store_demo → m_gear_002`，其它商家需要显式绑定。
+
 ## 已知限制
 
-- 当前店宠会话固定 `store_demo` / `m_gear_002`；多商家实时接入时需从会话绑定解析 merchant_id。
+- 店宠 friend_id 必须在 C 端 `c_friend` 中存在，且通过管理端映射到商家；没有真实好友入口时只能在测试/运营侧预置。
 - 图片、语音消息不进入画像抽取。
 - LLM 抽取失败时不写入，不阻塞后续任务。
 - embedding 使用远程 BGE-M3；失败时画像正文仍保存，语义搜索退回文本匹配。

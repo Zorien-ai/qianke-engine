@@ -1,0 +1,20 @@
+[Unit]
+Description=Qianke B-end chat user profile idle scanner
+After=network.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/qianke
+Environment=PYTHONIOENCODING=utf-8
+Environment=QIANKE_CEND_BACKEND=postgres
+Environment=QIANKE_CONTROL_BACKEND=postgres
+Environment=QIANKE_CONTROL_PG_SCHEMA=qianke_control
+ExecStart=/opt/qianke/.venv/bin/python scripts/b_profile_worker.py --interval 60
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/qianke/logs/b_profile_worker.log
+StandardError=append:/opt/qianke/logs/b_profile_worker.log
+
+[Install]
+WantedBy=multi-user.target

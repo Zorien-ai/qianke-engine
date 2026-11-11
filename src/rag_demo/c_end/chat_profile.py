@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 STORE_FRIEND_ID = "store_demo"
 STORE_MERCHANT_ID = store_agent.STORE_MERCHANT_ID
+DEFAULT_STORE_FRIEND_ID = STORE_FRIEND_ID
+DEFAULT_MERCHANT_ID = STORE_MERCHANT_ID
 IDLE_MINUTES = 30
 PROFILE_MAX_MESSAGES = 200
 _PII_RE = re.compile(
@@ -184,22 +186,75 @@ def _embed(profile_text: str) -> list[float] | None:
         return None
 
 
+def resolve_scope(
+    *,
+    friend_id: str | None = None,
+    merchant_id: str | None = None,
+) -> dict[str, Any] | None:
+    """把店宠 friend_id 或商家映射成 (merchant_id, friend_id)。"""
+    mappings = store.list_store_friend_mappings()
+    if friend_id:
+        for mapping in mappings:
+            if str(mapping.get("friend_id")) == str(friend_id):
+                if merchant_id and str(mapping.get("merchant_id")) != str(merchant_id):
+                    return None
+                return mapping
+        return None
+    if merchant_id:
+        for mapping in mappings:
+            if str(mapping.get("merchant_id")) == str(merchant_id):
+                return mapping
+        return None
+    # 兼容旧调用：没有显式 scope 时使用默认店宠。
+    for mapping in mappings:
+        if str(mapping.get("friend_id")) == DEFAULT_STORE_FRIEND_ID:
+            return mapping
+    if any(str(item.get("merchant_id")) == DEFAULT_MERCHANT_ID for item in mappings):
+        return {"merchant_id": DEFAULT_MERCHANT_ID, "friend_id": DEFAULT_STORE_FRIEND_ID}
+    return None
+
+
 def extract_for_owner(
     owner_id: str,
     *,
+    friend_id: str | None = None,
+    merchant_id: str | None = None,
     now: datetime | None = None,
     llm: ProfileLLM | None = None,
     embedder: ProfileEmbedder | None = None,
 ) -> dict[str, Any]:
+    scope = resolve_scope(friend_id=friend_id, merchant_id=merchant_id)
+    if scope is None:
+        return {
+            "owner_id": owner_id,
+            "ok": False,
+            "reason": "NO_MERCHANT",
+            "friend_id": friend_id or "",
+            "merchant_id": merchant_id or "",
+        }
+    resolved_merchant = str(scope["merchant_id"])
+    resolved_friend = str(scope["friend_id"])
     current = now or datetime.now(timezone.utc)
     cutoff = (current - timedelta(minutes=IDLE_MINUTES)).isoformat()
-    messages = social.get_messages(owner_id, STORE_FRIEND_ID, limit=PROFILE_MAX_MESSAGES)
+    messages = social.get_messages(owner_id, resolved_friend, limit=PROFILE_MAX_MESSAGES)
     if not messages:
-        return {"owner_id": owner_id, "ok": False, "reason": "NO_MESSAGES"}
+        return {
+            "owner_id": owner_id,
+            "ok": False,
+            "reason": "NO_MESSAGES",
+            "friend_id": resolved_friend,
+            "merchant_id": resolved_merchant,
+        }
     last_at = str(messages[-1].get("created_at") or "")
     if last_at > cutoff:
-        return {"owner_id": owner_id, "ok": False, "reason": "NOT_IDLE"}
-    existing = store.get_chat_user_profile(STORE_MERCHANT_ID, owner_id)
+        return {
+            "owner_id": owner_id,
+            "ok": False,
+            "reason": "NOT_IDLE",
+            "friend_id": resolved_friend,
+            "merchant_id": resolved_merchant,
+        }
+    existing = store.get_chat_user_profile(resolved_merchant, owner_id)
     if existing and int(existing.get("source_message_count") or 0) >= len(messages):
         # 老画像或 embedding 失败时，空闲扫描顺手补向量，不改画像内容。
         if not store.has_chat_user_profile_vector(str(existing["profile_id"])):
@@ -207,7 +262,7 @@ def extract_for_owner(
             embedding = (embedder or _embed)(text) if text else None
             if embedding:
                 store.upsert_chat_user_profile(
-                    STORE_MERCHANT_ID,
+                    resolved_merchant,
                     owner_id,
                     profile=existing.get("profile") or {},
                     profile_text=text,
@@ -217,15 +272,33 @@ def extract_for_owner(
                     last_message_at=existing.get("last_message_at"),
                     embedding=embedding,
                 )
-                return {"owner_id": owner_id, "ok": True, "reason": "VECTOR_BACKFILL"}
-        return {"owner_id": owner_id, "ok": False, "reason": "NO_NEW_MESSAGES"}
+                return {
+                    "owner_id": owner_id,
+                    "ok": True,
+                    "reason": "VECTOR_BACKFILL",
+                    "friend_id": resolved_friend,
+                    "merchant_id": resolved_merchant,
+                }
+        return {
+            "owner_id": owner_id,
+            "ok": False,
+            "reason": "NO_NEW_MESSAGES",
+            "friend_id": resolved_friend,
+            "merchant_id": resolved_merchant,
+        }
     profile = extract_profile(owner_id, messages, llm=llm)
     if profile is None:
-        return {"owner_id": owner_id, "ok": False, "reason": "EXTRACT_EMPTY"}
+        return {
+            "owner_id": owner_id,
+            "ok": False,
+            "reason": "EXTRACT_EMPTY",
+            "friend_id": resolved_friend,
+            "merchant_id": resolved_merchant,
+        }
     text = profile_to_text(profile)
     embedding = (embedder or _embed)(text) if text else None
     saved = store.upsert_chat_user_profile(
-        STORE_MERCHANT_ID,
+        resolved_merchant,
         owner_id,
         profile=profile,
         profile_text=text,
@@ -235,7 +308,13 @@ def extract_for_owner(
         last_message_at=last_at,
         embedding=embedding,
     )
-    return {"owner_id": owner_id, "ok": True, "profile": saved}
+    return {
+        "owner_id": owner_id,
+        "ok": True,
+        "friend_id": resolved_friend,
+        "merchant_id": resolved_merchant,
+        "profile": saved,
+    }
 
 
 def run_idle_profiles(
@@ -247,14 +326,31 @@ def run_idle_profiles(
 ) -> dict[str, Any]:
     current = now or datetime.now(timezone.utc)
     cutoff = (current - timedelta(minutes=IDLE_MINUTES)).isoformat()
-    owners = social.list_idle_store_owners(cutoff, STORE_FRIEND_ID, limit=limit)
-    results = [
-        extract_for_owner(owner, now=current, llm=llm, embedder=embedder)
-        for owner in owners
-    ]
+    mappings = store.list_store_friend_mappings()
+    if not mappings:
+        mappings = [{"merchant_id": DEFAULT_MERCHANT_ID, "friend_id": DEFAULT_STORE_FRIEND_ID}]
+    results: list[dict[str, Any]] = []
+    checked = 0
+    for mapping in mappings:
+        friend_id = str(mapping.get("friend_id") or "")
+        merchant_id = str(mapping.get("merchant_id") or "")
+        owners = social.list_idle_store_owners(cutoff, friend_id, limit=limit)
+        checked += len(owners)
+        results.extend(
+            extract_for_owner(
+                owner,
+                friend_id=friend_id,
+                merchant_id=merchant_id,
+                now=current,
+                llm=llm,
+                embedder=embedder,
+            )
+            for owner in owners
+        )
     return {
-        "checked": len(owners),
+        "checked": checked,
         "ok": sum(1 for item in results if item.get("ok")),
         "skipped": sum(1 for item in results if not item.get("ok")),
+        "merchants": len({item.get("merchant_id") for item in results if item.get("merchant_id")}),
         "results": results,
     }

@@ -19,13 +19,16 @@ def c_store(tmp_path, monkeypatch):
     return store
 
 
-def _seed_conversation(owner_id: str = "buyer_1"):
-    social.send_message(owner_id, "store_demo", "我想找一双通勤跑鞋，预算 500 元")
-    social.send_message(owner_id, "store_demo", "不要推荐太重的")
+def _seed_conversation(owner_id: str = "buyer_1", friend_id: str = "store_demo"):
+    social.send_message(owner_id, friend_id, "我想找一双通勤跑鞋，预算 500 元")
+    social.send_message(owner_id, friend_id, "不要推荐太重的")
     conn = store._connect()
     try:
         old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        conn.execute("UPDATE c_message SET created_at = ? WHERE owner_id = ?", (old, owner_id))
+        conn.execute(
+            "UPDATE c_message SET created_at = ? WHERE owner_id = ? AND friend_id = ?",
+            (old, owner_id, friend_id),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -143,8 +146,73 @@ def test_profile_search_tool_returns_summary_only(c_store, monkeypatch):
         "current_account",
         lambda: {"id": 1, "status": "active", "role": "cs", "is_system_admin": False},
     )
+    # 测试不加载本地 BGE-M3，避免测试进程被模型初始化拖住。
+    monkeypatch.setattr(chat_profile, "embed_text", lambda text: None)
     result = search_chat_user_profiles.invoke({"query": "通勤跑鞋", "limit": 5})
     assert result["ok"] is True
     assert result["items"]
     assert result["items"][0]["buyer_id"] == "buyer_1"
     assert "summary" in result["items"][0]
+
+
+def test_merchant_friend_mapping_scopes_profiles(c_store):
+    # 第二个商家的店宠会话
+    conn = c_store._connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_friend(owner_id, friend_id, name, kind, note, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("buyer_1", "store_tea", "山雾茶业", "merchant", "茶叶店宠", c_store._now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    c_store.bind_store_friend("m_tea_001", "store_tea")
+    _seed_conversation("buyer_1", "store_tea")
+
+    result = chat_profile.extract_for_owner(
+        "buyer_1",
+        friend_id="store_tea",
+        llm=_fake_profile_llm,
+        embedder=lambda text: [0.1] * 1024,
+    )
+    assert result["ok"] is True
+    assert result["merchant_id"] == "m_tea_001"
+    assert store.get_chat_user_profile("m_tea_001", "buyer_1") is not None
+    assert store.get_chat_user_profile(chat_profile.STORE_MERCHANT_ID, "buyer_1") is None
+
+    # 同一买家在另一个商家是另一份画像。
+    _seed_conversation("buyer_1", "store_demo")
+    result2 = chat_profile.extract_for_owner(
+        "buyer_1",
+        llm=_fake_profile_llm,
+        embedder=lambda text: [0.1] * 1024,
+    )
+    assert result2["ok"] is True
+    assert result2["merchant_id"] == chat_profile.STORE_MERCHANT_ID
+    assert store.get_chat_user_profile("m_tea_001", "buyer_1") is not None
+    assert store.get_chat_user_profile(chat_profile.STORE_MERCHANT_ID, "buyer_1") is not None
+
+
+def test_idle_scanner_covers_all_merchant_mappings(c_store):
+    conn = c_store._connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_friend(owner_id, friend_id, name, kind, note, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("buyer_2", "store_tea", "山雾茶业", "merchant", "茶叶店宠", c_store._now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    c_store.bind_store_friend("m_tea_001", "store_tea")
+    _seed_conversation("buyer_1", "store_demo")
+    _seed_conversation("buyer_2", "store_tea")
+
+    result = chat_profile.run_idle_profiles(
+        llm=_fake_profile_llm,
+        embedder=lambda text: [0.1] * 1024,
+    )
+    assert result["checked"] >= 2
+    assert store.get_chat_user_profile(chat_profile.STORE_MERCHANT_ID, "buyer_1") is not None
+    assert store.get_chat_user_profile("m_tea_001", "buyer_2") is not None

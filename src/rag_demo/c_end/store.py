@@ -315,6 +315,26 @@ def _ensure_pg_schema() -> None:
     finally:
         repo.close()
     _CEND_PG_INITIALIZED_SCHEMA = schema
+    # 首次启动补默认店宠映射；schema 保持纯结构，契约测试仍能看到空表。
+    try:
+        from rag_demo.control.pg_compat import connect as pg_connect
+        conn = pg_connect()
+        try:
+            row = conn.execute(
+                "SELECT 1 AS ok FROM c_merchant_store_friend WHERE friend_id = ?",
+                ("store_demo",),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO c_merchant_store_friend(merchant_id, friend_id, created_at) "
+                    "VALUES (?, ?, ?)",
+                    ("m_gear_002", "store_demo", _now()),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - 启动补种失败不阻断控制面
+        pass
 
 
 def _connect() -> sqlite3.Connection:
@@ -618,6 +638,16 @@ CREATE TABLE IF NOT EXISTS c_merchant_member (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_merchant_store_friend (
+    merchant_id TEXT NOT NULL,
+    friend_id   TEXT NOT NULL UNIQUE,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (merchant_id, friend_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_merchant_store_friend_merchant
+    ON c_merchant_store_friend (merchant_id);
+
 CREATE TABLE IF NOT EXISTS c_merchant_tenant (
     merchant_id TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
@@ -777,6 +807,15 @@ def init() -> None:
                         ("m_gear_002", "山野户外旗舰店", _now()),
                         ("m_tea_001", "山雾茶业", _now()),
                     ),
+                )
+            mapping_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM c_merchant_store_friend"
+            ).fetchone()["n"]
+            if mapping_count == 0:
+                conn.execute(
+                    "INSERT INTO c_merchant_store_friend(merchant_id, friend_id, created_at) "
+                    "VALUES (?, ?, ?)",
+                    ("m_gear_002", "store_demo", _now()),
                 )
             # 伙伴表轻量迁移：老库补 user_nickname 列，并把历史默认名「小伴」迁到「小鱼」。
             companion_columns = {
@@ -4681,6 +4720,73 @@ def search_chat_user_profiles(
                 item["distance"] = float(item["distance"])
             result.append(item)
         return result
+    finally:
+        conn.close()
+
+# ---------------------------------------------------------------------------
+# 商家店宠会话映射：一个商家可以有一个店宠 friend_id
+# ---------------------------------------------------------------------------
+
+def list_store_friend_mappings() -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT f.friend_id, f.merchant_id, t.name AS merchant_name "
+            "FROM c_merchant_store_friend f "
+            "LEFT JOIN c_merchant_tenant t ON t.merchant_id = f.merchant_id "
+            "ORDER BY f.merchant_id, f.friend_id"
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def merchant_for_store_friend(friend_id: str) -> str | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT merchant_id FROM c_merchant_store_friend WHERE friend_id = ?",
+            (str(friend_id),),
+        ).fetchone()
+        return str(row["merchant_id"]) if row is not None else None
+    finally:
+        conn.close()
+
+
+def bind_store_friend(merchant_id: str, friend_id: str) -> dict[str, Any]:
+    """绑定店宠会话到商家；friend_id 全局唯一。"""
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        tenant = conn.execute(
+            "SELECT merchant_id FROM c_merchant_tenant WHERE merchant_id = ?",
+            (str(merchant_id),),
+        ).fetchone()
+        if tenant is None:
+            raise CStoreError("MERCHANT_NOT_FOUND", "商家不存在")
+        existing = conn.execute(
+            "SELECT merchant_id FROM c_merchant_store_friend WHERE friend_id = ?",
+            (str(friend_id),),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO c_merchant_store_friend(merchant_id, friend_id, created_at) "
+                "VALUES (?, ?, ?)",
+                (str(merchant_id), str(friend_id), now),
+            )
+        else:
+            conn.execute(
+                "UPDATE c_merchant_store_friend SET merchant_id = ? WHERE friend_id = ?",
+                (str(merchant_id), str(friend_id)),
+            )
+        conn.commit()
+        return {"merchant_id": str(merchant_id), "friend_id": str(friend_id)}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

@@ -120,6 +120,11 @@ class DiaryPatchIn(BaseModel):
     enabled: bool
 
 
+class MerchantStoreFriendIn(BaseModel):
+    merchant_id: str = Field(..., min_length=1, max_length=80)
+    friend_id: str = Field(..., min_length=1, max_length=80)
+
+
 class CompanionPatchIn(BaseModel):
     name: str | None = Field(default=None, max_length=12)
     user_nickname: str | None = Field(default=None, max_length=12)
@@ -731,6 +736,25 @@ def list_mentions(unread_only: bool = False, limit: int = 50) -> dict:
 def read_mentions() -> dict:
     buyer_id, _ = _buyer()
     return {"read": store.mark_all_mentions_read(buyer_id)}
+
+
+@router.get("/admin/merchant-store-friends")
+def admin_merchant_store_friends() -> dict:
+    """管理端：查看店宠会话与商家的绑定。"""
+    _require_admin()
+    mappings = store.list_store_friend_mappings()
+    return {"items": mappings, "count": len(mappings)}
+
+
+@router.post("/admin/merchant-store-friends")
+def admin_bind_merchant_store_friend(req: MerchantStoreFriendIn) -> dict:
+    """管理端：把一个店宠 friend_id 绑定到真实商家。"""
+    _require_admin()
+    try:
+        mapping = store.bind_store_friend(req.merchant_id, req.friend_id)
+    except store.CStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"binding": mapping}
 
 
 @router.get("/admin/chat-profiles")
