@@ -23,6 +23,7 @@ import CSocial from "./views/CSocial.vue";
 import COrders from "./views/COrders.vue";
 import CApp from "./views/CApp.vue";
 import CAdminAudit from "./views/CAdminAudit.vue";
+import ChatProfiles from "./views/ChatProfiles.vue";
 
 /**
  * 用 hash 路由：后端把 web/dist 静态挂到 /v2/，没有服务端 fallback，
@@ -50,6 +51,7 @@ const routes = [
   { path: "/c/orders", name: "c-orders", component: COrders, meta: { title: "我的订单" } },
   { path: "/c/app", name: "c-app", component: CApp, meta: { title: "千客 · C 端", standalone: true } },
   { path: "/admin/c-end", name: "admin-c-end", component: CAdminAudit, meta: { title: "C 端交易审计" } },
+  { path: "/admin/chat-profiles", name: "admin-chat-profiles", component: ChatProfiles, meta: { title: "会话用户画像" } },
   { path: "/kb", name: "kb", component: Kb, meta: { title: "知识库" } },
   { path: "/kb/profiles", name: "kb-profiles", component: KbProfiles, meta: { title: "用户画像" } },
   { path: "/kb/docs", name: "kb-docs", component: KbDocs, meta: { title: "文档管理" } },
@@ -115,6 +117,10 @@ router.beforeEach(async (to) => {
   }
   if (to.name === "monitor-admin" && !(store.account && store.account.is_system_admin)) {
     toast("只有系统管理员可以访问平台监控", "error");
+    return { name: "dashboard" };
+  }
+  if (to.name === "admin-chat-profiles" && !(store.account && store.account.is_system_admin)) {
+    toast("只有系统管理员可以查看全部会话画像", "error");
     return { name: "dashboard" };
   }
   return true;

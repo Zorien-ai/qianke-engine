@@ -1294,8 +1294,26 @@ def agent_run(req: AgentRunIn) -> dict:
         raise HTTPException(status_code=400, detail="需求太长了（超过 500 字），请精简后再试")
 
     account = _require_login()
-    dataset = _agent_dataset(account)
+    try:
+        dataset = _agent_dataset(account)
+    except HTTPException:
+        # B 商家账号通常没有分析数据集；小千只开放画像查询 Tool，使用默认调试库承载 Graph 上下文。
+        try:
+            from rag_demo.c_end import store as c_store
+
+            merchant = c_store.get_merchant_member(int(account["id"]))
+        except Exception:  # noqa: BLE001
+            merchant = None
+        if merchant is None:
+            raise
+        dataset = os.environ.get("QIANKE_B_PROFILE_AGENT_DATASET", "test")
     persona_prompt, _identity = _b_persona_prompt(account, "agent")
+    try:
+        from rag_demo.c_end import store as c_store
+
+        merchant_member = c_store.get_merchant_member(int(account["id"]))
+    except Exception:  # noqa: BLE001
+        merchant_member = None
     if not _tenant_ready(dataset):
         raise HTTPException(
             status_code=403,
@@ -1318,6 +1336,12 @@ def agent_run(req: AgentRunIn) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     allowed_tools = ToolPolicy.for_account(account).allowed_tools(account)
+    if merchant_member is not None:
+        # 商家操作者只允许画像查询，不允许在平台数据空间执行 SQL/RAG。
+        allowed_tools = tuple(
+            name for name in ("get_chat_user_profile", "search_chat_user_profiles")
+            if name in allowed_tools
+        )
     if not allowed_tools:
         raise HTTPException(status_code=403, detail="当前账号没有可用的 Agent Tool")
 

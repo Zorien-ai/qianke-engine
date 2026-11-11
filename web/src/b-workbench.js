@@ -12,6 +12,7 @@ const VIEWS = [
   { key: "orders", label: "订单" },
   { key: "after-sales", label: "售后" },
   { key: "products", label: "商品" },
+  { key: "chat-profiles", label: "用户画像" },
   { key: "superagent", label: "Super-agent" },
   { key: "policy", label: "动作策略" },
   { key: "audit", label: "执行审计" },
@@ -106,6 +107,8 @@ const state = {
   afterSalesLoaded: false,
   products: [],
   productsLoaded: false,
+  chatProfiles: [],
+  chatProfilesLoaded: false,
   productFilter: "all",
   productSummary: null,
   inventoryAlerts: [],
@@ -495,6 +498,24 @@ async function dispatchInventoryAlerts() {
   }
 }
 
+async function loadChatProfiles() {
+  state.loading = true;
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/b/workbench/chat-profiles?limit=100");
+    state.chatProfiles = collectionFrom(data, ["profiles"]);
+    state.chatProfilesLoaded = true;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    showToast(state.error, "error");
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
 async function loadPolicy() {
   state.loading = true;
   state.error = "";
@@ -631,6 +652,9 @@ async function ensureViewData(view = state.view) {
   if (view === "audit") {
     if (!state.auditLoaded) await loadAudit();
   }
+  if (view === "chat-profiles") {
+    if (!state.chatProfilesLoaded) await loadChatProfiles();
+  }
 }
 
 async function switchView(view) {
@@ -657,6 +681,7 @@ async function refreshCurrent() {
   else if (state.view === "superagent") await loadWorkItems();
   else if (state.view === "policy") await loadPolicy();
   else if (state.view === "audit") await loadAudit();
+  else if (state.view === "chat-profiles") await loadChatProfiles();
   else await loadProducts();
 }
 
@@ -1838,6 +1863,48 @@ function afterSalesView() {
   </section>`;
 }
 
+function chatProfilesView() {
+  const body = state.loading && !state.chatProfiles.length
+    ? skeletonMarkup()
+    : state.chatProfiles.length
+      ? `<div class="b-list">${state.chatProfiles.map((profile) => {
+          const summary = profile.profile_text || "暂无摘要";
+          const json = JSON.stringify(profile.profile || {}, null, 2);
+          return `<article class="b-card b-chat-profile-card">
+            <div class="b-card-head">
+              <div class="b-card-title">
+                <strong>${escapeHtml(text(profile.buyer_id, "买家"))}</strong>
+                <code class="b-mono">${escapeHtml(text(profile.merchant_id))}</code>
+              </div>
+              <span class="b-badge is-info">置信度 ${Math.round(Number(profile.confidence || 0) * 100)}%</span>
+            </div>
+            <p class="b-chat-profile-summary">${escapeHtml(summary)}</p>
+            <dl class="b-meta">
+              <div><dt>版本</dt><dd>${escapeHtml(profile.version)}</dd></div>
+              <div><dt>来源消息</dt><dd>${escapeHtml(profile.source_message_count)}</dd></div>
+              <div><dt>更新时间</dt><dd>${escapeHtml(timeText(profile.extracted_at))}</dd></div>
+            </dl>
+            <details class="b-chat-profile-json">
+              <summary>展开 JSON</summary>
+              <pre>${escapeHtml(json)}</pre>
+            </details>
+          </article>`;
+        }).join("")}</div>`
+      : emptyMarkup("还没有会话画像。用户在店宠会话中聊过，且 30 分钟无新消息后会自动生成。");
+  return `<section class="b-view" aria-label="用户画像">
+    <div class="b-view-head">
+      <div>
+        <h1>用户画像</h1>
+        <p class="b-muted">只读 · 当前商家 ${state.chatProfiles.length} 个会话画像 · 摘要与 JSON 均来自明确对话</p>
+      </div>
+      <div class="b-view-tools">
+        <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
+      </div>
+    </div>
+    ${body}
+  </section>`;
+}
+
 function productsView() {
   const summary = state.productSummary || {};
   const lowProducts = state.products.filter((product) => product.low_stock);
@@ -2204,7 +2271,9 @@ function shellMarkup() {
             ? policyView()
             : activeView.key === "audit"
               ? auditView()
-              : productsView();
+              : activeView.key === "chat-profiles"
+                ? chatProfilesView()
+                : productsView();
   const merchantName = state.me?.name || "商家";
   const merchantId = state.me?.id || "";
   return `<div class="b-shell">

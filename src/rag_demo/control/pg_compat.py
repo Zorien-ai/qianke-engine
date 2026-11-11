@@ -1,4 +1,4 @@
-"""SQLite 风格连接兼容层：让 superagent/store.py 在 PostgreSQL 后端运行。
+﻿"""SQLite 风格连接兼容层：让 superagent/store.py 在 PostgreSQL 后端运行。
 
 只覆盖控制面 sa_* 使用的 SQL 子集：
 - ? → %s
@@ -72,7 +72,7 @@ class PGConnection:
         )
         self._conn.autocommit = False
         with self._conn.cursor() as cur:
-            cur.execute(f'SET search_path TO "{self.schema}"')
+            cur.execute(f'SET search_path TO "{self.schema}", public')
         self._conn.commit()
 
     def execute(self, sql: str, params: tuple | list = ()) -> PGCursor:
@@ -99,3 +99,4 @@ class PGConnection:
 
 def connect() -> PGConnection:
     return PGConnection()
+

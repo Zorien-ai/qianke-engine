@@ -67,6 +67,8 @@ const navItems = computed(() => {
     items.push({ to: "/admin/monitor", key: "adminMonitor", label: "平台监控", icon: ICONS.monitor });
   if (store.account && store.account.is_system_admin)
     items.push({ to: "/admin/c-end", key: "adminCEnd", label: "C 端审计", icon: ICONS.orders });
+  if (store.account && store.account.is_system_admin)
+    items.push({ to: "/admin/chat-profiles", key: "adminChatProfiles", label: "会话画像", icon: ICONS.agent });
   if (hasCap("ops"))
     items.push({ to: "/settings", key: "settings", label: "权限配置", icon: ICONS.settings });
   return items;

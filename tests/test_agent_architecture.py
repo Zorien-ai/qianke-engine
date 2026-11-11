@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Agent 架构、Tool Contract 与 LangGraph 路由单测（不调真实 LLM / 数据库）。"""
 from decimal import Decimal
 
@@ -36,6 +36,8 @@ def test_registry_exposes_tools_and_json_schemas():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "get_chat_user_profile",
+        "search_chat_user_profiles",
     ]
     schemas = get_tool_schemas()
     assert set(schemas) == {
@@ -43,6 +45,8 @@ def test_registry_exposes_tools_and_json_schemas():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "get_chat_user_profile",
+        "search_chat_user_profiles",
     }
     assert schemas["calculator"]["properties"]["expression"]["type"] == "string"
     assert schemas["rag_search"]["properties"]["top_k"]["default"] == 5
@@ -52,6 +56,8 @@ def test_registry_exposes_tools_and_json_schemas():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "get_chat_user_profile",
+        "search_chat_user_profiles",
     }
 
 
@@ -380,4 +386,5 @@ def test_run_agent_rejects_unallowed_tool(monkeypatch):
     assert result["status"] == AgentStatus.TOOL_NOT_ALLOWED.value
     assert "未授权" in result["final_answer"]
     assert result["tool_call_count"] == 0
+
 

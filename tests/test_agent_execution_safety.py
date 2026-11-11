@@ -224,6 +224,8 @@ def test_policy_denies_demo_and_disabled_accounts():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "get_chat_user_profile",
+        "search_chat_user_profiles",
     )
 
 
@@ -237,8 +239,10 @@ def test_policy_role_matrix_for_b_tools():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "get_chat_user_profile",
+        "search_chat_user_profiles",
     )
-    assert ToolPolicy.for_account(cs).allowed_tools(cs) == ("rag_search", "calculator")
+    assert ToolPolicy.for_account(cs).allowed_tools(cs) == ("rag_search", "calculator", "get_chat_user_profile", "search_chat_user_profiles")
     assert ToolPolicy.for_account(guest).allowed_tools(guest) == ()
 
 

@@ -104,6 +104,7 @@ def action_scope(dataset: str, account: dict[str, Any] | None, request_id: str) 
         "dataset": str(dataset or ""),
         "request_id": str(request_id or ""),
         "is_demo": bool((account or {}).get("is_demo")),
+        "is_system_admin": bool((account or {}).get("is_system_admin")),
     })
     try:
         yield

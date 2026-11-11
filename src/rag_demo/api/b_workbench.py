@@ -284,6 +284,25 @@ def _products_snapshot(merchant_id: str, *, limit: int = 100) -> dict[str, Any]:
         "products": items,
     }
 
+@router.get("/chat-profiles")
+def workbench_chat_profiles(limit: int = 100) -> dict[str, Any]:
+    """B 端：只读当前商家的会话用户画像摘要。"""
+    account = _account()
+    merchant_id = _membership(account)["merchant_id"]
+    profiles = store.list_chat_user_profiles(merchant_id, limit=limit)
+    return {"merchant_id": merchant_id, "profiles": profiles, "count": len(profiles)}
+
+
+@router.get("/chat-profiles/{buyer_id}")
+def workbench_chat_profile(buyer_id: str) -> dict[str, Any]:
+    account = _account()
+    merchant_id = _membership(account)["merchant_id"]
+    profile = store.get_chat_user_profile(merchant_id, buyer_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="画像不存在或不属于当前商家")
+    return {"merchant_id": merchant_id, "profile": profile}
+
+
 @router.get("/orders")
 def workbench_orders(status: str | None = None, limit: int = 100) -> dict[str, Any]:
     account = _account()

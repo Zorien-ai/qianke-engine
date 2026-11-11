@@ -442,6 +442,38 @@ CREATE TABLE IF NOT EXISTS c_companion_diary (
 CREATE INDEX IF NOT EXISTS idx_c_companion_diary_owner
     ON c_companion_diary (owner_id, diary_date DESC);
 
+CREATE TABLE IF NOT EXISTS b_chat_user_profile (
+    profile_id         TEXT PRIMARY KEY,
+    merchant_id        TEXT NOT NULL,
+    buyer_id           TEXT NOT NULL,
+    version            INTEGER NOT NULL DEFAULT 1,
+    profile_json       TEXT NOT NULL,
+    profile_text       TEXT NOT NULL,
+    confidence         REAL NOT NULL DEFAULT 0,
+    source_message_count INTEGER NOT NULL DEFAULT 0,
+    source_session_ids TEXT NOT NULL DEFAULT '[]',
+    last_message_at    TEXT,
+    extracted_at       TEXT NOT NULL,
+    status             TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    UNIQUE (merchant_id, buyer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_chat_user_profile_scope
+    ON b_chat_user_profile (merchant_id, status, extracted_at DESC);
+
+CREATE TABLE IF NOT EXISTS b_chat_user_profile_vector (
+    profile_id  TEXT PRIMARY KEY,
+    merchant_id TEXT NOT NULL,
+    buyer_id    TEXT NOT NULL,
+    embedding   TEXT,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_chat_user_profile_vector_scope
+    ON b_chat_user_profile_vector (merchant_id);
+
 CREATE TABLE IF NOT EXISTS c_companion_rhythm (
     owner_id          TEXT PRIMARY KEY,
     enabled           INTEGER NOT NULL DEFAULT 0,
@@ -4446,3 +4478,196 @@ def mark_inventory_alerts_sent(merchant_id: str, alert_ids: list[str]) -> int:
         return int(cursor.rowcount or 0)
     finally:
         conn.close()
+# ---------------------------------------------------------------------------
+# B 端会话用户画像（C 买家 ↔ 商家店宠/客服）
+# ---------------------------------------------------------------------------
+
+def _chat_profile_payload(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    try:
+        data["profile"] = json.loads(data.get("profile_json") or "{}")
+    except (TypeError, ValueError):
+        data["profile"] = {}
+    try:
+        data["source_session_ids"] = json.loads(data.get("source_session_ids") or "[]")
+    except (TypeError, ValueError):
+        data["source_session_ids"] = []
+    data.pop("profile_json", None)
+    return data
+
+
+def upsert_chat_user_profile(
+    merchant_id: str,
+    buyer_id: str,
+    *,
+    profile: dict[str, Any],
+    profile_text: str,
+    confidence: float = 0.0,
+    source_message_count: int = 0,
+    source_session_ids: list[str] | None = None,
+    last_message_at: str | None = None,
+    embedding: list[float] | None = None,
+) -> dict[str, Any]:
+    """按 merchant + buyer 写最新画像；版本号自增，向量幂等 upsert。"""
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        existing = conn.execute(
+            "SELECT profile_id, version FROM b_chat_user_profile WHERE merchant_id = ? AND buyer_id = ?",
+            (merchant_id, buyer_id),
+        ).fetchone()
+        source_json = json.dumps(source_session_ids or [], ensure_ascii=False)
+        if existing is None:
+            profile_id = f"chatprofile_{uuid.uuid4().hex[:20]}"
+            version = 1
+            conn.execute(
+                "INSERT INTO b_chat_user_profile(profile_id, merchant_id, buyer_id, version, "
+                "profile_json, profile_text, confidence, source_message_count, source_session_ids, "
+                "last_message_at, extracted_at, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)",
+                (
+                    profile_id, merchant_id, buyer_id, version,
+                    json.dumps(profile, ensure_ascii=False), profile_text[:2000],
+                    float(confidence or 0), int(source_message_count or 0), source_json,
+                    last_message_at, now, now, now,
+                ),
+            )
+        else:
+            profile_id = str(existing["profile_id"])
+            version = int(existing["version"] or 1) + 1
+            conn.execute(
+                "UPDATE b_chat_user_profile SET version = ?, profile_json = ?, profile_text = ?, "
+                "confidence = ?, source_message_count = ?, source_session_ids = ?, "
+                "last_message_at = ?, extracted_at = ?, status = 'ACTIVE', updated_at = ? "
+                "WHERE profile_id = ?",
+                (
+                    version, json.dumps(profile, ensure_ascii=False), profile_text[:2000],
+                    float(confidence or 0), int(source_message_count or 0), source_json,
+                    last_message_at, now, now, profile_id,
+                ),
+            )
+        if embedding is not None:
+            vector_text = json.dumps([float(x) for x in embedding])
+            if _cend_pg_enabled():
+                conn.execute(
+                    "INSERT INTO b_chat_user_profile_vector(profile_id, merchant_id, buyer_id, embedding, updated_at) "
+                    "VALUES (?, ?, ?, ?::vector, ?) ON CONFLICT(profile_id) DO UPDATE SET "
+                    "embedding = excluded.embedding, merchant_id = excluded.merchant_id, "
+                    "buyer_id = excluded.buyer_id, updated_at = excluded.updated_at",
+                    (profile_id, merchant_id, buyer_id, vector_text, now),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO b_chat_user_profile_vector(profile_id, merchant_id, buyer_id, embedding, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(profile_id) DO UPDATE SET "
+                    "embedding = excluded.embedding, updated_at = excluded.updated_at",
+                    (profile_id, merchant_id, buyer_id, vector_text, now),
+                )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM b_chat_user_profile WHERE profile_id = ?", (profile_id,)
+        ).fetchone()
+        return _chat_profile_payload(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_chat_user_profile(merchant_id: str, buyer_id: str) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM b_chat_user_profile WHERE merchant_id = ? AND buyer_id = ? AND status = 'ACTIVE'",
+            (merchant_id, buyer_id),
+        ).fetchone()
+        return _chat_profile_payload(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def list_chat_user_profiles(merchant_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    init()
+    where = "status = 'ACTIVE'"
+    params: list[Any] = []
+    if merchant_id:
+        where += " AND merchant_id = ?"
+        params.append(merchant_id)
+    params.append(max(1, min(int(limit), 500)))
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM b_chat_user_profile WHERE {where} ORDER BY extracted_at DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_chat_profile_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def delete_chat_user_profile(merchant_id: str, buyer_id: str) -> bool:
+    init()
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "UPDATE b_chat_user_profile SET status = 'DELETED', updated_at = ? "
+            "WHERE merchant_id = ? AND buyer_id = ? AND status = 'ACTIVE'",
+            (_now(), merchant_id, buyer_id),
+        )
+        conn.execute(
+            "DELETE FROM b_chat_user_profile_vector WHERE merchant_id = ? AND buyer_id = ?",
+            (merchant_id, buyer_id),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0) > 0
+    finally:
+        conn.close()
+
+
+def search_chat_user_profiles(
+    merchant_id: str,
+    query_text: str,
+    query_embedding: list[float] | None,
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """当前商家内语义检索；SQLite 退回文本匹配。"""
+    init()
+    limit = max(1, min(int(limit), 50))
+    conn = _connect()
+    try:
+        if _cend_pg_enabled() and query_embedding:
+            rows = conn.execute(
+                "SELECT p.*, (v.embedding <=> ?::vector) AS distance "
+                "FROM b_chat_user_profile p JOIN b_chat_user_profile_vector v ON v.profile_id = p.profile_id "
+                "WHERE p.merchant_id = ? AND p.status = 'ACTIVE' AND v.embedding IS NOT NULL "
+                "ORDER BY distance ASC LIMIT ?",
+                (json.dumps([float(x) for x in query_embedding]), merchant_id, limit),
+            ).fetchall()
+        else:
+            keyword = str(query_text or "").strip()
+            if keyword:
+                rows = conn.execute(
+                    "SELECT * FROM b_chat_user_profile WHERE merchant_id = ? AND status = 'ACTIVE' "
+                    "AND (profile_text LIKE ? OR profile_json LIKE ?) ORDER BY extracted_at DESC LIMIT ?",
+                    (merchant_id, f"%{keyword[:80]}%", f"%{keyword[:80]}%", limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM b_chat_user_profile WHERE merchant_id = ? AND status = 'ACTIVE' "
+                    "ORDER BY extracted_at DESC LIMIT ?",
+                    (merchant_id, limit),
+                ).fetchall()
+        result = []
+        for row in rows:
+            item = _chat_profile_payload(row)
+            if "distance" in item:
+                item["distance"] = float(item["distance"])
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+

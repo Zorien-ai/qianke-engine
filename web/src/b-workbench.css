@@ -1322,3 +1322,35 @@ code,
 .b-view-tools input[type="date"], .b-view-tools input[type="datetime-local"] { border: 1px solid var(--b-line, #e3ddd2); border-radius: 9px; padding: 7px 8px; font-size: 12px; background: #fff; color: var(--b-ink, #1f1d19); }
 
 .b-audit-policy-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.b-chat-profile-summary {
+  margin: 9px 0 0;
+  color: var(--b-text-2);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.b-chat-profile-json {
+  margin-top: 9px;
+  border-top: 1px dashed var(--b-line);
+  padding-top: 7px;
+}
+
+.b-chat-profile-json summary {
+  cursor: pointer;
+  color: var(--b-muted);
+  font-size: 10px;
+}
+
+.b-chat-profile-json pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 9px;
+  border-radius: 8px;
+  background: var(--b-bg-soft);
+  color: var(--b-text-2);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -733,6 +733,23 @@ def read_mentions() -> dict:
     return {"read": store.mark_all_mentions_read(buyer_id)}
 
 
+@router.get("/admin/chat-profiles")
+def admin_chat_profiles(merchant_id: str | None = None, limit: int = 100) -> dict:
+    """管理端：全量会话用户画像（只读）。"""
+    _require_admin()
+    profiles = store.list_chat_user_profiles(merchant_id, limit=limit)
+    return {"merchant_id": merchant_id or "", "profiles": profiles, "count": len(profiles)}
+
+
+@router.delete("/admin/chat-profiles/{merchant_id}/{buyer_id}")
+def admin_delete_chat_profile(merchant_id: str, buyer_id: str) -> dict:
+    _require_admin()
+    deleted = store.delete_chat_user_profile(merchant_id, buyer_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="画像不存在或已删除")
+    return {"deleted": True, "merchant_id": merchant_id, "buyer_id": buyer_id}
+
+
 @router.get("/admin/reconciliation")
 def admin_reconciliation(limit: int = 200) -> dict:
     """C 订单与商家订单对账（仅平台管理员，只读）。"""

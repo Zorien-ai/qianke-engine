@@ -235,6 +235,22 @@ def _mock_store_reply(content: str) -> tuple[str, bool]:
     return "喵~ 店宠已收到你的问题，当前是 mock 回复，后续接入商家 Agent 后会查商品库和 SOP。", True
 
 
+def list_idle_store_owners(cutoff_iso: str, friend_id: str = "store_demo", limit: int = 200) -> list[str]:
+    """返回最后一条店宠消息早于 cutoff 的买家；用于 30 分钟空闲画像抽取。"""
+    init()
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT owner_id, MAX(created_at) AS last_at FROM c_message "
+            "WHERE friend_id = ? GROUP BY owner_id HAVING MAX(created_at) <= ? "
+            "ORDER BY last_at ASC LIMIT ?",
+            (friend_id, cutoff_iso, max(1, min(int(limit), 1000))),
+        ).fetchall()
+        return [str(row["owner_id"]) for row in rows]
+    finally:
+        conn.close()
+
+
 def send_message(
     owner_id: str,
     friend_id: str,

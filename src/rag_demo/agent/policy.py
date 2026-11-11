@@ -19,6 +19,8 @@ B_AGENT_TOOL_NAMES: tuple[str, ...] = (
     "execute_sql",
     "calculator",
     "prepare_followup_task",
+    "get_chat_user_profile",
+    "search_chat_user_profiles",
 )
 
 _ANALYTICS_ROLES = frozenset({"admin", "ent_admin", "exec", "analyst", "ops"})
@@ -70,5 +72,5 @@ class ToolPolicy:
         if role in _ANALYTICS_ROLES:
             return cls(B_AGENT_TOOL_NAMES)
         if role == _CS_ROLE:
-            return cls(("rag_search", "calculator"))
+            return cls(("rag_search", "calculator", "get_chat_user_profile", "search_chat_user_profiles"))
         return cls(())

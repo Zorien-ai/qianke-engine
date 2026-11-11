@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- 控制面 PostgreSQL schema（由 SQLite schema 生成，P1 兼容阶段）
 -- __SCHEMA__ 由 repository 替换为实际 schema
 CREATE SCHEMA IF NOT EXISTS __SCHEMA__;
@@ -243,6 +245,38 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_diary (
 
 CREATE INDEX IF NOT EXISTS idx_c_companion_diary_owner
     ON __SCHEMA__.c_companion_diary ("owner_id", "diary_date" DESC);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.b_chat_user_profile (
+  "profile_id" TEXT PRIMARY KEY,
+  "merchant_id" TEXT NOT NULL,
+  "buyer_id" TEXT NOT NULL,
+  "version" INTEGER NOT NULL DEFAULT 1,
+  "profile_json" TEXT NOT NULL,
+  "profile_text" TEXT NOT NULL,
+  "confidence" REAL NOT NULL DEFAULT 0,
+  "source_message_count" INTEGER NOT NULL DEFAULT 0,
+  "source_session_ids" TEXT NOT NULL DEFAULT '[]',
+  "last_message_at" TEXT,
+  "extracted_at" TEXT NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+  "created_at" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL,
+  UNIQUE ("merchant_id", "buyer_id")
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_chat_user_profile_scope
+    ON __SCHEMA__.b_chat_user_profile ("merchant_id", "status", "extracted_at" DESC);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.b_chat_user_profile_vector (
+  "profile_id" TEXT PRIMARY KEY,
+  "merchant_id" TEXT NOT NULL,
+  "buyer_id" TEXT NOT NULL,
+  "embedding" vector(1024),
+  "updated_at" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_chat_user_profile_vector_scope
+    ON __SCHEMA__.b_chat_user_profile_vector ("merchant_id");
 
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_rhythm (
   "owner_id" TEXT PRIMARY KEY,
