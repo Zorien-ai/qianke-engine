@@ -17,3 +17,15 @@ This copy is used as a **local prototype / evaluation** for the C-end interactiv
 Before commercial launch, replace the extracted recipes with our own character shapes and
 animation data, or obtain explicit permission from the rights holder. Do not redistribute
 this vendor folder as a standalone asset pack.
+
+## Qianke character profile
+
+`qianke-recipes.json` is the profile used by C App:
+
+- 10 Qianke chat lifecycle states
+- 9 clips
+- warm ink-green + persimmon palette is injected by `CompanionAvatar.vue`
+- the original extracted `grok-recipes.json` is kept only as a reference and is not loaded by the app
+
+The geometry / facial expression basis still comes from the engine prototype. Replace it with
+original shapes before production.

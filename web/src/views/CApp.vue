@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import CompanionAvatar from "../components/CompanionAvatar.vue";
@@ -572,12 +572,125 @@ const statusText = computed(() => {
   }
   return "好友";
 });
+const avatarMenuOpen = ref(false);
+const avatarExpression = ref("");
+const avatarTip = ref("");
+const companionState = ref("idle");
+const topAvatarRef = ref(null);
+const headAvatarRef = ref(null);
+const avatarExpressions = ["happy", "surprised", "sleepy", "squinted", "confused", "neutral"];
+let avatarExpressionIndex = 0;
+let avatarIdleTimer = null;
+let avatarTransientTimer = null;
+let avatarTipTimer = null;
+let avatarExpressionTimer = null;
+
 const avatarState = computed(() => {
-  if (agentBusy.value) return "thinking";
+  if (typing.value || agentBusy.value) return "thinking";
   if (liveDraft.value) return "waiting";
   if (liveOrder.value) return "happy";
-  return "idle";
+  return companionState.value;
 });
+
+function clearTimer(name) {
+  if (name === "idle" && avatarIdleTimer) {
+    clearTimeout(avatarIdleTimer);
+    avatarIdleTimer = null;
+  }
+  if (name === "transient" && avatarTransientTimer) {
+    clearTimeout(avatarTransientTimer);
+    avatarTransientTimer = null;
+  }
+  if (name === "tip" && avatarTipTimer) {
+    clearTimeout(avatarTipTimer);
+    avatarTipTimer = null;
+  }
+  if (name === "expression" && avatarExpressionTimer) {
+    clearTimeout(avatarExpressionTimer);
+    avatarExpressionTimer = null;
+  }
+}
+
+function resetAvatarIdleTimer() {
+  clearTimer("idle");
+  avatarIdleTimer = setTimeout(() => {
+    if (!typing.value && !agentBusy.value && !liveDraft.value) {
+      companionState.value = "sleeping";
+    }
+  }, 90000);
+}
+
+function setCompanionState(state, holdMs = 0) {
+  clearTimer("transient");
+  companionState.value = state;
+  resetAvatarIdleTimer();
+  if (holdMs > 0) {
+    avatarTransientTimer = setTimeout(() => {
+      if (!typing.value && !agentBusy.value && !liveDraft.value) {
+        companionState.value = "idle";
+      }
+    }, holdMs);
+  }
+}
+
+function wakeCompanion() {
+  if (companionState.value === "sleeping") {
+    setCompanionState("waking", 700);
+  } else {
+    resetAvatarIdleTimer();
+  }
+}
+
+function showAvatarTip(text) {
+  clearTimer("tip");
+  avatarTip.value = text;
+  avatarTipTimer = setTimeout(() => {
+    avatarTip.value = "";
+  }, 1800);
+}
+
+function pokeCompanions(kind) {
+  topAvatarRef.value?.poke(kind);
+  headAvatarRef.value?.poke(kind);
+}
+
+function onAvatarPoke() {
+  wakeCompanion();
+  avatarMenuOpen.value = !avatarMenuOpen.value;
+}
+
+function feedCompanion() {
+  wakeCompanion();
+  setCompanionState("fed", 1600);
+  pokeCompanions("bounce");
+  showAvatarTip("小鱼吃饱了");
+  avatarMenuOpen.value = false;
+}
+
+function petCompanion() {
+  wakeCompanion();
+  setCompanionState("petted", 1600);
+  pokeCompanions("nod");
+  showAvatarTip("小鱼蹭了蹭你");
+  avatarMenuOpen.value = false;
+}
+
+function cycleAvatarExpression() {
+  wakeCompanion();
+  avatarExpressionIndex = (avatarExpressionIndex + 1) % avatarExpressions.length;
+  avatarExpression.value = avatarExpressions[avatarExpressionIndex];
+  showAvatarTip("换了个表情");
+  clearTimer("expression");
+  avatarExpressionTimer = setTimeout(() => {
+    avatarExpression.value = "";
+  }, 1800);
+  avatarMenuOpen.value = false;
+}
+
+function onCompanionActivity() {
+  if (companionState.value === "sleeping") wakeCompanion();
+  else resetAvatarIdleTimer();
+}
 
 const threadDotClass = computed(() => {
   if (activeThread.value.kind === "group") {
@@ -694,11 +807,14 @@ function onComposerFocus() {
   composerFocused.value = true;
   syncViewportHeight();
   window.setTimeout(scrollToBottom, 120);
+  wakeCompanion();
+  if (!typing.value && !agentBusy.value) setCompanionState("listening");
 }
 
 function onComposerBlur() {
   composerFocused.value = false;
   closeMention();
+  if (companionState.value === "listening") setCompanionState("idle");
 }
 
 function syncViewportHeight() {
@@ -741,6 +857,7 @@ function updateMention(input) {
 function onComposerInput(event) {
   resizeComposer(event);
   updateMention(event?.target);
+  onCompanionActivity();
 }
 
 function startMention() {
@@ -1413,6 +1530,7 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
       pendingRetry.value = { threadId: activeId.value, text, clientId };
     } finally {
       typing.value = false;
+      if (!agentError.value) setCompanionState("streaming", 1400);
       scrollToBottom();
     }
     return;
@@ -1458,6 +1576,7 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
     pendingRetry.value = { threadId: activeId.value, text, clientId, mode };
   } finally {
     typing.value = false;
+    if (!agentError.value) setCompanionState("streaming", 1400);
     scrollToBottom();
   }
 }
@@ -1473,6 +1592,7 @@ async function confirmLiveOrder() {
     });
     liveOrder.value = result.order;
     liveDraft.value = null;
+    setCompanionState("happy", 2200);
     const replyText = result.order
       ? `订单 ${result.order.order_id} 已创建。可以在订单页查看报价和确认记录。`
       : "订单已确认。";
@@ -1866,6 +1986,9 @@ onMounted(async () => {
   await refreshUnread();
   startUnreadPolling();
   document.addEventListener("visibilitychange", onVisibilityChange);
+  document.addEventListener("pointerdown", onCompanionActivity, { passive: true });
+  document.addEventListener("keydown", onCompanionActivity);
+  resetAvatarIdleTimer();
   syncViewportHeight();
   window.visualViewport?.addEventListener("resize", onViewportResize);
   window.visualViewport?.addEventListener("scroll", onViewportResize);
@@ -1896,6 +2019,12 @@ onBeforeUnmount(() => {
     incomingReadTimer = null;
   }
   document.removeEventListener("visibilitychange", onVisibilityChange);
+  document.removeEventListener("pointerdown", onCompanionActivity);
+  document.removeEventListener("keydown", onCompanionActivity);
+  clearTimer("idle");
+  clearTimer("transient");
+  clearTimer("tip");
+  clearTimer("expression");
   for (const url of avatarPreviewUrls) URL.revokeObjectURL(url);
   avatarPreviewUrls.clear();
   window.visualViewport?.removeEventListener("resize", onViewportResize);
@@ -2042,10 +2171,13 @@ onBeforeUnmount(() => {
             </button>
             <CompanionAvatar
               v-if="!avatarVisible('companion')"
+              ref="topAvatarRef"
               :size="34"
               :state="avatarState"
+              :expression="avatarExpression"
               fallback="小"
               label="戳一下小鱼"
+              @poke="onAvatarPoke"
             />
             <button
               v-else
@@ -2073,10 +2205,13 @@ onBeforeUnmount(() => {
               </button>
               <CompanionAvatar
                 v-if="activeThread.kind === 'companion' && !avatarVisible('companion')"
+                ref="headAvatarRef"
                 :size="40"
                 :state="avatarState"
+                :expression="avatarExpression"
                 fallback="小"
                 label="戳一下小鱼"
+                @poke="onAvatarPoke"
               />
               <button
                 v-else-if="activeThread.kind === 'companion'"
@@ -2114,6 +2249,13 @@ onBeforeUnmount(() => {
                 </svg>
               </button>
             </div>
+            <div v-if="avatarMenuOpen" class="c-avatar-menu-backdrop" @click="avatarMenuOpen = false" />
+            <div v-if="avatarMenuOpen" class="c-avatar-menu" role="menu" aria-label="和小鱼互动" @click.stop>
+              <button type="button" role="menuitem" @click="feedCompanion">喂食</button>
+              <button type="button" role="menuitem" @click="petCompanion">摸摸</button>
+              <button type="button" role="menuitem" @click="cycleAvatarExpression">换表情</button>
+            </div>
+            <div v-if="avatarTip" class="c-avatar-tip" role="status">{{ avatarTip }}</div>
           </header>
 
           <div id="c-app-thread" class="c-thread" aria-live="polite" @scroll="onThreadScroll">
@@ -5043,5 +5185,67 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+
+
+/* ---------- 小鱼互动菜单 ---------- */
+.c-chat-head {
+  position: relative;
+}
+
+.c-avatar-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+
+.c-avatar-menu {
+  position: absolute;
+  z-index: 41;
+  top: 56px;
+  left: 58px;
+  min-width: 108px;
+  padding: 5px;
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  background: var(--c-panel);
+  box-shadow: 0 12px 28px rgba(30, 27, 22, 0.14);
+}
+
+.c-avatar-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.c-avatar-menu button:hover {
+  background: var(--c-accent-soft, #f6e3da);
+  color: var(--c-text);
+}
+
+.c-avatar-tip {
+  position: absolute;
+  z-index: 42;
+  top: 56px;
+  left: 108px;
+  max-width: 140px;
+  padding: 6px 9px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px 10px 10px 2px;
+  background: var(--c-bg-soft);
+  color: var(--c-text-2);
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 </style>
+
 

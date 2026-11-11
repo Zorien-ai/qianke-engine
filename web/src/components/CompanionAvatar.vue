@@ -20,6 +20,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 const props = defineProps({
   size: { type: Number, default: 34 },
   state: { type: String, default: "idle" },
+  expression: { type: String, default: "" },
   follow: { type: Boolean, default: true },
   fallback: { type: String, default: "小" },
   label: { type: String, default: "和小鱼互动" },
@@ -33,7 +34,7 @@ onMounted(async () => {
   try {
     const [player, recipes] = await Promise.all([
       import("../vendor/grokbot/grok-player.js"),
-      import("../vendor/grokbot/grok-recipes.json"),
+      import("../vendor/grokbot/qianke-recipes.json"),
     ]);
     if (cancelled || !host.value) return;
     bot = player.createGrokBot(host.value, {
@@ -43,7 +44,7 @@ onMounted(async () => {
       seed: 7,
       follow: props.follow,
       theme: {
-        ink: [0.12, 0.105, 0.086],
+        ink: [0.14, 0.19, 0.15],
         spot: [0.85, 0.37, 0.23],
         cutout: true,
       },
@@ -61,17 +62,34 @@ watch(
   },
 );
 
+watch(
+  () => props.expression,
+  (value) => {
+    if (value) bot?.setExpression(value);
+  },
+);
+
 onBeforeUnmount(() => {
   cancelled = true;
   bot?.destroy();
   bot = null;
 });
 
-function handlePoke() {
-  bot?.poke("bounce");
+function poke(kind = "bounce") {
+  bot?.poke(kind);
   bot?.blink();
+}
+
+function setExpression(name) {
+  if (name) bot?.setExpression(name);
+}
+
+function handlePoke() {
+  poke("bounce");
   emit("poke");
 }
+
+defineExpose({ poke, setExpression });
 </script>
 
 <style scoped>
@@ -115,5 +133,6 @@ function handlePoke() {
   height: 100%;
 }
 </style>
+
 
 
