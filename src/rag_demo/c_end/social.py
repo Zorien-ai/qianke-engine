@@ -235,6 +235,33 @@ def _mock_store_reply(content: str) -> tuple[str, bool]:
     return "喵~ 店宠已收到你的问题，当前是 mock 回复，后续接入商家 Agent 后会查商品库和 SOP。", True
 
 
+def add_friend(
+    owner_id: str,
+    friend_id: str,
+    name: str,
+    kind: str = "user",
+    note: str = "",
+) -> dict[str, Any]:
+    """把商家店宠加入当前买家的好友列表；重复添加幂等。"""
+    init()
+    conn = store._connect()
+    try:
+        _ensure_friends(conn, owner_id)
+        existing = _friend(conn, owner_id, friend_id)
+        if existing is not None:
+            conn.commit()
+            return existing
+        conn.execute(
+            "INSERT INTO c_friend(owner_id, friend_id, name, kind, note, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (owner_id, friend_id, name, kind, note, store._now()),
+        )
+        conn.commit()
+        return _friend(conn, owner_id, friend_id) or {}
+    finally:
+        conn.close()
+
+
 def list_idle_store_owners(cutoff_iso: str, friend_id: str = "store_demo", limit: int = 200) -> list[str]:
     """返回最后一条店宠消息早于 cutoff 的买家；用于 30 分钟空闲画像抽取。"""
     init()

@@ -54,7 +54,21 @@ sudo journalctl -u qianke-b-profile-worker -f
 
 ## 商家映射
 
-店宠 friend_id 必须绑定真实商家，否则扫描器不会处理：
+店宠 friend_id 必须绑定真实商家，否则扫描器不会处理。
+
+C 端买家入口：
+
+```text
+C 端 -> 消息 -> 好友 -> 发现店宠
+```
+
+管理端页面：
+
+```text
+/v2/#/admin/merchant-store-friends
+```
+
+API：
 
 ```text
 GET  /api/c/admin/merchant-store-friends

@@ -10,6 +10,11 @@ const error = ref("");
 const draft = ref("");
 const sending = ref(false);
 const socketState = ref("offline");
+const showMerchantPicker = ref(false);
+const availableMerchants = ref([]);
+const merchantLoading = ref(false);
+const merchantBusy = ref("");
+const merchantError = ref("");
 let ws = null;
 
 const selectedName = computed(() => selected.value?.name || "选择好友");
@@ -157,6 +162,42 @@ function onKeydown(event) {
   }
 }
 
+async function openMerchantPicker() {
+  showMerchantPicker.value = true;
+  merchantError.value = "";
+  merchantLoading.value = true;
+  try {
+    const data = await getJson("/api/c/merchants/available");
+    availableMerchants.value = Array.isArray(data?.merchants) ? data.merchants : [];
+  } catch (e) {
+    merchantError.value = e?.detail || e?.message || "发现店宠加载失败";
+    availableMerchants.value = [];
+  } finally {
+    merchantLoading.value = false;
+  }
+}
+
+async function addMerchant(merchant) {
+  if (!merchant || merchantBusy.value) return;
+  merchantBusy.value = merchant.merchant_id;
+  merchantError.value = "";
+  try {
+    const data = await postJson("/api/c/friends/merchants", {
+      merchant_id: merchant.merchant_id,
+    });
+    await loadFriends();
+    if (data?.friend?.friend_id) {
+      const found = friends.value.find((item) => item.friend_id === data.friend.friend_id);
+      if (found) await selectFriend(found);
+    }
+    showMerchantPicker.value = false;
+  } catch (e) {
+    merchantError.value = e?.detail || e?.message || "添加店宠失败";
+  } finally {
+    merchantBusy.value = "";
+  }
+}
+
 onMounted(loadFriends);
 onBeforeUnmount(closeSocket);
 </script>
@@ -183,7 +224,10 @@ onBeforeUnmount(closeSocket);
       <aside class="friend-panel" aria-label="好友列表">
         <div class="friend-head">
           <h3>好友</h3>
-          <span>{{ friends.length }}</span>
+          <div class="friend-head-actions">
+            <span>{{ friends.length }}</span>
+            <button type="button" class="discover-btn" @click="openMerchantPicker">发现店宠</button>
+          </div>
         </div>
         <p v-if="loading" class="state-line" role="status">正在加载好友…</p>
         <div v-else class="friend-list">
@@ -259,6 +303,36 @@ onBeforeUnmount(closeSocket);
         </form>
       </section>
     </section>
+
+    <div v-if="showMerchantPicker" class="merchant-picker-backdrop" @click="showMerchantPicker = false">
+      <section class="merchant-picker" role="dialog" aria-modal="true" aria-label="发现店宠" @click.stop>
+        <header>
+          <div>
+            <p class="social-kicker">DISCOVER</p>
+            <h3>发现店宠</h3>
+          </div>
+          <button type="button" class="picker-close" aria-label="关闭" @click="showMerchantPicker = false">×</button>
+        </header>
+        <p v-if="merchantLoading" class="state-line" role="status">正在加载商家…</p>
+        <p v-else-if="merchantError" class="social-error" role="alert">{{ merchantError }}</p>
+        <div v-else class="merchant-list">
+          <article v-for="merchant in availableMerchants" :key="merchant.merchant_id" class="merchant-row">
+            <span class="friend-mark">{{ merchant.name.slice(0, 1) }}</span>
+            <div class="merchant-copy">
+              <strong>{{ merchant.name }}</strong>
+              <small>{{ merchant.note }}</small>
+            </div>
+            <button
+              type="button"
+              class="merchant-add"
+              :disabled="merchant.is_friend || merchantBusy === merchant.merchant_id"
+              @click="addMerchant(merchant)"
+            >{{ merchant.is_friend ? "已添加" : merchantBusy === merchant.merchant_id ? "添加中…" : "添加" }}</button>
+          </article>
+          <p v-if="!availableMerchants.length" class="empty-line">还没有可添加的店宠。</p>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -654,5 +728,130 @@ onBeforeUnmount(closeSocket);
   .social-head {
     flex-direction: column;
   }
+}
+
+
+.friend-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.friend-head-actions span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.discover-btn {
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--primary);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.discover-btn:hover {
+  border-color: var(--primary);
+}
+
+.merchant-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(30, 27, 22, 0.36);
+}
+
+.merchant-picker {
+  width: min(420px, 100%);
+  max-height: min(560px, 82vh);
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 22px 60px rgba(30, 27, 22, 0.24);
+}
+
+.merchant-picker header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.merchant-picker h3 {
+  margin: 0;
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 20px;
+}
+
+.picker-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.merchant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.merchant-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+
+.merchant-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.merchant-copy strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.merchant-copy small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.merchant-add {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fffdf8;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.merchant-add:disabled {
+  border-color: var(--border);
+  background: var(--surface-3);
+  color: var(--muted);
+  cursor: default;
 }
 </style>

@@ -195,3 +195,12 @@ def test_get_messages_clamps_limit(c_store):
     _seed_history(c_store, 5)
     assert len(social.get_messages("buyer_1", "store_demo", limit=0)) == 1
     assert len(social.get_messages("buyer_1", "store_demo", limit=9999)) == 5
+
+
+def test_add_merchant_friend_is_idempotent(c_store):
+    first = social.add_friend("buyer_1", "store_tea", "山雾茶业", "merchant", "店宠")
+    second = social.add_friend("buyer_1", "store_tea", "山雾茶业", "merchant", "店宠")
+    assert first["friend_id"] == "store_tea"
+    assert second["friend_id"] == "store_tea"
+    friends = social.list_friends("buyer_1")
+    assert sum(1 for item in friends if item["friend_id"] == "store_tea") == 1

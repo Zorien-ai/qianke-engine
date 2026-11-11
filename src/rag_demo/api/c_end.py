@@ -125,6 +125,10 @@ class MerchantStoreFriendIn(BaseModel):
     friend_id: str = Field(..., min_length=1, max_length=80)
 
 
+class MerchantFriendIn(BaseModel):
+    merchant_id: str = Field(..., min_length=1, max_length=80)
+
+
 class CompanionPatchIn(BaseModel):
     name: str | None = Field(default=None, max_length=12)
     user_nickname: str | None = Field(default=None, max_length=12)
@@ -992,6 +996,48 @@ def cancel_order(order_id: str, req: CancelOrderIn | None = None) -> dict:
 def list_friends() -> dict:
     buyer_id, _ = _buyer()
     return {"friends": social.list_friends(buyer_id)}
+
+
+@router.get("/merchants/available")
+def available_merchants() -> dict:
+    """C 端可添加的店宠：来自已绑定的商家店宠映射。"""
+    buyer_id, _ = _buyer()
+    existing = {str(friend.get("friend_id")) for friend in social.list_friends(buyer_id)}
+    items = []
+    for mapping in store.list_store_friend_mappings():
+        friend_id = str(mapping.get("friend_id") or "")
+        if not friend_id:
+            continue
+        items.append({
+            "merchant_id": str(mapping.get("merchant_id") or ""),
+            "friend_id": friend_id,
+            "name": str(mapping.get("merchant_name") or friend_id),
+            "note": "店宠 · 售前 / 售后 / 砍价",
+            "is_friend": friend_id in existing,
+        })
+    return {"merchants": items, "count": len(items)}
+
+
+@router.post("/friends/merchants")
+def add_merchant_friend(req: MerchantFriendIn) -> dict:
+    """把指定商家的店宠加入当前买家好友。"""
+    buyer_id, _ = _buyer()
+    mapping = next(
+        (item for item in store.list_store_friend_mappings() if str(item.get("merchant_id")) == req.merchant_id),
+        None,
+    )
+    if mapping is None:
+        raise HTTPException(status_code=404, detail="商家店宠不存在或未绑定")
+    friend_id = str(mapping.get("friend_id") or "")
+    existed = any(str(friend.get("friend_id")) == friend_id for friend in social.list_friends(buyer_id))
+    friend = social.add_friend(
+        buyer_id,
+        friend_id,
+        str(mapping.get("merchant_name") or friend_id),
+        "merchant",
+        "店宠 · 售前 / 售后 / 砍价",
+    )
+    return {"friend": friend, "added": not existed}
 
 
 @router.get("/friends/{friend_id}/messages")
