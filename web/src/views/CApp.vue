@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
+import CompanionAvatar from "../components/CompanionAvatar.vue";
 import { getJson, postJson, patchJson, del, postForm } from "../api";
 
 const threads = ref([
@@ -571,6 +572,13 @@ const statusText = computed(() => {
   }
   return "好友";
 });
+const avatarState = computed(() => {
+  if (agentBusy.value) return "thinking";
+  if (liveDraft.value) return "waiting";
+  if (liveOrder.value) return "happy";
+  return "idle";
+});
+
 const threadDotClass = computed(() => {
   if (activeThread.value.kind === "group") {
     return groupSocketState.value === "online" ? "online" : "connecting";
@@ -2032,19 +2040,25 @@ onBeforeUnmount(() => {
                 <path d="M12 11v5M12 8h.01" />
               </svg>
             </button>
+            <CompanionAvatar
+              v-if="!avatarVisible('companion')"
+              :size="34"
+              :state="avatarState"
+              fallback="小"
+              label="戳一下小鱼"
+            />
             <button
+              v-else
               type="button"
               class="c-avatar top c-avatar-btn"
               :aria-label="avatarBusy === 'companion' ? '伙伴头像上传中' : '更换伙伴头像'"
               @click="openAvatarPicker('companion')"
             >
               <img
-                v-if="avatarVisible('companion')"
                 :src="avatarSrc('companion')"
                 alt=""
                 @error="onAvatarError(avatarSrc('companion'))"
               />
-              <template v-else>{{ avatarChar('companion') }}</template>
             </button>
           </div>
         </header>
@@ -2057,20 +2071,25 @@ onBeforeUnmount(() => {
                   <path d="m15 18-6-6 6-6" />
                 </svg>
               </button>
+              <CompanionAvatar
+                v-if="activeThread.kind === 'companion' && !avatarVisible('companion')"
+                :size="40"
+                :state="avatarState"
+                fallback="小"
+                label="戳一下小鱼"
+              />
               <button
-                v-if="activeThread.kind === 'companion'"
+                v-else-if="activeThread.kind === 'companion'"
                 type="button"
                 class="c-avatar c-avatar-btn"
                 aria-label="更换伙伴头像"
                 @click="openAvatarPicker('companion')"
               >
                 <img
-                  v-if="avatarVisible('companion')"
                   :src="avatarSrc('companion')"
                   alt=""
                   @error="onAvatarError(avatarSrc('companion'))"
                 />
-                <template v-else>{{ avatarChar('companion') }}</template>
               </button>
               <span v-else class="c-avatar">{{ activeThread.name.slice(0, 1) }}</span>
               <div>
