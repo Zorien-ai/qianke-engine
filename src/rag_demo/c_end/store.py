@@ -387,6 +387,7 @@ CREATE TABLE IF NOT EXISTS c_companion (
     satiety    INTEGER NOT NULL DEFAULT 60,
     avatar_path      TEXT NOT NULL DEFAULT '',
     user_avatar_path TEXT NOT NULL DEFAULT '',
+    diary_enabled    INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
 
@@ -396,13 +397,50 @@ CREATE TABLE IF NOT EXISTS c_companion_memory (
     kind       TEXT NOT NULL,
     content    TEXT NOT NULL,
     source     TEXT NOT NULL DEFAULT 'explicit',
+    importance INTEGER NOT NULL DEFAULT 3,
+    reinforced_count INTEGER NOT NULL DEFAULT 1,
+    last_reinforced_at TEXT,
+    last_decayed_at TEXT,
+    status     TEXT NOT NULL DEFAULT 'ACTIVE',
+    pinned     INTEGER NOT NULL DEFAULT 0,
+    compressed_into TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE (owner_id, kind, content)
 );
 
 CREATE INDEX IF NOT EXISTS idx_c_companion_memory_owner
-    ON c_companion_memory (owner_id, created_at DESC);
+    ON c_companion_memory (owner_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS c_companion_memory_digest (
+    digest_id  TEXT PRIMARY KEY,
+    owner_id   TEXT NOT NULL,
+    period     TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    source_memory_ids TEXT NOT NULL DEFAULT '[]',
+    importance INTEGER NOT NULL DEFAULT 3,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (owner_id, period, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_memory_digest_owner
+    ON c_companion_memory_digest (owner_id, period DESC);
+
+CREATE TABLE IF NOT EXISTS c_companion_diary (
+    diary_id   TEXT PRIMARY KEY,
+    owner_id   TEXT NOT NULL,
+    diary_date TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    source_message_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (owner_id, diary_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_diary_owner
+    ON c_companion_diary (owner_id, diary_date DESC);
 
 CREATE TABLE IF NOT EXISTS c_companion_rhythm (
     owner_id          TEXT PRIMARY KEY,
@@ -720,10 +758,28 @@ def init() -> None:
             for column_name, column_ddl in (
                 ("avatar_path", "TEXT NOT NULL DEFAULT ''"),
                 ("user_avatar_path", "TEXT NOT NULL DEFAULT ''"),
+                ("diary_enabled", "INTEGER NOT NULL DEFAULT 0"),
             ):
                 if column_name not in companion_columns:
                     conn.execute(
                         f"ALTER TABLE c_companion ADD COLUMN {column_name} {column_ddl}"
+                    )
+            # 记忆生命周期迁移：重要性、强化、归档状态。老库只补列，不改已有数据。
+            memory_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(c_companion_memory)").fetchall()
+            }
+            for column_name, column_ddl in (
+                ("importance", "INTEGER NOT NULL DEFAULT 3"),
+                ("reinforced_count", "INTEGER NOT NULL DEFAULT 1"),
+                ("last_reinforced_at", "TEXT"),
+                ("last_decayed_at", "TEXT"),
+                ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
+                ("pinned", "INTEGER NOT NULL DEFAULT 0"),
+                ("compressed_into", "TEXT"),
+            ):
+                if column_name not in memory_columns:
+                    conn.execute(
+                        f"ALTER TABLE c_companion_memory ADD COLUMN {column_name} {column_ddl}"
                     )
             conn.execute(
                 "UPDATE c_companion SET name = ? WHERE name = '小伴' AND user_nickname = ''",
@@ -2948,6 +3004,7 @@ def _companion_payload(row: sqlite3.Row) -> dict[str, Any]:
         "satiety": int(row["satiety"]),
         "avatar_url": _avatar_url(row["avatar_path"], "companion"),
         "user_avatar_url": _avatar_url(row["user_avatar_path"], "user"),
+        "diary_enabled": bool(row["diary_enabled"]) if "diary_enabled" in row.keys() else False,
         "updated_at": row["updated_at"],
     }
 
@@ -3041,6 +3098,9 @@ def update_companion(
 
 
 MEMORY_KINDS = ("preference", "boundary", "fact", "event")
+MEMORY_ACTIVE_LIMIT = 20
+MEMORY_DIGEST_LIMIT = 10
+MEMORY_DECAY_DAYS = 90
 _MEMORY_PII_RE = re.compile(
     r"\b1[3-9]\d{9}\b|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\d{17}[\dXx]\b|\b\d{16,19}\b"
 )
@@ -3095,8 +3155,22 @@ def extract_memories(message: str) -> list[dict[str, str]]:
     return found
 
 
+def _memory_importance(kind: str, content: str) -> int:
+    """确定性重要性；安全/过敏边界 5 分，预算/尺码 4 分，其余 3 分。"""
+    text = str(content or "")
+    if kind == "boundary":
+        if any(word in text for word in ("过敏", "安全", "忌口", "不能用", "疾病", "医生")):
+            return 5
+        return 4
+    if any(word in text for word in ("预算", "尺码", "码")):
+        return 4
+    if "不喜欢" in text:
+        return 3
+    return 3
+
+
 def save_memories(owner_id: str, message: str, *, source: str = "extracted") -> list[dict[str, Any]]:
-    """保存抽取出的记忆；重复内容不重复写入。"""
+    """保存明确记忆；重复内容只强化，不重复插入。"""
     items = extract_memories(message)
     if not items:
         return []
@@ -3106,19 +3180,31 @@ def save_memories(owner_id: str, message: str, *, source: str = "extracted") -> 
     conn = _connect()
     try:
         for item in items:
+            importance = _memory_importance(item["kind"], item["content"])
             exists = conn.execute(
-                "SELECT memory_id FROM c_companion_memory WHERE owner_id = ? AND kind = ? AND content = ?",
+                "SELECT memory_id, importance, reinforced_count FROM c_companion_memory "
+                "WHERE owner_id = ? AND kind = ? AND content = ?",
                 (owner_id, item["kind"], item["content"]),
             ).fetchone()
             if exists is not None:
+                conn.execute(
+                    "UPDATE c_companion_memory SET reinforced_count = reinforced_count + 1, "
+                    "importance = ?, last_reinforced_at = ?, status = 'ACTIVE', updated_at = ? "
+                    "WHERE memory_id = ?",
+                    (max(int(exists["importance"] or 3), importance), now, now, exists["memory_id"]),
+                )
                 continue
             memory_id = f"mem_{uuid.uuid4().hex[:20]}"
             conn.execute(
-                "INSERT INTO c_companion_memory(memory_id, owner_id, kind, content, source, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (memory_id, owner_id, item["kind"], item["content"], source, now, now),
+                "INSERT INTO c_companion_memory(memory_id, owner_id, kind, content, source, "
+                "importance, reinforced_count, last_reinforced_at, status, pinned, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'ACTIVE', 0, ?, ?)",
+                (memory_id, owner_id, item["kind"], item["content"], source, importance, now, now, now),
             )
-            added.append({"memory_id": memory_id, **item, "source": source, "created_at": now})
+            added.append({
+                "memory_id": memory_id, **item, "source": source,
+                "importance": importance, "created_at": now,
+            })
         conn.commit()
     except Exception:
         conn.rollback()
@@ -3133,9 +3219,11 @@ def list_memories(owner_id: str, limit: int = 20) -> list[dict[str, Any]]:
     conn = _connect()
     try:
         rows = conn.execute(
-            "SELECT memory_id, kind, content, source, created_at FROM c_companion_memory "
-            "WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?",
-            (owner_id, max(1, min(int(limit), 50))),
+            "SELECT memory_id, kind, content, source, importance, reinforced_count, pinned, "
+            "last_reinforced_at, created_at FROM c_companion_memory "
+            "WHERE owner_id = ? AND status = 'ACTIVE' ORDER BY pinned DESC, importance DESC, "
+            "created_at DESC LIMIT ?",
+            (owner_id, max(1, min(int(limit), 500))),
         ).fetchall()
         return [dict(row) for row in rows]
     finally:
@@ -3163,6 +3251,264 @@ def clear_memories(owner_id: str) -> int:
         cur = conn.execute("DELETE FROM c_companion_memory WHERE owner_id = ?", (owner_id,))
         conn.commit()
         return int(cur.rowcount or 0)
+    finally:
+        conn.close()
+
+
+def list_memory_digests(owner_id: str, limit: int = 10) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT digest_id, owner_id, period, kind, content, source_memory_ids, importance, "
+            "created_at, updated_at FROM c_companion_memory_digest WHERE owner_id = ? "
+            "ORDER BY period DESC, importance DESC LIMIT ?",
+            (owner_id, max(1, min(int(limit), 50))),
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["source_memory_ids"] = json.loads(item.get("source_memory_ids") or "[]")
+            except (TypeError, ValueError):
+                item["source_memory_ids"] = []
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+
+
+def upsert_memory_digest(
+    owner_id: str,
+    *,
+    period: str,
+    kind: str,
+    content: str,
+    source_memory_ids: list[str],
+    importance: int = 3,
+) -> dict[str, Any]:
+    init()
+    now = _now()
+    digest_id = "dig_" + hashlib.sha256(f"{owner_id}|{period}|{kind}".encode("utf-8")).hexdigest()[:20]
+    source_json = json.dumps(sorted(set(str(x) for x in source_memory_ids)), ensure_ascii=False)
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_companion_memory_digest(digest_id, owner_id, period, kind, content, "
+            "source_memory_ids, importance, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(digest_id) DO UPDATE SET content = excluded.content, "
+            "source_memory_ids = excluded.source_memory_ids, importance = excluded.importance, "
+            "updated_at = excluded.updated_at",
+            (digest_id, owner_id, period, kind, content[:600], source_json, int(importance), now, now),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM c_companion_memory_digest WHERE digest_id = ?", (digest_id,)
+        ).fetchone()
+        return dict(row) if row is not None else {}
+    finally:
+        conn.close()
+
+
+def archive_memories(owner_id: str, memory_ids: list[str], *, digest_id: str) -> int:
+    ids = [str(item) for item in memory_ids if str(item).strip()]
+    if not ids:
+        return 0
+    init()
+    placeholders = ",".join("?" for _ in ids)
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            f"UPDATE c_companion_memory SET status = 'ARCHIVED', compressed_into = ?, updated_at = ? "
+            f"WHERE owner_id = ? AND status = 'ACTIVE' AND pinned = 0 AND importance < 5 "
+            f"AND memory_id IN ({placeholders})",
+            (digest_id, _now(), owner_id, *ids),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0)
+    finally:
+        conn.close()
+
+
+def decay_memories(owner_id: str, *, now: datetime | None = None, days: int = MEMORY_DECAY_DAYS) -> int:
+    """长期未强化的记忆降 1 分；5 分和置顶永不自动降级。"""
+    init()
+    current = now or datetime.now(timezone.utc)
+    cutoff = (current - timedelta(days=days)).isoformat()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT memory_id, importance, last_reinforced_at, created_at, last_decayed_at "
+            "FROM c_companion_memory WHERE owner_id = ? AND status = 'ACTIVE' "
+            "AND pinned = 0 AND importance < 5",
+            (owner_id,),
+        ).fetchall()
+        changed = 0
+        for row in rows:
+            last_seen = row["last_reinforced_at"] or row["created_at"] or ""
+            if last_seen >= cutoff:
+                continue
+            if row["last_decayed_at"] and row["last_decayed_at"] >= (current - timedelta(days=1)).isoformat():
+                continue
+            new_importance = max(1, int(row["importance"] or 3) - 1)
+            conn.execute(
+                "UPDATE c_companion_memory SET importance = ?, last_decayed_at = ?, updated_at = ? "
+                "WHERE memory_id = ?",
+                (new_importance, current.isoformat(), current.isoformat(), row["memory_id"]),
+            )
+            changed += 1
+        conn.commit()
+        return changed
+    finally:
+        conn.close()
+
+
+def merge_memory_digests(owner_id: str, limit: int = MEMORY_DIGEST_LIMIT) -> int:
+    """压缩摘要超过上限时，把最旧的几条并进一条摘要；保留来源 id。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_companion_memory_digest WHERE owner_id = ? "
+            "ORDER BY period ASC, importance ASC, created_at ASC",
+            (owner_id,),
+        ).fetchall()
+        if len(rows) <= limit:
+            return 0
+        extras = rows[: len(rows) - limit]
+        keep = rows[len(rows) - limit]
+        contents = [str(keep["content"])]
+        source_ids: list[str] = []
+        for row in [keep, *extras]:
+            try:
+                source_ids.extend(json.loads(row["source_memory_ids"] or "[]"))
+            except (TypeError, ValueError):
+                pass
+            if row is not keep:
+                content = str(row["content"] or "").strip()
+                if content:
+                    contents.append(content)
+        now = _now()
+        conn.execute(
+            "UPDATE c_companion_memory_digest SET content = ?, source_memory_ids = ?, updated_at = ? "
+            "WHERE digest_id = ?",
+            ("；".join(contents)[:600], json.dumps(sorted(set(source_ids)), ensure_ascii=False), now, keep["digest_id"]),
+        )
+        conn.executemany(
+            "DELETE FROM c_companion_memory_digest WHERE digest_id = ?",
+            [(row["digest_id"],) for row in extras],
+        )
+        conn.commit()
+        return len(extras)
+    finally:
+        conn.close()
+
+
+def get_diary_enabled(owner_id: str) -> bool:
+    return bool(get_companion(owner_id).get("diary_enabled"))
+
+
+def set_diary_enabled(owner_id: str, enabled: bool) -> dict[str, Any]:
+    get_companion(owner_id)
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE c_companion SET diary_enabled = ?, updated_at = ? WHERE owner_id = ?",
+            (1 if enabled else 0, _now(), owner_id),
+        )
+        conn.commit()
+        return get_companion(owner_id)
+    finally:
+        conn.close()
+
+
+def get_diary(owner_id: str, diary_date: str) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_companion_diary WHERE owner_id = ? AND diary_date = ?",
+            (owner_id, diary_date),
+        ).fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def save_diary(
+    owner_id: str,
+    *,
+    diary_date: str,
+    content: str,
+    source_message_count: int = 0,
+) -> dict[str, Any]:
+    init()
+    now = _now()
+    diary_id = f"diary_{uuid.uuid4().hex[:20]}"
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_companion_diary(diary_id, owner_id, diary_date, content, "
+            "source_message_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(owner_id, diary_date) DO UPDATE SET content = excluded.content, "
+            "source_message_count = excluded.source_message_count, updated_at = excluded.updated_at",
+            (diary_id, owner_id, diary_date, content[:1000], int(source_message_count), now, now),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM c_companion_diary WHERE owner_id = ? AND diary_date = ?",
+            (owner_id, diary_date),
+        ).fetchone()
+        return dict(row) if row is not None else {}
+    finally:
+        conn.close()
+
+
+def list_diaries(owner_id: str, limit: int = 30) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT diary_id, diary_date, content, source_message_count, created_at, updated_at "
+            "FROM c_companion_diary WHERE owner_id = ? ORDER BY diary_date DESC LIMIT ?",
+            (owner_id, max(1, min(int(limit), 100))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_app_messages_between(
+    owner_id: str,
+    start_iso: str,
+    end_iso: str,
+    *,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_app_message WHERE owner_id = ? AND created_at >= ? AND created_at < ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (owner_id, start_iso, end_iso, max(1, min(int(limit), 1000))),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_message_owner_ids_between(start_iso: str, end_iso: str) -> list[str]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT owner_id FROM c_app_message WHERE created_at >= ? AND created_at < ? "
+            "ORDER BY owner_id ASC",
+            (start_iso, end_iso),
+        ).fetchall()
+        return [str(row["owner_id"]) for row in rows]
     finally:
         conn.close()
 

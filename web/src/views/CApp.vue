@@ -288,8 +288,13 @@ const companion = ref({
   user_avatar_url: "",
 });
 const memories = ref([]);
+const memoryDigests = ref([]);
 const memoriesError = ref("");
 const memoryBusy = ref("");
+const diaries = ref([]);
+const diaryEnabled = ref(false);
+const diaryError = ref("");
+const diaryBusy = ref(false);
 const rhythm = ref({
   enabled: false,
   quiet_start: "22:00",
@@ -1646,6 +1651,8 @@ async function loadMemories() {
   try {
     const data = await getJson("/api/c/companion/memories");
     memories.value = Array.isArray(data?.memories) ? data.memories : [];
+    memoryDigests.value = Array.isArray(data?.digests) ? data.digests : [];
+    diaryEnabled.value = Boolean(data?.diary_enabled);
   } catch (error) {
     memories.value = [];
     memoriesError.value = error?.detail || error?.message || "记忆加载失败";
@@ -1680,6 +1687,32 @@ async function clearMemories() {
     memoriesError.value = error?.detail || error?.message || "清空记忆失败";
   } finally {
     memoryBusy.value = "";
+  }
+}
+
+async function loadDiary() {
+  diaryError.value = "";
+  try {
+    const data = await getJson("/api/c/companion/diary?limit=10");
+    diaryEnabled.value = Boolean(data?.enabled);
+    diaries.value = Array.isArray(data?.diaries) ? data.diaries : [];
+  } catch (error) {
+    diaryError.value = error?.detail || error?.message || "日记加载失败";
+  }
+}
+
+async function setDiaryEnabled(enabled) {
+  if (diaryBusy.value) return;
+  diaryBusy.value = true;
+  diaryError.value = "";
+  try {
+    const data = await patchJson("/api/c/companion/diary", { enabled });
+    diaryEnabled.value = Boolean(data?.enabled);
+    await loadDiary();
+  } catch (error) {
+    diaryError.value = error?.detail || error?.message || "日记设置失败";
+  } finally {
+    diaryBusy.value = false;
   }
 }
 
@@ -1820,7 +1853,7 @@ function selectMobileThread(id) {
 onMounted(async () => {
   await loadAccountContext();
   stripDemoSeedForRealAccount();
-  await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm()]);
+  await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm(), loadDiary()]);
   await pollCheckin();
   await refreshUnread();
   startUnreadPolling();
@@ -2313,6 +2346,32 @@ onBeforeUnmount(() => {
                 >删</button>
               </li>
             </ul>
+          </section>
+
+          <section v-if="activeId === 'companion'" class="c-context-section">
+            <header>
+              <span>小鱼的日记</span>
+              <label class="c-diary-toggle">
+                <input
+                  type="checkbox"
+                  :checked="diaryEnabled"
+                  :disabled="diaryBusy"
+                  @change="setDiaryEnabled($event.target.checked)"
+                />
+                <span>每天写</span>
+              </label>
+            </header>
+            <p v-if="diaryError" class="c-inline-error" role="status">{{ diaryError }}</p>
+            <p v-else-if="!diaryEnabled" class="c-memory-empty">
+              默认关闭。开启后小鱼每天基于当天对话写一篇日记，只自己看，不自动变成偏好。
+            </p>
+            <p v-else-if="!diaries.length" class="c-memory-empty">还没有日记，今晚之后会出现在这里。</p>
+            <div v-else class="c-diary-list">
+              <article v-for="item in diaries" :key="item.diary_id" class="c-diary-item">
+                <time>{{ item.diary_date }}</time>
+                <p>{{ item.content }}</p>
+              </article>
+            </div>
           </section>
 
           <section v-if="activeId === 'companion'" class="c-context-section">
@@ -3656,6 +3715,47 @@ onBeforeUnmount(() => {
 .c-memory-remove:hover,
 .c-memory-clear:hover {
   color: var(--c-text);
+}
+
+.c-diary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c-text-3);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.c-diary-toggle input {
+  width: 12px;
+  height: 12px;
+  accent-color: var(--c-text);
+}
+
+.c-diary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.c-diary-item {
+  padding: 8px 9px;
+  border: 1px solid var(--c-line-soft);
+  border-radius: 8px;
+  background: var(--c-bg-soft);
+}
+
+.c-diary-item time {
+  color: var(--c-text-3);
+  font-size: 9px;
+}
+
+.c-diary-item p {
+  margin: 5px 0 0;
+  color: var(--c-text-2);
+  font-size: 10px;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .c-rhythm-row {

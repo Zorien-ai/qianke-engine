@@ -1,4 +1,4 @@
-"""控制面 SQLite/PostgreSQL 双后端契约测试（P1）。"""
+﻿"""控制面 SQLite/PostgreSQL 双后端契约测试（P1）。"""
 from __future__ import annotations
 
 import uuid
@@ -10,7 +10,7 @@ from rag_demo.control.sqlite_repository import SQLiteControlRepository
 
 EXPECTED_TABLES = {
     "c_after_sale", "c_app_message", "c_client_request", "c_companion", "c_companion_memory",
-    "c_companion_rhythm", "c_companion_checkin", "c_logistics_event", "c_compensation",
+    "c_companion_rhythm", "c_companion_checkin", "c_companion_memory_digest", "c_companion_diary", "c_logistics_event", "c_compensation",
     "c_inventory_alert",
     "c_friend", "c_group", "c_group_member", "c_group_message", "c_mention", "c_message",
     "c_order", "c_order_item", "c_product", "c_quote", "c_reconciliation_alert",
@@ -95,3 +95,4 @@ def test_postgres_schema_matches_sqlite(pg_repo):
 def test_postgres_schema_init_is_idempotent(pg_repo):
     pg_repo.init_schema()
     assert set(pg_repo.list_tables()) == EXPECTED_TABLES
+

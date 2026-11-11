@@ -171,8 +171,12 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion (
   "updated_at" TEXT NOT NULL,
   "user_nickname" TEXT NOT NULL DEFAULT '',
   "avatar_path" TEXT NOT NULL DEFAULT '',
-  "user_avatar_path" TEXT NOT NULL DEFAULT ''
+  "user_avatar_path" TEXT NOT NULL DEFAULT '',
+  "diary_enabled" INTEGER NOT NULL DEFAULT 0
 );
+
+ALTER TABLE __SCHEMA__.c_companion
+    ADD COLUMN IF NOT EXISTS "diary_enabled" INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_memory (
   "memory_id" TEXT PRIMARY KEY,
@@ -180,13 +184,65 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_memory (
   "kind" TEXT NOT NULL,
   "content" TEXT NOT NULL,
   "source" TEXT NOT NULL DEFAULT 'explicit',
+  "importance" INTEGER NOT NULL DEFAULT 3,
+  "reinforced_count" INTEGER NOT NULL DEFAULT 1,
+  "last_reinforced_at" TEXT,
+  "last_decayed_at" TEXT,
+  "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+  "pinned" INTEGER NOT NULL DEFAULT 0,
+  "compressed_into" TEXT,
   "created_at" TEXT NOT NULL,
   "updated_at" TEXT NOT NULL,
   UNIQUE ("owner_id", "kind", "content")
 );
 
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "importance" INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "reinforced_count" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "last_reinforced_at" TEXT;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "last_decayed_at" TEXT;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "pinned" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "compressed_into" TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_c_companion_memory_owner
-    ON __SCHEMA__.c_companion_memory ("owner_id", "created_at" DESC);
+    ON __SCHEMA__.c_companion_memory ("owner_id", "status", "created_at" DESC);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_memory_digest (
+  "digest_id" TEXT PRIMARY KEY,
+  "owner_id" TEXT NOT NULL,
+  "period" TEXT NOT NULL,
+  "kind" TEXT NOT NULL,
+  "content" TEXT NOT NULL,
+  "source_memory_ids" TEXT NOT NULL DEFAULT '[]',
+  "importance" INTEGER NOT NULL DEFAULT 3,
+  "created_at" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL,
+  UNIQUE ("owner_id", "period", "kind")
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_memory_digest_owner
+    ON __SCHEMA__.c_companion_memory_digest ("owner_id", "period" DESC);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_diary (
+  "diary_id" TEXT PRIMARY KEY,
+  "owner_id" TEXT NOT NULL,
+  "diary_date" TEXT NOT NULL,
+  "content" TEXT NOT NULL,
+  "source_message_count" INTEGER NOT NULL DEFAULT 0,
+  "created_at" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL,
+  UNIQUE ("owner_id", "diary_date")
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_diary_owner
+    ON __SCHEMA__.c_companion_diary ("owner_id", "diary_date" DESC);
 
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_rhythm (
   "owner_id" TEXT PRIMARY KEY,

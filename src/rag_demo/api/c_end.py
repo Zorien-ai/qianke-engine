@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, express, group, idempotency, negotiation, persona as c_persona, social, store, store_agent
+from rag_demo.c_end import companion_agent, express, group, idempotency, memory_daily, negotiation, persona as c_persona, social, store, store_agent
 from rag_demo.merchant import MerchantConflictError, MerchantError, MerchantNotFoundError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
@@ -114,6 +114,10 @@ class CAgentRunIn(BaseModel):
 class CAgentResumeIn(BaseModel):
     thread_id: str = Field(..., min_length=1, max_length=128)
     approved: bool
+
+
+class DiaryPatchIn(BaseModel):
+    enabled: bool
 
 
 class CompanionPatchIn(BaseModel):
@@ -257,7 +261,36 @@ def update_companion(req: CompanionPatchIn) -> dict:
 @router.get("/companion/memories")
 def list_companion_memories() -> dict:
     buyer_id, _ = _buyer()
-    return {"memories": store.list_memories(buyer_id, limit=20)}
+    companion = store.get_companion(buyer_id)
+    return {
+        "memories": store.list_memories(buyer_id, limit=20),
+        "digests": store.list_memory_digests(buyer_id, limit=5),
+        "diary_enabled": bool(companion.get("diary_enabled")),
+    }
+
+
+@router.get("/companion/diary")
+def list_companion_diary(limit: int = 30) -> dict:
+    buyer_id, _ = _buyer()
+    return {
+        "enabled": store.get_diary_enabled(buyer_id),
+        "diaries": store.list_diaries(buyer_id, limit=limit),
+    }
+
+
+@router.patch("/companion/diary")
+def update_companion_diary(req: DiaryPatchIn) -> dict:
+    buyer_id, _ = _buyer()
+    companion = store.set_diary_enabled(buyer_id, req.enabled)
+    return {"enabled": bool(companion.get("diary_enabled")), "companion": companion}
+
+
+@router.post("/companion/diary/run")
+def run_companion_daily() -> dict:
+    """手动执行当前用户当天任务；定时任务默认仍由脚本/cron 驱动。"""
+    buyer_id, _ = _buyer()
+    day = datetime.now(memory_daily.LOCAL_TZ).date().isoformat()
+    return memory_daily.run_daily(buyer_id, day)
 
 
 @router.get("/companion/rhythm")

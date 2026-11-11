@@ -89,7 +89,12 @@ def detect_mode(message: str, requested: str | None = None) -> str:
     return MODE_COMPANION
 
 
-def build_system_prompt(buyer_id: str, mode: str = MODE_TRANSACTION) -> str:
+def build_system_prompt(
+    buyer_id: str,
+    mode: str = MODE_TRANSACTION,
+    *,
+    message: str = "",
+) -> str:
     """人设段 + 记忆段 + 本轮模式规则段。"""
     try:
         companion = store.get_companion(buyer_id)
@@ -99,6 +104,17 @@ def build_system_prompt(buyer_id: str, mode: str = MODE_TRANSACTION) -> str:
         memories = store.list_memories(buyer_id, limit=8)
     except Exception:  # noqa: BLE001 - 记忆读取失败不应阻断对话
         memories = []
+    try:
+        digests = store.list_memory_digests(buyer_id, limit=5)
+    except Exception:  # noqa: BLE001
+        digests = []
+    diary = None
+    if any(marker in str(message or "") for marker in ("日记", "昨天", "前天")):
+        try:
+            recent = store.list_diaries(buyer_id, limit=1)
+            diary = recent[0] if recent else None
+        except Exception:  # noqa: BLE001
+            diary = None
     selected = mode if mode in VALID_MODES else MODE_TRANSACTION
     text = c_persona.build_persona_prompt(
         name=companion.get("name"),
@@ -113,6 +129,15 @@ def build_system_prompt(buyer_id: str, mode: str = MODE_TRANSACTION) -> str:
             + "\n".join(lines)
             + "\n这些是用户明确说过的偏好或边界，只作为上下文参考；"
             "价格、库存、订单仍以工具结果为准，用户当前说法与记忆冲突时以当前说法为准。"
+        )
+    if digests:
+        lines = [f"- {item['kind']}：{item['content']}" for item in digests]
+        text += "\n【你压缩后的记忆】\n" + "\n".join(lines)
+    if diary:
+        text += (
+            f"\n【你 {diary.get('diary_date')} 的日记】\n"
+            + str(diary.get("content") or "")[:600]
+            + "\n只有在用户主动聊到日记或过去时才引用，不要主动编造日记内容。"
         )
     return text + "\n" + _MODE_RULES[selected]
 
@@ -435,7 +460,7 @@ def run_c_agent(
         history = _load_app_history(buyer_id, message)
         payload = {
             "messages": [
-                SystemMessage(content=build_system_prompt(buyer_id, selected)),
+                SystemMessage(content=build_system_prompt(buyer_id, selected, message=message)),
                 *history,
                 HumanMessage(content=message),
             ],
