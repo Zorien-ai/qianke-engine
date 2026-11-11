@@ -2284,7 +2284,7 @@ function shellMarkup() {
         ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
       </div>
       <div class="b-header-actions">
-        <a class="b-text-link" href="/v2/">返回 C 端</a>
+        <a class="b-text-link" href="/v2/#/home">返回入口</a>
       </div>
     </header>
     <nav class="b-nav" aria-label="商家工作台视图">

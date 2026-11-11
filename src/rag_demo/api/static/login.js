@@ -425,13 +425,36 @@
       }
       setAlert(alertBox, "success", "登录成功，正在进入…");
       toast("登录成功");
+      const entry = await resolveEntry();
       window.setTimeout(() => {
-        window.location.href = "/";
+        window.location.href = entry;
       }, 420);
     } catch (err) {
       setAlert(alertBox, "error", "网络异常，请检查连接后重试");
     } finally {
       setLoading(btn, false);
+    }
+  }
+
+
+  /* 按账号能力选择端：商家 → B 工作台；普通买家 → C App；其余 → 管理工作台 */
+  async function resolveEntry() {
+    try {
+      const who = await fetch("/whoami", { credentials: "same-origin" }).then((r) => r.json());
+      const account = who && who.account ? who.account : {};
+      if (account.is_system_admin || account.is_enterprise_admin) return "/v2/#/";
+      try {
+        const me = await fetch("/api/b/workbench/me", { credentials: "same-origin" });
+        if (me.ok) return "/v2/b.html";
+      } catch (e) {
+        /* 不是商家账号，继续判断买家 */
+      }
+      if (!account.enterprise_id && !account.is_system_admin && !account.is_enterprise_admin) {
+        return "/v2/#/c/app";
+      }
+      return "/v2/#/";
+    } catch (e) {
+      return "/v2/#/";
     }
   }
 

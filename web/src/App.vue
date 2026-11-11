@@ -53,10 +53,6 @@ const navItems = computed(() => {
     { to: "/agent", key: "agent", label: "Agent 智能助理", icon: ICONS.agent },
     { to: "/agent/actions", key: "agentActions", label: "任务看板", icon: ICONS.orders },
     { to: "/my-agent", key: "myAgent", label: "我的 AI", icon: ICONS.persona },
-    { to: "/c", key: "shop", label: "C 端商城", icon: ICONS.shop },
-    { to: "/c/app", key: "capp", label: "C 端 App", icon: ICONS.social },
-    { to: "/c/social", key: "social", label: "社交消息", icon: ICONS.social },
-    { to: "/c/orders", key: "orders", label: "我的订单", icon: ICONS.orders },
     { to: "/kb", key: "kb", label: "知识库", icon: ICONS.kb },
   ];
   if (isManager()) items.push({ to: "/staff", key: "staff", label: "员工管理", icon: ICONS.staff });
