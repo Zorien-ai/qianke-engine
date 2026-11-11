@@ -52,8 +52,34 @@ POST /api/c/friends/merchants
 → 生成 m_tea_001 下该买家的画像
 ```
 
+## 多商家店宠 Agent 路由
+
+已验证：
+
+```text
+store_tea → m_tea_001
+买家发送 "@店宠 推荐一款龙井"
+→ 店宠读取 m_tea_001 商品
+→ 返回 P-TEA-001 明前龙井
+→ metadata.product_refs 带 SKU / 价格 / 库存
+```
+
+截图：
+
+![山雾茶业店宠回复](c-tea-store-chat.png)
+
+实现：
+
+```text
+friend_id → c_merchant_store_friend → merchant_id
+→ store_agent._tools(merchant_id)
+→ 商品 / 库存 / 订单全部按该商家查询
+→ system prompt 使用该商家名称
+```
+
 ## 已知限制
 
-- 目前只有 `store_demo → m_gear_002` 默认映射；第二个商家需要管理员先绑定。
-- 店宠回复仍然使用 `store_agent` 的固定商家逻辑；多商家店宠 Agent 路由是下一阶段。
+- 默认映射只有 `store_demo → m_gear_002`；其它商家需要管理员先绑定。
+- 店宠 SOP 仍然是平台共享的 `store_policy`，还没有按商家配置。
 - 发现页只展示已绑定映射，不展示未绑定商家。
+- C 端商城入口仍默认山野户外；按当前会话切换商城商家是下一步。

@@ -563,18 +563,23 @@ def delete_companion_avatar(kind: str) -> dict:
 
 
 @router.get("/merchant/products")
-def merchant_products(keyword: str | None = None, limit: int = 20) -> dict:
-    """真实商家商品查询（只读）。"""
+def merchant_products(
+    keyword: str | None = None,
+    limit: int = 20,
+    friend_id: str | None = None,
+) -> dict:
+    """真实商家商品查询（只读）；可从店宠会话 friend_id 解析商家。"""
     _buyer()
+    resolved_merchant = store_agent.resolve_merchant_id(friend_id=friend_id)
     try:
         repo = get_merchant_repository()
-        products = repo.list_products(store_agent.STORE_MERCHANT_ID, keyword=keyword, limit=limit)
+        products = repo.list_products(resolved_merchant, keyword=keyword, limit=limit)
         payload = []
         for product in products:
-            skus = repo.list_product_skus(product.product_id, merchant_id=store_agent.STORE_MERCHANT_ID)
+            skus = repo.list_product_skus(product.product_id, merchant_id=resolved_merchant)
             item = product.to_dict()
             if skus:
-                inventory = repo.get_inventory(skus[0].sku, merchant_id=store_agent.STORE_MERCHANT_ID)
+                inventory = repo.get_inventory(skus[0].sku, merchant_id=resolved_merchant)
                 item.update({
                     "sku": skus[0].sku,
                     "price": float(skus[0].price),
@@ -587,12 +592,13 @@ def merchant_products(keyword: str | None = None, limit: int = 20) -> dict:
 
 
 @router.get("/merchant/inventory/{sku}")
-def merchant_inventory(sku: str) -> dict:
+def merchant_inventory(sku: str, friend_id: str | None = None) -> dict:
     """真实商家 SKU 库存查询（只读）。"""
     _buyer()
+    resolved_merchant = store_agent.resolve_merchant_id(friend_id=friend_id)
     try:
         inventory = get_merchant_repository().get_inventory(
-            sku, merchant_id=store_agent.STORE_MERCHANT_ID
+            sku, merchant_id=resolved_merchant
         )
         if inventory is None:
             raise HTTPException(status_code=404, detail="没有找到这个 SKU")
@@ -602,12 +608,17 @@ def merchant_inventory(sku: str) -> dict:
 
 
 @router.get("/merchant/orders")
-def merchant_orders(status: str | None = None, limit: int = 20) -> dict:
+def merchant_orders(
+    status: str | None = None,
+    limit: int = 20,
+    friend_id: str | None = None,
+) -> dict:
     """当前买家在真实商家库中的订单。"""
     buyer_id, _ = _buyer()
+    resolved_merchant = store_agent.resolve_merchant_id(friend_id=friend_id)
     try:
         orders = get_merchant_repository().list_orders(
-            store_agent.STORE_MERCHANT_ID,
+            resolved_merchant,
             buyer_id=store_agent.merchant_buyer_id(buyer_id),
             status=status,
             limit=limit,
@@ -618,13 +629,14 @@ def merchant_orders(status: str | None = None, limit: int = 20) -> dict:
 
 
 @router.get("/merchant/orders/{order_id}")
-def merchant_order_detail(order_id: str) -> dict:
+def merchant_order_detail(order_id: str, friend_id: str | None = None) -> dict:
     """当前买家的单笔真实商家订单。"""
     buyer_id, _ = _buyer()
+    resolved_merchant = store_agent.resolve_merchant_id(friend_id=friend_id)
     try:
         order = get_merchant_repository().get_order(
             order_id,
-            merchant_id=store_agent.STORE_MERCHANT_ID,
+            merchant_id=resolved_merchant,
             buyer_id=store_agent.merchant_buyer_id(buyer_id),
         )
         if order is None:
@@ -1070,7 +1082,7 @@ def _send_store_message_once(
             buyer_id,
             friend_id,
             content,
-            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text),
+            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text, friend_id=friend_id),
             commentary_provider=lambda text, reply_text: companion_agent.commentary(
                 buyer_id, text, reply_text
             ),
@@ -1093,7 +1105,7 @@ def _send_store_message_once(
             buyer_id,
             friend_id,
             content,
-            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text),
+            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text, friend_id=friend_id),
             commentary_provider=lambda text, reply_text: companion_agent.commentary(
                 buyer_id, text, reply_text
             ),

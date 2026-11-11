@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from rag_demo.c_end import store, store_agent
 from rag_demo.merchant import reset_merchant_repository_cache
@@ -61,3 +62,50 @@ def test_order_lookup_by_id_and_unknown(merchant_env):
     missing = _tool("search_my_orders").invoke({"order_id": "ORD-NOT-EXISTS"})
     assert missing["ok"] is False
     assert missing["error"]["code"] == "ORDER_NOT_FOUND"
+
+
+def test_second_merchant_catalog_is_isolated(merchant_env):
+    tea = store_agent._tools("buyer_1", merchant_id="m_tea_001")
+    tools = {item.name: item for item in tea}
+    result = tools["search_catalog"].invoke({"need": "龙井"})
+    assert result["ok"] is True
+    assert result["source"] == "merchant_v1"
+    assert any(item["product_id"] == "P-TEA-001" for item in result["products"])
+    assert all(not item["product_id"].startswith("P-") or item["product_id"].startswith("P-TEA-") for item in result["products"])
+
+
+def test_friend_mapping_routes_reply_to_tea_merchant(merchant_env):
+    store.bind_store_friend("m_tea_001", "store_tea")
+    assert store_agent.resolve_merchant_id(friend_id="store_tea") == "m_tea_001"
+
+    class _FakeLLM:
+        def __init__(self):
+            self.responses = [
+                AIMessage(
+                    content="",
+                    tool_calls=[{
+                        "name": "search_catalog",
+                        "args": {"need": "龙井"},
+                        "id": "call_tea_1",
+                        "type": "tool_call",
+                    }],
+                ),
+                AIMessage(content="推荐明前龙井"),
+            ]
+            self.calls = 0
+
+        def invoke(self, messages):
+            self.calls += 1
+            return self.responses.pop(0)
+
+    fake = _FakeLLM()
+    result = store_agent.reply_with_meta(
+        "buyer_1",
+        "@店宠 推荐一款龙井",
+        llm=fake,
+        friend_id="store_tea",
+    )
+    assert result.awakened is True
+    assert result.text == "推荐明前龙井"
+    assert any(item["product_id"] == "P-TEA-001" for item in result.metadata.get("product_refs", []))
+    assert fake.calls == 2
