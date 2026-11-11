@@ -13,7 +13,7 @@
 ```text
 引擎：程序化 SVG，零依赖
 角色数据：qianke-recipes.json
-状态：idle / listening / thinking / streaming / waiting / happy / fed / petted / sleeping / waking
+状态：idle / listening / thinking / streaming / speaking / waiting / happy / fed / petted / sleeping / waking
 ```
 
 ## 已实现
@@ -56,14 +56,34 @@ Agent 回复中      thinking
 
 播放器引擎不变，角色状态集和配色已经切到千客。
 
-### 4. 语音口型 / 情绪
+### 4. 语音输入 / 朗读 / 口型
 
-暂未接，属于下一阶段：
+已接：
 
 ```text
-语音输入口型
-流式 token 节奏映射
-更细的情绪状态
+浏览器 Web Speech API 语音输入（Chrome / Edge 优先）
+浏览器 SpeechSynthesis 朗读小鱼回复
+朗读时切 speaking 状态 + 口型帧循环
+回复文本情绪词 → happy / sad / surprised / confused 表情
+```
+
+语音输入是浏览器本地识别，不上传音频；不支持 Web Speech 的浏览器会提示“不支持语音输入”。
+
+情绪词表是确定性规则，不是让模型再生成一次情绪：
+
+```text
+happy       可以 / 喜欢 / 不错 / 优惠 / 成功
+sad         抱歉 / 没货 / 失败 / 取消 / 退款
+surprised   居然 / 竟然 / 没想到 / 惊喜
+confused    可能 / 也许 / 不确定 / 需要确认
+```
+
+朗读开启后，收到回复会：
+
+```text
+speaking 状态
+→ 每 170ms 切换一次口型帧
+→ 结束时回到 idle，再显示一次情绪表情
 ```
 
 ## 位置
@@ -79,6 +99,8 @@ Agent 回复中      thinking
 ![头像互动菜单](c-app-qianke-avatar-menu.png)
 
 ![头像特写](qianke-avatar-closeup.png)
+
+![语音 UI](c-app-voice-ui.png)
 
 ## 验证
 

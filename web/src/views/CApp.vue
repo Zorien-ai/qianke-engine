@@ -579,6 +579,17 @@ const companionState = ref("idle");
 const topAvatarRef = ref(null);
 const headAvatarRef = ref(null);
 const avatarExpressions = ["happy", "surprised", "sleepy", "squinted", "confused", "neutral"];
+const voiceReplyEnabled = ref(false);
+const voiceListening = ref(false);
+const voiceSupported = ref(
+  typeof window !== "undefined" &&
+    Boolean(window.SpeechRecognition || window.webkitSpeechRecognition),
+);
+const voiceSynthesisSupported = ref(
+  typeof window !== "undefined" && "speechSynthesis" in window,
+);
+let speechRecognition = null;
+let lipSyncTimer = null;
 let avatarExpressionIndex = 0;
 let avatarIdleTimer = null;
 let avatarTransientTimer = null;
@@ -678,18 +689,145 @@ function petCompanion() {
 function cycleAvatarExpression() {
   wakeCompanion();
   avatarExpressionIndex = (avatarExpressionIndex + 1) % avatarExpressions.length;
-  avatarExpression.value = avatarExpressions[avatarExpressionIndex];
+  setAvatarExpression(avatarExpressions[avatarExpressionIndex]);
   showAvatarTip("换了个表情");
-  clearTimer("expression");
-  avatarExpressionTimer = setTimeout(() => {
-    avatarExpression.value = "";
-  }, 1800);
   avatarMenuOpen.value = false;
 }
 
 function onCompanionActivity() {
   if (companionState.value === "sleeping") wakeCompanion();
   else resetAvatarIdleTimer();
+}
+
+function setAvatarExpression(name, holdMs = 1800) {
+  clearTimer("expression");
+  avatarExpression.value = name;
+  avatarExpressionTimer = setTimeout(() => {
+    avatarExpression.value = "";
+  }, holdMs);
+}
+
+function emotionFor(text) {
+  const value = String(text || "");
+  if (/(抱歉|遗憾|没货|失败|取消|退款|不能|无法)/.test(value)) return "sad";
+  if (/(居然|竟然|没想到|惊喜|惊讶|真的吗)/.test(value)) return "surprised";
+  if (/(可能|也许|不确定|需要确认|查一下)/.test(value)) return "confused";
+  if (/(可以|喜欢|舒服|很棒|不错|优惠|成功|好的|没问题)/.test(value)) return "happy";
+  return "neutral";
+}
+
+function applyReplyEmotion(text) {
+  const emotion = emotionFor(text);
+  setAvatarExpression(emotion, 2200);
+}
+
+function stopLipSync() {
+  if (lipSyncTimer) {
+    clearInterval(lipSyncTimer);
+    lipSyncTimer = null;
+  }
+}
+
+function startLipSync() {
+  stopLipSync();
+  setCompanionState("speaking");
+  const frames = ["happy", "neutral", "surprised", "calm"];
+  let index = 0;
+  lipSyncTimer = setInterval(() => {
+    avatarExpression.value = frames[index % frames.length];
+    index += 1;
+  }, 170);
+}
+
+function stopSpeaking() {
+  stopLipSync();
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  setCompanionState("idle");
+  avatarExpression.value = "neutral";
+}
+
+function speakReply(text) {
+  if (!voiceReplyEnabled.value || !voiceSynthesisSupported.value) {
+    applyReplyEmotion(text);
+    return;
+  }
+  const content = String(text || "").trim().slice(0, 320);
+  if (!content) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(content);
+  utterance.lang = "zh-CN";
+  utterance.rate = 1.02;
+  utterance.pitch = 1.05;
+  utterance.onstart = () => startLipSync();
+  utterance.onboundary = () => {
+    if (!lipSyncTimer) startLipSync();
+  };
+  utterance.onend = () => {
+    stopLipSync();
+    setCompanionState("idle");
+    applyReplyEmotion(content);
+  };
+  utterance.onerror = () => {
+    stopLipSync();
+    setCompanionState("idle");
+    applyReplyEmotion(content);
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+function toggleVoiceReply() {
+  if (!voiceSynthesisSupported.value) {
+    showAvatarTip("当前浏览器不支持朗读");
+    return;
+  }
+  voiceReplyEnabled.value = !voiceReplyEnabled.value;
+  if (!voiceReplyEnabled.value) stopSpeaking();
+  showAvatarTip(voiceReplyEnabled.value ? "小鱼会读出来" : "已关闭朗读");
+}
+
+function toggleVoiceInput() {
+  if (!voiceSupported.value) {
+    showAvatarTip("当前浏览器不支持语音输入");
+    return;
+  }
+  if (voiceListening.value) {
+    speechRecognition?.stop();
+    return;
+  }
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  speechRecognition = new Recognition();
+  speechRecognition.lang = "zh-CN";
+  speechRecognition.interimResults = true;
+  speechRecognition.continuous = false;
+  speechRecognition.onstart = () => {
+    voiceListening.value = true;
+    setCompanionState("listening");
+    showAvatarTip("正在听…");
+  };
+  speechRecognition.onresult = (event) => {
+    let transcript = "";
+    for (let i = 0; i < event.results.length; i += 1) {
+      transcript += event.results[i][0]?.transcript || "";
+    }
+    if (transcript.trim()) draft.value = transcript.trim();
+  };
+  speechRecognition.onerror = () => {
+    voiceListening.value = false;
+    showAvatarTip("没有听清，再试一次");
+    setCompanionState("idle");
+  };
+  speechRecognition.onend = () => {
+    voiceListening.value = false;
+    if (companionState.value === "listening") setCompanionState("idle");
+  };
+  try {
+    speechRecognition.start();
+  } catch (error) {
+    voiceListening.value = false;
+    showAvatarTip("语音输入启动失败");
+  }
 }
 
 const threadDotClass = computed(() => {
@@ -1562,6 +1700,8 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
       text: replyText,
     });
     await persistAppMessage("companion", replyText);
+    applyReplyEmotion(replyText);
+    speakReply(replyText);
     if (result.memories_added) await loadMemories();
     if (result.draft) {
       liveDraft.value = result.draft;
@@ -2025,6 +2165,11 @@ onBeforeUnmount(() => {
   clearTimer("transient");
   clearTimer("tip");
   clearTimer("expression");
+  stopLipSync();
+  speechRecognition?.abort?.();
+  if (voiceReplyEnabled.value && typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
   for (const url of avatarPreviewUrls) URL.revokeObjectURL(url);
   avatarPreviewUrls.clear();
   window.visualViewport?.removeEventListener("resize", onViewportResize);
@@ -2169,6 +2314,19 @@ onBeforeUnmount(() => {
                 <path d="M12 11v5M12 8h.01" />
               </svg>
             </button>
+            <button
+              type="button"
+              class="c-icon-btn c-voice-toggle"
+              :class="{ 'is-active': voiceReplyEnabled }"
+              :aria-label="voiceReplyEnabled ? '关闭朗读' : '朗读小鱼回复'"
+              :title="voiceReplyEnabled ? '关闭朗读' : '朗读小鱼回复'"
+              @click="toggleVoiceReply"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                <path d="M11 5 6 9H3v6h3l5 4z" />
+                <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+              </svg>
+            </button>
             <CompanionAvatar
               v-if="!avatarVisible('companion')"
               ref="topAvatarRef"
@@ -2233,6 +2391,19 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="c-chat-actions">
+              <button
+                type="button"
+                class="c-icon-btn c-voice-toggle"
+                :class="{ 'is-active': voiceReplyEnabled }"
+                :aria-label="voiceReplyEnabled ? '关闭朗读' : '朗读小鱼回复'"
+                :title="voiceReplyEnabled ? '关闭朗读' : '朗读小鱼回复'"
+                @click="toggleVoiceReply"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                  <path d="M11 5 6 9H3v6h3l5 4z" />
+                  <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+                </svg>
+              </button>
               <button
                 v-if="mentionUnread > 0"
                 type="button"
@@ -2421,6 +2592,19 @@ onBeforeUnmount(() => {
                 </svg>
               </button>
               <button class="c-tool-btn c-mention-btn" type="button" aria-label="提及" @click="startMention">@</button>
+              <button
+                class="c-tool-btn c-voice-btn"
+                :class="{ 'is-recording': voiceListening }"
+                type="button"
+                :aria-label="voiceListening ? '停止语音输入' : '语音输入'"
+                :aria-pressed="voiceListening"
+                @click="toggleVoiceInput"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
+                </svg>
+              </button>
               <textarea
                 id="c-app-input"
                 v-model="draft"
@@ -5245,6 +5429,26 @@ onBeforeUnmount(() => {
   font-size: 10px;
   white-space: nowrap;
   pointer-events: none;
+}
+
+
+/* ---------- 语音输入 / 朗读 ---------- */
+.c-voice-toggle.is-active {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+}
+
+.c-voice-btn.is-recording {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  animation: c-voice-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes c-voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 95, 59, 0.18); }
+  50% { box-shadow: 0 0 0 5px rgba(217, 95, 59, 0.04); }
 }
 </style>
 
