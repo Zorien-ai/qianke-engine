@@ -204,3 +204,9 @@ def test_add_merchant_friend_is_idempotent(c_store):
     assert second["friend_id"] == "store_tea"
     friends = social.list_friends("buyer_1")
     assert sum(1 for item in friends if item["friend_id"] == "store_tea") == 1
+
+
+def test_mark_thread_read_allows_dynamic_merchant_friend(c_store):
+    social.add_friend("buyer_1", "store_tea", "山雾茶业", "merchant", "店宠")
+    result = c_store.mark_thread_read("buyer_1", "store_tea")
+    assert result["thread_id"] == "store_tea"

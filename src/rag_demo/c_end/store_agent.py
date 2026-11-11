@@ -204,7 +204,10 @@ def _tools(buyer_id: str = "buyer_1", merchant_id: str | None = None):
     @tool(args_schema=PolicyInput)
     def search_store_policy(topic: str | None = None) -> dict[str, Any]:
         """查询商家 SOP 与平台活动；只返回已配置规则，不执行改价。"""
-        return {"ok": True, "policies": store_policy.search_policies(topic)}
+        return {
+            "ok": True,
+            "policies": store_policy.search_policies(topic, merchant_id=resolved_merchant),
+        }
 
     return [search_catalog, search_inventory, search_my_orders, search_store_policy, calculator]
 

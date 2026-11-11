@@ -345,10 +345,18 @@ def _ensure_pg_schema() -> None:
                     "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(product_id) DO NOTHING",
                     row,
                 )
+            sop_count = conn.execute("SELECT COUNT(*) AS n FROM c_merchant_sop").fetchone()["n"]
+            if int(sop_count) == 0:
+                for merchant_id, topic, title, content in _MERCHANT_SOP_SEED:
+                    conn.execute(
+                        "INSERT INTO c_merchant_sop(merchant_id, topic, title, content, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(merchant_id, topic) DO NOTHING",
+                        (merchant_id, topic, title, content, _now()),
+                    )
             conn.commit()
         finally:
             conn.close()
-    except Exception:  # noqa: BLE001 - 商品补种失败不阻断控制面
+    except Exception:  # noqa: BLE001 - 商品/SOP 补种失败不阻断控制面
         pass
 
 
@@ -665,6 +673,15 @@ CREATE TABLE IF NOT EXISTS c_merchant_store_friend (
 CREATE INDEX IF NOT EXISTS idx_c_merchant_store_friend_merchant
     ON c_merchant_store_friend (merchant_id);
 
+CREATE TABLE IF NOT EXISTS c_merchant_sop (
+    merchant_id TEXT NOT NULL,
+    topic       TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (merchant_id, topic)
+);
+
 CREATE TABLE IF NOT EXISTS c_merchant_tenant (
     merchant_id TEXT PRIMARY KEY,
     name        TEXT NOT NULL,
@@ -784,6 +801,15 @@ _TEA_SEED = (
     ("P-TEA-003", "m_tea_001", "云南普洱熟茶", "普洱茶", 328.0, 20),
 )
 
+_MERCHANT_SOP_SEED = (
+    ("m_gear_002", "shipping", "发货时效", "现货商品 48 小时内发出；偏远地区可能延迟 1-2 天。"),
+    ("m_gear_002", "return", "售后与退货", "支持 7 天无理由退货，商品需保持不影响二次销售；质量问题商家承担运费。"),
+    ("m_gear_002", "no_change_price", "店宠改价权限", "店宠无权直接改价、发券或承诺赔付；优惠以平台活动或商家确认结果为准。"),
+    ("m_tea_001", "shipping", "茶叶发货时效", "茶叶现货 48 小时内发出，礼盒装会加防震包装。"),
+    ("m_tea_001", "return", "茶叶售后与退货", "支持 7 天无理由退货，未拆封且不影响二次销售；质量问题商家承担运费。"),
+    ("m_tea_001", "no_change_price", "店宠改价权限", "店宠无权直接改价、发券或承诺赔付；优惠以平台活动或商家确认结果为准。"),
+)
+
 
 def init() -> None:
     if _cend_pg_enabled():
@@ -851,6 +877,13 @@ def init() -> None:
                     "INSERT INTO c_merchant_store_friend(merchant_id, friend_id, created_at) "
                     "VALUES (?, ?, ?)",
                     ("m_gear_002", "store_demo", _now()),
+                )
+            sop_count = conn.execute("SELECT COUNT(*) AS n FROM c_merchant_sop").fetchone()["n"]
+            if sop_count == 0:
+                conn.executemany(
+                    "INSERT INTO c_merchant_sop(merchant_id, topic, title, content, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [(m, topic, title, content, _now()) for m, topic, title, content in _MERCHANT_SOP_SEED],
                 )
             # 伙伴表轻量迁移：老库补 user_nickname 列，并把历史默认名「小伴」迁到「小鱼」。
             companion_columns = {
@@ -4305,7 +4338,14 @@ def mark_thread_read(owner_id: str, thread_id: str) -> dict[str, Any]:
                 ).fetchone()
             except sqlite3.OperationalError:
                 group_row = None
+            friend_row = None
             if group_row is None:
+                friend_row = conn.execute(
+                    "SELECT 1 FROM c_friend WHERE owner_id = ? AND friend_id = ? "
+                    "AND kind = 'merchant'",
+                    (owner_id, thread),
+                ).fetchone()
+            if group_row is None and friend_row is None:
                 raise CStoreError("INVALID_THREAD", "会话 ID 不合法")
         conn.execute("BEGIN IMMEDIATE")
         now = _now()
@@ -4873,4 +4913,72 @@ def bind_store_friend(merchant_id: str, friend_id: str) -> dict[str, Any]:
         raise
     finally:
         conn.close()
+
+# ---------------------------------------------------------------------------
+# 商家级 SOP
+# ---------------------------------------------------------------------------
+
+def list_merchant_sops(merchant_id: str) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM c_merchant_sop WHERE merchant_id = ? ORDER BY topic",
+            (str(merchant_id),),
+        ).fetchall()
+        return [
+            {
+                "policy_id": f"sop_{row['topic']}",
+                "kind": "merchant_sop",
+                "merchant_id": row["merchant_id"],
+                "topic": row["topic"],
+                "title": row["title"],
+                "content": row["content"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def upsert_merchant_sop(
+    merchant_id: str,
+    topic: str,
+    *,
+    title: str,
+    content: str,
+) -> dict[str, Any]:
+    merchant_id = str(merchant_id or "").strip()
+    topic = str(topic or "").strip()
+    title = str(title or "").strip()
+    content = str(content or "").strip()
+    if not merchant_id or not topic or not title or not content:
+        raise CStoreError("INVALID_MERCHANT_SOP", "商家、主题、标题和内容都不能为空")
+    if len(topic) > 40 or len(title) > 80 or len(content) > 1000:
+        raise CStoreError("INVALID_MERCHANT_SOP", "SOP 字段过长")
+    if get_tenant(merchant_id) is None:
+        raise CStoreError("MERCHANT_NOT_FOUND", "商家不存在")
+    init()
+    conn = _connect()
+    try:
+        now = _now()
+        conn.execute(
+            "INSERT INTO c_merchant_sop(merchant_id, topic, title, content, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(merchant_id, topic) DO UPDATE SET "
+            "title = excluded.title, content = excluded.content, updated_at = excluded.updated_at",
+            (merchant_id, topic, title, content, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {
+        "policy_id": f"sop_{topic}",
+        "kind": "merchant_sop",
+        "merchant_id": merchant_id,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "updated_at": now,
+    }
 

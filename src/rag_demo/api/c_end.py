@@ -129,6 +129,13 @@ class MerchantFriendIn(BaseModel):
     merchant_id: str = Field(..., min_length=1, max_length=80)
 
 
+class MerchantSopIn(BaseModel):
+    merchant_id: str = Field(..., min_length=1, max_length=80)
+    topic: str = Field(..., min_length=1, max_length=40)
+    title: str = Field(..., min_length=1, max_length=80)
+    content: str = Field(..., min_length=1, max_length=1000)
+
+
 class CompanionPatchIn(BaseModel):
     name: str | None = Field(default=None, max_length=12)
     user_nickname: str | None = Field(default=None, max_length=12)
@@ -775,6 +782,37 @@ def admin_bind_merchant_store_friend(req: MerchantStoreFriendIn) -> dict:
     except store.CStoreError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"binding": mapping}
+
+
+@router.get("/admin/merchant-sops")
+def admin_merchant_sops(merchant_id: str | None = None) -> dict:
+    """管理端：查看商家级 SOP；不传 merchant_id 时返回所有商家。"""
+    _require_admin()
+    if merchant_id:
+        items = store.list_merchant_sops(merchant_id)
+    else:
+        items = []
+        for mapping in store.list_store_friend_mappings():
+            mid = str(mapping.get("merchant_id") or "")
+            if mid and not any(item.get("merchant_id") == mid for item in items):
+                items.extend(store.list_merchant_sops(mid))
+    return {"items": items, "count": len(items)}
+
+
+@router.put("/admin/merchant-sops")
+def admin_upsert_merchant_sop(req: MerchantSopIn) -> dict:
+    """管理端：新增/更新商家级 SOP。"""
+    _require_admin()
+    try:
+        item = store.upsert_merchant_sop(
+            req.merchant_id,
+            req.topic,
+            title=req.title,
+            content=req.content,
+        )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+    return {"item": item}
 
 
 @router.get("/admin/chat-profiles")

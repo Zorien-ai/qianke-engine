@@ -116,7 +116,9 @@ function unreadOf(threadId) {
 
 function isKnownThread(threadId) {
   const id = String(threadId || "");
-  return THREAD_IDS.includes(id) || groups.value.some((item) => item.group_id === id);
+  return THREAD_IDS.includes(id)
+    || merchantThreads.value.some((item) => item.id === id)
+    || groups.value.some((item) => item.group_id === id);
 }
 
 function mentionThreadId(token) {
@@ -278,6 +280,7 @@ const installHint = ref("");
 const storeSocketState = ref("offline");
 const storeSocketAttempts = ref(0);
 let storeSocket = null;
+let storeSocketFriendId = "store_demo";
 let storeReconnectTimer = null;
 let storeManualClose = false;
 const companion = ref({
@@ -383,7 +386,13 @@ const groupThreads = computed(() =>
 );
 
 /** 群会话在前，单聊保持原有顺序 */
-const allThreads = computed(() => [...groupThreads.value, ...threads.value]);
+const merchantThreads = ref([]);
+/** 群会话在前，动态商家店宠其次，单聊保持原有顺序 */
+const allThreads = computed(() => [
+  ...groupThreads.value,
+  ...merchantThreads.value,
+  ...threads.value,
+]);
 
 function threadMemberCount(thread) {
   return thread?.kind === "group" ? thread.members?.length || 0 : 0;
@@ -1216,15 +1225,37 @@ function storeCursor(message) {
     : message.created_at;
 }
 
-async function loadStoreMessages() {
+async function loadMerchantThreads() {
+  try {
+    const data = await getJson("/api/c/friends");
+    const existing = new Set(["store_demo", "friend_demo"]);
+    merchantThreads.value = (data?.friends || [])
+      .filter((friend) => friend.kind === "merchant" && !existing.has(friend.friend_id))
+      .map((friend) => ({
+        id: friend.friend_id,
+        name: friend.name,
+        kind: "merchant",
+        preview: friend.note || "店宠",
+        time: "",
+        unread: 0,
+      }));
+  } catch {
+    merchantThreads.value = [];
+  }
+}
+
+async function loadStoreMessages(friendId = "store_demo") {
   storeHistoryHint.value = "";
   try {
-    const data = await getJson("/api/c/friends/store_demo/messages?limit=20");
+    const data = await getJson(
+      `/api/c/friends/${encodeURIComponent(friendId)}/messages?limit=20`
+    );
     if (data?.messages?.length) {
-      messagesByThread.value.store_demo = data.messages.map(mapStoreMessage);
+      messagesByThread.value[friendId] = data.messages.map(mapStoreMessage);
       hasMoreStore.value = data.messages.length >= 20;
       storeBefore.value = storeCursor(data.messages[0]);
     } else {
+      messagesByThread.value[friendId] = [];
       hasMoreStore.value = false;
       storeBefore.value = "";
     }
@@ -1236,18 +1267,19 @@ async function loadStoreMessages() {
 
 async function loadOlderStore() {
   if (!hasMoreStore.value || !storeBefore.value || loadingOlderStore.value) return;
+  const friendId = activeId.value;
   loadingOlderStore.value = true;
   storeHistoryHint.value = "";
   try {
     const data = await getJson(
-      `/api/c/friends/store_demo/messages?limit=20&before=${encodeURIComponent(storeBefore.value)}`
+      `/api/c/friends/${encodeURIComponent(friendId)}/messages?limit=20&before=${encodeURIComponent(storeBefore.value)}`
     );
     const raw = data?.messages || [];
-    const existing = new Set((messagesByThread.value.store_demo || []).map((message) => message.id));
+    const existing = new Set((messagesByThread.value[friendId] || []).map((message) => message.id));
     const older = raw
       .map(mapStoreMessage)
       .filter((message) => message.id && !existing.has(message.id));
-    messagesByThread.value.store_demo = [...older, ...(messagesByThread.value.store_demo || [])];
+    messagesByThread.value[friendId] = [...older, ...(messagesByThread.value[friendId] || [])];
     hasMoreStore.value = raw.length >= 20;
     if (raw.length) storeBefore.value = storeCursor(raw[0]);
   } catch (error) {
@@ -1273,7 +1305,8 @@ function closeStoreSocket() {
 }
 
 function scheduleStoreReconnect() {
-  if (activeId.value !== "store_demo") return;
+  const target = allThreads.value.find((item) => item.id === activeId.value);
+  if (!target || target.kind !== "merchant") return;
   if (storeSocketAttempts.value >= 5) {
     storeSocketState.value = "offline";
     return;
@@ -1287,7 +1320,8 @@ function scheduleStoreReconnect() {
   }, delay);
 }
 
-function openStoreSocket(isReconnect = false) {
+function openStoreSocket(isReconnect = false, friendId = null) {
+  if (friendId) storeSocketFriendId = friendId;
   if (storeReconnectTimer) {
     clearTimeout(storeReconnectTimer);
     storeReconnectTimer = null;
@@ -1301,7 +1335,9 @@ function openStoreSocket(isReconnect = false) {
   if (!isReconnect) storeSocketAttempts.value = 0;
   try {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    storeSocket = new WebSocket(`${scheme}://${window.location.host}/api/c/ws/chat/store_demo`);
+    storeSocket = new WebSocket(
+      `${scheme}://${window.location.host}/api/c/ws/chat/${encodeURIComponent(storeSocketFriendId)}`
+    );
   } catch {
     storeSocketState.value = "fallback";
     scheduleStoreReconnect();
@@ -1331,7 +1367,8 @@ function handleStoreSocket(event) {
   } catch {
     return;
   }
-  if (activeId.value !== "store_demo") return;
+  const target = allThreads.value.find((item) => item.id === activeId.value);
+  if (!target || target.kind !== "merchant") return;
   if (payload.type === "chat") {
     typing.value = false;
     pendingRetry.value = null;
@@ -1349,7 +1386,7 @@ function handleStoreSocket(event) {
     agentError.value = payload.error?.message || "店宠暂时无法回应";
     if (lastStoreSend.value) {
       pendingRetry.value = {
-        threadId: "store_demo",
+        threadId: activeId.value,
         text: lastStoreSend.value.text,
         clientId: lastStoreSend.value.clientId,
       };
@@ -1734,7 +1771,8 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
     return;
   }
 
-  if (activeId.value === "store_demo") {
+  const activeThreadForSend = allThreads.value.find((item) => item.id === activeId.value);
+  if (activeThreadForSend?.kind === "merchant") {
     if (storeSocket && storeSocket.readyState === WebSocket.OPEN) {
       typing.value = true;
       agentError.value = "";
@@ -1744,10 +1782,13 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
     }
     typing.value = true;
     try {
-      const result = await postJson("/api/c/friends/store_demo/messages", {
-        content: text,
-        client_message_id: clientId || undefined,
-      });
+      const result = await postJson(
+        `/api/c/friends/${encodeURIComponent(activeId.value)}/messages`,
+        {
+          content: text,
+          client_message_id: clientId || undefined,
+        }
+      );
       if (result.reply) {
         pushMessage({ role: "merchant", text: cleanReply(result.reply.content) });
         if (result.reply.metadata?.quote_id) storeQuote.value = result.reply.metadata;
@@ -1845,7 +1886,8 @@ async function confirmLiveOrder() {
 async function sendPrompt(prompt, mode = "") {
   if (typing.value) return;
   pendingMode.value = mode;
-  if (activeId.value === "store_demo") {
+  const promptThread = allThreads.value.find((item) => item.id === activeId.value);
+  if (promptThread?.kind === "merchant") {
     draft.value = `@店宠 ${prompt}`;
   } else {
     draft.value = prompt;
@@ -2167,9 +2209,9 @@ async function switchThread(id) {
   } else {
     // 进入会话即标记已读并把角标清零，之后以后端未读接口为准
     markThreadRead(id);
-    if (id === "store_demo") {
-      await loadStoreMessages();
-      openStoreSocket();
+    if (target?.kind === "merchant") {
+      await loadStoreMessages(id);
+      openStoreSocket(false, id);
     }
   }
   scrollToBottom();
@@ -2217,6 +2259,7 @@ function selectMobileThread(id) {
 onMounted(async () => {
   await loadAccountContext();
   stripDemoSeedForRealAccount();
+  await loadMerchantThreads();
   await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm(), loadDiary()]);
   await pollCheckin();
   await refreshUnread();

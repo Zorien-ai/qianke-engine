@@ -37,13 +37,28 @@ POLICIES: tuple[dict[str, str], ...] = (
 )
 
 
-def search_policies(topic: str | None = None) -> list[dict[str, Any]]:
+def search_policies(
+    topic: str | None = None,
+    merchant_id: str | None = None,
+) -> list[dict[str, Any]]:
     text = (topic or "").strip()
+    policies: list[dict[str, Any]] = [dict(item) for item in POLICIES]
+    if merchant_id:
+        try:
+            from rag_demo.c_end import store
+
+            merchant_sops = store.list_merchant_sops(merchant_id)
+            if merchant_sops:
+                policies = [
+                    item for item in policies if item.get("kind") != "merchant_sop"
+                ] + merchant_sops
+        except Exception:  # noqa: BLE001 - SOP 读取失败保留静态回退
+            pass
     if not text:
-        return [dict(item) for item in POLICIES]
+        return policies
     hits = [
-        dict(item)
-        for item in POLICIES
+        item
+        for item in policies
         if text in item["title"] or text in item["content"] or item["kind"] in text
     ]
-    return hits or [dict(item) for item in POLICIES]
+    return hits or policies

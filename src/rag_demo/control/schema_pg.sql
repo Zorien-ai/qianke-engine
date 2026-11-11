@@ -390,6 +390,15 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_reconciliation_alert (
   "resolved_at" TEXT
 );
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_sop (
+  "merchant_id" TEXT NOT NULL,
+  "topic" TEXT NOT NULL,
+  "title" TEXT NOT NULL,
+  "content" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL,
+  PRIMARY KEY ("merchant_id", "topic")
+);
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_tenant (
   "merchant_id" TEXT PRIMARY KEY,
   "name" TEXT NOT NULL,

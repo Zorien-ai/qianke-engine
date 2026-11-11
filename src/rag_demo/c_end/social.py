@@ -270,7 +270,7 @@ def list_idle_store_owners(cutoff_iso: str, friend_id: str = "store_demo", limit
         rows = conn.execute(
             "SELECT owner_id, MAX(created_at) AS last_at FROM c_message "
             "WHERE friend_id = ? GROUP BY owner_id HAVING MAX(created_at) <= ? "
-            "ORDER BY last_at ASC LIMIT ?",
+            "ORDER BY MAX(created_at) ASC LIMIT ?",
             (friend_id, cutoff_iso, max(1, min(int(limit), 1000))),
         ).fetchall()
         return [str(row["owner_id"]) for row in rows]

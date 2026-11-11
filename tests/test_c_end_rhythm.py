@@ -21,7 +21,7 @@ def completed_merchant(monkeypatch):
     monkeypatch.setattr(
         store,
         "_merchant_order_state",
-        lambda owner_id, order_id: (
+        lambda owner_id, order_id, merchant_id=None: (
             "COMPLETED",
             (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat(),
         ),
@@ -64,7 +64,8 @@ def test_enabled_rhythm_delivers_order_followup_once(c_store):
     order = _confirmed_order()
     _set_due_past("buyer_1", order["order_id"])
     store.update_rhythm("buyer_1", enabled=True)
-    now = datetime.now(timezone.utc) + timedelta(days=3)
+    # 固定在白天，避免测试运行时刚好落在 22:00–09:00 免打扰时段。
+    now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
     first = store.claim_due_checkin("buyer_1", now=now)
     assert first is not None
     assert first["kind"] == "order_followup"
@@ -95,7 +96,7 @@ def test_not_delivered_order_does_not_trigger_followup(c_store, monkeypatch):
     order = _confirmed_order()
     _set_due_past("buyer_1", order["order_id"])
     store.update_rhythm("buyer_1", enabled=True)
-    monkeypatch.setattr(store, "_merchant_order_state", lambda owner_id, order_id: ("SHIPPED", None))
+    monkeypatch.setattr(store, "_merchant_order_state", lambda owner_id, order_id, merchant_id=None: ("SHIPPED", None))
     assert store.claim_due_checkin("buyer_1", now=datetime.now(timezone.utc) + timedelta(days=3)) is None
 
 
@@ -107,6 +108,6 @@ def test_followup_waits_24h_after_signed(c_store, monkeypatch):
     monkeypatch.setattr(
         store,
         "_merchant_order_state",
-        lambda owner_id, order_id: ("COMPLETED", signed.isoformat()),
+        lambda owner_id, order_id, merchant_id=None: ("COMPLETED", signed.isoformat()),
     )
     assert store.claim_due_checkin("buyer_1", now=datetime.now(timezone.utc)) is None

@@ -45,12 +45,42 @@
         </div>
       </article>
     </div>
+
+    <section class="card sop-card">
+      <header class="sop-head">
+        <div>
+          <h3>商家级 SOP</h3>
+          <p>店宠的商品/售后/发货口径按 merchant_id 读取，不再共用一套。</p>
+        </div>
+        <button class="btn btn-ghost" type="button" :disabled="sopLoading" @click="loadSops">
+          {{ sopLoading ? "刷新中…" : "刷新" }}
+        </button>
+      </header>
+      <div class="sop-fields">
+        <label><span>商家 ID</span><input v-model="sopMerchantId" class="input" placeholder="m_tea_001" /></label>
+        <label><span>主题</span><input v-model="sopTopic" class="input" placeholder="shipping" /></label>
+        <label><span>标题</span><input v-model="sopTitle" class="input" placeholder="茶叶发货时效" /></label>
+        <label class="sop-content"><span>内容</span><textarea v-model="sopContent" rows="3" class="input" /></label>
+        <button class="btn btn-primary" type="button" :disabled="sopSaving" @click="saveSop">
+          {{ sopSaving ? "保存中…" : "保存 SOP" }}
+        </button>
+      </div>
+      <p v-if="sopError" class="inline-error" role="alert">{{ sopError }}</p>
+      <p v-if="sopMessage" class="sop-success" role="status">{{ sopMessage }}</p>
+      <div class="sop-list">
+        <article v-for="sop in sops" :key="`${sop.merchant_id}:${sop.topic}`" class="sop-row">
+          <strong>{{ sop.merchant_id }} · {{ sop.title }}</strong>
+          <p>{{ sop.content }}</p>
+        </article>
+        <p v-if="!sops.length && !sopLoading" class="empty-state">还没有商家 SOP。</p>
+      </div>
+    </section>
   </section>
 </template>
 
 <script setup>
 import { onMounted, ref } from "vue";
-import { getJson, postJson } from "../api";
+import { getJson, postJson, putJson } from "../api";
 import { toast } from "../store";
 
 const items = ref([]);
@@ -59,6 +89,15 @@ const binding = ref(false);
 const error = ref("");
 const merchantId = ref("");
 const friendId = ref("");
+const sops = ref([]);
+const sopLoading = ref(false);
+const sopSaving = ref(false);
+const sopError = ref("");
+const sopMessage = ref("");
+const sopMerchantId = ref("m_tea_001");
+const sopTopic = ref("shipping");
+const sopTitle = ref("茶叶发货时效");
+const sopContent = ref("茶叶现货 48 小时内发出，礼盒装会加防震包装。");
 
 async function load() {
   loading.value = true;
@@ -66,6 +105,7 @@ async function load() {
   try {
     const data = await getJson("/api/c/admin/merchant-store-friends");
     items.value = Array.isArray(data?.items) ? data.items : [];
+    await loadSops();
   } catch (exc) {
     error.value = exc?.detail || exc?.message || "映射加载失败";
   } finally {
@@ -95,6 +135,44 @@ async function bind() {
   }
 }
 
+async function loadSops() {
+  sopLoading.value = true;
+  try {
+    const data = await getJson("/api/c/admin/merchant-sops");
+    sops.value = Array.isArray(data?.items) ? data.items : [];
+  } catch (exc) {
+    sopError.value = exc?.detail || exc?.message || "SOP 加载失败";
+  } finally {
+    sopLoading.value = false;
+  }
+}
+
+async function saveSop() {
+  if (sopSaving.value) return;
+  const merchant = sopMerchantId.value.trim();
+  const topic = sopTopic.value.trim();
+  const title = sopTitle.value.trim();
+  const content = sopContent.value.trim();
+  if (!merchant || !topic || !title || !content) return;
+  sopSaving.value = true;
+  sopError.value = "";
+  sopMessage.value = "";
+  try {
+    await putJson("/api/c/admin/merchant-sops", {
+      merchant_id: merchant,
+      topic,
+      title,
+      content,
+    });
+    sopMessage.value = "SOP 已保存";
+    await loadSops();
+  } catch (exc) {
+    sopError.value = exc?.detail || exc?.message || "SOP 保存失败";
+  } finally {
+    sopSaving.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -116,4 +194,21 @@ onMounted(load);
 .mapping-status { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-3); font-size: 10px; }
 .empty-state { margin-top: 18px; padding: 28px; text-align: center; color: var(--text-3); border: 1px dashed var(--line); border-radius: 10px; }
 .inline-error { color: var(--danger); font-size: 12px; }
+
+
+.sop-card { margin-top: 16px; padding: 14px 16px; }
+.sop-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.sop-head h3 { margin: 0; }
+.sop-head p { margin: 4px 0 0; color: var(--text-3); font-size: 11px; }
+.sop-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; align-items: end; }
+.sop-fields label { display: flex; flex-direction: column; gap: 4px; }
+.sop-fields label span { color: var(--text-3); font-size: 11px; }
+.sop-fields .sop-content { grid-column: 1 / -1; }
+.sop-fields textarea { resize: vertical; }
+.sop-fields .btn { justify-self: start; }
+.sop-success { color: var(--success); font-size: 12px; }
+.sop-list { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
+.sop-row { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.sop-row strong { font-size: 12px; }
+.sop-row p { margin: 3px 0 0; color: var(--text-2); font-size: 11px; }
 </style>

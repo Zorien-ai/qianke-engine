@@ -15,6 +15,7 @@ const quoteDraft = ref(null);
 const quoteOrder = ref(null);
 const quoteBusy = ref(false);
 const negotiationBusy = ref(false);
+const negotiationBudget = ref(500);
 const message = ref("我想买一双轻量跑鞋，预算 500 元以内");
 const running = ref(false);
 const agentError = ref("");
@@ -261,7 +262,7 @@ async function runMerchantNegotiation() {
       "商品";
     const data = await postJson("/api/c/negotiations", {
       need: need.slice(0, 80),
-      budget: 500,
+      budget: Math.max(1, Number(negotiationBudget.value) || 500),
       quantity: 1,
       friend_id: merchantFriendId.value,
     });
@@ -452,6 +453,10 @@ onMounted(() => {
         </div>
 
         <div v-if="isMerchantShop" class="negotiation-row">
+          <label class="negotiation-budget">
+            <span>预算 ¥</span>
+            <input v-model.number="negotiationBudget" type="number" min="1" max="100000" step="10" />
+          </label>
           <button
             class="ghost-btn"
             type="button"
@@ -1384,5 +1389,25 @@ onMounted(() => {
 .negotiation-row span {
   color: var(--muted);
   font-size: 10px;
+}
+
+
+.negotiation-budget {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.negotiation-budget input {
+  width: 72px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
 }
 </style>

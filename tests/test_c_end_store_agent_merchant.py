@@ -109,3 +109,17 @@ def test_friend_mapping_routes_reply_to_tea_merchant(merchant_env):
     assert result.text == "推荐明前龙井"
     assert any(item["product_id"] == "P-TEA-001" for item in result.metadata.get("product_refs", []))
     assert fake.calls == 2
+
+
+def test_merchant_sop_is_scoped_per_merchant(merchant_env):
+    gear = {item["topic"]: item["content"] for item in store.list_merchant_sops("m_gear_002")}
+    tea = {item["topic"]: item["content"] for item in store.list_merchant_sops("m_tea_001")}
+    assert "偏远地区" in gear["shipping"]
+    assert "防震包装" in tea["shipping"]
+    assert gear["return"] != tea["return"]
+
+    tea_tools = {item.name: item for item in store_agent._tools("buyer_1", "m_tea_001")}
+    result = tea_tools["search_store_policy"].invoke({"topic": "发货"})
+    assert result["ok"] is True
+    assert any("防震包装" in item["content"] for item in result["policies"])
+    assert all("偏远地区" not in item["content"] for item in result["policies"])
