@@ -6,6 +6,7 @@ import ToastHost from "./components/ToastHost.vue";
 import LanguageToggle from "./components/LanguageToggle.vue";
 import ThemeToggle from "./components/ThemeToggle.vue";
 import Logo from "./components/Logo.vue";
+import CShell from "./components/CShell.vue";
 
 const route = useRoute();
 const drawerOpen = ref(false);
@@ -151,6 +152,14 @@ function closeDrawer() {
   <!-- 公开落地页：不渲染侧边栏 / topbar / 抽屉，页面自带营销页顶栏 -->
   <template v-else-if="isPublicRoute">
     <RouterView />
+    <ToastHost />
+  </template>
+
+  <!-- C 端商城/订单/消息：统一移动端壳 -->
+  <template v-else-if="route.meta && route.meta.cShell">
+    <CShell>
+      <RouterView />
+    </CShell>
     <ToastHost />
   </template>
 
