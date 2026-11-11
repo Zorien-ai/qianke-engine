@@ -34,8 +34,8 @@ import { RouterLink, useRoute } from "vue-router";
 const route = useRoute();
 const title = computed(() => route.meta?.title || "千客");
 const tabs = [
-  { key: "chat", label: "对话", to: "/c/app", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>' },
-  { key: "shop", label: "商城", to: "/c", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>' },
+  { key: "chat", label: "聊", to: "/c/app", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>' },
+  { key: "shop", label: "逛", to: "/c", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>' },
   { key: "orders", label: "订单", to: "/c/orders", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l4 4v16H6z"/><path d="M14 2v5h5"/><path d="M9 12h6M9 16h6"/></svg>' },
   { key: "messages", label: "消息", to: "/c/social", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9.4 9.4 0 0 1-3.2-.6L4 21l1.6-4.8A8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z"/></svg>' },
 ];
@@ -50,12 +50,27 @@ function isActive(tab) {
 .c-shell-wrap {
   min-height: 100vh;
   padding: 20px;
-  background: #eef0f2;
-  color: var(--text);
+  background: #ece8df;
+  color: #1e1b16;
   box-sizing: border-box;
 }
 
 .c-shell-frame {
+  --bg: #f7f3ea;
+  --surface: #fffdf8;
+  --surface-2: #f7f3ea;
+  --surface-3: #efe7da;
+  --border: #e4dccd;
+  --text: #1e1b16;
+  --text-2: #6b6258;
+  --text-3: #8a7f72;
+  --muted: #8a7f72;
+  --primary: #d95f3b;
+  --primary-soft: #f6e3da;
+  --primary-strong: #b4492f;
+  --radius: 14px;
+  --radius-xs: 9px;
+  --shadow-sm: none;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -63,10 +78,10 @@ function isActive(tab) {
   height: calc(100vh - 40px);
   margin: 0 auto;
   overflow: hidden;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(30, 27, 22, 0.1);
   border-radius: 26px;
   background: var(--surface);
-  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 22px 60px rgba(30, 27, 22, 0.16);
 }
 
 .c-shell-top {
@@ -77,7 +92,7 @@ function isActive(tab) {
   min-height: 48px;
   padding: 0 14px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 253, 248, 0.92);
   backdrop-filter: blur(12px);
   font-size: 13px;
 }
@@ -88,7 +103,9 @@ function isActive(tab) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  color: var(--text);
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -145,7 +162,7 @@ function isActive(tab) {
   flex: none;
   align-items: stretch;
   border-top: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 253, 248, 0.96);
   backdrop-filter: blur(12px);
   padding: 5px 6px calc(5px + env(safe-area-inset-bottom));
 }
@@ -164,9 +181,9 @@ function isActive(tab) {
 }
 
 .c-shell-tab.is-active {
-  color: var(--text);
-  background: var(--bg-soft);
-  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-weight: 700;
 }
 
 .c-shell-tab-icon {

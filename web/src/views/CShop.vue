@@ -24,6 +24,7 @@ const threadId = ref("");
 const decisionLoading = ref(false);
 const lastAction = ref("");
 
+const featuredProduct = computed(() => products.value.find((p) => p.category === "运动") || products.value[0] || null);
 const hasDraft = computed(() => !!draft.value);
 const hasOrder = computed(() => !!order.value);
 const canSend = computed(() => !running.value && !decisionLoading.value && !hasDraft.value && message.value.trim().length > 0);
@@ -210,10 +211,10 @@ onMounted(() => {
   <div class="shop-page">
     <header class="shop-head">
       <div>
-        <p class="shop-kicker">C-END · SHOPPING</p>
-        <h2>C 端商城体验</h2>
+        <p class="shop-kicker">C-END · MARKET</p>
+        <h2>今天想逛什么？</h2>
         <p class="shop-subtitle">
-          告诉导购你的需求，Agent 会从真实 mock 商品库推荐，并在你确认后才创建模拟订单。
+          小鱼替你从店里挑了这些。先看看，不急着买；需要时再问她。
         </p>
       </div>
       <span class="shop-status" role="status">
@@ -222,12 +223,20 @@ onMounted(() => {
       </span>
     </header>
 
+    <section v-if="featuredProduct" class="market-note" aria-label="今日手记">
+      <p class="market-note-kicker">TODAY'S NOTE</p>
+      <h3>{{ featuredProduct.title }}</h3>
+      <p class="market-note-text">
+        {{ featuredProduct.category }} · {{ productHint(featuredProduct) }}。小鱼说：先看合不合用，再决定要不要买。
+      </p>
+    </section>
+
     <section class="shop-grid" aria-label="商品与导购">
       <div class="catalog-panel">
         <div class="panel-head">
           <div>
-            <h3>商品目录</h3>
-            <p>价格和库存来自确定性商品库</p>
+            <h3>市集选物</h3>
+            <p>价格和库存来自真实商品库</p>
           </div>
           <span class="count">{{ products.length }} 件</span>
         </div>
@@ -240,17 +249,17 @@ onMounted(() => {
         </div>
         <div v-else class="product-list">
           <article v-for="product in products" :key="product.product_id" class="product-row">
-            <div class="product-mark">{{ product.category.slice(0, 1) }}</div>
+            <div class="product-mark" aria-hidden="true">{{ product.category.slice(0, 1) }}</div>
             <div class="product-main">
               <div class="product-top">
                 <h4>{{ product.title }}</h4>
                 <span class="category">{{ product.category }}</span>
               </div>
-              <p>{{ product.product_id }} · {{ productHint(product) }}</p>
-            </div>
-            <div class="product-side">
-              <strong>¥{{ money(product.price) }}</strong>
-              <button class="ghost-btn" type="button" @click="useProduct(product)">咨询</button>
+              <p class="product-story">{{ productHint(product) }}</p>
+              <div class="product-side">
+                <strong>¥{{ money(product.price) }}</strong>
+                <button class="ghost-btn" type="button" @click="useProduct(product)">问问小鱼</button>
+              </div>
             </div>
           </article>
         </div>
@@ -259,7 +268,7 @@ onMounted(() => {
       <div class="assistant-panel">
         <div class="panel-head">
           <div>
-            <h3>导购 Agent</h3>
+            <h3>和小鱼说说</h3>
             <p>推荐 → 草稿 → 你确认 → 模拟下单</p>
           </div>
           <span class="agent-badge">LangGraph</span>
@@ -980,4 +989,271 @@ onMounted(() => {
     width: 100%;
   }
 }
+
+/* ---------- 暖白市集 · 编辑风 ---------- */
+.shop-page {
+  --bg: #f7f3ea;
+  --surface: #fffdf8;
+  --surface-2: #f7f3ea;
+  --surface-3: #efe7da;
+  --border: #e4dccd;
+  --text: #1e1b16;
+  --text-2: #6b6258;
+  --muted: #8a7f72;
+  --primary: #d95f3b;
+  --primary-soft: #f6e3da;
+  --danger: #a33f36;
+  --radius: 14px;
+  --radius-xs: 9px;
+  --shadow-sm: none;
+  color: var(--text);
+}
+
+.shop-head,
+.catalog-panel,
+.assistant-panel,
+.market-note {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.shop-head {
+  padding: 18px 18px 16px;
+  border-radius: 16px;
+}
+
+.shop-kicker,
+.market-note-kicker {
+  margin: 0 0 6px;
+  color: var(--primary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+}
+
+.shop-head h2,
+.market-note h3,
+.panel-head h3,
+.product-top h4 {
+  font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.shop-head h2 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.25;
+}
+
+.shop-subtitle {
+  max-width: 36em;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.shop-status {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 10px;
+}
+
+.market-note {
+  padding: 15px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.market-note h3 {
+  margin: 0 0 5px;
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.market-note-text {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.panel-head h3 {
+  font-size: 17px;
+}
+
+.panel-head p {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.catalog-panel,
+.assistant-panel {
+  padding: 15px;
+  border-radius: 14px;
+}
+
+.product-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.product-row {
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.product-mark {
+  width: 100%;
+  height: 92px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(30, 27, 22, 0.36);
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 38px;
+  font-weight: 600;
+}
+
+.product-row:nth-child(1) .product-mark { background: linear-gradient(145deg, #d9ccb7, #b6a084 58%, #efe5d3); }
+.product-row:nth-child(2) .product-mark { background: linear-gradient(145deg, #cdd5c5, #81927b 60%, #e6e9df); }
+.product-row:nth-child(3) .product-mark { background: linear-gradient(145deg, #e6d2c2, #c38d70 65%, #f2e5d9); }
+.product-row:nth-child(4) .product-mark { background: linear-gradient(145deg, #d8d2c7, #a89a87 62%, #ece5da); }
+.product-row:nth-child(5) .product-mark { background: linear-gradient(145deg, #e4d9c2, #bda474 62%, #f1e8d8); }
+.product-row:nth-child(6) .product-mark { background: linear-gradient(145deg, #d9d9d1, #999a8e 62%, #ecece5); }
+
+.product-main {
+  width: 100%;
+  padding: 10px;
+}
+
+.product-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.product-top h4 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.product-top .category {
+  flex: none;
+  color: var(--primary);
+  font-size: 9px;
+}
+
+.product-story {
+  margin: 5px 0 0;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.product-side {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.product-side strong {
+  color: var(--primary);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+}
+
+.ghost-btn {
+  padding: 5px 8px;
+  border-color: var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 10px;
+}
+
+.ghost-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.primary-btn {
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fffdf8;
+}
+
+.primary-btn:hover {
+  background: #b4492f;
+}
+
+.field-label {
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.shop-input {
+  border-color: var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.shop-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.companion-box,
+.reply-box,
+.confirm-box,
+.order-box,
+.quote-panel {
+  border-color: var(--border);
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.agent-badge,
+.count,
+.quote-status {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.reply-label,
+.confirm-kicker,
+.quote-kicker {
+  color: var(--primary);
+}
+
+@media (max-width: 360px) {
+  .product-list {
+    grid-template-columns: 1fr;
+  }
+
+  .shop-head h2 {
+    font-size: 23px;
+  }
+}
+
 </style>

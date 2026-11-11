@@ -46,7 +46,7 @@ const routes = [
   { path: "/agent", name: "agent", component: AgentDemo, meta: { title: "Agent 智能助理" } },
   { path: "/agent/actions", name: "agent-actions", component: AgentActions, meta: { title: "运营任务看板" } },
   { path: "/my-agent", name: "my-agent", component: MyAgent, meta: { title: "我的 AI" } },
-  { path: "/c", name: "c-shop", component: CShop, meta: { title: "C 端商城", cShell: true } },
+  { path: "/c", name: "c-shop", component: CShop, meta: { title: "市集", cShell: true } },
   { path: "/c/social", name: "c-social", component: CSocial, meta: { title: "消息", cShell: true } },
   { path: "/c/orders", name: "c-orders", component: COrders, meta: { title: "订单", cShell: true } },
   { path: "/c/app", name: "c-app", component: CApp, meta: { title: "千客 · C 端", standalone: true } },

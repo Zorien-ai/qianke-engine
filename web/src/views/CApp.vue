@@ -2627,14 +2627,14 @@ onBeforeUnmount(() => {
           <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" />
           <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
         </svg>
-        <span>对话</span>
+        <span>聊</span>
       </RouterLink>
       <RouterLink to="/c">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
           <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
           <path d="M3 6h18M16 10a4 4 0 0 1-8 0" />
         </svg>
-        <span>商城</span>
+        <span>逛</span>
       </RouterLink>
       <RouterLink to="/c/orders">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -2643,13 +2643,12 @@ onBeforeUnmount(() => {
         </svg>
         <span>订单</span>
       </RouterLink>
-      <button type="button" @click="toggleContext">
+      <RouterLink to="/c/social">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 11v5M12 8h.01" />
+          <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9 9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" />
         </svg>
-        <span>概览</span>
-      </button>
+        <span>消息</span>
+      </RouterLink>
     </nav>
 
     <input
@@ -2665,20 +2664,21 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .c-app {
-  --c-bg: #ffffff;
-  --c-bg-soft: #fcfcfb;
-  --c-panel: #ffffff;
-  --c-panel-2: #f6f6f3;
-  --c-panel-3: #efefeb;
-  --c-line: #e4e4de;
-  --c-line-soft: #efefeb;
-  --c-text: #171715;
-  --c-text-2: #5c5c56;
-  --c-text-3: #6b6b64;
-  --c-accent: #587376;
-  --c-positive: #6f8f7a;
-  --c-warning: #7a6340;
-  --c-negative: #8a4f4f;
+  --c-bg: #f7f3ea;
+  --c-bg-soft: #fffdf8;
+  --c-panel: #fffdf8;
+  --c-panel-2: #f1eadf;
+  --c-panel-3: #e8dfd1;
+  --c-line: #e4dccd;
+  --c-line-soft: #eee6d8;
+  --c-text: #1e1b16;
+  --c-text-2: #6b6258;
+  --c-text-3: #8a7f72;
+  --c-accent: #d95f3b;
+  --c-accent-soft: #f6e3da;
+  --c-positive: #6f7f63;
+  --c-warning: #b4492f;
+  --c-negative: #a33f36;
   min-height: 100dvh;
   background: var(--c-bg);
   color: var(--c-text);
@@ -2795,7 +2795,7 @@ onBeforeUnmount(() => {
 }
 
 .c-nav-item.active {
-  background: var(--c-panel-3);
+  background: var(--c-accent-soft, #f6e3da);
   color: var(--c-text);
   font-weight: 600;
 }
@@ -4403,8 +4403,8 @@ onBeforeUnmount(() => {
   }
 
   .c-mobile-nav a.active {
-    color: var(--c-text);
-    font-weight: 600;
+    color: var(--c-accent);
+    font-weight: 700;
   }
 
   .c-mobile-nav svg {
