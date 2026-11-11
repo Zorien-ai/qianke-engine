@@ -4,7 +4,9 @@
     type="button"
     class="companion-avatar"
     :style="{ width: `${size}px`, height: `${size}px` }"
-    :aria-label="label"\n    :data-state="state"
+    :aria-label="label"
+    :data-state="state"
+    :data-expression="expression"
     :title="label"
     @click="handlePoke"
   >
@@ -133,6 +135,8 @@ defineExpose({ poke, setExpression });
   height: 100%;
 }
 </style>
+
+
 
 
 

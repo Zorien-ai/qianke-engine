@@ -82,9 +82,20 @@ confused    可能 / 也许 / 不确定 / 需要确认
 
 ```text
 speaking 状态
-→ 每 170ms 切换一次口型帧
+→ 优先由 speechSynthesis boundary 事件驱动口型帧
+→ 浏览器不触发 boundary 时用 220ms 兜底
 → 结束时回到 idle，再显示一次情绪表情
 ```
+
+语音设置会记住：
+
+```text
+朗读开关
+音色（系统中文语音优先）
+语速 0.8–1.3×
+```
+
+设置面板在“当前会话信息 → 声音”，支持试听。
 
 ## 位置
 
@@ -101,6 +112,10 @@ speaking 状态
 ![头像特写](qianke-avatar-closeup.png)
 
 ![语音 UI](c-app-voice-ui.png)
+
+![语音设置](c-app-voice-settings.png)
+
+![朗读中的小鱼](c-app-voice-speaking.png)
 
 ## 验证
 

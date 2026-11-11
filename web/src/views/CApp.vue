@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import CompanionAvatar from "../components/CompanionAvatar.vue";
 import { getJson, postJson, patchJson, del, postForm } from "../api";
@@ -588,8 +588,15 @@ const voiceSupported = ref(
 const voiceSynthesisSupported = ref(
   typeof window !== "undefined" && "speechSynthesis" in window,
 );
+const voiceRate = ref(1.02);
+const voiceURI = ref("");
+const voiceOptions = ref([]);
+const VOICE_PREFS_KEY = "qianke_voice_prefs";
 let speechRecognition = null;
 let lipSyncTimer = null;
+let lipFallbackTimer = null;
+let lipFrameIndex = 0;
+const lipFrames = ["happy", "neutral", "surprised", "calm", "squinted"];
 let avatarExpressionIndex = 0;
 let avatarIdleTimer = null;
 let avatarTransientTimer = null;
@@ -726,18 +733,98 @@ function stopLipSync() {
     clearInterval(lipSyncTimer);
     lipSyncTimer = null;
   }
+  if (lipFallbackTimer) {
+    clearTimeout(lipFallbackTimer);
+    lipFallbackTimer = null;
+  }
+}
+
+function pulseLipSync() {
+  avatarExpression.value = lipFrames[lipFrameIndex % lipFrames.length];
+  lipFrameIndex += 1;
 }
 
 function startLipSync() {
   stopLipSync();
   setCompanionState("speaking");
-  const frames = ["happy", "neutral", "surprised", "calm"];
-  let index = 0;
-  lipSyncTimer = setInterval(() => {
-    avatarExpression.value = frames[index % frames.length];
-    index += 1;
-  }, 170);
+  lipFrameIndex = 0;
+  pulseLipSync();
+  // boundary 事件在部分浏览器/语音下不触发，保留低频兜底，但优先由 boundary 驱动。
+  lipFallbackTimer = setTimeout(() => {
+    if (!lipSyncTimer) {
+      lipSyncTimer = setInterval(pulseLipSync, 220);
+    }
+  }, 500);
 }
+
+function loadVoiceOptions() {
+  if (!voiceSynthesisSupported.value) return;
+  const all = window.speechSynthesis.getVoices() || [];
+  const zh = all.filter((voice) => /^zh/i.test(voice.lang));
+  voiceOptions.value = (zh.length ? zh : all).map((voice) => ({
+    uri: voice.voiceURI,
+    label: `${voice.name} (${voice.lang})`,
+  }));
+  if (!voiceURI.value && voiceOptions.value.length) {
+    voiceURI.value = voiceOptions.value[0].uri;
+  }
+}
+
+function previewVoice() {
+  if (!voiceSynthesisSupported.value) {
+    showAvatarTip("当前浏览器不支持朗读");
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance("你好，我是小鱼。今天想逛点什么？");
+  utterance.lang = "zh-CN";
+  utterance.rate = Number(voiceRate.value) || 1;
+  const selected = window.speechSynthesis
+    .getVoices()
+    .find((voice) => voice.voiceURI === voiceURI.value);
+  if (selected) utterance.voice = selected;
+  utterance.onstart = () => startLipSync();
+  utterance.onend = () => {
+    stopLipSync();
+    setCompanionState("idle");
+    avatarExpression.value = "neutral";
+  };
+  utterance.onerror = utterance.onend;
+  window.speechSynthesis.speak(utterance);
+}
+
+function saveVoicePrefs() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(
+      VOICE_PREFS_KEY,
+      JSON.stringify({
+        enabled: voiceReplyEnabled.value,
+        rate: voiceRate.value,
+        voiceURI: voiceURI.value,
+      }),
+    );
+  } catch (error) {
+    /* 隐私模式下 localStorage 不可用，忽略 */
+  }
+}
+
+function restoreVoicePrefs() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const raw = localStorage.getItem(VOICE_PREFS_KEY);
+    if (!raw) return;
+    const prefs = JSON.parse(raw);
+    voiceReplyEnabled.value = Boolean(prefs.enabled);
+    const rate = Number(prefs.rate);
+    if (Number.isFinite(rate)) voiceRate.value = Math.min(1.3, Math.max(0.8, rate));
+    if (typeof prefs.voiceURI === "string") voiceURI.value = prefs.voiceURI;
+  } catch (error) {
+    /* 配置损坏时回落默认值 */
+  }
+}
+
+watch([voiceReplyEnabled, voiceRate, voiceURI], () => saveVoicePrefs());
 
 function stopSpeaking() {
   stopLipSync();
@@ -758,11 +845,19 @@ function speakReply(text) {
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(content);
   utterance.lang = "zh-CN";
-  utterance.rate = 1.02;
+  utterance.rate = Number(voiceRate.value) || 1;
   utterance.pitch = 1.05;
+  const selected = window.speechSynthesis
+    .getVoices()
+    .find((voice) => voice.voiceURI === voiceURI.value);
+  if (selected) utterance.voice = selected;
   utterance.onstart = () => startLipSync();
   utterance.onboundary = () => {
-    if (!lipSyncTimer) startLipSync();
+    if (lipFallbackTimer) {
+      clearTimeout(lipFallbackTimer);
+      lipFallbackTimer = null;
+    }
+    pulseLipSync();
   };
   utterance.onend = () => {
     stopLipSync();
@@ -2128,6 +2223,11 @@ onMounted(async () => {
   document.addEventListener("visibilitychange", onVisibilityChange);
   document.addEventListener("pointerdown", onCompanionActivity, { passive: true });
   document.addEventListener("keydown", onCompanionActivity);
+  restoreVoicePrefs();
+  loadVoiceOptions();
+  if (voiceSynthesisSupported.value) {
+    window.speechSynthesis.addEventListener?.("voiceschanged", loadVoiceOptions);
+  }
   resetAvatarIdleTimer();
   syncViewportHeight();
   window.visualViewport?.addEventListener("resize", onViewportResize);
@@ -2166,6 +2266,9 @@ onBeforeUnmount(() => {
   clearTimer("tip");
   clearTimer("expression");
   stopLipSync();
+  if (voiceSynthesisSupported.value) {
+    window.speechSynthesis.removeEventListener?.("voiceschanged", loadVoiceOptions);
+  }
   speechRecognition?.abort?.();
   if (voiceReplyEnabled.value && typeof window !== "undefined" && window.speechSynthesis) {
     window.speechSynthesis.cancel();
@@ -2717,6 +2820,31 @@ onBeforeUnmount(() => {
                 <p>{{ item.content }}</p>
               </article>
             </div>
+          </section>
+
+          <section v-if="activeId === 'companion'" class="c-context-section">
+            <header>
+              <span>声音</span>
+              <span class="c-context-link">{{ voiceReplyEnabled ? "朗读已开" : "默认关闭" }}</span>
+            </header>
+            <label class="c-voice-row">
+              <input type="checkbox" :checked="voiceReplyEnabled" @change="toggleVoiceReply" />
+              <span>朗读小鱼回复</span>
+            </label>
+            <label v-if="voiceOptions.length" class="c-voice-field">
+              <span>音色</span>
+              <select v-model="voiceURI">
+                <option v-for="voice in voiceOptions" :key="voice.uri" :value="voice.uri">{{ voice.label }}</option>
+              </select>
+            </label>
+            <label class="c-voice-field">
+              <span>语速 {{ Number(voiceRate).toFixed(2) }}×</span>
+              <input v-model.number="voiceRate" type="range" min="0.8" max="1.3" step="0.05" />
+            </label>
+            <button type="button" class="c-context-link" :disabled="!voiceSynthesisSupported" @click="previewVoice">
+              试听
+            </button>
+            <p v-if="!voiceSynthesisSupported" class="c-memory-empty">当前浏览器不支持朗读。</p>
           </section>
 
           <section v-if="activeId === 'companion'" class="c-context-section">
@@ -5449,6 +5577,43 @@ onBeforeUnmount(() => {
 @keyframes c-voice-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(217, 95, 59, 0.18); }
   50% { box-shadow: 0 0 0 5px rgba(217, 95, 59, 0.04); }
+}
+
+
+.c-voice-row,
+.c-voice-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-2);
+  font-size: 10px;
+}
+
+.c-voice-row input {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--c-accent);
+}
+
+.c-voice-field {
+  justify-content: space-between;
+}
+
+.c-voice-field select {
+  min-width: 0;
+  max-width: 150px;
+  padding: 4px 6px;
+  border: 1px solid var(--c-line);
+  border-radius: 7px;
+  background: var(--c-bg-soft);
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 10px;
+}
+
+.c-voice-field input[type="range"] {
+  width: 110px;
+  accent-color: var(--c-accent);
 }
 </style>
 

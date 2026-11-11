@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 2.96.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 2.97.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v2.96.0 |
+| AGENTS.md | v2.97.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -608,6 +608,7 @@ IM 社交载体
 | 2.94.0 | 2026-11-11 | C 端接入 GrokBot 程序化 SVG 可交互头像原型（点击/注视/状态映射） |
 | 2.95.0 | 2026-11-11 | 小鱼头像状态机（listening/streaming/sleeping）、互动菜单、千客角色 recipes |
 | 2.96.0 | 2026-11-11 | 小鱼语音输入、朗读口型同步、回复情绪表情 |
+| 2.97.0 | 2026-11-11 | 语音 boundary 驱动口型、音色/语速设置与试听 |
 
 
 
