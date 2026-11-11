@@ -13,11 +13,13 @@ from rag_demo.c_end import store
 class _FakeLLM:
     def __init__(self, responses):
         self._responses = list(responses)
+        self.calls = []
 
     def bind_tools(self, tools):
         return self
 
     def invoke(self, messages):
+        self.calls.append(list(messages))
         return self._responses.pop(0)
 
 
@@ -172,6 +174,52 @@ def test_c_agent_advisor_mode_recommends_without_order(c_store, tmp_path):
     assert result["mode"] == "advisor"
     assert result["interrupted"] is False
     assert result["draft"] is None
+
+
+def test_c_agent_continues_same_thread_with_history(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_multi.sqlite")
+    fake = _FakeLLM([AIMessage(content="第一轮回答"), AIMessage(content="第二轮回答")])
+    first = c_agent.run_c_agent(
+        "我叫小明，喜欢跑步",
+        buyer_id="buyer_1",
+        thread_id="c_thread_multi_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    second = c_agent.run_c_agent(
+        "我叫什么名字",
+        buyer_id="buyer_1",
+        thread_id="c_thread_multi_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    assert first["status"] == "COMPLETED"
+    assert second["status"] == "COMPLETED"
+    # 第二轮调用必须能看到第一轮的用户消息和回答。
+    second_context = "\n".join(str(getattr(m, "content", "")) for m in fake.calls[-1])
+    assert "我叫小明" in second_context
+    assert "第一轮回答" in second_context
+
+
+def test_c_agent_new_thread_loads_persisted_app_history(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    c_store.save_app_message("buyer_1", "companion", "user", "我第一个问题是什么")
+    c_store.save_app_message("buyer_1", "companion", "companion", "你第一个问题是我该买什么。")
+    saver = sqlite_checkpointer(tmp_path / "c_agent_seed.sqlite")
+    fake = _FakeLLM([AIMessage(content="你第一个问题是我该买什么。")])
+    c_agent.run_c_agent(
+        "那第二个问题呢",
+        buyer_id="buyer_1",
+        thread_id="c_thread_seed_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    context = "\n".join(str(getattr(m, "content", "")) for m in fake.calls[-1])
+    assert "我第一个问题是什么" in context
+    assert "你第一个问题是我该买什么" in context
 
 
 def test_c_agent_cannot_resume_other_buyer(c_store, tmp_path):

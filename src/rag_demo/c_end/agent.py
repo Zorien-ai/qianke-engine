@@ -377,6 +377,28 @@ def build_c_graph(
     return graph.compile(checkpointer=checkpointer)
 
 
+def _load_app_history(buyer_id: str, current_message: str, *, limit: int = 20) -> list[Any]:
+    """从 C App 已持久化消息回填上下文；同一条当前用户消息不重复注入。"""
+    try:
+        rows = store.list_app_messages(buyer_id, "companion", limit=limit)
+    except Exception:  # noqa: BLE001 - 历史读取失败不应阻断当前对话
+        return []
+    history: list[Any] = []
+    for row in rows or []:
+        text = str(row.get("content") or "").strip()
+        if not text:
+            continue
+        role = str(row.get("role") or "")
+        if role == "user":
+            history.append(HumanMessage(content=text))
+        elif role in {"companion", "assistant"}:
+            history.append(AIMessage(content=text))
+    # 前端在请求前会先持久化当前 user 消息，避免重复。
+    if history and isinstance(history[-1], HumanMessage) and history[-1].content.strip() == current_message.strip():
+        history.pop()
+    return history[-limit:]
+
+
 def run_c_agent(
     message: str,
     *,
@@ -389,21 +411,40 @@ def run_c_agent(
     selected = detect_mode(message, mode)
     graph = build_c_graph(buyer_id, checkpointer, llm=llm, mode=selected)
     config = {"configurable": {"thread_id": thread_id}}
-    if graph.get_state(config).values:
-        raise ValueError("thread_id 已存在，请使用新的 thread_id")
-    state = graph.invoke(
-        {
+    snapshot = graph.get_state(config)
+    existing = snapshot.values or {}
+    history: list[Any] = []
+    if existing:
+        if existing.get("buyer_id") != buyer_id:
+            raise PermissionError("不能继续其他用户的 Agent 会话")
+        if snapshot.next:
+            raise ValueError("当前会话有待确认订单，请先确认或取消后再发新消息")
+        # 同一会话保持创建时的模式，避免中途切换导致图节点不匹配。
+        existing_mode = str(existing.get("mode") or "")
+        if existing_mode and existing_mode != selected:
+            selected = existing_mode
+            graph = build_c_graph(buyer_id, checkpointer, llm=llm, mode=selected)
+        payload: dict[str, Any] = {
+            "messages": [HumanMessage(content=message)],
+            "buyer_id": buyer_id,
+            "thread_id": thread_id,
+            "mode": selected,
+            "status": "RUNNING",
+        }
+    else:
+        history = _load_app_history(buyer_id, message)
+        payload = {
             "messages": [
                 SystemMessage(content=build_system_prompt(buyer_id, selected)),
+                *history,
                 HumanMessage(content=message),
             ],
             "buyer_id": buyer_id,
             "thread_id": thread_id,
             "mode": selected,
             "status": "RUNNING",
-        },
-        config=config,
-    )
+        }
+    state = graph.invoke(payload, config=config)
     snapshot = graph.get_state(config)
     interrupted = bool(snapshot.next)
     draft = _extract_draft(state.get("messages") or [])

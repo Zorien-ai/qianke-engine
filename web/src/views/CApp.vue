@@ -1439,8 +1439,6 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
       liveOrder.value = result.order;
       liveThreadId.value = "";
       loadRecentOrders();
-    } else {
-      liveThreadId.value = "";
     }
   } catch (error) {
     agentError.value = error?.detail || error?.message || "小鱼暂时无法回应";
