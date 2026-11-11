@@ -425,3 +425,16 @@ def test_tea_after_sale_refund_uses_tea_merchant(c_store):
     )
     assert merchant_order is not None
     assert merchant_order.status == "REFUNDED"
+
+
+def test_reconcile_and_followup_read_tea_merchant(c_store):
+    order = _tea_order(c_store, "req_tea_reconcile_001")
+    result = c_store.reconcile_orders()
+    assert result["checked"] >= 1
+    assert not any(
+        issue.get("order_id") == order["order_id"] for issue in result["issues"]
+    )
+    status, _ = c_store._merchant_order_state(
+        "buyer_1", order["order_id"], "m_tea_001"
+    )
+    assert status == "CREATED"

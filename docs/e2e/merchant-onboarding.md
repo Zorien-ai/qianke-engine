@@ -172,9 +172,25 @@ GET /api/c/merchant/products?friend_id=store_tea
 → 商家订单 CANCELLED
 ```
 
+## 对账 / 回访按商家路由
+
+同步补齐：
+
+```text
+定时对账：按 c_order.merchant_id 读取商家订单
+购后回访：按 c_order.merchant_id 读取签收状态
+```
+
+已验证：
+
+```text
+茶商订单在 reconcile_orders 中不会误报 MERCHANT_ORDER_MISSING
+_merchant_order_state(..., m_tea_001) 返回 CREATED
+```
+
 ## 已知限制
 
 - 默认映射只有 `store_demo → m_gear_002`；其它商家需要管理员先绑定。
 - 店宠 SOP 仍然是平台共享的 `store_policy`，还没有按商家配置。
 - 发现页只展示已绑定映射，不展示未绑定商家。
-- 定时对账/回访里仍有一处按默认商家读取订单，需后续统一改为按订单 merchant_id。
+- C 端双宠谈判/议价仍默认山野户外商品库，还未按会话商家切换。

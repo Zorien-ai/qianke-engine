@@ -2516,9 +2516,10 @@ def reconcile_orders(limit: int = 200) -> dict[str, Any]:
                 legacy += 1
                 continue
             checked += 1
+            row_merchant = str(row["merchant_id"] or _MERCHANT_ID)
             merchant_order = repo.get_order(
                 merchant_order_id,
-                merchant_id=_MERCHANT_ID,
+                merchant_id=row_merchant,
                 buyer_id=_merchant_buyer_id(row["buyer_id"]),
             )
             if merchant_order is None:
@@ -3845,12 +3846,17 @@ def _is_quiet(rhythm: dict[str, Any], now: datetime) -> bool:
     return hour >= start_hour or hour < end_hour
 
 
-def _merchant_order_state(owner_id: str, order_id: str) -> tuple[str | None, str | None]:
+def _merchant_order_state(
+    owner_id: str,
+    order_id: str,
+    merchant_id: str | None = None,
+) -> tuple[str | None, str | None]:
     """读取商家订单状态与签收时间；读取失败按未知处理，不误发回访。"""
+    resolved_merchant = str(merchant_id or _MERCHANT_ID)
     try:
         order = get_merchant_repository().get_order(
             order_id,
-            merchant_id=_MERCHANT_ID,
+            merchant_id=resolved_merchant,
             buyer_id=_merchant_buyer_id(owner_id),
         )
     except Exception:  # noqa: BLE001 - 商家侧不可用时宁可暂缓回访
@@ -3920,7 +3926,7 @@ def claim_due_checkin(owner_id: str, *, now: datetime | None = None) -> dict[str
                 continue
             if row["kind"] == CHECKIN_ORDER_FOLLOWUP:
                 order = conn.execute(
-                    "SELECT status FROM c_order WHERE order_id = ? AND buyer_id = ?",
+                    "SELECT status, merchant_id FROM c_order WHERE order_id = ? AND buyer_id = ?",
                     (row["ref_id"], owner_id),
                 ).fetchone()
                 if order is None or str(order["status"]).upper() not in {"CONFIRMED", "COMPLETED"}:
@@ -3929,7 +3935,11 @@ def claim_due_checkin(owner_id: str, *, now: datetime | None = None) -> dict[str
                         (current.isoformat(), row["checkin_id"]),
                     )
                     continue
-                merchant_status, completed_at = _merchant_order_state(owner_id, str(row["ref_id"]))
+                merchant_status, completed_at = _merchant_order_state(
+                    owner_id,
+                    str(row["ref_id"]),
+                    str(order["merchant_id"] or _MERCHANT_ID),
+                )
                 if merchant_status in {"CANCELLED", "REFUNDED"}:
                     conn.execute(
                         "UPDATE c_companion_checkin SET status = 'SKIPPED', updated_at = ? WHERE checkin_id = ?",
