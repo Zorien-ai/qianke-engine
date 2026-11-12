@@ -315,6 +315,12 @@ const storeQuote = ref(null);
 const negotiating = ref(false);
 const negotiateError = ref("");
 const negotiationRejected = ref(false);
+const negotiationOpen = ref(false);
+const negotiationNeed = ref("");
+const negotiationBudget = ref(500);
+const negotiationQuantity = ref(1);
+const negotiationMerchant = ref("");
+const negotiationFormError = ref("");
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
@@ -1915,7 +1921,7 @@ async function sendPrompt(prompt, mode = "") {
 }
 
 /* ---------- 双宠谈判（C 伙伴 ↔ 商家店宠，受控报价） ---------- */
-const NEGOTIATION_DEFAULT = { need: "跑鞋", budget: 500, quantity: 1 };
+const NEGOTIATION_DEFAULT_BUDGET = 500;
 const NEGOTIATION_REASON_LABELS = {
   BUDGET_TOO_LOW: "预算内没有可成交的方案，小鱼建议等平台活动或换个商品再试。",
   MERCHANT_NO_MATCH: "店里暂时没有匹配且有库存的商品，小鱼建议换个关键词再试。",
@@ -1929,7 +1935,85 @@ function negotiationErrorMessage(error) {
   return error?.detail || error?.message || "双宠谈判暂时不可用，请稍后再试";
 }
 
-async function runNegotiation() {
+function normalizeNegotiationNeed(text) {
+  const original = String(text || "").replace(/\s+/g, " ").trim();
+  let value = original
+    .replace(/@\S+/g, " ")
+    .replace(/让小鱼去砍价[:：]?/g, " ")
+    .replace(/[（(].*?[)）]/g, " ")
+    .replace(/[，。！？；,.!?;]/g, " ");
+  value = value
+    .replace(/(?:这款|这个|这件|它|帮我|想买|我要买|推荐一款|推荐一下|推荐|看看|看一下|看|以内|以下)/g, " ")
+    .replace(/(?:多少钱|有优惠吗|有优惠|怎么卖|价格|能便宜吗|便宜点|砍价|吗|呢|呀|啊)/g, " ")
+    .replace(/\d+\s*(?:元|块)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (value || original).slice(0, 40);
+}
+
+function negotiationNeedFromThread() {
+  const list = messagesByThread.value[activeId.value] || [];
+  // 优先用户最近一句：通常就是「我想砍什么」；没有用户消息时才用店宠回复。
+  for (const role of ["user", "merchant"]) {
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const message = list[index];
+      if (!message || message.role !== role) continue;
+      const text = String(message.text || "")
+        .replace(/@\S+/g, " ")
+        .replace(/让小鱼去砍价[:：]?/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) return normalizeNegotiationNeed(text);
+    }
+  }
+  return "";
+}
+
+function negotiationBudgetFromThread() {
+  const list = messagesByThread.value[activeId.value] || [];
+  // 只从用户自己的话里取预算，避免把店宠报价误当成用户预算。
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (list[index]?.role !== "user") continue;
+    const text = String(list[index]?.text || "");
+    const match = text.match(/(\d{2,6})\s*(?:元|块)/) || text.match(/(?:预算|¥|￥)\s*(\d{2,6})/);
+    if (match) {
+      const value = Number(match[1]);
+      if (value >= 1) return value;
+    }
+  }
+  return NEGOTIATION_DEFAULT_BUDGET;
+}
+
+function openNegotiation() {
+  if (negotiating.value || typing.value) return;
+  const thread = activeThread.value;
+  negotiationNeed.value = negotiationNeedFromThread();
+  negotiationBudget.value = negotiationBudgetFromThread();
+  negotiationQuantity.value = 1;
+  negotiationMerchant.value = thread.kind === "merchant" ? thread.name : "";
+  negotiationFormError.value = "";
+  negotiationOpen.value = true;
+}
+
+function closeNegotiation() {
+  if (negotiating.value) return;
+  negotiationOpen.value = false;
+  negotiationFormError.value = "";
+}
+
+async function confirmNegotiation() {
+  const need = String(negotiationNeed.value || "").trim();
+  const budget = Math.max(1, Number(negotiationBudget.value) || NEGOTIATION_DEFAULT_BUDGET);
+  const quantity = Math.max(1, Math.min(20, Number(negotiationQuantity.value) || 1));
+  if (!need) {
+    negotiationFormError.value = "先告诉小鱼想砍什么商品";
+    return;
+  }
+  negotiationOpen.value = false;
+  await runNegotiation(need, budget, quantity);
+}
+
+async function runNegotiation(need, budget = NEGOTIATION_DEFAULT_BUDGET, quantity = 1) {
   // 调用中禁止重复点击；typing 同时会禁用发送按钮/回车提交
   if (negotiating.value || typing.value) return;
   negotiateError.value = "";
@@ -1940,14 +2024,14 @@ async function runNegotiation() {
   negotiationRejected.value = false;
   pushMessage({
     role: "user",
-    text: `让小鱼去砍价：${NEGOTIATION_DEFAULT.need}，预算 ¥${NEGOTIATION_DEFAULT.budget}`,
+    text: `让小鱼去砍价：${need}，预算 ¥${budget}`,
   });
   scrollToBottom();
   try {
     const data = await postJson("/api/c/negotiations", {
-      need: NEGOTIATION_DEFAULT.need,
-      budget: NEGOTIATION_DEFAULT.budget,
-      quantity: NEGOTIATION_DEFAULT.quantity,
+      need,
+      budget,
+      quantity,
       friend_id: negotiationThread !== "companion" ? negotiationThread : undefined,
     });
     const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
@@ -2363,6 +2447,38 @@ onBeforeUnmount(() => {
       <button type="button" class="c-install-dismiss" aria-label="关闭安装提示" @click="showInstall = false">关闭</button>
     </div>
 
+    <div v-if="negotiationOpen" class="c-negotiate-mask" @click.self="closeNegotiation">
+      <form class="c-negotiate-sheet" role="dialog" aria-modal="true" aria-labelledby="c-negotiate-title" @submit.prevent="confirmNegotiation">
+        <header class="c-negotiate-head">
+          <div>
+            <strong id="c-negotiate-title">让小鱼去砍价</strong>
+            <p>商品从当前对话自动带出，可以修改。</p>
+          </div>
+          <button type="button" class="c-negotiate-close" aria-label="关闭" @click="closeNegotiation">×</button>
+        </header>
+        <p v-if="negotiationMerchant" class="c-negotiate-merchant">当前商家 · {{ negotiationMerchant }}</p>
+        <label class="c-negotiate-field">
+          <span>想砍的商品</span>
+          <input v-model="negotiationNeed" type="text" maxlength="80" placeholder="例如：明前龙井 250g 礼盒" />
+        </label>
+        <div class="c-negotiate-row">
+          <label class="c-negotiate-field">
+            <span>预算（元）</span>
+            <input v-model.number="negotiationBudget" type="number" min="1" max="100000" inputmode="numeric" />
+          </label>
+          <label class="c-negotiate-field">
+            <span>数量</span>
+            <input v-model.number="negotiationQuantity" type="number" min="1" max="20" inputmode="numeric" />
+          </label>
+        </div>
+        <p v-if="negotiationFormError" class="c-inline-error" role="alert">{{ negotiationFormError }}</p>
+        <div class="c-negotiate-actions">
+          <button type="button" class="c-negotiate-cancel" @click="closeNegotiation">取消</button>
+          <button type="submit" class="c-negotiate-submit" :disabled="negotiating">{{ negotiating ? "谈判中…" : "开始谈判" }}</button>
+        </div>
+      </form>
+    </div>
+
     <div class="c-shell">
       <aside class="c-sidebar" aria-label="C 端导航">
         <div class="c-brand">
@@ -2721,7 +2837,7 @@ onBeforeUnmount(() => {
               type="button"
               class="c-prompt is-negotiate"
               :disabled="negotiating || typing"
-              @click="runNegotiation"
+              @click="openNegotiation"
             >{{ negotiating ? "双宠谈判中…" : "让小鱼去砍价" }}</button>
           </div>
           <p v-if="negotiateError" class="c-inline-error c-negotiate-error" role="status">
@@ -4071,6 +4187,150 @@ onBeforeUnmount(() => {
 .c-negotiate-error {
   margin: 0;
   padding: 0 0 6px;
+}
+
+.c-negotiate-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(30, 27, 22, 0.28);
+}
+
+.c-negotiate-sheet {
+  width: min(420px, 100%);
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--c-line);
+  border-radius: 18px;
+  background: var(--c-panel);
+  box-shadow: 0 18px 50px rgba(30, 27, 22, 0.2);
+}
+
+.c-negotiate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.c-negotiate-head strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.c-negotiate-head p {
+  margin: 3px 0 0;
+  color: var(--c-text-3);
+  font-size: 11px;
+}
+
+.c-negotiate-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--c-line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.c-negotiate-merchant {
+  margin: 14px 0 10px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: var(--c-panel-2);
+  color: var(--c-text-2);
+  font-size: 11px;
+}
+
+.c-negotiate-field {
+  display: block;
+  margin-top: 12px;
+}
+
+.c-negotiate-field > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--c-text-2);
+  font-size: 11px;
+}
+
+.c-negotiate-field input {
+  width: 100%;
+  height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-bg-soft);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+.c-negotiate-field input:focus {
+  border-color: var(--c-accent);
+}
+
+.c-negotiate-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.c-negotiate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.c-negotiate-cancel,
+.c-negotiate-submit {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.c-negotiate-cancel {
+  border: 1px solid var(--c-line);
+  background: transparent;
+  color: var(--c-text-2);
+}
+
+.c-negotiate-submit {
+  border: 1px solid var(--c-accent);
+  background: var(--c-accent);
+  color: #fffdf8;
+}
+
+.c-negotiate-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 760px) {
+  .c-negotiate-mask {
+    place-items: end center;
+    padding: 0;
+  }
+
+  .c-negotiate-sheet {
+    width: 100%;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0;
+  }
 }
 
 /* 群内点击 @ 的轻提示：只做一次短暂反馈，不占聊天空间 */
