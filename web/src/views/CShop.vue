@@ -19,6 +19,7 @@ const negotiationBudget = ref(500);
 const message = ref("");
 const categoryFilter = ref("全部");
 const selectedProduct = ref(null);
+const productImageErrors = ref({});
 const running = ref(false);
 const agentError = ref("");
 const reply = ref("");
@@ -66,6 +67,15 @@ function money(value) {
 
 function productHint(product) {
   return product.stock > 0 ? `库存 ${product.stock}` : "暂时缺货";
+}
+
+function productImageVisible(product) {
+  return Boolean(product?.image_url) && !productImageErrors.value[product.product_id];
+}
+
+function onProductImageError(product) {
+  if (!product?.product_id) return;
+  productImageErrors.value = { ...productImageErrors.value, [product.product_id]: true };
 }
 
 function productTone(product) {
@@ -399,7 +409,19 @@ onMounted(() => {
             class="product-row"
             @click="openProductDetail(product)"
           >
-            <div class="product-mark" :class="`tone-${productTone(product)}`" aria-hidden="true">
+            <div
+              class="product-mark"
+              :class="[`tone-${productTone(product)}`, { 'has-photo': productImageVisible(product) }]"
+              aria-hidden="true"
+            >
+              <img
+                v-if="productImageVisible(product)"
+                class="product-photo"
+                :src="product.image_url"
+                :alt="product.title"
+                loading="lazy"
+                @error="onProductImageError(product)"
+              />
               <span class="product-mark-char">{{ product.category.slice(0, 1) }}</span>
               <span class="product-mark-brand">{{ product.brand || product.category }}</span>
             </div>
@@ -589,7 +611,17 @@ onMounted(() => {
         <button type="button" class="product-detail-close" aria-label="关闭商品详情" @click="closeProductDetail">×</button>
       </header>
       <div class="product-detail-body">
-        <div class="product-detail-art" :class="`tone-${productTone(selectedProduct)}`">
+        <div
+          class="product-detail-art"
+          :class="[`tone-${productTone(selectedProduct)}`, { 'has-photo': productImageVisible(selectedProduct) }]"
+        >
+          <img
+            v-if="productImageVisible(selectedProduct)"
+            class="product-photo"
+            :src="selectedProduct.image_url"
+            :alt="selectedProduct.title"
+            @error="onProductImageError(selectedProduct)"
+          />
           <span class="product-mark-char">{{ selectedProduct.category.slice(0, 1) }}</span>
           <span class="product-mark-brand">{{ selectedProduct.brand || selectedProduct.category }}</span>
         </div>
@@ -1567,6 +1599,7 @@ onMounted(() => {
   position: relative;
   flex-direction: column;
   gap: 4px;
+  overflow: hidden;
   transition: filter 0.15s ease;
 }
 
@@ -1876,5 +1909,39 @@ onMounted(() => {
     padding-top: 8px;
     background: var(--surface);
   }
+}
+/* ---------- 商品照片 ---------- */
+.product-photo {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.product-mark.has-photo {
+  flex: 0 0 auto;
+  height: auto;
+  aspect-ratio: 4 / 3;
+}
+
+.product-mark.has-photo::after {
+  display: none;
+}
+
+.product-mark.has-photo .product-mark-char,
+.product-mark.has-photo .product-mark-brand,
+.product-detail-art.has-photo .product-mark-char,
+.product-detail-art.has-photo .product-mark-brand {
+  display: none;
+}
+
+.product-detail-art {
+  overflow: hidden;
+}
+
+.product-detail-art .product-photo {
+  border-radius: inherit;
 }
 </style>

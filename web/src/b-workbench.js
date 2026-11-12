@@ -232,7 +232,9 @@ class ApiError extends Error {
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
-  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  if (options.body !== undefined && !(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
   let response;
   try {
     response = await fetch(path, {
@@ -389,6 +391,32 @@ async function loadAfterSales(force = true) {
   } finally {
     state.loading = false;
     render();
+  }
+}
+
+async function uploadProductImage(productId, file) {
+  if (!productId || !file) return;
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    showToast("只支持 PNG / JPEG / WebP", "error");
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    showToast("图片不能超过 2MB", "error");
+    return;
+  }
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const data = await api(`/api/b/workbench/products/${encodeURIComponent(productId)}/image`, {
+      method: "POST",
+      body: form,
+    });
+    showToast("商品图片已更新", "success");
+    await loadProducts();
+    return data;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    showToast(errorMessage(error), "error");
   }
 }
 
@@ -1786,7 +1814,15 @@ function productCard(product) {
     </div>`;
   }).join("");
   const category = [product.category, product.brand].filter(Boolean).join(" · ");
+  const imageUrl = String(product.image_url || "");
   return `<article class="b-card b-product-card">
+    <div class="b-product-cover">
+      ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(text(product.title))}" loading="lazy" />` : `<span class="b-product-cover-empty">暂无图片</span>`}
+      ${can("operate_inventory") ? `<label class="b-product-image-btn">
+        更换图片
+        <input type="file" accept="image/png,image/jpeg,image/webp" data-product-image-input="${escapeHtml(product.product_id)}" hidden />
+      </label>` : ""}
+    </div>
     <div class="b-card-head">
       <div class="b-card-title">
         <strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong>
@@ -1944,7 +1980,7 @@ function productsView() {
     <div class="b-view-head">
       <div>
         <h1>商品</h1>
-        <p class="b-muted">只读 · 共 ${state.products.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
+        <p class="b-muted">商品图片可由 owner/admin 更换 · 共 ${state.products.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
       </div>
       <div class="b-view-tools">
         <label class="b-filter">库存
@@ -2365,6 +2401,12 @@ function bindEvents() {
     if (target.matches("[data-product-filter]")) {
       state.productFilter = target.value === "low" ? "low" : "all";
       render();
+      return;
+    }
+    if (target.matches("[data-product-image-input]")) {
+      const file = target.files?.[0];
+      target.value = "";
+      await uploadProductImage(target.dataset.productImageInput, file);
       return;
     }
     if (target.matches("[data-audit-action-filter]")) {

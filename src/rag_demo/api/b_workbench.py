@@ -6,12 +6,16 @@
 """
 from __future__ import annotations
 
+import io
+import re
+import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from PIL import Image
 from pydantic import BaseModel, Field
 
-from rag_demo import auth
+from rag_demo import auth, product_media as media
 from rag_demo.c_end import alerts as alert_notifier
 from rag_demo.c_end import store
 from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
@@ -135,6 +139,44 @@ def workbench_products(limit: int = 100) -> dict[str, Any]:
     account = _account()
     merchant_id = _membership(account)["merchant_id"]
     return _products_snapshot(merchant_id, limit=limit)
+
+
+@router.post("/products/{product_id}/image")
+async def upload_product_image(product_id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    """B 端上传商品主图：校验图片 → 转 WebP → 落本地 → 写 image_url。"""
+    account = _account()
+    member = _require_permission(account, "operate_inventory")
+    merchant_id = member["merchant_id"]
+    product_id = str(product_id or "").strip()
+    if not product_id:
+        raise HTTPException(status_code=400, detail="product_id 不能为空")
+    if file.content_type not in {"image/png", "image/jpeg", "image/webp"}:
+        raise HTTPException(status_code=400, detail="只支持 PNG / JPEG / WebP")
+    raw = await file.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="图片不能超过 2MB")
+    repo = get_merchant_write_repository()
+    owned = {item.product_id for item in repo.list_products(merchant_id, limit=500)}
+    if product_id not in owned:
+        raise HTTPException(status_code=404, detail="商品不存在或不属于当前商家")
+    try:
+        with Image.open(io.BytesIO(raw)) as probe:
+            probe.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            image = image.convert("RGB")
+            image.thumbnail((1200, 1200))
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", product_id)[:100]
+            folder = media.PRODUCT_UPLOAD_ROOT / re.sub(r"[^A-Za-z0-9_.-]", "_", merchant_id)
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / f"{safe_id}.webp"
+            image.save(target, "WEBP", quality=86, method=6)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="图片无法解析") from exc
+
+    image_url = f"/uploads/products/{folder.name}/{safe_id}.webp?v={int(time.time())}"
+    if not repo.set_product_image(merchant_id, product_id, image_url):
+        raise HTTPException(status_code=404, detail="商品不存在或不属于当前商家")
+    return {"product_id": product_id, "image_url": image_url}
 
 
 @router.get("/inventory/alerts")

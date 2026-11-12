@@ -201,6 +201,7 @@ def _parse_products(rows: list[dict[str, str]]) -> list[Product]:
             brand=_optional_text(row, "brand"),
             status=_text(row, "status", filename).upper(),
             created_at=_optional_text(row, "created_at"),
+            image_url=_optional_text(row, "image_url"),
         )
         for row in rows
     ]

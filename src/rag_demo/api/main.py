@@ -47,7 +47,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import APIError
 from pydantic import BaseModel
 
-from rag_demo import ai_monitor, answer_guard, auth, chat_history, chat_memory, config, conversation, marketing, permissions, tenant_eval
+from rag_demo import ai_monitor, answer_guard, auth, chat_history, chat_memory, config, conversation, marketing, permissions, product_media as media, tenant_eval
 from rag_demo.agent import actions as agent_actions
 from rag_demo.b_end import persona as b_persona, store as b_persona_store
 from rag_demo.api.demo_showcase import (
@@ -712,6 +712,9 @@ if os.path.isdir(WEB_DIST):
     logger.info("Vue 3 新界面已挂载: /v2 -> %s", WEB_DIST)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+media.ensure_upload_dirs()
+app.mount("/uploads", StaticFiles(directory=str(media.UPLOAD_ROOT)), name="uploads")
 
 
 @app.get("/", include_in_schema=False)

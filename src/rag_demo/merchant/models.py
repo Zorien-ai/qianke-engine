@@ -97,6 +97,7 @@ class Product:
     brand: str | None
     status: str
     created_at: str | None = None
+    image_url: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -107,6 +108,7 @@ class Product:
             "brand": self.brand,
             "status": self.status,
             "created_at": self.created_at,
+            "image_url": self.image_url,
         }
 
 

@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS m_product (
     category    TEXT NOT NULL,
     brand       TEXT,
     status      TEXT NOT NULL,
-    created_at  TEXT
+    created_at  TEXT,
+    image_url   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_m_product_merchant ON m_product (merchant_id);
@@ -300,6 +301,11 @@ class SqliteMerchantRepository:
             refund_request_id / returned_at / restock_request_id
         新库在建表时已包含这些列；这里用 PRAGMA 检查逐列 ALTER，幂等可重复执行。
         """
+        product_columns = {
+            str(row["name"]) for row in conn.execute("PRAGMA table_info(m_product)")
+        }
+        if "image_url" not in product_columns:
+            conn.execute("ALTER TABLE m_product ADD COLUMN image_url TEXT")
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(m_order)")}
         # 列名 → SQL 类型；全部允许 NULL（历史订单没有物流/取消/退款/退货信息是正常状态）
         missing_columns = {
@@ -394,12 +400,12 @@ class SqliteMerchantRepository:
     def _insert_seed(self, conn: sqlite3.Connection, data: seeds.SeedData) -> None:
         conn.executemany(
             "INSERT INTO m_product "
-            "(product_id, merchant_id, title, category, brand, status, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(product_id, merchant_id, title, category, brand, status, created_at, image_url) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     p.product_id, p.merchant_id, p.title, p.category,
-                    p.brand, p.status, p.created_at,
+                    p.brand, p.status, p.created_at, p.image_url,
                 )
                 for p in data.products
             ],
@@ -520,7 +526,7 @@ class SqliteMerchantRepository:
         bounded = clamp_limit(limit)
 
         sql = (
-            "SELECT product_id, merchant_id, title, category, brand, status, created_at "
+            "SELECT product_id, merchant_id, title, category, brand, status, created_at, image_url "
             "FROM m_product WHERE merchant_id = ?"
         )
         params: list[Any] = [merchant]
@@ -539,6 +545,19 @@ class SqliteMerchantRepository:
         with self._lock, self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [self._product_from_row(row) for row in rows]
+
+    def set_product_image(self, merchant_id: str, product_id: str, image_url: str) -> bool:
+        """设置商品主图 URL；商品必须属于该商家。"""
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        product = _required_text(product_id, "product_id", max_length=128)
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE m_product SET image_url = ? WHERE product_id = ? AND merchant_id = ?",
+                (str(image_url or ""), product, merchant),
+            )
+            conn.commit()
+        return cur.rowcount > 0
 
     def get_product_sku(self, sku: str, *, merchant_id: str | None = None) -> SKU | None:
         """按 SKU 取规格；传 merchant_id 时同时校验租户归属。"""
@@ -1745,6 +1764,7 @@ class SqliteMerchantRepository:
             brand=row["brand"],
             status=str(row["status"]),
             created_at=row["created_at"],
+            image_url=row["image_url"],
         )
 
     @staticmethod

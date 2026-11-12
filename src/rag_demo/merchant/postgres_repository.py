@@ -366,7 +366,8 @@ CREATE TABLE IF NOT EXISTS {schema}.m_product (
     category    TEXT NOT NULL,
     brand       TEXT,
     status      TEXT NOT NULL,
-    created_at  TEXT
+    created_at  TEXT,
+    image_url   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS {schema}.m_sku (
@@ -470,6 +471,9 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
                 cur.execute(self._ddl())
                 # 幂等迁移：已存在的旧 schema 可能缺 task-54 的退货入库列/索引。
                 # （search_path 已指向目标 schema，故这里用非限定名。）
+                cur.execute(
+                    "ALTER TABLE m_product ADD COLUMN IF NOT EXISTS image_url TEXT"
+                )
                 cur.execute("ALTER TABLE m_order ADD COLUMN IF NOT EXISTS returned_at TEXT")
                 cur.execute(
                     "ALTER TABLE m_order ADD COLUMN IF NOT EXISTS restock_request_id TEXT"
@@ -538,12 +542,12 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
     def _insert_seed(self, cur: Any, data: seeds.SeedData) -> None:
         cur.executemany(
             "INSERT INTO m_product "
-            "(product_id, merchant_id, title, category, brand, status, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            "(product_id, merchant_id, title, category, brand, status, created_at, image_url) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
             [
                 (
                     p.product_id, p.merchant_id, p.title, p.category,
-                    p.brand, p.status, p.created_at,
+                    p.brand, p.status, p.created_at, p.image_url,
                 )
                 for p in data.products
             ],
@@ -680,6 +684,7 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             brand=row["brand"],
             status=str(row["status"]),
             created_at=row["created_at"],
+            image_url=row.get("image_url"),
         )
 
     @staticmethod
@@ -704,7 +709,7 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
         merchant = self._require_merchant(merchant_id)
         bounded = clamp_limit(limit)
         sql = (
-            "SELECT product_id, merchant_id, title, category, brand, status, created_at "
+            "SELECT product_id, merchant_id, title, category, brand, status, created_at, image_url "
             "FROM m_product WHERE merchant_id = %s"
         )
         params: list[Any] = [merchant]
@@ -723,6 +728,19 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             cur.execute(sql, params)
             rows = cur.fetchall()
         return [self._product_from_row(row) for row in rows]
+
+    def set_product_image(self, merchant_id: str, product_id: str, image_url: str) -> bool:
+        """设置商品主图 URL；商品必须属于该商家。"""
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        product = _required_text(product_id, "product_id", max_length=128)
+        with self._lock, self._transaction() as cur:
+            cur.execute(
+                "UPDATE m_product SET image_url = %s WHERE product_id = %s AND merchant_id = %s",
+                (str(image_url or ""), product, merchant),
+            )
+            updated = cur.rowcount > 0
+        return updated
 
     def get_product_sku(
         self, sku: str, *, merchant_id: str | None = None
