@@ -108,31 +108,32 @@ web/src/b-workbench.js
 
 ## 字号调整（2026-11-12）
 
-B 端字号整体上调：
+B 端字号整体上调两次，最终：
 
 ```text
-正文：13px → 15px
-辅助文字：10/11px → 12/13px
-表格/表单：12px → 14px
-标题：15–18px → 17–20px
+正文：13px → 17px（手机 18px）
+辅助文字：10/11px → 13/14px
+表格/表单：12px → 15/16px
+标题：15–18px → 20–22px
+按钮触控高度：34px → 38px（手机）
 ```
 
-同时把手机端导航按钮左右 padding 收紧到 5px，保证 360px 宽度下 7 个短标签仍然全部可见。
+手机导航按钮左右 padding 收紧到 4px、字号 15px，保证 360px 宽度下 7 个短标签仍全部可见；`b-meta` 标签列宽度从 54px 加到 68px，避免“安全库存 / 更新时间”折行。
 
 验证：
 
 ```text
-360px: body font-size = 15px
+360px: body font-size = 18px
 360px: nav 7 个标签全部可见，scrollWidth = clientWidth = 345
-1280px: body font-size = 15px，无横向溢出
+1280px: body font-size = 17px，无横向溢出
 ```
 
 截图：
 
-![B 端手机订单字号](b-mobile-font-orders.png)
+![B 端手机订单字号](b-mobile-font2-orders.png)
 
-![B 端手机商品字号](b-mobile-font-products.png)
+![B 端手机商品字号](b-mobile-font2-products.png)
 
-![B 端手机审计字号](b-mobile-font-audit.png)
+![B 端手机审计字号](b-mobile-font2-audit.png)
 
-![B 端桌面字号](b-desktop-font-after.png)
+![B 端桌面字号](b-desktop-font2-after.png)
