@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from rag_demo.c_end import negotiation, store
+from rag_demo.merchant import get_merchant_repository
 
 
 @pytest.fixture()
@@ -120,3 +121,46 @@ def test_negotiation_rejects_insufficient_sku_stock(c_store):
     assert result["reason"] == "INSUFFICIENT_STOCK"
     assert result["quote"] is None
     assert any("只剩 18 件" in item["text"] for item in result["transcript"])
+
+
+def test_cart_negotiation_merges_multiple_skus_and_orders(c_store):
+    c_store.bind_store_friend("m_tea_001", "store_tea")
+    result = negotiation.run_negotiation(
+        "buyer_1",
+        need="购物车合并报价",
+        budget=400,
+        friend_id="store_tea",
+        items=[
+            {"sku": "SKU-TEA-001-50G", "quantity": 2},
+            {"sku": "SKU-TEA-002-50G", "quantity": 2},
+        ],
+    )
+    assert result["status"] == "ACCEPTED"
+    assert result["total_amount"] == 282.0
+    assert result["discount_amount"] == 30.0
+    refs = result["quote"]["product_refs"]
+    assert len(refs) == 2
+    assert {ref["sku"] for ref in refs} == {"SKU-TEA-001-50G", "SKU-TEA-002-50G"}
+
+    draft = c_store.prepare_order("buyer_1", [], quote_id=result["quote"]["quote_id"])
+    assert draft["total_amount"] == 282.0
+    assert len(draft["items"]) == 2
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_cart_merge_001",
+    )
+    assert order["status"] == "CONFIRMED"
+    assert len(order["items"]) == 2
+
+    merchant_order = get_merchant_repository().get_order(
+        order["order_id"], merchant_id="m_tea_001"
+    )
+    assert merchant_order is not None
+    # 商家订单记录原价，平台满减由 C 端承担。
+    assert merchant_order.total_amount == 312.0
+    assert {item.sku for item in merchant_order.items} == {
+        "SKU-TEA-001-50G",
+        "SKU-TEA-002-50G",
+    }

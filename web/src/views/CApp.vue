@@ -331,6 +331,9 @@ const negotiationProductTitle = ref("");
 const negotiationProductOptions = ref([]);
 const negotiationProductId = ref("");
 const negotiationProductSearch = ref("");
+const negotiationCartHint = ref("");
+const cartItems = ref([]);
+const CART_STORAGE_KEY = "qianke:cart";
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
@@ -2031,6 +2034,123 @@ const filteredNegotiationProducts = computed(() => {
   });
 });
 
+const visibleCartItems = computed(() =>
+  cartItems.value.filter(
+    (item) => !item.friend_id || item.friend_id === String(negotiationFriendId.value || "").trim()
+  )
+);
+const cartCount = computed(() =>
+  visibleCartItems.value.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+);
+const cartTotal = computed(() =>
+  visibleCartItems.value.reduce(
+    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+    0
+  )
+);
+
+function loadCart() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "[]");
+    cartItems.value = Array.isArray(stored)
+      ? stored.filter((item) => item && item.sku && Number(item.quantity) > 0)
+      : [];
+  } catch {
+    cartItems.value = [];
+  }
+}
+
+function saveCart() {
+  try {
+    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems.value));
+  } catch {
+    // 本地存储不可用时购物车只在当前页面生命周期内有效
+  }
+}
+
+function addSelectedToCart() {
+  const product = negotiationProductOptions.value.find(
+    (item) => item.product_id === negotiationProductId.value
+  );
+  const sku = negotiationSkuOptions.value.find((item) => item.sku === negotiationSku.value);
+  if (!product || !sku) {
+    negotiationCartHint.value = "先选择商品和规格";
+    return;
+  }
+  if (!sku.in_stock) {
+    negotiationCartHint.value = "这个规格暂时缺货";
+    return;
+  }
+  const quantity = Math.max(1, Math.min(Number(sku.stock || 1), Number(negotiationQuantity.value) || 1, 20));
+  const friendId = String(negotiationFriendId.value || "").trim();
+  const existing = cartItems.value.find(
+    (item) => item.friend_id === friendId && item.sku === sku.sku
+  );
+  if (existing) {
+    existing.quantity = Math.min(Number(sku.stock || 20), Number(existing.quantity || 0) + quantity, 20);
+  } else {
+    cartItems.value.push({
+      friend_id: friendId,
+      merchant_name: negotiationMerchant.value,
+      product_id: product.product_id,
+      title: product.title,
+      image_url: product.image_url,
+      sku: sku.sku,
+      spec: sku.spec,
+      price: Number(sku.price || 0),
+      stock: Number(sku.stock || 0),
+      quantity,
+    });
+  }
+  saveCart();
+  negotiationCartHint.value = `已加入购物车：${product.title} ${sku.spec}`;
+}
+
+function removeCartItem(sku) {
+  cartItems.value = cartItems.value.filter((item) => item.sku !== sku);
+  saveCart();
+}
+
+function clearCurrentCart() {
+  const friendId = String(negotiationFriendId.value || "").trim();
+  cartItems.value = cartItems.value.filter((item) => item.friend_id !== friendId);
+  saveCart();
+}
+
+async function confirmCartQuote() {
+  if (!visibleCartItems.value.length || negotiating.value) return;
+  const budget = Math.max(1, Number(negotiationBudget.value) || NEGOTIATION_DEFAULT_BUDGET);
+  negotiationOpen.value = false;
+  await runNegotiation("购物车合并报价", budget, 1, {
+    friendId: negotiationFriendId.value,
+    echoUser: negotiationEchoUser.value,
+    items: visibleCartItems.value.map((item) => ({ sku: item.sku, quantity: item.quantity })),
+  });
+  if (!negotiationRejected.value && storeQuote.value) clearCurrentCart();
+}
+
+function quoteRefCount(quote) {
+  const refs = Array.isArray(quote?.product_refs) ? quote.product_refs : [];
+  return refs.reduce((sum, ref) => sum + Number(ref?.quantity || 1), 0);
+}
+
+function quoteOriginalTotal(quote) {
+  const refs = Array.isArray(quote?.product_refs) ? quote.product_refs : [];
+  return refs.reduce(
+    (sum, ref) => sum + Number(ref?.price || ref?.unit_price || 0) * Number(ref?.quantity || 1),
+    0
+  );
+}
+
+function quoteDiscountTotal(quote) {
+  const policies = Array.isArray(quote?.policy_refs) ? quote.policy_refs : [];
+  return policies.reduce((sum, policy) => sum + Number(policy?.discount_amount || 0), 0);
+}
+
+function quotePayableTotal(quote) {
+  return Math.max(0, quoteOriginalTotal(quote) - quoteDiscountTotal(quote));
+}
+
 function openNegotiation(options = {}) {
   if (negotiating.value || typing.value) return;
   const active = activeThread.value;
@@ -2052,6 +2172,7 @@ function openNegotiation(options = {}) {
   negotiationProductOptions.value = [];
   negotiationProductId.value = String(remembered?.product_id || "").trim();
   negotiationProductSearch.value = "";
+  negotiationCartHint.value = "";
   negotiationBudget.value = negotiationBudgetFromThread();
   negotiationQuantity.value = Math.max(
     1,
@@ -2196,12 +2317,19 @@ async function runNegotiation(need, budget = NEGOTIATION_DEFAULT_BUDGET, quantit
   scrollToBottom();
   try {
     const sku = String(options.sku || negotiationSku.value || "").trim();
+    const cartPayload = Array.isArray(options.items)
+      ? options.items.map((item) => ({
+          sku: String(item.sku || ""),
+          quantity: Math.max(1, Math.min(20, Number(item.quantity) || 1)),
+        }))
+      : [];
     const data = await postJson("/api/c/negotiations", {
       need,
       budget,
       quantity,
       friend_id: explicitFriend || (negotiationThread !== "companion" ? negotiationThread : undefined),
-      ...(sku ? { sku } : {}),
+      ...(sku && !cartPayload.length ? { sku } : {}),
+      ...(cartPayload.length ? { items: cartPayload } : {}),
     });
     const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
     for (const item of transcript) {
@@ -2532,6 +2660,7 @@ onMounted(async () => {
   await loadAccountContext();
   stripDemoSeedForRealAccount();
   await loadMerchantThreads();
+  loadCart();
   await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm(), loadDiary()]);
   await pollCheckin();
   await refreshUnread();
@@ -2680,6 +2809,33 @@ onBeforeUnmount(() => {
         <p v-else-if="negotiationSku" class="c-negotiate-hint">
           规格 · {{ negotiationSkuSpec || negotiationSku }}
         </p>
+        <div class="c-cart-add-row">
+          <button type="button" class="c-cart-add" :disabled="negotiating" @click="addSelectedToCart">加入购物车</button>
+          <span v-if="negotiationCartHint">{{ negotiationCartHint }}</span>
+          <span v-else-if="visibleCartItems.length">购物车 {{ cartCount }} 件 · ¥{{ cartTotal.toFixed(2) }}</span>
+        </div>
+        <div v-if="visibleCartItems.length" class="c-cart-panel">
+          <div class="c-cart-head">
+            <strong>购物车 · {{ cartCount }} 件</strong>
+            <button type="button" @click="clearCurrentCart">清空</button>
+          </div>
+          <div class="c-cart-list">
+            <div v-for="item in visibleCartItems" :key="item.sku" class="c-cart-item">
+              <span class="c-cart-thumb">
+                <img v-if="item.image_url" :src="item.image_url" :alt="item.title" loading="lazy" @error="$event.target.style.display = 'none'" />
+                <span>{{ item.title.slice(0, 1) }}</span>
+              </span>
+              <span class="c-cart-info">
+                <strong>{{ item.title }}</strong>
+                <small>{{ item.spec }} · ¥{{ Number(item.price).toFixed(2) }} × {{ item.quantity }}</small>
+              </span>
+              <button type="button" class="c-cart-remove" :aria-label="`移除 ${item.title}`" @click="removeCartItem(item.sku)">×</button>
+            </div>
+          </div>
+          <button type="button" class="c-cart-merge" :disabled="negotiating" @click="confirmCartQuote">
+            {{ negotiating ? "合并报价中…" : `购物车合并报价 · ¥${cartTotal.toFixed(2)}` }}
+          </button>
+        </div>
         <div class="c-negotiate-row">
           <label class="c-negotiate-field">
             <span>预算（元）</span>
@@ -3297,9 +3453,12 @@ onBeforeUnmount(() => {
                 <span class="c-quote-card-label">来自店宠的结构化报价</span>
                 <span class="c-dot waiting" />
               </div>
-              <strong>{{ storeQuote.product_refs?.[0]?.title || "平台活动引用" }}</strong>
+              <strong>
+                {{ storeQuote.product_refs?.[0]?.title || "平台活动引用" }}
+                <template v-if="quoteRefCount(storeQuote) > 1"> 等 {{ quoteRefCount(storeQuote) }} 件</template>
+              </strong>
               <div class="c-quote-price">
-                <span v-if="storeQuote.product_refs?.[0]?.price">¥{{ Number(storeQuote.product_refs[0].price).toFixed(2) }}</span>
+                <span>¥{{ quotePayableTotal(storeQuote).toFixed(2) }}</span>
                 <small>{{ primaryPolicy(storeQuote)?.title || "以结算页为准" }}</small>
               </div>
               <p>报价只做引用，成交前需在商城逐单确认。</p>
@@ -6421,6 +6580,156 @@ onBeforeUnmount(() => {
 
 .c-product-card.active .c-product-info small {
   color: #9d4c31;
+}
+
+
+.c-cart-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 12px;
+  min-height: 22px;
+}
+
+.c-cart-add {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border, #e4dccd);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2, #6b6258);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.c-cart-add-row > span {
+  color: var(--muted, #948b7e);
+  font-size: 9px;
+}
+
+.c-cart-panel {
+  margin: 0 0 13px;
+  padding: 8px;
+  border: 1px solid var(--border, #e4dccd);
+  border-radius: 9px;
+  background: var(--bg-soft, #f7f3ea);
+}
+
+.c-cart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--text-2, #6b6258);
+  font-size: 10px;
+}
+
+.c-cart-head button {
+  border: 0;
+  background: transparent;
+  color: var(--muted, #948b7e);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.c-cart-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.c-cart-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.c-cart-thumb {
+  position: relative;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #e6ecdb;
+}
+
+.c-cart-thumb img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.c-cart-thumb > span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #7d8b6b;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.c-cart-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.c-cart-info strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-cart-info small {
+  overflow: hidden;
+  color: var(--muted, #948b7e);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-cart-remove {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted, #948b7e);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.c-cart-merge {
+  width: 100%;
+  min-height: 32px;
+  margin-top: 7px;
+  border: 1px solid var(--primary, #a8623f);
+  border-radius: 7px;
+  background: var(--primary-soft, #f6e3da);
+  color: #9d4c31;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.c-cart-merge:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 </style>

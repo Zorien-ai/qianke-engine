@@ -159,6 +159,170 @@ def _merchant_candidates(
     return sorted(candidates, key=lambda item: item["price"])
 
 
+def _negotiate_cart(
+    *,
+    buyer_id: str,
+    friend_id: str,
+    merchant_id: str,
+    store_name: str,
+    b_pet_name: str,
+    need: str,
+    budget: float,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """购物车多商品合并报价；价格/库存全部来自商家 SKU。"""
+    if len(items) > 10:
+        raise NegotiationError("NEGOTIATION_INVALID", "一次最多合并 10 个商品")
+
+    merged: dict[str, dict[str, Any]] = {}
+    for raw in items:
+        try:
+            sku = str(raw.get("sku") or "").strip()
+            qty = int(raw.get("quantity") or 1)
+        except (TypeError, ValueError):
+            raise NegotiationError("NEGOTIATION_INVALID", "购物车商品数量无效") from None
+        if not sku or qty <= 0 or qty > 20:
+            raise NegotiationError("NEGOTIATION_INVALID", "购物车商品数量必须在 1–20 之间")
+        existing = merged.get(sku)
+        if existing:
+            existing["quantity"] = min(20, int(existing["quantity"]) + qty)
+        else:
+            merged[sku] = {"sku": sku, "quantity": qty}
+
+    transcript: list[dict[str, Any]] = [{
+        "actor": "c_pet",
+        "name": "小鱼",
+        "text": f"我想把购物车里的 {len(merged)} 个商品一起买，预算 ¥{budget:.2f}，能合并报个价吗？",
+    }]
+    resolved: list[dict[str, Any]] = []
+    subtotal = 0.0
+    for line in merged.values():
+        candidates = _merchant_candidates("", merchant_id, sku=line["sku"])
+        if not candidates:
+            transcript.append({
+                "actor": "b_pet",
+                "name": b_pet_name,
+                "text": f"规格 {line['sku']} 暂时没有库存。",
+            })
+            return {
+                "version": NEGOTIATION_VERSION,
+                "status": "REJECTED",
+                "reason": "SKU_NOT_AVAILABLE",
+                "transcript": transcript,
+                "quote": None,
+            }
+        candidate = candidates[0]
+        available = int(candidate["stock"])
+        if available < int(line["quantity"]):
+            transcript.append({
+                "actor": "b_pet",
+                "name": b_pet_name,
+                "text": f"{candidate['title']} 当前只剩 {available} 件，不够 {line['quantity']} 件。",
+            })
+            return {
+                "version": NEGOTIATION_VERSION,
+                "status": "REJECTED",
+                "reason": "INSUFFICIENT_STOCK",
+                "transcript": transcript,
+                "quote": None,
+            }
+        price = float(candidate["price"])
+        qty = int(line["quantity"])
+        line_total = round(price * qty, 2)
+        subtotal = round(subtotal + line_total, 2)
+        resolved.append({
+            "product_id": candidate["product_id"],
+            "title": candidate["title"],
+            "price": price,
+            "unit_price": price,
+            "quantity": qty,
+            "subtotal": line_total,
+            "sku": candidate["sku"],
+            "spec": candidate.get("spec") or "",
+            "source": candidate["source"],
+        })
+
+    discount = _platform_discount(subtotal)
+    total = round(subtotal - discount, 2)
+    policy_refs = _policy_refs(subtotal)
+    summary = "；".join(
+        f"{item['title']} {item['spec']} × {item['quantity']} ¥{item['subtotal']:.2f}"
+        for item in resolved
+    )
+    policy_text = f"，平台满减 -¥{discount:.2f}" if discount else ""
+    transcript.append({
+        "actor": "b_pet",
+        "name": b_pet_name,
+        "text": f"合并报价：{summary}；合计 ¥{subtotal:.2f}{policy_text}，应付 ¥{total:.2f}。",
+        "offer": {
+            "items": resolved,
+            "subtotal": subtotal,
+            "discount": discount,
+            "total": total,
+            "source": "merchant_v1",
+        },
+    })
+    if total > budget:
+        transcript.append({
+            "actor": "c_pet",
+            "name": "小鱼",
+            "text": f"合计 ¥{total:.2f} 超过预算 ¥{budget:.2f}，先不成交；可以减数量或等平台活动。",
+        })
+        return {
+            "version": NEGOTIATION_VERSION,
+            "status": "REJECTED",
+            "reason": "BUDGET_TOO_LOW",
+            "rounds": 1,
+            "transcript": transcript,
+            "quote": None,
+        }
+
+    transcript.append({
+        "actor": "c_pet",
+        "name": "小鱼",
+        "text": "这个合并方案在预算内，我把它记成报价；最后仍由用户确认。",
+    })
+    quote_id = f"quote_neg_{uuid.uuid4().hex[:16]}"
+    quote = store.create_quote(
+        buyer_id,
+        friend_id,
+        {
+            "quote_id": quote_id,
+            "merchant_id": merchant_id,
+            "friend_id": friend_id,
+            "product_refs": [
+                {
+                    "product_id": item["product_id"],
+                    "title": item["title"],
+                    "price": item["price"],
+                    "unit_price": item["unit_price"],
+                    "quantity": item["quantity"],
+                    "sku": item["sku"],
+                    **({"spec": item["spec"]} if item["spec"] else {}),
+                }
+                for item in resolved
+            ],
+            "policy_refs": policy_refs,
+        },
+    )
+    transcript.append({
+        "actor": "b_pet",
+        "name": b_pet_name,
+        "text": "合并报价已生成，成交仍需用户在商城逐单确认。",
+    })
+    return {
+        "version": NEGOTIATION_VERSION,
+        "status": "ACCEPTED",
+        "rounds": 1,
+        "transcript": transcript,
+        "quote": quote,
+        "total_amount": total,
+        "discount_amount": discount,
+        "policy_refs": policy_refs,
+        "items": resolved,
+    }
+
+
 def run_negotiation(
     buyer_id: str,
     *,
@@ -168,8 +332,12 @@ def run_negotiation(
     friend_id: str | None = None,
     merchant_id: str | None = None,
     sku: str | None = None,
+    items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """两个独立 Agent 的确定性多轮报价；达成时落 PENDING 报价。"""
+    """两个独立 Agent 的确定性多轮报价；达成时落 PENDING 报价。
+
+    items 存在时按购物车多商品合并报价，忽略单商品 sku/quantity。
+    """
     resolved_friend = str(friend_id or "store_demo")
     resolved_merchant = str(
         merchant_id
@@ -184,6 +352,18 @@ def run_negotiation(
     if budget <= 0 or budget > 100000:
         raise NegotiationError("NEGOTIATION_INVALID", "预算必须大于 0 且不超过 100000")
     quantity = max(1, min(int(quantity or 1), 20))
+
+    if items:
+        return _negotiate_cart(
+            buyer_id=buyer_id,
+            friend_id=resolved_friend,
+            merchant_id=resolved_merchant,
+            store_name=store_name,
+            b_pet_name=b_pet_name,
+            need=need,
+            budget=budget,
+            items=items,
+        )
 
     requested_sku = str(sku or "").strip() or None
     candidates = _merchant_candidates(need, resolved_merchant, sku=requested_sku)

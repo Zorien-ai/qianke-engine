@@ -172,12 +172,18 @@ class MerchantOrderStatusIn(BaseModel):
     carrier: str | None = Field(default=None, max_length=64)
 
 
+class NegotiationItemIn(BaseModel):
+    sku: str = Field(..., min_length=1, max_length=128)
+    quantity: int = Field(default=1, ge=1, le=20)
+
+
 class NegotiationIn(BaseModel):
     need: str = Field(..., min_length=1, max_length=80)
     budget: float = Field(..., gt=0, le=100000)
     quantity: int = Field(default=1, ge=1, le=20)
     friend_id: str | None = Field(default=None, max_length=80)
     sku: str | None = Field(default=None, max_length=128)
+    items: list[NegotiationItemIn] | None = Field(default=None, max_length=10)
 
 
 class AppMessageIn(BaseModel):
@@ -245,6 +251,7 @@ def negotiate(req: NegotiationIn) -> dict:
             quantity=req.quantity,
             friend_id=req.friend_id,
             sku=req.sku,
+            items=[item.model_dump() for item in req.items] if req.items else None,
         )
     except negotiation.NegotiationError as exc:
         raise HTTPException(
