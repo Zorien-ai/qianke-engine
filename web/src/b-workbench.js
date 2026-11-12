@@ -394,26 +394,45 @@ async function loadAfterSales(force = true) {
   }
 }
 
-async function uploadProductImage(productId, file) {
-  if (!productId || !file) return;
-  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-    showToast("只支持 PNG / JPEG / WebP", "error");
-    return;
-  }
-  if (file.size > 2 * 1024 * 1024) {
-    showToast("图片不能超过 2MB", "error");
-    return;
+async function uploadProductImages(productId, files) {
+  const selected = Array.from(files || []);
+  if (!productId || !selected.length) return;
+  for (const file of selected) {
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      showToast("只支持 PNG / JPEG / WebP", "error");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showToast("单张图片不能超过 2MB", "error");
+      return;
+    }
   }
   const form = new FormData();
-  form.append("file", file);
+  for (const file of selected) form.append("files", file);
   try {
-    const data = await api(`/api/b/workbench/products/${encodeURIComponent(productId)}/image`, {
+    const data = await api(`/api/b/workbench/products/${encodeURIComponent(productId)}/images`, {
       method: "POST",
       body: form,
     });
-    showToast("商品图片已更新", "success");
+    showToast(`已添加 ${selected.length} 张图片`, "success");
     await loadProducts();
     return data;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    showToast(errorMessage(error), "error");
+  }
+}
+
+async function deleteProductImage(productId, imageUrl) {
+  if (!productId || !imageUrl) return;
+  if (!window.confirm("删除这张商品图片？")) return;
+  try {
+    await api(
+      `/api/b/workbench/products/${encodeURIComponent(productId)}/images?url=${encodeURIComponent(imageUrl)}`,
+      { method: "DELETE" },
+    );
+    showToast("商品图片已删除", "success");
+    await loadProducts();
   } catch (error) {
     if (handleAuthFailure(error)) return;
     showToast(errorMessage(error), "error");
@@ -1815,14 +1834,30 @@ function productCard(product) {
   }).join("");
   const category = [product.category, product.brand].filter(Boolean).join(" · ");
   const imageUrl = String(product.image_url || "");
+  const images = (Array.isArray(product.images) ? product.images : [])
+    .filter((item) => item && item.url)
+    .map((item) => ({ url: String(item.url), thumb_url: String(item.thumb_url || item.url) }));
+  const coverImage = imageUrl || images[0]?.url || "";
+  const imageIndex = new Map(images.map((item, index) => [item.url, index]));
+  const imageRows = images.length
+    ? `<div class="b-product-thumbs">${images.map((item) => {
+        const index = imageIndex.get(item.url) || 0;
+        return `<span class="b-product-thumb" title="第 ${index + 1} 张">
+          <img src="${escapeHtml(item.thumb_url)}" alt="" loading="lazy" />
+          ${index === 0 ? `<em>封面</em>` : ""}
+          ${can("operate_inventory") ? `<button type="button" data-product-image-delete="${escapeHtml(item.url)}" data-product-id="${escapeHtml(product.product_id)}" aria-label="删除图片">×</button>` : ""}
+        </span>`;
+      }).join("")}</div>`
+    : "";
   return `<article class="b-card b-product-card">
     <div class="b-product-cover">
-      ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(text(product.title))}" loading="lazy" />` : `<span class="b-product-cover-empty">暂无图片</span>`}
+      ${coverImage ? `<img src="${escapeHtml(coverImage)}" alt="${escapeHtml(text(product.title))}" loading="lazy" />` : `<span class="b-product-cover-empty">暂无图片</span>`}
       ${can("operate_inventory") ? `<label class="b-product-image-btn">
-        更换图片
-        <input type="file" name="product-image" accept="image/png,image/jpeg,image/webp" data-product-image-input="${escapeHtml(product.product_id)}" hidden />
+        添加图片
+        <input type="file" name="product-images" multiple accept="image/png,image/jpeg,image/webp" data-product-image-add="${escapeHtml(product.product_id)}" hidden />
       </label>` : ""}
     </div>
+    ${imageRows}
     <div class="b-card-head">
       <div class="b-card-title">
         <strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong>
@@ -2403,10 +2438,10 @@ function bindEvents() {
       render();
       return;
     }
-    if (target.matches("[data-product-image-input]")) {
-      const file = target.files?.[0];
+    if (target.matches("[data-product-image-add]")) {
+      const files = target.files;
       target.value = "";
-      await uploadProductImage(target.dataset.productImageInput, file);
+      await uploadProductImages(target.dataset.productImageAdd, files);
       return;
     }
     if (target.matches("[data-audit-action-filter]")) {
@@ -2476,6 +2511,11 @@ function bindEvents() {
     if (target.closest("[data-low-stock-filter]")) {
       state.productFilter = "low";
       render();
+      return;
+    }
+    const imageDeleteButton = target.closest("[data-product-image-delete]");
+    if (imageDeleteButton) {
+      await deleteProductImage(imageDeleteButton.dataset.productId, imageDeleteButton.dataset.productImageDelete);
       return;
     }
     const viewButton = target.closest("[data-view]");

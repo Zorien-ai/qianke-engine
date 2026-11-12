@@ -67,6 +67,7 @@ from .models import (
     Order,
     OrderItem,
     Product,
+    parse_product_images,
     Reservation,
     ReservationAllocation,
     ReservationItem,
@@ -367,7 +368,8 @@ CREATE TABLE IF NOT EXISTS {schema}.m_product (
     brand       TEXT,
     status      TEXT NOT NULL,
     created_at  TEXT,
-    image_url   TEXT
+    image_url   TEXT,
+    images_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS {schema}.m_sku (
@@ -474,6 +476,9 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
                 cur.execute(
                     "ALTER TABLE m_product ADD COLUMN IF NOT EXISTS image_url TEXT"
                 )
+                cur.execute(
+                    "ALTER TABLE m_product ADD COLUMN IF NOT EXISTS images_json TEXT"
+                )
                 cur.execute("ALTER TABLE m_order ADD COLUMN IF NOT EXISTS returned_at TEXT")
                 cur.execute(
                     "ALTER TABLE m_order ADD COLUMN IF NOT EXISTS restock_request_id TEXT"
@@ -542,12 +547,12 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
     def _insert_seed(self, cur: Any, data: seeds.SeedData) -> None:
         cur.executemany(
             "INSERT INTO m_product "
-            "(product_id, merchant_id, title, category, brand, status, created_at, image_url) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            "(product_id, merchant_id, title, category, brand, status, created_at, image_url, images_json) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
             [
                 (
                     p.product_id, p.merchant_id, p.title, p.category,
-                    p.brand, p.status, p.created_at, p.image_url,
+                    p.brand, p.status, p.created_at, p.image_url, None,
                 )
                 for p in data.products
             ],
@@ -685,6 +690,7 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             status=str(row["status"]),
             created_at=row["created_at"],
             image_url=row.get("image_url"),
+            images=parse_product_images(row.get("images_json"), row.get("image_url")),
         )
 
     @staticmethod
@@ -709,7 +715,7 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
         merchant = self._require_merchant(merchant_id)
         bounded = clamp_limit(limit)
         sql = (
-            "SELECT product_id, merchant_id, title, category, brand, status, created_at, image_url "
+            "SELECT product_id, merchant_id, title, category, brand, status, created_at, image_url, images_json "
             "FROM m_product WHERE merchant_id = %s"
         )
         params: list[Any] = [merchant]
@@ -730,14 +736,36 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
         return [self._product_from_row(row) for row in rows]
 
     def set_product_image(self, merchant_id: str, product_id: str, image_url: str) -> bool:
-        """设置商品主图 URL；商品必须属于该商家。"""
+        """兼容旧接口：把单张图设为主图，同时重置图片列表。"""
+        url = str(image_url or "").strip()
+        images = [{"url": url, "thumb_url": url}] if url else []
+        return self.set_product_images(merchant_id, product_id, images)
+
+    def set_product_images(
+        self, merchant_id: str, product_id: str, images: list[dict[str, str]] | list[str]
+    ) -> bool:
+        """设置商品图片列表；第一张作为封面。商品必须属于该商家。"""
         self._ensure_open()
         merchant = self._require_merchant(merchant_id)
         product = _required_text(product_id, "product_id", max_length=128)
+        normalized: list[dict[str, str]] = []
+        for item in images or []:
+            if isinstance(item, str):
+                url, thumb = item.strip(), item.strip()
+            elif isinstance(item, dict):
+                url = str(item.get("url") or "").strip()
+                thumb = str(item.get("thumb_url") or url).strip()
+            else:
+                continue
+            if url:
+                normalized.append({"url": url, "thumb_url": thumb or url})
+        cover = normalized[0]["url"] if normalized else ""
+        payload = json.dumps(normalized, ensure_ascii=False)
         with self._lock, self._transaction() as cur:
             cur.execute(
-                "UPDATE m_product SET image_url = %s WHERE product_id = %s AND merchant_id = %s",
-                (str(image_url or ""), product, merchant),
+                "UPDATE m_product SET image_url = %s, images_json = %s "
+                "WHERE product_id = %s AND merchant_id = %s",
+                (cover, payload, product, merchant),
             )
             updated = cur.rowcount > 0
         return updated

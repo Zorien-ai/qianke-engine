@@ -32,6 +32,7 @@
 import base64
 import json
 import logging
+import mimetypes
 import os
 import random
 import secrets
@@ -714,6 +715,7 @@ if os.path.isdir(WEB_DIST):
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 media.ensure_upload_dirs()
+mimetypes.add_type("image/webp", ".webp")
 app.mount("/uploads", StaticFiles(directory=str(media.UPLOAD_ROOT)), name="uploads")
 
 

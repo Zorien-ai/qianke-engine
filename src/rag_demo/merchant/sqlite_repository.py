@@ -63,6 +63,7 @@ from .models import (
     Order,
     OrderItem,
     Product,
+    parse_product_images,
     Reservation,
     ReservationAllocation,
     ReservationItem,
@@ -95,7 +96,8 @@ CREATE TABLE IF NOT EXISTS m_product (
     brand       TEXT,
     status      TEXT NOT NULL,
     created_at  TEXT,
-    image_url   TEXT
+    image_url   TEXT,
+    images_json TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_m_product_merchant ON m_product (merchant_id);
@@ -306,6 +308,8 @@ class SqliteMerchantRepository:
         }
         if "image_url" not in product_columns:
             conn.execute("ALTER TABLE m_product ADD COLUMN image_url TEXT")
+        if "images_json" not in product_columns:
+            conn.execute("ALTER TABLE m_product ADD COLUMN images_json TEXT")
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(m_order)")}
         # 列名 → SQL 类型；全部允许 NULL（历史订单没有物流/取消/退款/退货信息是正常状态）
         missing_columns = {
@@ -400,12 +404,12 @@ class SqliteMerchantRepository:
     def _insert_seed(self, conn: sqlite3.Connection, data: seeds.SeedData) -> None:
         conn.executemany(
             "INSERT INTO m_product "
-            "(product_id, merchant_id, title, category, brand, status, created_at, image_url) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(product_id, merchant_id, title, category, brand, status, created_at, image_url, images_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     p.product_id, p.merchant_id, p.title, p.category,
-                    p.brand, p.status, p.created_at, p.image_url,
+                    p.brand, p.status, p.created_at, p.image_url, None,
                 )
                 for p in data.products
             ],
@@ -526,7 +530,7 @@ class SqliteMerchantRepository:
         bounded = clamp_limit(limit)
 
         sql = (
-            "SELECT product_id, merchant_id, title, category, brand, status, created_at, image_url "
+            "SELECT product_id, merchant_id, title, category, brand, status, created_at, image_url, images_json "
             "FROM m_product WHERE merchant_id = ?"
         )
         params: list[Any] = [merchant]
@@ -547,14 +551,36 @@ class SqliteMerchantRepository:
         return [self._product_from_row(row) for row in rows]
 
     def set_product_image(self, merchant_id: str, product_id: str, image_url: str) -> bool:
-        """设置商品主图 URL；商品必须属于该商家。"""
+        """兼容旧接口：把单张图设为主图，同时重置图片列表。"""
+        url = str(image_url or "").strip()
+        images = [{"url": url, "thumb_url": url}] if url else []
+        return self.set_product_images(merchant_id, product_id, images)
+
+    def set_product_images(
+        self, merchant_id: str, product_id: str, images: list[dict[str, str]] | list[str]
+    ) -> bool:
+        """设置商品图片列表；第一张作为封面。商品必须属于该商家。"""
         self._ensure_open()
         merchant = self._require_merchant(merchant_id)
         product = _required_text(product_id, "product_id", max_length=128)
+        normalized: list[dict[str, str]] = []
+        for item in images or []:
+            if isinstance(item, str):
+                url, thumb = item.strip(), item.strip()
+            elif isinstance(item, dict):
+                url = str(item.get("url") or "").strip()
+                thumb = str(item.get("thumb_url") or url).strip()
+            else:
+                continue
+            if url:
+                normalized.append({"url": url, "thumb_url": thumb or url})
+        cover = normalized[0]["url"] if normalized else ""
+        payload = json.dumps(normalized, ensure_ascii=False)
         with self._lock, self._connect() as conn:
             cur = conn.execute(
-                "UPDATE m_product SET image_url = ? WHERE product_id = ? AND merchant_id = ?",
-                (str(image_url or ""), product, merchant),
+                "UPDATE m_product SET image_url = ?, images_json = ? "
+                "WHERE product_id = ? AND merchant_id = ?",
+                (cover, payload, product, merchant),
             )
             conn.commit()
         return cur.rowcount > 0
@@ -1765,6 +1791,7 @@ class SqliteMerchantRepository:
             status=str(row["status"]),
             created_at=row["created_at"],
             image_url=row["image_url"],
+            images=parse_product_images(row["images_json"] if "images_json" in row.keys() else None, row["image_url"]),
         )
 
     @staticmethod

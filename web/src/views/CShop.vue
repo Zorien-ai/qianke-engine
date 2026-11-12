@@ -19,6 +19,8 @@ const negotiationBudget = ref(500);
 const message = ref("");
 const categoryFilter = ref("全部");
 const selectedProduct = ref(null);
+const detailImageIndex = ref(0);
+const detailImageErrors = ref({});
 const productImageErrors = ref({});
 const running = ref(false);
 const agentError = ref("");
@@ -76,6 +78,37 @@ function productImageVisible(product) {
 function onProductImageError(product) {
   if (!product?.product_id) return;
   productImageErrors.value = { ...productImageErrors.value, [product.product_id]: true };
+}
+
+function productGallery(product) {
+  const items = Array.isArray(product?.images) ? product.images : [];
+  const normalized = items
+    .filter((item) => item && item.url)
+    .map((item) => ({
+      url: String(item.url),
+      thumb_url: String(item.thumb_url || item.url),
+    }));
+  if (!normalized.length && product?.image_url) {
+    return [{ url: product.image_url, thumb_url: product.image_url }];
+  }
+  return normalized;
+}
+
+const detailImages = computed(() => productGallery(selectedProduct.value));
+const activeDetailImage = computed(() => detailImages.value[detailImageIndex.value] || null);
+const detailImageVisible = computed(() => {
+  const image = activeDetailImage.value;
+  return Boolean(image?.url) && !detailImageErrors.value[image.url];
+});
+
+function selectDetailImage(index) {
+  detailImageIndex.value = Number(index) || 0;
+}
+
+function onDetailImageError() {
+  const url = activeDetailImage.value?.url;
+  if (!url) return;
+  detailImageErrors.value = { ...detailImageErrors.value, [url]: true };
 }
 
 function productTone(product) {
@@ -337,6 +370,8 @@ function useProduct(product) {
 
 function openProductDetail(product) {
   rememberProduct(product);
+  detailImageIndex.value = 0;
+  detailImageErrors.value = {};
   selectedProduct.value = product;
 }
 
@@ -635,19 +670,34 @@ onMounted(() => {
         <button type="button" class="product-detail-close" aria-label="关闭商品详情" @click="closeProductDetail">×</button>
       </header>
       <div class="product-detail-body">
-        <div
-          class="product-detail-art"
-          :class="[`tone-${productTone(selectedProduct)}`, { 'has-photo': productImageVisible(selectedProduct) }]"
-        >
-          <img
-            v-if="productImageVisible(selectedProduct)"
-            class="product-photo"
-            :src="selectedProduct.image_url"
-            :alt="selectedProduct.title"
-            @error="onProductImageError(selectedProduct)"
-          />
-          <span class="product-mark-char">{{ selectedProduct.category.slice(0, 1) }}</span>
-          <span class="product-mark-brand">{{ selectedProduct.brand || selectedProduct.category }}</span>
+        <div class="product-detail-gallery">
+          <div
+            class="product-detail-art"
+            :class="[`tone-${productTone(selectedProduct)}`, { 'has-photo': detailImageVisible }]"
+          >
+            <img
+              v-if="detailImageVisible"
+              class="product-photo"
+              :src="activeDetailImage.url"
+              :alt="selectedProduct.title"
+              @error="onDetailImageError"
+            />
+            <span class="product-mark-char">{{ selectedProduct.category.slice(0, 1) }}</span>
+            <span class="product-mark-brand">{{ selectedProduct.brand || selectedProduct.category }}</span>
+          </div>
+          <div v-if="detailImages.length > 1" class="product-detail-thumbs" aria-label="商品图片">
+            <button
+              v-for="(image, index) in detailImages"
+              :key="image.url"
+              type="button"
+              class="product-detail-thumb"
+              :class="{ active: detailImageIndex === index }"
+              :aria-label="`查看第 ${index + 1} 张图片`"
+              @click="selectDetailImage(index)"
+            >
+              <img :src="image.thumb_url || image.url" alt="" loading="lazy" />
+            </button>
+          </div>
         </div>
         <div class="product-detail-info">
           <p class="product-detail-store">{{ shopScopeLabel }} · 店宠在线</p>
@@ -1914,9 +1964,13 @@ onMounted(() => {
     display: block;
   }
 
+  .product-detail-gallery {
+    padding: 14px 14px 0;
+  }
+
   .product-detail-art {
     min-height: 210px;
-    margin: 14px 14px 0;
+    margin: 0;
   }
 
   .product-detail-art .product-mark-char {
@@ -1934,6 +1988,48 @@ onMounted(() => {
     background: var(--surface);
   }
 }
+
+.product-detail-gallery {
+  min-width: 0;
+  padding: 20px 0 20px 20px;
+}
+
+.product-detail-gallery .product-detail-art {
+  margin: 0;
+}
+
+.product-detail-thumbs {
+  display: flex;
+  gap: 7px;
+  margin-top: 9px;
+  overflow-x: auto;
+}
+
+.product-detail-thumb {
+  flex: 0 0 54px;
+  width: 54px;
+  height: 54px;
+  padding: 2px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.product-detail-thumb.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.product-detail-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
 /* ---------- 商品照片 ---------- */
 .product-photo {
   position: absolute;

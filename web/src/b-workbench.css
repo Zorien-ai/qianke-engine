@@ -1520,3 +1520,58 @@ code,
 .b-product-image-btn:hover {
   background: rgba(31, 29, 25, 0.9);
 }
+
+
+/* ---------- 商品多图 ---------- */
+.b-product-thumbs {
+  display: flex;
+  gap: 5px;
+  padding: 8px 10px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--b-line);
+}
+
+.b-product-thumb {
+  position: relative;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border: 1px solid var(--b-line);
+  border-radius: 6px;
+  background: var(--b-bg-soft);
+}
+
+.b-product-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.b-product-thumb em {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: rgba(31, 29, 25, 0.72);
+  color: #fff;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.b-product-thumb button {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(31, 29, 25, 0.75);
+  color: #fff;
+  font-size: 11px;
+  line-height: 15px;
+  cursor: pointer;
+}

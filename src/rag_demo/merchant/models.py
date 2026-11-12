@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -98,8 +99,12 @@ class Product:
     status: str
     created_at: str | None = None
     image_url: str | None = None
+    images: tuple[dict[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
+        images = [dict(item) for item in self.images if item.get("url")]
+        if not images and self.image_url:
+            images = [{"url": self.image_url, "thumb_url": self.image_url}]
         return {
             "merchant_id": self.merchant_id,
             "product_id": self.product_id,
@@ -109,7 +114,33 @@ class Product:
             "status": self.status,
             "created_at": self.created_at,
             "image_url": self.image_url,
+            "images": images,
         }
+
+
+def parse_product_images(raw: Any, image_url: str | None = None) -> tuple[dict[str, str], ...]:
+    """解析 images_json；兼容旧商品只有 image_url 的情况。"""
+    items: list[Any] = []
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            items = parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError):
+            items = []
+    result: list[dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        result.append({
+            "url": url,
+            "thumb_url": str(item.get("thumb_url") or url).strip(),
+        })
+    if not result and image_url:
+        result.append({"url": image_url, "thumb_url": image_url})
+    return tuple(result)
 
 
 @dataclass(frozen=True)
