@@ -3247,6 +3247,7 @@ onBeforeUnmount(() => {
 }
 
 .c-app {
+  -webkit-text-size-adjust: 100%;
   --c-bg: #f7f3ea;
   --c-bg-soft: #fffdf8;
   --c-panel: #fffdf8;
@@ -4053,8 +4054,9 @@ onBeforeUnmount(() => {
   resize: none;
   background: transparent;
   color: var(--c-text);
+  caret-color: var(--c-text);
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1.6;
 }
 
@@ -4709,7 +4711,7 @@ onBeforeUnmount(() => {
 
   .c-composer textarea {
     padding: 4px 0;
-    font-size: 13px;
+    font-size: 16px;
   }
 
   .c-send-btn {
@@ -5030,10 +5032,12 @@ onBeforeUnmount(() => {
   }
 
   .c-install-banner {
-    right: 16px;
-    bottom: calc(64px + env(safe-area-inset-bottom));
-    left: 16px;
+    top: calc(8px + env(safe-area-inset-top));
+    right: 12px;
+    bottom: auto;
+    left: 12px;
     max-width: none;
+    z-index: 80;
   }
 }
 /* ===== 白色极简对话：纸面、行式消息、细线输入 ===== */
@@ -5364,7 +5368,8 @@ onBeforeUnmount(() => {
 }
 
 .c-app .c-composer textarea {
-  font-size: 12px;
+  font-size: 16px;
+  caret-color: var(--c-text);
 }
 
 .c-app .c-send-btn {
