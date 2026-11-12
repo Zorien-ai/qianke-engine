@@ -104,3 +104,35 @@ web/src/b-workbench.js
 1. 当前只验证了 360 / 390 / 1280 三个宽度，未覆盖所有安卓 WebView。
 2. 审计宽表格仍需要横向滑动，只是增加了提示和惯性。
 3. B 端页面没有底部 Tab，仍采用顶部滚动导航；后续可评估改成底部 5 项主 Tab。
+
+
+## 字号调整（2026-11-12）
+
+B 端字号整体上调：
+
+```text
+正文：13px → 15px
+辅助文字：10/11px → 12/13px
+表格/表单：12px → 14px
+标题：15–18px → 17–20px
+```
+
+同时把手机端导航按钮左右 padding 收紧到 5px，保证 360px 宽度下 7 个短标签仍然全部可见。
+
+验证：
+
+```text
+360px: body font-size = 15px
+360px: nav 7 个标签全部可见，scrollWidth = clientWidth = 345
+1280px: body font-size = 15px，无横向溢出
+```
+
+截图：
+
+![B 端手机订单字号](b-mobile-font-orders.png)
+
+![B 端手机商品字号](b-mobile-font-products.png)
+
+![B 端手机审计字号](b-mobile-font-audit.png)
+
+![B 端桌面字号](b-desktop-font-after.png)
