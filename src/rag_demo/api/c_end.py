@@ -177,6 +177,7 @@ class NegotiationIn(BaseModel):
     budget: float = Field(..., gt=0, le=100000)
     quantity: int = Field(default=1, ge=1, le=20)
     friend_id: str | None = Field(default=None, max_length=80)
+    sku: str | None = Field(default=None, max_length=128)
 
 
 class AppMessageIn(BaseModel):
@@ -243,6 +244,7 @@ def negotiate(req: NegotiationIn) -> dict:
             budget=req.budget,
             quantity=req.quantity,
             friend_id=req.friend_id,
+            sku=req.sku,
         )
     except negotiation.NegotiationError as exc:
         raise HTTPException(

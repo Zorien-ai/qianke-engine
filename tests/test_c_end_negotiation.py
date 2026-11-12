@@ -70,3 +70,53 @@ def test_tea_negotiation_uses_tea_merchant(c_store):
     assert any("山雾茶业店宠" == item["name"] for item in result["transcript"])
     draft = c_store.prepare_order("buyer_1", [], quote_id=result["quote"]["quote_id"])
     assert draft["merchant_id"] == "m_tea_001"
+
+
+def test_negotiation_with_sku_quote_uses_sku_price_and_quantity(c_store):
+    c_store.bind_store_friend("m_tea_001", "store_tea")
+    result = negotiation.run_negotiation(
+        "buyer_1",
+        need="明前龙井",
+        budget=200,
+        quantity=2,
+        friend_id="store_tea",
+        sku="SKU-TEA-001-50G",
+    )
+    assert result["status"] == "ACCEPTED"
+    ref = result["quote"]["product_refs"][0]
+    assert ref["sku"] == "SKU-TEA-001-50G"
+    assert ref["spec"] == "50g 罐装"
+    assert ref["unit_price"] == 68.0
+    assert ref["quantity"] == 2
+    assert result["total_amount"] == 136.0
+
+    draft = c_store.prepare_order("buyer_1", [], quote_id=result["quote"]["quote_id"])
+    assert draft["total_amount"] == 136.0
+    assert draft["items"][0]["unit_price"] == 68.0
+    assert draft["items"][0]["sku"] == "SKU-TEA-001-50G"
+
+    order = c_store.confirm_order(
+        "buyer_1",
+        draft["order_id"],
+        draft["confirmation_token"],
+        request_id="req_quote_sku_confirm_001",
+    )
+    assert order["status"] == "CONFIRMED"
+    assert order["total_amount"] == 136.0
+    assert order["merchant_order_id"] == order["order_id"]
+
+
+def test_negotiation_rejects_insufficient_sku_stock(c_store):
+    c_store.bind_store_friend("m_tea_001", "store_tea")
+    result = negotiation.run_negotiation(
+        "buyer_1",
+        need="福鼎白牡丹",
+        budget=1000,
+        quantity=20,
+        friend_id="store_tea",
+        sku="SKU-TEA-004-300G",
+    )
+    assert result["status"] == "REJECTED"
+    assert result["reason"] == "INSUFFICIENT_STOCK"
+    assert result["quote"] is None
+    assert any("只剩 18 件" in item["text"] for item in result["transcript"])

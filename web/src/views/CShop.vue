@@ -22,6 +22,7 @@ const searchKeyword = ref("");
 const sortMode = ref("default");
 const selectedProduct = ref(null);
 const selectedSku = ref(null);
+const detailQuantity = ref(1);
 const detailImageIndex = ref(0);
 const detailImageErrors = ref({});
 const productImageErrors = ref({});
@@ -170,6 +171,9 @@ function productGallery(product) {
 
 const detailSkus = computed(() => (selectedProduct.value ? productSkus(selectedProduct.value) : []));
 const activeSku = computed(() => selectedSku.value || detailSkus.value[0] || null);
+const detailMaxQuantity = computed(() =>
+  Math.max(1, Math.min(20, Number(activeSku.value?.stock ?? 1) || 1))
+);
 
 const detailImages = computed(() => productGallery(selectedProduct.value));
 const activeDetailImage = computed(() => detailImages.value[detailImageIndex.value] || null);
@@ -396,7 +400,7 @@ async function decide(approved) {
   }
 }
 
-async function runMerchantNegotiation(needOverride = "") {
+async function runMerchantNegotiation(needOverride = "", sku = "", quantity = 1) {
   if (!isMerchantShop.value || negotiationBusy.value) return;
   negotiationBusy.value = true;
   agentError.value = "";
@@ -411,8 +415,9 @@ async function runMerchantNegotiation(needOverride = "") {
     const data = await postJson("/api/c/negotiations", {
       need: need.slice(0, 80),
       budget: Math.max(1, Number(negotiationBudget.value) || 500),
-      quantity: 1,
+      quantity: Math.max(1, Math.min(20, Number(quantity) || 1)),
       friend_id: merchantFriendId.value,
+      ...(sku ? { sku } : {}),
     });
     const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
     reply.value = transcript.map((item) => `${item.name}：${item.text}`).join("\n\n");
@@ -457,6 +462,7 @@ function openProductDetail(product) {
   detailImageIndex.value = 0;
   detailImageErrors.value = {};
   selectedSku.value = defaultSku(product);
+  detailQuantity.value = 1;
   selectedProduct.value = product;
 }
 
@@ -467,6 +473,12 @@ function closeProductDetail() {
 
 function selectSku(sku) {
   selectedSku.value = sku;
+  detailQuantity.value = 1;
+}
+
+function changeQuantity(delta) {
+  const next = Number(detailQuantity.value || 1) + Number(delta || 0);
+  detailQuantity.value = Math.max(1, Math.min(detailMaxQuantity.value, next));
 }
 
 function askProduct(product, sku = null) {
@@ -485,7 +497,7 @@ function negotiateProduct(product, sku = null) {
     return;
   }
   message.value = productNeedText(product, selected);
-  runMerchantNegotiation(product.title);
+  runMerchantNegotiation(product.title, selected?.sku || "", detailQuantity.value);
 }
 
 onMounted(() => {
@@ -841,6 +853,15 @@ onMounted(() => {
               </button>
             </div>
           </div>
+          <div class="quantity-selector">
+            <span class="field-label">数量</span>
+            <div class="quantity-stepper">
+              <button type="button" aria-label="减少数量" :disabled="detailQuantity <= 1" @click="changeQuantity(-1)">−</button>
+              <strong>{{ detailQuantity }}</strong>
+              <button type="button" aria-label="增加数量" :disabled="detailQuantity >= detailMaxQuantity" @click="changeQuantity(1)">＋</button>
+              <small>当前规格最多 {{ detailMaxQuantity }} 件</small>
+            </div>
+          </div>
           <dl class="product-detail-meta">
             <div><dt>商品编号</dt><dd>{{ selectedProduct.product_id }}</dd></div>
             <div v-if="activeSku?.sku"><dt>SKU</dt><dd>{{ activeSku.sku }}</dd></div>
@@ -851,10 +872,10 @@ onMounted(() => {
             <p>现货 48 小时内发出 · 支持 7 天无理由 · 成交前需逐单确认</p>
           </div>
           <div class="product-detail-actions">
-            <button type="button" class="primary-btn" @click="askProduct(selectedProduct, activeSku)">
+            <button type="button" class="primary-btn" @click="askProduct(selectedProduct, activeSku)" :disabled="activeSku && !activeSku.in_stock">
               {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
             </button>
-            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="negotiationBusy" @click="negotiateProduct(selectedProduct, activeSku)">
+            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="negotiationBusy || (activeSku && !activeSku.in_stock)" @click="negotiateProduct(selectedProduct, activeSku)">
               {{ negotiationBusy ? "谈判中…" : "让小鱼去砍价" }}
             </button>
           </div>
@@ -2367,6 +2388,49 @@ onMounted(() => {
     flex: 1;
     max-width: none;
   }
+}
+
+
+.quantity-selector {
+  margin-top: 13px;
+}
+
+.quantity-selector .field-label {
+  margin: 0 0 7px;
+}
+
+.quantity-stepper {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.quantity-stepper button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.quantity-stepper button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.quantity-stepper strong {
+  min-width: 26px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.quantity-stepper small {
+  color: var(--muted);
+  font-size: 9px;
 }
 
 </style>

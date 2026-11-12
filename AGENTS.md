@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 3.17.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 3.18.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v3.17.0 |
+| AGENTS.md | v3.18.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -634,6 +634,7 @@ IM 社交载体
 | 3.15.0 | 2026-11-12 | 商品图 OSS 适配：OSS 上传/删除/公网 URL，本地兜底 |
 | 3.16.0 | 2026-11-12 | OSS 商品图真实链路验收：qianke-products 上传/公网读/删除通过；图片测试强制本地隔离；760 tests |
 | 3.17.0 | 2026-11-12 | P2 CShop：SKU 规格切换/价格库存联动、搜索排序、库存提示；761 tests |
+| 3.18.0 | 2026-11-12 | P2.1：SKU 感知砍价/报价/订单单价、数量选择、SKU 库存不足拒绝；763 tests |
 
 
 

@@ -1708,8 +1708,11 @@ def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tupl
     items = [
         {
             "product_id": str(item["product_id"]),
+            "title": str(item.get("title") or ""),
             "quantity": int(item.get("quantity") or 1),
             "sku": str(item.get("sku") or ""),
+            "spec": str(item.get("spec") or ""),
+            "unit_price": float(item.get("unit_price") or item.get("price") or 0),
         }
         for item in products
         if item.get("product_id")
@@ -1793,6 +1796,7 @@ def prepare_order(
         conn.execute("BEGIN IMMEDIATE")
         policy_ids: list[str] = []
         merchant_id = _MERCHANT_ID
+        quote_mode = bool(quote_id)
         if quote_id:
             normalized, policy_ids, merchant_id = _quote_items(conn, quote_id, buyer_id)
         else:
@@ -1807,16 +1811,23 @@ def prepare_order(
             ).fetchone()
             if row is None:
                 raise CStoreError("PRODUCT_NOT_FOUND", f"商品不存在或已下架：{item['product_id']}")
-            if row["stock"] < item["quantity"]:
+            if not quote_mode and row["stock"] < item["quantity"]:
                 raise CStoreError("INSUFFICIENT_STOCK", f"库存不足：{row['title']}")
-            unit_price = float(row["price"])
+            unit_price = float(item.get("unit_price") or 0) if quote_mode else float(row["price"])
+            if unit_price <= 0:
+                # 兼容旧报价（没有 unit_price 字段）：回退到商品当前价。
+                unit_price = float(row["price"])
+            if unit_price <= 0:
+                raise CStoreError("INVALID_PRICE", "商品价格无效，请重新准备订单")
+            title = str(item.get("title") or row["title"])
             original += unit_price * item["quantity"]
             products.append({
                 "product_id": row["product_id"],
-                "title": row["title"],
+                "title": title,
                 "quantity": item["quantity"],
                 "unit_price": unit_price,
                 **({"sku": item["sku"]} if item.get("sku") else {}),
+                **({"spec": item["spec"]} if item.get("spec") else {}),
             })
 
         discount = _quote_discount(original, policy_ids)
@@ -1926,14 +1937,17 @@ def confirm_order(
         current = {row["product_id"]: row for row in product_rows}
         expected = json.loads(draft["snapshot_json"])
         expected_by_id = {item["product_id"]: item for item in expected}
+        quote_mode = bool(draft["quote_id"])
 
         for item in expected:
             row = current.get(item["product_id"])
             if row is None or row["status"] != "ACTIVE":
                 raise CStoreError("ORDER_CHANGED", "订单商品已下架，请重新准备订单")
-            if float(row["price"]) != float(item["unit_price"]):
+            # 报价单价/规格可能来自非默认 SKU，以报价快照为准；普通草稿仍校验
+            # C 端商品价格，防止草稿生成后价格被悄悄改动。
+            if not quote_mode and float(row["price"]) != float(item["unit_price"]):
                 raise CStoreError("ORDER_CHANGED", "订单价格已变化，请重新准备并确认")
-            if row["stock"] < item["quantity"]:
+            if not quote_mode and row["stock"] < item["quantity"]:
                 raise CStoreError("INSUFFICIENT_STOCK", f"库存不足：{row['title']}")
 
         order_id = "order_" + uuid.uuid4().hex[:16]
