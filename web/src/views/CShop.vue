@@ -190,10 +190,20 @@ async function loadProducts() {
       category: product.category || "精选",
       stock: Number(product.stock ?? 0),
     }));
+    productImageErrors.value = {};
   } catch (e) {
     productsError.value = e?.detail || e?.message || "商品加载失败";
   } finally {
     productsLoading.value = false;
+  }
+}
+
+async function ensureMerchantFriend() {
+  if (!isMerchantShop.value || !merchantId.value) return;
+  try {
+    await postJson("/api/c/friends/merchants", { merchant_id: merchantId.value });
+  } catch {
+    // 加好友失败不影响逛店；CApp 仍可用已有会话。
   }
 }
 
@@ -309,11 +319,24 @@ async function runMerchantNegotiation(needOverride = "") {
   }
 }
 
+function rememberProduct(product) {
+  try {
+    localStorage.setItem("qianke:lastProduct", JSON.stringify({
+      title: String(product?.title || "").trim(),
+      merchant_id: String(product?.merchant_id || merchantId.value || "").trim(),
+    }));
+  } catch {
+    // 本地存储不可用时不影响浏览
+  }
+}
+
 function useProduct(product) {
+  rememberProduct(product);
   message.value = `我想买 ${product.title}，预算 ${Math.ceil(product.price)} 元`;
 }
 
 function openProductDetail(product) {
+  rememberProduct(product);
   selectedProduct.value = product;
 }
 
@@ -339,6 +362,7 @@ function negotiateProduct(product) {
 
 onMounted(() => {
   loadProducts();
+  ensureMerchantFriend();
   loadCompanion();
   loadQuote();
 });

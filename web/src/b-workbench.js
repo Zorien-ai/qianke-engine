@@ -1820,7 +1820,7 @@ function productCard(product) {
       ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(text(product.title))}" loading="lazy" />` : `<span class="b-product-cover-empty">暂无图片</span>`}
       ${can("operate_inventory") ? `<label class="b-product-image-btn">
         更换图片
-        <input type="file" accept="image/png,image/jpeg,image/webp" data-product-image-input="${escapeHtml(product.product_id)}" hidden />
+        <input type="file" name="product-image" accept="image/png,image/jpeg,image/webp" data-product-image-input="${escapeHtml(product.product_id)}" hidden />
       </label>` : ""}
     </div>
     <div class="b-card-head">

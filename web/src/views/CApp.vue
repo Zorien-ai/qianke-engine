@@ -1994,6 +1994,13 @@ function negotiationBudgetFromThread() {
 }
 
 function fallbackProductNeed() {
+  try {
+    const remembered = JSON.parse(localStorage.getItem("qianke:lastProduct") || "null");
+    const rememberedTitle = String(remembered?.title || "").trim();
+    if (rememberedTitle) return rememberedTitle;
+  } catch {
+    // 忽略本地存储损坏
+  }
   const quoteTitle = String(storeQuote.value?.product_refs?.[0]?.title || "").trim();
   if (quoteTitle) return quoteTitle;
   const latest = recentOrders.value?.[0];
