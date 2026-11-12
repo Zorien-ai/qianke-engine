@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import CompanionAvatar from "../components/CompanionAvatar.vue";
 import { getJson, postJson, patchJson, del, postForm } from "../api";
@@ -1041,7 +1041,9 @@ function onThreadScroll(event) {
 
 function scrollToBottom() {
   showJumpBottom.value = false;
-  requestAnimationFrame(() => {
+  // 用 nextTick 在 DOM 更新后、浏览器绘制前直接定位，避免每次加载都看到
+  // 内容从顶部滚动到底部的过程。
+  nextTick(() => {
     const el = document.getElementById("c-app-thread");
     if (el) el.scrollTop = el.scrollHeight;
   });
@@ -3286,6 +3288,37 @@ onBeforeUnmount(() => {
   background: var(--c-bg);
 }
 
+/* 桌面三栏固定视口高度：中间对话区独立滚动，不再让整个页面无限变长 */
+@media (min-width: 981px) {
+  .c-app {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .c-shell {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .c-sidebar,
+  .c-context {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .c-main {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .c-chat {
+    height: 100%;
+    min-height: 0;
+  }
+}
+
 .c-sidebar {
   display: flex;
   flex-direction: column;
@@ -3772,10 +3805,32 @@ onBeforeUnmount(() => {
   flex: 1;
   flex-direction: column;
   gap: 18px;
-  overflow-y: auto;
+  overflow-y: scroll;
+  scroll-behavior: auto;
+  scrollbar-gutter: stable;
   padding: 20px 2px 12px;
   scrollbar-width: thin;
-  scrollbar-color: var(--c-line) transparent;
+  scrollbar-color: var(--c-line-strong) var(--c-panel-2);
+}
+
+.c-thread::-webkit-scrollbar {
+  width: 10px;
+}
+
+.c-thread::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: var(--c-panel-2);
+}
+
+.c-thread::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 2px solid var(--c-panel-2);
+  border-radius: 999px;
+  background: var(--c-line-strong);
+}
+
+.c-thread::-webkit-scrollbar-thumb:hover {
+  background: var(--c-text-3);
 }
 
 .c-date-line {
