@@ -330,6 +330,7 @@ const negotiationSkuLoading = ref(false);
 const negotiationProductTitle = ref("");
 const negotiationProductOptions = ref([]);
 const negotiationProductId = ref("");
+const negotiationProductSearch = ref("");
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
@@ -2019,6 +2020,17 @@ function fallbackProductNeed() {
   return String(item?.title || "").trim();
 }
 
+const filteredNegotiationProducts = computed(() => {
+  const keyword = String(negotiationProductSearch.value || "").trim().toLowerCase();
+  if (!keyword) return negotiationProductOptions.value;
+  return negotiationProductOptions.value.filter((product) => {
+    const haystack = [product.title, product.category, product.brand]
+      .map((value) => String(value || "").toLowerCase())
+      .join(" ");
+    return haystack.includes(keyword);
+  });
+});
+
 function openNegotiation(options = {}) {
   if (negotiating.value || typing.value) return;
   const active = activeThread.value;
@@ -2039,6 +2051,7 @@ function openNegotiation(options = {}) {
   negotiationProductTitle.value = rememberedTitle;
   negotiationProductOptions.value = [];
   negotiationProductId.value = String(remembered?.product_id || "").trim();
+  negotiationProductSearch.value = "";
   negotiationBudget.value = negotiationBudgetFromThread();
   negotiationQuantity.value = Math.max(
     1,
@@ -2066,6 +2079,11 @@ async function loadNegotiationSkuOptions() {
       .map((item) => ({
         product_id: String(item.product_id),
         title: String(item.title),
+        category: String(item.category || ""),
+        brand: String(item.brand || ""),
+        price: Number(item.price || 0),
+        stock: Number(item.stock || 0),
+        image_url: String(item.image_url || item.images?.[0]?.url || ""),
         skus: Array.isArray(item.skus) ? item.skus : [],
       }));
     negotiationProductOptions.value = products;
@@ -2608,15 +2626,44 @@ onBeforeUnmount(() => {
           <button type="button" class="c-negotiate-close" aria-label="关闭" @click="closeNegotiation">×</button>
         </header>
         <p v-if="negotiationMerchant" class="c-negotiate-merchant">当前商家 · {{ negotiationMerchant }}</p>
-        <label v-if="negotiationProductOptions.length" class="c-negotiate-field">
-          <span>从店铺选择</span>
-          <select :value="negotiationProductId" @change="selectNegotiationProduct($event.target.value)">
-            <option value="">手动填写商品名</option>
-            <option v-for="product in negotiationProductOptions" :key="product.product_id" :value="product.product_id">
-              {{ product.title }}{{ product.skus.length ? ` · ${product.skus.length} 个规格` : "" }}
-            </option>
-          </select>
-        </label>
+        <div v-if="negotiationProductOptions.length" class="c-negotiate-products">
+          <div class="c-negotiate-products-head">
+            <span>从店铺选择</span>
+            <small>{{ filteredNegotiationProducts.length }} / {{ negotiationProductOptions.length }} 件</small>
+          </div>
+          <label class="c-product-search">
+            <span aria-hidden="true">⌕</span>
+            <input v-model.trim="negotiationProductSearch" type="search" placeholder="搜商品、分类或品牌" />
+          </label>
+          <div class="c-product-cards" role="list">
+            <button
+              v-for="product in filteredNegotiationProducts"
+              :key="product.product_id"
+              type="button"
+              class="c-product-card"
+              :class="{ active: negotiationProductId === product.product_id }"
+              role="listitem"
+              @click="selectNegotiationProduct(product.product_id)"
+            >
+              <span class="c-product-thumb">
+                <img
+                  v-if="product.image_url"
+                  :src="product.image_url"
+                  :alt="product.title"
+                  loading="lazy"
+                  @error="$event.target.style.display = 'none'"
+                />
+                <span class="c-product-placeholder">{{ product.category.slice(0, 1) || "茶" }}</span>
+              </span>
+              <span class="c-product-info">
+                <strong>{{ product.title }}</strong>
+                <small>{{ product.category }} · ¥{{ Number(product.price).toFixed(2) }}</small>
+                <em>{{ product.skus.length }} 个规格 · 库存 {{ product.stock }}</em>
+              </span>
+            </button>
+          </div>
+          <p v-if="!filteredNegotiationProducts.length" class="c-negotiate-hint">没有匹配的商品，试试其他关键词。</p>
+        </div>
         <label class="c-negotiate-field">
           <span>想砍的商品</span>
           <input v-model="negotiationNeed" type="text" maxlength="80" placeholder="想买的商品名称" @change="loadNegotiationSkuOptions" />
@@ -6243,6 +6290,137 @@ onBeforeUnmount(() => {
   color: inherit;
   font: inherit;
   font-size: 13px;
+}
+
+
+.c-negotiate-products {
+  margin: 0 0 12px;
+}
+
+.c-negotiate-products-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--text-2, #6b6258);
+  font-size: 11px;
+}
+
+.c-negotiate-products-head small {
+  color: var(--muted, #948b7e);
+  font-size: 9px;
+}
+
+.c-product-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border, #e4dccd);
+  border-radius: 8px;
+  background: var(--surface, #fffdf8);
+}
+
+.c-product-search span {
+  color: var(--muted, #948b7e);
+  font-size: 16px;
+}
+
+.c-product-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.c-product-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  max-height: 238px;
+  margin-top: 8px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.c-product-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border, #e4dccd);
+  border-radius: 9px;
+  background: var(--surface, #fffdf8);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.c-product-card.active {
+  border-color: var(--primary, #a8623f);
+  background: var(--primary-soft, #f6e3da);
+}
+
+.c-product-thumb {
+  position: relative;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: linear-gradient(145deg, #e6ecdb, #d7e2c9);
+}
+
+.c-product-thumb img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.c-product-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #7d8b6b;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.c-product-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.c-product-info strong {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-product-info small,
+.c-product-info em {
+  overflow: hidden;
+  color: var(--muted, #948b7e);
+  font-size: 9px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-product-card.active .c-product-info small {
+  color: #9d4c31;
 }
 
 </style>
