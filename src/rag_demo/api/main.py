@@ -59,6 +59,7 @@ from rag_demo.api.demo_showcase import (
     serialize_user as serialize_demo_user,
 )
 from rag_demo.api.c_end import register_c_end
+from rag_demo.api.c_auth import register_c_auth
 from rag_demo.api.b_end import register_b_end
 from rag_demo.api.kb import register_kb
 from rag_demo.api.monitor import register_monitor
@@ -685,6 +686,8 @@ register_kb(app)
 
 # C 端 mock 商品/模拟订单：/api/c/products、/api/c/orders/*
 register_c_end(app)
+# C 端消费者注册 / 验证码登录：/api/c/auth/*
+register_c_auth(app)
 
 # B 端账号级 AI 人设：/api/b/persona（名字 / 称呼 / 语气档位，只影响表现层）
 register_b_end(app)
@@ -732,6 +735,12 @@ def index() -> Response:
 def login_page() -> FileResponse:
     """登录 / 注册页（唯一不需要登录的页面）"""
     return FileResponse(os.path.join(STATIC_DIR, "login.html"))
+
+
+@app.get("/c/login", include_in_schema=False)
+def c_login_page() -> FileResponse:
+    """C 端消费者专属登录 / 注册页。"""
+    return FileResponse(os.path.join(STATIC_DIR, "c-login.html"))
 
 
 @app.get("/favicon.ico", include_in_schema=False)

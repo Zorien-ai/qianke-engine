@@ -318,6 +318,8 @@ const negotiationRejected = ref(false);
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
+const logoutBusy = ref(false);
+const logoutError = ref("");
 const hasMoreStore = ref(false);
 const storeBefore = ref("");
 const loadingOlderStore = ref(false);
@@ -1661,6 +1663,21 @@ async function loadOlderCompanion() {
     companionBefore.value = older[0]?.created_at || companionBefore.value;
   } catch {
     // 加载失败时保留当前消息。
+  }
+}
+
+async function logoutC() {
+  if (logoutBusy.value) return;
+  if (!window.confirm("退出当前账号？")) return;
+  logoutBusy.value = true;
+  logoutError.value = "";
+  try {
+    await postJson("/auth/logout", {});
+    window.location.assign("/c/login");
+  } catch (error) {
+    logoutError.value = error?.detail || error?.message || "退出失败，请稍后再试";
+  } finally {
+    logoutBusy.value = false;
   }
 }
 
@@ -3066,6 +3083,17 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="c-context-section">
+            <header><span>账号</span><span class="c-context-link">消费者</span></header>
+            <button
+              class="c-danger-link"
+              type="button"
+              :disabled="logoutBusy"
+              @click="logoutC"
+            >{{ logoutBusy ? "退出中…" : "退出登录" }}</button>
+            <p v-if="logoutError" class="c-inline-error" role="alert">{{ logoutError }}</p>
+          </section>
+
+          <section class="c-context-section">
             <header><span>会话</span><span class="c-context-link">仅小鱼</span></header>
             <button
               class="c-danger-link"
@@ -3144,6 +3172,13 @@ onBeforeUnmount(() => {
           <span v-if="unreadOf(thread.id)" class="c-unread">{{ unreadOf(thread.id) }}</span>
         </button>
       </div>
+      <div class="c-mobile-account">
+        <span>当前账号 · 消费者</span>
+        <button type="button" class="c-danger-link" :disabled="logoutBusy" @click="logoutC">
+          {{ logoutBusy ? "退出中…" : "退出登录" }}
+        </button>
+      </div>
+      <p v-if="logoutError" class="c-inline-error c-mobile-account-error" role="alert">{{ logoutError }}</p>
     </div>
 
     <nav class="c-mobile-nav" aria-label="移动端导航">
@@ -3188,6 +3223,29 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.c-mobile-account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  padding: 12px 14px;
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: var(--c-panel);
+  color: var(--c-text-2);
+  font-size: 12px;
+}
+
+.c-mobile-account .c-danger-link {
+  flex: none;
+  margin: 0;
+}
+
+.c-mobile-account-error {
+  margin: 0 16px 16px;
+}
+
 .c-app {
   --c-bg: #f7f3ea;
   --c-bg-soft: #fffdf8;

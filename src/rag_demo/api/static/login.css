@@ -1162,3 +1162,26 @@ dialog::backdrop {
     animation: none;
   }
 }
+
+
+.auth-c-entry {
+  margin: 14px 0 0;
+  text-align: center;
+  font-size: 12px;
+}
+
+.auth-c-entry a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--line, #e3ddd2);
+  border-radius: 999px;
+  color: var(--ink, #1f1d19);
+  text-decoration: none;
+}
+
+.auth-c-entry a:hover {
+  border-color: var(--accent, #3155d9);
+  color: var(--accent, #3155d9);
+}

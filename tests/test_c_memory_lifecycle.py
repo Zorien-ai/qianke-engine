@@ -1,6 +1,9 @@
 """C 端记忆生命周期：重要性、强化、压缩、遗忘、日记。"""
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -81,6 +84,7 @@ def test_compress_failure_keeps_raw_memories(c_store, monkeypatch):
 
 
 def test_diary_disabled_by_default_and_enabled(c_store):
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     assert store.get_diary_enabled("buyer_1") is False
     store.set_diary_enabled("buyer_1", True)
     assert store.get_diary_enabled("buyer_1") is True
@@ -91,22 +95,23 @@ def test_diary_disabled_by_default_and_enabled(c_store):
         calls.append(messages)
         return "今天和用户聊了爬山，天气不错。"
 
-    diary = memory_daily.generate_diary("buyer_1", "2026-11-11", llm=fake_llm)
+    diary = memory_daily.generate_diary("buyer_1", today, llm=fake_llm)
     assert diary is not None
     assert "爬山" in diary["content"]
     assert calls
     # 幂等：同一天不会重复生成。
-    again = memory_daily.generate_diary("buyer_1", "2026-11-11", llm=fake_llm)
+    again = memory_daily.generate_diary("buyer_1", today, llm=fake_llm)
     assert again["diary_id"] == diary["diary_id"]
     assert len(calls) == 1
 
 
 def test_diary_rejects_pii(c_store):
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     store.set_diary_enabled("buyer_1", True)
     store.save_app_message("buyer_1", "companion", "user", "联系我 13800138000")
     diary = memory_daily.generate_diary(
         "buyer_1",
-        "2026-11-11",
+        today,
         llm=lambda messages: "今天用户留了手机号 13800138000。",
     )
     assert diary is None

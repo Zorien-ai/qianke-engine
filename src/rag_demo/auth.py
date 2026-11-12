@@ -112,10 +112,13 @@ SQLITE_MIGRATION_ENABLED = os.environ.get("RAG_AUTH_MIGRATE_SQLITE", "1") != "0"
 
 ACCOUNT_ENTERPRISE = "enterprise"
 ACCOUNT_EMPLOYEE = "employee"
+ACCOUNT_CONSUMER = "consumer"
+# 企业/员工仍走原有审核与邀请码流程；消费者走 /api/c/auth 自助注册。
 ACCOUNT_TYPES = (ACCOUNT_ENTERPRISE, ACCOUNT_EMPLOYEE)
 ACCOUNT_TYPE_LABELS = {
     ACCOUNT_ENTERPRISE: "企业",
     ACCOUNT_EMPLOYEE: "员工",
+    ACCOUNT_CONSUMER: "消费者",
 }
 
 STATUS_PENDING = "pending"
@@ -767,6 +770,60 @@ def create_user(
         "新注册（待审核）: %s 类型=%s 企业=%s 联系方式=%s",
         username, account_type, enterprise_id, contact_label(contact_value),
     )
+    return user
+
+
+def create_consumer(
+    phone: str,
+    password: str,
+    nickname: str = "",
+) -> dict[str, Any]:
+    """C 端消费者自助注册：直接 active，不走企业审核/邀请码。"""
+    contact_value = normalize_contact(phone)
+    if not contact_value or not contact_value.isdigit() or len(contact_value) != 11:
+        raise ValueError("请输入有效的 11 位手机号")
+    if not (contact_value.startswith("1") and contact_value[1] in "3456789"):
+        raise ValueError("请输入有效的手机号")
+    password = password or ""
+    if len(password) < 8:
+        raise ValueError("密码至少 8 位")
+    nickname = (nickname or "").strip()
+    if not 2 <= len(nickname) <= 20:
+        raise ValueError("昵称需为 2~20 个字符")
+    username = f"c_{contact_value}"
+    try:
+        with _cursor() as cur:
+            cur.execute("SELECT 1 FROM app_user WHERE username = %s", (username,))
+            if cur.fetchone() is not None:
+                raise ValueError("该手机号暂时无法注册，请直接登录")
+            cur.execute("SELECT 1 FROM app_user WHERE contact = %s", (contact_value,))
+            if cur.fetchone() is not None:
+                # 不直接暴露“手机号已注册”，避免账号枚举。
+                raise ValueError("该手机号暂时无法注册，请直接登录")
+            cur.execute(
+                """INSERT INTO app_user
+                   (username, contact, display_name, password_hash, account_type, role,
+                    enterprise_id, status, reviewed_at, reviewed_by)
+                   VALUES (%s, %s, %s, %s, %s, 'buyer', NULL, 'active', now(), 'consumer_self_register')
+                   RETURNING id""",
+                (username, contact_value, nickname, hash_password(password), ACCOUNT_CONSUMER),
+            )
+            row = cur.fetchone()
+            user_id = int(row["id"])
+    except Exception as exc:
+        if isinstance(exc, ValueError):
+            raise
+        try:
+            import psycopg2
+
+            if isinstance(exc, psycopg2.errors.UniqueViolation):
+                raise ValueError("该手机号暂时无法注册，请直接登录") from exc
+        except ImportError:
+            pass
+        raise
+    user = find_user_by_id(user_id)
+    assert user is not None
+    logger.info("C 端消费者注册: %s", contact_value)
     return user
 
 

@@ -442,6 +442,7 @@
     try {
       const who = await fetch("/whoami", { credentials: "same-origin" }).then((r) => r.json());
       const account = who && who.account ? who.account : {};
+      if (account.account_type === "consumer") return "/v2/#/c/app";
       if (account.is_system_admin || account.is_enterprise_admin) return "/v2/#/";
       try {
         const me = await fetch("/api/b/workbench/me", { credentials: "same-origin" });
