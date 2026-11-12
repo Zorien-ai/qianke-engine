@@ -2496,7 +2496,8 @@ onBeforeUnmount(() => {
             <CompanionAvatar
               v-if="!avatarVisible('companion')"
               ref="topAvatarRef"
-              :size="34"
+              class="c-top-avatar"
+              :size="44"
               :state="avatarState"
               :expression="avatarExpression"
               fallback="小"
@@ -3641,6 +3642,21 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
+.c-topbar-right :deep(.c-top-avatar) {
+  border-color: color-mix(in srgb, var(--c-accent) 55%, var(--c-line));
+  background: var(--c-panel);
+  box-shadow: 0 0 0 4px var(--c-accent-soft);
+}
+
+.c-topbar-right :deep(.c-top-avatar:hover) {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 5px var(--c-accent-soft);
+}
+
+.c-topbar-right :deep(.companion-avatar-fallback) {
+  font-size: 14px;
+}
+
 .c-mobile-brand {
   display: none;
   color: var(--c-text);
@@ -3693,10 +3709,10 @@ onBeforeUnmount(() => {
 }
 
 .c-avatar.top {
-  width: 28px;
-  height: 28px;
-  flex-basis: 28px;
-  font-size: 10px;
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
+  font-size: 13px;
 }
 
 .c-chat {
