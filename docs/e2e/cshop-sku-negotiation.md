@@ -116,7 +116,7 @@ tests/test_c_end_negotiation.py
 
 ## 已知限制
 
-1. CApp 小伴侧还没有 SKU 选择器；SKU 感知目前从 CShop 详情进入。
+1. CApp 已支持从上次浏览商品透传 SKU，见 [capp-sku-negotiation.md](capp-sku-negotiation.md)。
 2. 一单一商品；多商品报价/购物车未做。
 3. 数量上限 20，受前端和 API 双重限制。
 4. C 端商品库存仍是模拟汇总，SKU 库存以商家库存域为准。

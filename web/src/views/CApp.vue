@@ -323,6 +323,11 @@ const negotiationMerchant = ref("");
 const negotiationFriendId = ref("");
 const negotiationEchoUser = ref(true);
 const negotiationFormError = ref("");
+const negotiationSku = ref("");
+const negotiationSkuSpec = ref("");
+const negotiationSkuOptions = ref([]);
+const negotiationSkuLoading = ref(false);
+const negotiationProductTitle = ref("");
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
@@ -1993,14 +1998,18 @@ function negotiationBudgetFromThread() {
   return NEGOTIATION_DEFAULT_BUDGET;
 }
 
-function fallbackProductNeed() {
+function rememberedLastProduct() {
   try {
-    const remembered = JSON.parse(localStorage.getItem("qianke:lastProduct") || "null");
-    const rememberedTitle = String(remembered?.title || "").trim();
-    if (rememberedTitle) return rememberedTitle;
+    return JSON.parse(localStorage.getItem("qianke:lastProduct") || "null");
   } catch {
-    // 忽略本地存储损坏
+    return null;
   }
+}
+
+function fallbackProductNeed() {
+  const remembered = rememberedLastProduct();
+  const rememberedTitle = String(remembered?.title || "").trim();
+  if (rememberedTitle) return rememberedTitle;
   const quoteTitle = String(storeQuote.value?.product_refs?.[0]?.title || "").trim();
   if (quoteTitle) return quoteTitle;
   const latest = recentOrders.value?.[0];
@@ -2019,11 +2028,66 @@ function openNegotiation(options = {}) {
     negotiationNeedFromThread() ||
     (merchant?.id ? needFromConversation(merchant.id) : "") ||
     fallbackProductNeed();
+  const remembered = rememberedLastProduct();
+  const rememberedTitle = String(remembered?.title || "").trim();
+  negotiationSku.value = String(options.sku || remembered?.sku || "").trim();
+  negotiationSkuSpec.value = String(remembered?.spec || "").trim();
+  negotiationSkuOptions.value = [];
+  negotiationSkuLoading.value = false;
+  negotiationProductTitle.value = rememberedTitle;
   negotiationBudget.value = negotiationBudgetFromThread();
-  negotiationQuantity.value = 1;
+  negotiationQuantity.value = Math.max(
+    1,
+    Math.min(20, Number(remembered?.quantity || options.quantity || 1) || 1),
+  );
   negotiationEchoUser.value = options.echoUser !== false;
   negotiationFormError.value = "";
   negotiationOpen.value = true;
+  void loadNegotiationSkuOptions();
+}
+
+async function loadNegotiationSkuOptions() {
+  const need = String(negotiationNeed.value || "").trim();
+  const friendId = String(negotiationFriendId.value || "").trim();
+  if (!friendId || !need) return;
+  negotiationSkuLoading.value = true;
+  try {
+    const data = await getJson(
+      `/api/c/merchant/products?friend_id=${encodeURIComponent(friendId)}&limit=12`
+    );
+    const products = Array.isArray(data?.products) ? data.products : [];
+    const product = products.find((item) => {
+      const title = String(item?.title || "").trim();
+      return title && (title.includes(need) || need.includes(title));
+    });
+    if (!product) return;
+    negotiationProductTitle.value = String(product.title || "").trim();
+    negotiationSkuOptions.value = (Array.isArray(product.skus) ? product.skus : [])
+      .filter((item) => item && item.sku)
+      .map((item) => ({
+        sku: String(item.sku),
+        spec: String(item.spec || "默认规格"),
+        price: Number(item.price || 0),
+        stock: Number(item.stock || 0),
+        in_stock: item.in_stock !== false && Number(item.stock || 0) > 0,
+      }));
+    const known = negotiationSkuOptions.value.find((item) => item.sku === negotiationSku.value);
+    const selected = known || negotiationSkuOptions.value.find((item) => item.in_stock) || negotiationSkuOptions.value[0];
+    if (selected) {
+      negotiationSku.value = selected.sku;
+      negotiationSkuSpec.value = selected.spec;
+    }
+  } catch {
+    // 规格读取失败时保留手动商品名，不阻断砍价
+  } finally {
+    negotiationSkuLoading.value = false;
+  }
+}
+
+function selectNegotiationSku(skuValue) {
+  const selected = negotiationSkuOptions.value.find((item) => item.sku === skuValue);
+  negotiationSku.value = String(skuValue || "");
+  negotiationSkuSpec.value = selected?.spec || "";
 }
 
 function openNegotiationForPrompt(text) {
@@ -2048,9 +2112,15 @@ async function confirmNegotiation() {
     return;
   }
   negotiationOpen.value = false;
+  const selectedSku =
+    negotiationSku.value ||
+    negotiationSkuOptions.value.find((item) => item.in_stock)?.sku ||
+    negotiationSkuOptions.value[0]?.sku ||
+    "";
   await runNegotiation(need, budget, quantity, {
     friendId: negotiationFriendId.value,
     echoUser: negotiationEchoUser.value,
+    sku: selectedSku,
   });
 }
 
@@ -2072,11 +2142,13 @@ async function runNegotiation(need, budget = NEGOTIATION_DEFAULT_BUDGET, quantit
   }
   scrollToBottom();
   try {
+    const sku = String(options.sku || negotiationSku.value || "").trim();
     const data = await postJson("/api/c/negotiations", {
       need,
       budget,
       quantity,
       friend_id: explicitFriend || (negotiationThread !== "companion" ? negotiationThread : undefined),
+      ...(sku ? { sku } : {}),
     });
     const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
     for (const item of transcript) {
@@ -2503,8 +2575,20 @@ onBeforeUnmount(() => {
         <p v-if="negotiationMerchant" class="c-negotiate-merchant">当前商家 · {{ negotiationMerchant }}</p>
         <label class="c-negotiate-field">
           <span>想砍的商品</span>
-          <input v-model="negotiationNeed" type="text" maxlength="80" placeholder="想买的商品名称" />
+          <input v-model="negotiationNeed" type="text" maxlength="80" placeholder="想买的商品名称" @change="loadNegotiationSkuOptions" />
         </label>
+        <p v-if="negotiationSkuLoading" class="c-negotiate-hint">正在读取规格…</p>
+        <label v-else-if="negotiationSkuOptions.length" class="c-negotiate-field">
+          <span>规格</span>
+          <select :value="negotiationSku" @change="selectNegotiationSku($event.target.value)">
+            <option v-for="sku in negotiationSkuOptions" :key="sku.sku" :value="sku.sku" :disabled="!sku.in_stock">
+              {{ sku.spec }} · ¥{{ Number(sku.price).toFixed(2) }}{{ sku.in_stock ? "" : "（缺货）" }}
+            </option>
+          </select>
+        </label>
+        <p v-else-if="negotiationSku" class="c-negotiate-hint">
+          规格 · {{ negotiationSkuSpec || negotiationSku }}
+        </p>
         <div class="c-negotiate-row">
           <label class="c-negotiate-field">
             <span>预算（元）</span>
@@ -6095,6 +6179,28 @@ onBeforeUnmount(() => {
   width: 110px;
   accent-color: var(--c-accent);
 }
+
+.c-negotiate-hint {
+  margin: 0 0 10px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--bg-soft, #f7f3ea);
+  color: var(--text-2, #6b6258);
+  font-size: 11px;
+}
+
+.c-negotiate-field select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--border, #e4dccd);
+  border-radius: 8px;
+  background: var(--surface, #fffdf8);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
 </style>
 
 

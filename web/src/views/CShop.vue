@@ -434,11 +434,17 @@ async function runMerchantNegotiation(needOverride = "", sku = "", quantity = 1)
   }
 }
 
-function rememberProduct(product) {
+function rememberProduct(product, sku = null, quantity = 1) {
   try {
+    const selected = sku || defaultSku(product);
     localStorage.setItem("qianke:lastProduct", JSON.stringify({
-      title: String(product?.title || "").trim(),
       merchant_id: String(product?.merchant_id || merchantId.value || "").trim(),
+      product_id: String(product?.product_id || "").trim(),
+      title: String(product?.title || "").trim(),
+      sku: String(selected?.sku || "").trim(),
+      spec: String(selected?.spec || "").trim(),
+      price: Number(selected?.price ?? product?.price ?? 0),
+      quantity: Math.max(1, Math.min(20, Number(quantity) || 1)),
     }));
   } catch {
     // 本地存储不可用时不影响浏览
@@ -453,12 +459,12 @@ function productNeedText(product, sku = null) {
 }
 
 function useProduct(product) {
-  rememberProduct(product);
+  rememberProduct(product, defaultSku(product), 1);
   message.value = productNeedText(product, defaultSku(product));
 }
 
 function openProductDetail(product) {
-  rememberProduct(product);
+  rememberProduct(product, defaultSku(product), 1);
   detailImageIndex.value = 0;
   detailImageErrors.value = {};
   selectedSku.value = defaultSku(product);
@@ -474,17 +480,19 @@ function closeProductDetail() {
 function selectSku(sku) {
   selectedSku.value = sku;
   detailQuantity.value = 1;
+  if (selectedProduct.value) rememberProduct(selectedProduct.value, sku, 1);
 }
 
 function changeQuantity(delta) {
   const next = Number(detailQuantity.value || 1) + Number(delta || 0);
   detailQuantity.value = Math.max(1, Math.min(detailMaxQuantity.value, next));
+  if (selectedProduct.value) rememberProduct(selectedProduct.value, selectedSku.value, detailQuantity.value);
 }
 
 function askProduct(product, sku = null) {
   const selected = sku || selectedSku.value || defaultSku(product);
   closeProductDetail();
-  rememberProduct(product);
+  rememberProduct(product, selected, detailQuantity.value);
   message.value = productNeedText(product, selected);
   window.setTimeout(() => document.getElementById("shop-message")?.focus(), 50);
 }
@@ -496,6 +504,7 @@ function negotiateProduct(product, sku = null) {
     askProduct(product, selected);
     return;
   }
+  rememberProduct(product, selected, detailQuantity.value);
   message.value = productNeedText(product, selected);
   runMerchantNegotiation(product.title, selected?.sku || "", detailQuantity.value);
 }
