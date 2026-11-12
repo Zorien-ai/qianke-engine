@@ -16,7 +16,7 @@ const quoteOrder = ref(null);
 const quoteBusy = ref(false);
 const negotiationBusy = ref(false);
 const negotiationBudget = ref(500);
-const message = ref("我想买一双轻量跑鞋，预算 500 元以内");
+const message = ref("");
 const running = ref(false);
 const agentError = ref("");
 const reply = ref("");
@@ -160,9 +160,6 @@ async function loadProducts() {
       category: product.category || "精选",
       stock: Number(product.stock ?? 0),
     }));
-    if (merchantFriendId.value && /轻量跑鞋/.test(message.value)) {
-      message.value = `我想买${shopScopeLabel.value}的一件商品，预算 500 元以内`;
-    }
   } catch (e) {
     productsError.value = e?.detail || e?.message || "商品加载失败";
   } finally {
@@ -440,7 +437,7 @@ onMounted(() => {
           class="shop-input"
           rows="3"
           :disabled="running || hasDraft"
-          :placeholder="isMerchantShop ? '例如：这款茶多少钱，有优惠吗？' : '例如：我想买一双跑鞋，预算 500 元以内'"
+          :placeholder="isMerchantShop ? '例如：问商品、活动和优惠' : '例如：我想买什么，预算多少'"
           @keydown.ctrl.enter="runAgent"
           @keydown.meta.enter="runAgent"
         />

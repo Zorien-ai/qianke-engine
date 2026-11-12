@@ -952,9 +952,7 @@ const threadDotClass = computed(() => {
 });
 const pendingCount = computed(() => {
   if (liveDraft.value || storeQuote.value) return 1;
-  // 已拒绝：不生成报价卡，计数归零；演示账号保留静态演示卡。
-  if (liveOrder.value || negotiationRejected.value) return 0;
-  return isDemoAccount.value ? 1 : 0;
+  return 0;
 });
 
 function cleanReply(text) {
@@ -1187,30 +1185,6 @@ function pushMessage(message) {
     scheduleUnreadRefresh();
     scheduleIncomingRead();
   }
-}
-
-function localReply(text) {
-  const normalized = text.toLowerCase();
-  if (/跑鞋|鞋|跑步/.test(normalized)) {
-    return {
-      text: "轻量跑鞋 P001，299 元，库存 18 件。平台满 299 减 30，是否适用以结算页为准。",
-      quote: { product: "轻量跑鞋 · P001", price: "299.00", policy: "满 299 减 30" },
-    };
-  }
-  if (/活动|优惠|满减|券/.test(normalized)) {
-    return {
-      text: "当前可查到的活动是满 299 减 30、满 599 减 80。优惠资格和适用商品需要在结算页确认。",
-      quote: { product: "平台活动", price: "—", policy: "满 299 减 30" },
-    };
-  }
-  if (/售后|退货|物流|发货/.test(normalized)) {
-    return {
-      text: "现货商品 48 小时内发出，支持 7 天无理由退货。质量问题由商家承担运费。",
-    };
-  }
-  return {
-    text: "我先把问题记录下来。你可以继续看商品，或者切到店宠会话询问活动和售后。",
-  };
 }
 
 function mapStoreMessage(message) {
@@ -2459,7 +2433,7 @@ onBeforeUnmount(() => {
         <p v-if="negotiationMerchant" class="c-negotiate-merchant">当前商家 · {{ negotiationMerchant }}</p>
         <label class="c-negotiate-field">
           <span>想砍的商品</span>
-          <input v-model="negotiationNeed" type="text" maxlength="80" placeholder="例如：明前龙井 250g 礼盒" />
+          <input v-model="negotiationNeed" type="text" maxlength="80" placeholder="想买的商品名称" />
         </label>
         <div class="c-negotiate-row">
           <label class="c-negotiate-field">
@@ -2830,7 +2804,7 @@ onBeforeUnmount(() => {
               <button type="button" class="c-prompt" @click="sendPrompt('陪我聊聊', 'companion')">陪我聊聊</button>
               <button type="button" class="c-prompt" @click="sendPrompt('帮我挑东西', 'advisor')">帮我挑东西</button>
             </template>
-            <button type="button" class="c-prompt" @click="sendPrompt('看 500 元以内的跑鞋', 'advisor')">看 500 元以内的跑鞋</button>
+            <button type="button" class="c-prompt" @click="sendPrompt('看看有什么推荐', 'advisor')">看看有什么推荐</button>
             <button type="button" class="c-prompt" @click="sendPrompt('查平台活动', 'advisor')">查平台活动</button>
             <button type="button" class="c-prompt" @click="sendPrompt('问店宠售后', 'transaction')">问店宠售后</button>
             <button
@@ -3098,16 +3072,6 @@ onBeforeUnmount(() => {
               >
                 查看报价 <span>→</span>
               </RouterLink>
-            </div>
-            <div v-else-if="isDemoAccount && !negotiationRejected" class="c-quote-card">
-              <div class="c-quote-card-top">
-                <span class="c-quote-card-label">来自店宠的报价</span>
-                <span class="c-dot waiting" />
-              </div>
-              <strong>轻量跑鞋 · P001</strong>
-              <div class="c-quote-price"><span>¥299.00</span><small>满 299 减 30</small></div>
-              <p>成交前需在商城逐单确认。</p>
-              <RouterLink to="/c" class="c-text-link">查看商城 <span>→</span></RouterLink>
             </div>
             <p v-if="agentError" class="c-inline-error" role="alert">{{ agentError }}</p>
           </section>
