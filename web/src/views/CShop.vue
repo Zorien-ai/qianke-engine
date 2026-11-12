@@ -17,6 +17,8 @@ const quoteBusy = ref(false);
 const negotiationBusy = ref(false);
 const negotiationBudget = ref(500);
 const message = ref("");
+const categoryFilter = ref("全部");
+const selectedProduct = ref(null);
 const running = ref(false);
 const agentError = ref("");
 const reply = ref("");
@@ -40,6 +42,18 @@ const shopScopeLabel = computed(() => merchantName.value || "小鱼精选");
 const isMerchantShop = computed(() => Boolean(merchantFriendId.value));
 
 const featuredProduct = computed(() => products.value.find((p) => p.category === "运动") || products.value[0] || null);
+const categories = computed(() => {
+  const unique = [];
+  for (const product of products.value) {
+    const category = String(product.category || "").trim();
+    if (category && !unique.includes(category)) unique.push(category);
+  }
+  return ["全部", ...unique];
+});
+const filteredProducts = computed(() => {
+  if (categoryFilter.value === "全部") return products.value;
+  return products.value.filter((product) => product.category === categoryFilter.value);
+});
 const hasDraft = computed(() => !!draft.value);
 const hasOrder = computed(() => !!order.value);
 const canSend = computed(() => !running.value && !decisionLoading.value && !hasDraft.value && message.value.trim().length > 0);
@@ -52,6 +66,12 @@ function money(value) {
 
 function productHint(product) {
   return product.stock > 0 ? `库存 ${product.stock}` : "暂时缺货";
+}
+
+function productTone(product) {
+  const category = String(product?.category || "");
+  const map = { 绿茶: "sage", 白茶: "stone", 红茶: "clay", 普洱茶: "amber", 礼盒: "rose", 运动: "stone" };
+  return map[category] || "stone";
 }
 
 function speciesLabel(species) {
@@ -246,16 +266,17 @@ async function decide(approved) {
   }
 }
 
-async function runMerchantNegotiation() {
+async function runMerchantNegotiation(needOverride = "") {
   if (!isMerchantShop.value || negotiationBusy.value) return;
   negotiationBusy.value = true;
   agentError.value = "";
   lastAction.value = "";
   try {
     const need =
+      String(needOverride || "").trim() ||
       quote.value?.product_refs?.[0]?.title ||
-      products.value[0]?.title ||
       message.value.trim() ||
+      products.value[0]?.title ||
       "商品";
     const data = await postJson("/api/c/negotiations", {
       need: need.slice(0, 80),
@@ -280,6 +301,30 @@ async function runMerchantNegotiation() {
 
 function useProduct(product) {
   message.value = `我想买 ${product.title}，预算 ${Math.ceil(product.price)} 元`;
+}
+
+function openProductDetail(product) {
+  selectedProduct.value = product;
+}
+
+function closeProductDetail() {
+  selectedProduct.value = null;
+}
+
+function askProduct(product) {
+  closeProductDetail();
+  useProduct(product);
+  window.setTimeout(() => document.getElementById("shop-message")?.focus(), 50);
+}
+
+function negotiateProduct(product) {
+  closeProductDetail();
+  if (!isMerchantShop.value) {
+    askProduct(product);
+    return;
+  }
+  message.value = `我想买 ${product.title}，预算 ${Math.ceil(product.price)} 元`;
+  runMerchantNegotiation(product.title);
 }
 
 onMounted(() => {
@@ -323,7 +368,18 @@ onMounted(() => {
             <h3>{{ merchantFriendId ? shopScopeLabel : "市集选物" }}</h3>
             <p>{{ merchantFriendId ? "该商家的真实商品与库存" : "价格和库存来自真实商品库" }}</p>
           </div>
-          <span class="count">{{ products.length }} 件</span>
+          <span class="count">{{ filteredProducts.length }} / {{ products.length }} 件</span>
+        </div>
+
+        <div v-if="categories.length > 1" class="product-filters" role="group" aria-label="商品分类">
+          <button
+            v-for="category in categories"
+            :key="category"
+            type="button"
+            class="product-filter"
+            :class="{ active: categoryFilter === category }"
+            @click="categoryFilter = category"
+          >{{ category }}</button>
         </div>
 
         <p v-if="productsLoading" class="state-line" role="status">正在加载商品…</p>
@@ -332,20 +388,35 @@ onMounted(() => {
           <strong>暂无商品</strong>
           <p>商品库为空，暂时无法推荐。</p>
         </div>
+        <div v-else-if="!filteredProducts.length" class="state-box">
+          <strong>这个分类暂时没有商品</strong>
+          <p>切换其他分类看看。</p>
+        </div>
         <div v-else class="product-list">
-          <article v-for="product in products" :key="product.product_id" class="product-row">
-            <div class="product-mark" aria-hidden="true">{{ product.category.slice(0, 1) }}</div>
+          <article
+            v-for="product in filteredProducts"
+            :key="product.product_id"
+            class="product-row"
+            @click="openProductDetail(product)"
+          >
+            <div class="product-mark" :class="`tone-${productTone(product)}`" aria-hidden="true">
+              <span class="product-mark-char">{{ product.category.slice(0, 1) }}</span>
+              <span class="product-mark-brand">{{ product.brand || product.category }}</span>
+            </div>
             <div class="product-main">
               <div class="product-top">
                 <h4>{{ product.title }}</h4>
                 <span class="category">{{ product.category }}</span>
               </div>
-              <p class="product-story">{{ productHint(product) }}</p>
+              <p class="product-story">{{ productHint(product) }} · 店宠可咨询</p>
               <div class="product-side">
                 <strong>¥{{ money(product.price) }}</strong>
-                <button class="ghost-btn" type="button" @click="useProduct(product)">
-                  {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
-                </button>
+                <div class="product-actions">
+                  <button class="ghost-btn" type="button" @click.stop="useProduct(product)">
+                    {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
+                  </button>
+                  <button class="ghost-btn product-detail-btn" type="button" @click.stop="openProductDetail(product)">详情</button>
+                </div>
               </div>
             </div>
           </article>
@@ -504,6 +575,53 @@ onMounted(() => {
         </section>
 
         <p v-if="lastAction && !hasOrder" class="action-line" role="status">{{ lastAction }}</p>
+      </div>
+    </section>
+  </div>
+
+  <div v-if="selectedProduct" class="product-detail-mask" @click.self="closeProductDetail">
+    <section class="product-detail" role="dialog" aria-modal="true" :aria-label="`${selectedProduct.title} 商品详情`">
+      <header class="product-detail-head">
+        <div>
+          <span class="product-detail-kicker">PRODUCT · {{ selectedProduct.category }}</span>
+          <h3>{{ selectedProduct.title }}</h3>
+        </div>
+        <button type="button" class="product-detail-close" aria-label="关闭商品详情" @click="closeProductDetail">×</button>
+      </header>
+      <div class="product-detail-body">
+        <div class="product-detail-art" :class="`tone-${productTone(selectedProduct)}`">
+          <span class="product-mark-char">{{ selectedProduct.category.slice(0, 1) }}</span>
+          <span class="product-mark-brand">{{ selectedProduct.brand || selectedProduct.category }}</span>
+        </div>
+        <div class="product-detail-info">
+          <p class="product-detail-store">{{ shopScopeLabel }} · 店宠在线</p>
+          <p class="product-detail-brand">{{ selectedProduct.brand || "店铺商品" }} · {{ selectedProduct.category }}</p>
+          <div class="product-detail-price">
+            <strong>¥{{ money(selectedProduct.price) }}</strong>
+            <span>{{ productHint(selectedProduct) }}</span>
+          </div>
+          <div class="product-detail-tags">
+            <span>模拟订单</span><span>{{ productHint(selectedProduct) }}</span><span>7 天无理由</span>
+          </div>
+          <dl class="product-detail-meta">
+            <div><dt>商品编号</dt><dd>{{ selectedProduct.product_id }}</dd></div>
+            <div v-if="selectedProduct.sku"><dt>SKU</dt><dd>{{ selectedProduct.sku }}</dd></div>
+            <div><dt>店铺</dt><dd>{{ shopScopeLabel }}</dd></div>
+          </dl>
+          <div class="product-detail-service">
+            <strong>店铺服务</strong>
+            <p>现货 48 小时内发出 · 支持 7 天无理由 · 成交前需逐单确认</p>
+          </div>
+          <div class="product-detail-actions">
+            <button type="button" class="primary-btn" @click="askProduct(selectedProduct)">
+              {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
+            </button>
+            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="negotiationBusy" @click="negotiateProduct(selectedProduct)">
+              {{ negotiationBusy ? "谈判中…" : "让小鱼去砍价" }}
+            </button>
+          </div>
+          <p class="product-detail-note">报价与订单均为模拟，不接真实支付。</p>
+        </div>
       </div>
     </section>
   </div>
@@ -1406,5 +1524,357 @@ onMounted(() => {
   color: var(--text);
   font: inherit;
   font-size: 11px;
+}
+
+
+/* ---------- 商品卡 / 商品详情（JD 信息层级，暖白 CShop 风格） ---------- */
+.product-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 10px 0 12px;
+}
+
+.product-filter {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.product-filter.active {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--surface);
+}
+
+.product-row {
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.product-row:hover {
+  transform: translateY(-2px);
+  border-color: rgba(217, 95, 59, 0.45);
+}
+
+.product-mark {
+  position: relative;
+  flex-direction: column;
+  gap: 4px;
+  transition: filter 0.15s ease;
+}
+
+.product-mark::after {
+  content: "";
+  position: absolute;
+  right: 12%;
+  bottom: 14%;
+  width: 42%;
+  height: 10%;
+  border-radius: 50%;
+  background: rgba(30, 27, 22, 0.12);
+  filter: blur(5px);
+}
+
+.product-mark-char {
+  position: relative;
+  z-index: 1;
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 38px;
+  line-height: 1;
+  color: rgba(30, 27, 22, 0.58);
+  text-shadow: 0 1px 0 rgba(255, 253, 248, 0.5);
+}
+
+.product-mark-brand {
+  position: relative;
+  z-index: 1;
+  color: rgba(30, 27, 22, 0.52);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.product-mark.tone-sage { background: linear-gradient(145deg, #d9e1cf, #9bab8b 60%, #edf0e4) !important; }
+.product-mark.tone-stone { background: linear-gradient(145deg, #e4e0d6, #b8b1a5 60%, #f1ede4) !important; }
+.product-mark.tone-clay { background: linear-gradient(145deg, #e8cfbf, #c88f74 62%, #f3e6dc) !important; }
+.product-mark.tone-amber { background: linear-gradient(145deg, #ecd9bd, #c5a06d 62%, #f5ebdc) !important; }
+.product-mark.tone-rose { background: linear-gradient(145deg, #e8d1ca, #c99c92 62%, #f5e8e4) !important; }
+
+.product-side {
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.product-actions {
+  display: flex;
+  gap: 5px;
+  width: 100%;
+}
+
+.product-actions .ghost-btn {
+  flex: 1;
+  min-height: 28px;
+  padding: 0 7px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.product-actions .product-detail-btn {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.product-detail-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(30, 27, 22, 0.36);
+  backdrop-filter: blur(3px);
+}
+
+.product-detail {
+  width: min(760px, 100%);
+  max-height: calc(100dvh - 44px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(30, 27, 22, 0.2);
+}
+
+.product-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 17px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.product-detail-kicker {
+  color: var(--primary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.product-detail-head h3 {
+  margin: 4px 0 0;
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: 23px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.product-detail-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.product-detail-body {
+  display: grid;
+  grid-template-columns: 0.95fr 1.05fr;
+  gap: 0;
+}
+
+.product-detail-art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 340px;
+  margin: 20px;
+  border-radius: 15px;
+  background: linear-gradient(145deg, #d9e1cf, #9bab8b 60%, #edf0e4);
+}
+
+.product-detail-art.tone-stone { background: linear-gradient(145deg, #e4e0d6, #b8b1a5 60%, #f1ede4); }
+.product-detail-art.tone-clay { background: linear-gradient(145deg, #e8cfbf, #c88f74 62%, #f3e6dc); }
+.product-detail-art.tone-amber { background: linear-gradient(145deg, #ecd9bd, #c5a06d 62%, #f5ebdc); }
+.product-detail-art.tone-rose { background: linear-gradient(145deg, #e8d1ca, #c99c92 62%, #f5e8e4); }
+
+.product-detail-art .product-mark-char {
+  font-size: 92px;
+  color: rgba(30, 27, 22, 0.55);
+}
+
+.product-detail-art .product-mark-brand {
+  font-size: 12px;
+}
+
+.product-detail-info {
+  padding: 20px 22px 22px 4px;
+}
+
+.product-detail-store {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.product-detail-brand {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.product-detail-price {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.product-detail-price strong {
+  color: var(--primary);
+  font-family: var(--mono);
+  font-size: 30px;
+  font-weight: 600;
+}
+
+.product-detail-price span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.product-detail-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.product-detail-tags span {
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--primary-soft);
+  color: #9d4c31;
+  font-size: 9px;
+}
+
+.product-detail-meta {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0 0;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.product-detail-meta > div {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+}
+
+.product-detail-meta dt {
+  flex: 0 0 58px;
+  color: var(--muted);
+}
+
+.product-detail-meta dd {
+  margin: 0;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.product-detail-service {
+  margin-top: 14px;
+}
+
+.product-detail-service strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.product-detail-service p {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.product-detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.product-detail-actions .primary-btn,
+.product-detail-actions .ghost-btn {
+  flex: 1;
+  min-height: 38px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.product-detail-actions .ghost-btn {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: #9d4c31;
+}
+
+.product-detail-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+@media (max-width: 820px) {
+  .product-detail-mask {
+    place-items: end center;
+    padding: 0;
+  }
+
+  .product-detail {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .product-detail-body {
+    display: block;
+  }
+
+  .product-detail-art {
+    min-height: 210px;
+    margin: 14px 14px 0;
+  }
+
+  .product-detail-art .product-mark-char {
+    font-size: 66px;
+  }
+
+  .product-detail-info {
+    padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .product-detail-actions {
+    position: sticky;
+    bottom: 0;
+    padding-top: 8px;
+    background: var(--surface);
+  }
 }
 </style>

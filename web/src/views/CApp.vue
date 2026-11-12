@@ -320,6 +320,8 @@ const negotiationNeed = ref("");
 const negotiationBudget = ref(500);
 const negotiationQuantity = ref(1);
 const negotiationMerchant = ref("");
+const negotiationFriendId = ref("");
+const negotiationEchoUser = ref(true);
 const negotiationFormError = ref("");
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
@@ -1697,6 +1699,17 @@ async function send() {
   const text = draft.value.trim();
   if (!text || typing.value) return;
   closeMention();
+  // 小伴不是议价方：识别到砍价意图时，直接转到当前店铺的砍价确认层。
+  if (activeThread.value.kind === "companion" && isBargainIntent(text) && latestMerchantThread()) {
+    pushMessage({ role: "user", text });
+    draft.value = "";
+    const input = document.getElementById("c-app-input");
+    if (input) input.style.height = "auto";
+    pendingRetry.value = null;
+    scrollToBottom();
+    openNegotiationForPrompt(text);
+    return;
+  }
   const clientId = newClientMessageId();
   const mode = pendingMode.value;
   pendingMode.value = "";
@@ -1918,11 +1931,33 @@ function normalizeNegotiationNeed(text) {
     .replace(/[，。！？；,.!?;]/g, " ");
   value = value
     .replace(/(?:这款|这个|这件|它|帮我|想买|我要买|推荐一款|推荐一下|推荐|看看|看一下|看|以内|以下)/g, " ")
-    .replace(/(?:多少钱|有优惠吗|有优惠|怎么卖|价格|能便宜吗|便宜点|砍价|吗|呢|呀|啊)/g, " ")
+    .replace(/(?:多少钱|有优惠吗|有优惠|怎么卖|价格|能便宜吗|便宜点|砍(?:个|一下|点)?价|吗|呢|呀|啊)/g, " ")
     .replace(/\d+\s*(?:元|块)/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  if (!value && isBargainIntent(original)) return "";
   return (value || original).slice(0, 40);
+}
+
+function latestMerchantThread() {
+  const merchants = allThreads.value.filter((thread) => thread.kind === "merchant");
+  return merchants[merchants.length - 1] || null;
+}
+
+function isBargainIntent(text) {
+  return /砍(?:个|一下|点)?价|议价|便宜点|能不能便宜|能便宜|降价|优惠点|杀价/.test(String(text || ""));
+}
+
+function needFromConversation(threadId) {
+  const list = messagesByThread.value[threadId] || [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const message = list[index];
+    if (!message || message.role !== "user") continue;
+    const raw = String(message.text || "").replace(/@\S+/g, " ").replace(/\s+/g, " ").trim();
+    if (!raw || isBargainIntent(raw)) continue;
+    return normalizeNegotiationNeed(raw);
+  }
+  return "";
 }
 
 function negotiationNeedFromThread() {
@@ -1958,15 +1993,37 @@ function negotiationBudgetFromThread() {
   return NEGOTIATION_DEFAULT_BUDGET;
 }
 
-function openNegotiation() {
+function fallbackProductNeed() {
+  const quoteTitle = String(storeQuote.value?.product_refs?.[0]?.title || "").trim();
+  if (quoteTitle) return quoteTitle;
+  const latest = recentOrders.value?.[0];
+  const item = latest?.items?.[0];
+  return String(item?.title || "").trim();
+}
+
+function openNegotiation(options = {}) {
   if (negotiating.value || typing.value) return;
-  const thread = activeThread.value;
-  negotiationNeed.value = negotiationNeedFromThread();
+  const active = activeThread.value;
+  const merchant = active.kind === "merchant" ? active : latestMerchantThread();
+  negotiationFriendId.value = merchant?.id || "";
+  negotiationMerchant.value = merchant?.name || "";
+  negotiationNeed.value =
+    String(options.need || "").trim() ||
+    negotiationNeedFromThread() ||
+    (merchant?.id ? needFromConversation(merchant.id) : "") ||
+    fallbackProductNeed();
   negotiationBudget.value = negotiationBudgetFromThread();
   negotiationQuantity.value = 1;
-  negotiationMerchant.value = thread.kind === "merchant" ? thread.name : "";
+  negotiationEchoUser.value = options.echoUser !== false;
   negotiationFormError.value = "";
   negotiationOpen.value = true;
+}
+
+function openNegotiationForPrompt(text) {
+  openNegotiation({
+    need: normalizeNegotiationNeed(text),
+    echoUser: false,
+  });
 }
 
 function closeNegotiation() {
@@ -1984,29 +2041,35 @@ async function confirmNegotiation() {
     return;
   }
   negotiationOpen.value = false;
-  await runNegotiation(need, budget, quantity);
+  await runNegotiation(need, budget, quantity, {
+    friendId: negotiationFriendId.value,
+    echoUser: negotiationEchoUser.value,
+  });
 }
 
-async function runNegotiation(need, budget = NEGOTIATION_DEFAULT_BUDGET, quantity = 1) {
+async function runNegotiation(need, budget = NEGOTIATION_DEFAULT_BUDGET, quantity = 1, options = {}) {
   // 调用中禁止重复点击；typing 同时会禁用发送按钮/回车提交
   if (negotiating.value || typing.value) return;
   negotiateError.value = "";
-  const negotiationThread = activeThread.value.kind === "merchant" ? activeId.value : "companion";
-  if (activeId.value !== negotiationThread) await switchThread(negotiationThread);
+  const explicitFriend = String(options.friendId || negotiationFriendId.value || "").trim();
+  const negotiationThread = explicitFriend || (activeThread.value.kind === "merchant" ? activeId.value : "companion");
+  if (!explicitFriend && activeId.value !== negotiationThread) await switchThread(negotiationThread);
   negotiating.value = true;
   typing.value = true;
   negotiationRejected.value = false;
-  pushMessage({
-    role: "user",
-    text: `让小鱼去砍价：${need}，预算 ¥${budget}`,
-  });
+  if (options.echoUser !== false) {
+    pushMessage({
+      role: "user",
+      text: `让小鱼去砍价：${need}，预算 ¥${budget}`,
+    });
+  }
   scrollToBottom();
   try {
     const data = await postJson("/api/c/negotiations", {
       need,
       budget,
       quantity,
-      friend_id: negotiationThread !== "companion" ? negotiationThread : undefined,
+      friend_id: explicitFriend || (negotiationThread !== "companion" ? negotiationThread : undefined),
     });
     const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
     for (const item of transcript) {
