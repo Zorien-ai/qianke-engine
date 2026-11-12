@@ -9,13 +9,13 @@ import "./b-workbench.css";
 const root = document.getElementById("b-root");
 
 const VIEWS = [
-  { key: "orders", label: "订单" },
-  { key: "after-sales", label: "售后" },
-  { key: "products", label: "商品" },
-  { key: "chat-profiles", label: "用户画像" },
-  { key: "superagent", label: "Super-agent" },
-  { key: "policy", label: "动作策略" },
-  { key: "audit", label: "执行审计" },
+  { key: "orders", label: "订单", short: "订单" },
+  { key: "after-sales", label: "售后", short: "售后" },
+  { key: "products", label: "商品", short: "商品" },
+  { key: "chat-profiles", label: "用户画像", short: "画像" },
+  { key: "superagent", label: "Super-agent", short: "Super" },
+  { key: "policy", label: "动作策略", short: "策略" },
+  { key: "audit", label: "执行审计", short: "审计" },
 ];
 
 const ORDER_STATUS_LABELS = {
@@ -2288,7 +2288,7 @@ function shellMarkup() {
       </div>
     </header>
     <nav class="b-nav" aria-label="商家工作台视图">
-      ${VIEWS.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" ${state.loading || state.busy ? 'aria-disabled="true"' : ""}>${view.label}</button>`).join("")}
+      ${VIEWS.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" ${state.loading || state.busy ? 'aria-disabled="true"' : ""}><span class="b-nav-full">${view.label}</span><span class="b-nav-short">${view.short || view.label}</span></button>`).join("")}
     </nav>
     ${state.error ? `<p class="b-inline-error" role="alert"><span>${escapeHtml(state.error)}</span><button type="button" class="b-inline-close" data-clear-error aria-label="关闭错误提示">×</button></p>` : ""}
     <main class="b-main">${viewMarkup}</main>
@@ -2320,6 +2320,20 @@ function paint(html) {
   bindEvents();
 }
 
+function syncMobileNav() {
+  const nav = root.querySelector(".b-nav");
+  const active = nav?.querySelector(".b-nav-btn.active");
+  if (!nav || !active) return;
+  if (nav.scrollWidth <= nav.clientWidth + 2) {
+    nav.scrollLeft = 0;
+    return;
+  }
+  nav.scrollLeft = Math.max(
+    0,
+    active.offsetLeft - nav.clientWidth / 2 + active.clientWidth / 2
+  );
+}
+
 function render() {
   if (state.loginRequired) {
     paint(authViewMarkup() + toastMarkup());
@@ -2334,6 +2348,7 @@ function render() {
     return;
   }
   paint(shellMarkup());
+  syncMobileNav();
 }
 
 /* ---------------- 事件绑定 ---------------- */

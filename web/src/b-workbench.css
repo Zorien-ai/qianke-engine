@@ -230,6 +230,10 @@ code,
   display: none;
 }
 
+.b-nav-short {
+  display: none;
+}
+
 .b-nav-btn {
   flex: 0 0 auto;
   padding: 8px 14px;
@@ -1202,31 +1206,80 @@ code,
 
 @media (max-width: 720px) {
   .b-shell {
-    padding: 16px 14px 96px;
+    padding: 14px 14px 96px;
   }
 
   .b-header {
     flex-wrap: wrap;
+    align-items: center;
     gap: 8px 12px;
-    padding-bottom: 12px;
+    padding-bottom: 10px;
+  }
+
+  .b-brand {
+    min-width: 0;
+  }
+
+  .b-brand strong {
+    font-size: 15px;
+  }
+
+  .b-brand small {
+    font-size: 10px;
   }
 
   .b-merchant {
     order: 3;
     width: 100%;
     margin-left: 0;
+    padding-top: 0;
+  }
+
+  .b-merchant strong {
+    font-size: 12px;
+  }
+
+  .b-merchant .b-mono {
+    font-size: 10px;
   }
 
   .b-header-actions {
     margin-left: auto;
+    padding-top: 0;
+  }
+
+  .b-text-link {
+    padding: 6px 9px;
+    border: 1px solid var(--b-line);
+    border-radius: 999px;
+    background: var(--b-card);
+    white-space: nowrap;
   }
 
   .b-nav {
-    margin: 10px 0 14px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    margin: 8px -14px 14px;
+    padding: 5px 14px 0;
+    background: color-mix(in srgb, var(--b-bg) 94%, transparent);
+    box-shadow: 0 8px 14px -14px rgba(31, 29, 25, 0.45);
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
   }
 
   .b-nav-btn {
-    padding: 8px 12px;
+    padding: 9px 10px;
+    scroll-snap-align: center;
+    white-space: nowrap;
+  }
+
+  .b-nav-full {
+    display: none;
+  }
+
+  .b-nav-short {
+    display: inline;
   }
 
   .b-view-head {
@@ -1239,6 +1292,66 @@ code,
     width: 100%;
     align-items: flex-end;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .b-view-tools > * {
+    min-width: 0;
+  }
+
+  .b-table-wrap {
+    margin: 0 -14px;
+    padding: 0 14px 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .b-table {
+    min-width: 640px;
+  }
+
+  .b-stock-alert {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .b-stock-alert > div {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+
+  .b-stock-alert .b-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .b-alert-queue-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .b-alert-queue-head .b-btn {
+    margin-left: auto;
+  }
+
+  .b-alert-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .b-alert-row .b-btn {
+    margin-left: auto;
+  }
+
+  .b-table-wrap::after {
+    content: "左右滑动查看";
+    display: block;
+    padding-top: 5px;
+    color: var(--b-muted);
+    font-size: 10px;
+    text-align: right;
   }
 
   .b-meta {
