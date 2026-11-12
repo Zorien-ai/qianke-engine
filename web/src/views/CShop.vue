@@ -18,7 +18,10 @@ const negotiationBusy = ref(false);
 const negotiationBudget = ref(500);
 const message = ref("");
 const categoryFilter = ref("全部");
+const searchKeyword = ref("");
+const sortMode = ref("default");
 const selectedProduct = ref(null);
+const selectedSku = ref(null);
 const detailImageIndex = ref(0);
 const detailImageErrors = ref({});
 const productImageErrors = ref({});
@@ -54,8 +57,24 @@ const categories = computed(() => {
   return ["全部", ...unique];
 });
 const filteredProducts = computed(() => {
-  if (categoryFilter.value === "全部") return products.value;
-  return products.value.filter((product) => product.category === categoryFilter.value);
+  const keyword = String(searchKeyword.value || "").trim().toLowerCase();
+  let list = products.value.filter((product) => {
+    if (categoryFilter.value !== "全部" && product.category !== categoryFilter.value) return false;
+    if (!keyword) return true;
+    const haystack = [product.title, product.category, product.brand]
+      .map((value) => String(value || "").toLowerCase())
+      .join(" ");
+    return haystack.includes(keyword);
+  });
+  list = [...list];
+  if (sortMode.value === "price-asc") {
+    list.sort((a, b) => productPrice(a) - productPrice(b));
+  } else if (sortMode.value === "price-desc") {
+    list.sort((a, b) => productPrice(b) - productPrice(a));
+  } else if (sortMode.value === "stock-desc") {
+    list.sort((a, b) => productStock(b) - productStock(a));
+  }
+  return list;
 });
 const hasDraft = computed(() => !!draft.value);
 const hasOrder = computed(() => !!order.value);
@@ -67,8 +86,63 @@ function money(value) {
   return n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function productSkus(product) {
+  const skus = Array.isArray(product?.skus) ? product.skus : [];
+  const normalized = skus
+    .filter((sku) => sku && sku.sku)
+    .map((sku) => ({
+      sku: String(sku.sku),
+      spec: String(sku.spec || "默认规格"),
+      price: Number(sku.price ?? product.price ?? 0),
+      stock: Number(sku.stock ?? 0),
+      in_stock: sku.in_stock !== false && Number(sku.stock ?? 0) > 0,
+    }));
+  if (normalized.length) return normalized;
+  return [{
+    sku: String(product?.sku || ""),
+    spec: "默认规格",
+    price: Number(product?.price ?? 0),
+    stock: Number(product?.stock ?? 0),
+    in_stock: Number(product?.stock ?? 0) > 0,
+  }];
+}
+
+function defaultSku(product) {
+  return productSkus(product)[0] || null;
+}
+
+function productPrice(product) {
+  return Number(defaultSku(product)?.price ?? product?.price ?? 0);
+}
+
+function productStock(product) {
+  return Number(defaultSku(product)?.stock ?? product?.stock ?? 0);
+}
+
 function productHint(product) {
-  return product.stock > 0 ? `库存 ${product.stock}` : "暂时缺货";
+  const stock = productStock(product);
+  return stock > 0 ? `库存 ${stock}` : "暂时缺货";
+}
+
+function stockTone(product) {
+  const stock = productStock(product);
+  if (stock <= 0) return "out";
+  if (stock <= 15) return "low";
+  return "in";
+}
+
+function stockLabel(product) {
+  const stock = productStock(product);
+  if (stock <= 0) return "暂时缺货";
+  if (stock <= 15) return `仅剩 ${stock} 件`;
+  return `库存 ${stock}`;
+}
+
+function skuStockLabel(sku) {
+  const stock = Number(sku?.stock ?? 0);
+  if (stock <= 0) return "暂时缺货";
+  if (stock <= 15) return `仅剩 ${stock} 件`;
+  return `库存 ${stock}`;
 }
 
 function productImageVisible(product) {
@@ -93,6 +167,9 @@ function productGallery(product) {
   }
   return normalized;
 }
+
+const detailSkus = computed(() => (selectedProduct.value ? productSkus(selectedProduct.value) : []));
+const activeSku = computed(() => selectedSku.value || detailSkus.value[0] || null);
 
 const detailImages = computed(() => productGallery(selectedProduct.value));
 const activeDetailImage = computed(() => detailImages.value[detailImageIndex.value] || null);
@@ -363,35 +440,51 @@ function rememberProduct(product) {
   }
 }
 
+function productNeedText(product, sku = null) {
+  const selected = sku || defaultSku(product);
+  const spec = selected?.spec && selected.spec !== "默认规格" ? ` ${selected.spec}` : "";
+  const price = Number(selected?.price ?? product.price ?? 0);
+  return `我想买 ${product.title}${spec}，预算 ${Math.ceil(price)} 元`;
+}
+
 function useProduct(product) {
   rememberProduct(product);
-  message.value = `我想买 ${product.title}，预算 ${Math.ceil(product.price)} 元`;
+  message.value = productNeedText(product, defaultSku(product));
 }
 
 function openProductDetail(product) {
   rememberProduct(product);
   detailImageIndex.value = 0;
   detailImageErrors.value = {};
+  selectedSku.value = defaultSku(product);
   selectedProduct.value = product;
 }
 
 function closeProductDetail() {
   selectedProduct.value = null;
+  selectedSku.value = null;
 }
 
-function askProduct(product) {
+function selectSku(sku) {
+  selectedSku.value = sku;
+}
+
+function askProduct(product, sku = null) {
+  const selected = sku || selectedSku.value || defaultSku(product);
   closeProductDetail();
-  useProduct(product);
+  rememberProduct(product);
+  message.value = productNeedText(product, selected);
   window.setTimeout(() => document.getElementById("shop-message")?.focus(), 50);
 }
 
-function negotiateProduct(product) {
+function negotiateProduct(product, sku = null) {
+  const selected = sku || selectedSku.value || defaultSku(product);
   closeProductDetail();
   if (!isMerchantShop.value) {
-    askProduct(product);
+    askProduct(product, selected);
     return;
   }
-  message.value = `我想买 ${product.title}，预算 ${Math.ceil(product.price)} 元`;
+  message.value = productNeedText(product, selected);
   runMerchantNegotiation(product.title);
 }
 
@@ -440,6 +533,23 @@ onMounted(() => {
           <span class="count">{{ filteredProducts.length }} / {{ products.length }} 件</span>
         </div>
 
+        <div class="catalog-tools">
+          <label class="product-search">
+            <span class="sr-only">搜索商品</span>
+            <span class="search-icon" aria-hidden="true">⌕</span>
+            <input v-model.trim="searchKeyword" type="search" placeholder="搜商品、品牌或分类" />
+          </label>
+          <label class="product-sort">
+            <span>排序</span>
+            <select v-model="sortMode">
+              <option value="default">综合</option>
+              <option value="price-asc">价格从低到高</option>
+              <option value="price-desc">价格从高到低</option>
+              <option value="stock-desc">库存优先</option>
+            </select>
+          </label>
+        </div>
+
         <div v-if="categories.length > 1" class="product-filters" role="group" aria-label="商品分类">
           <button
             v-for="category in categories"
@@ -458,8 +568,9 @@ onMounted(() => {
           <p>商品库为空，暂时无法推荐。</p>
         </div>
         <div v-else-if="!filteredProducts.length" class="state-box">
-          <strong>这个分类暂时没有商品</strong>
-          <p>切换其他分类看看。</p>
+          <strong>没有匹配的商品</strong>
+          <p>换个关键词，或者清除筛选。</p>
+          <button type="button" class="ghost-btn" @click="searchKeyword = ''; categoryFilter = '全部'">清除筛选</button>
         </div>
         <div v-else class="product-list">
           <article
@@ -489,9 +600,12 @@ onMounted(() => {
                 <h4>{{ product.title }}</h4>
                 <span class="category">{{ product.category }}</span>
               </div>
-              <p class="product-story">{{ productHint(product) }} · 店宠可咨询</p>
+              <p class="product-story">
+                <span class="stock-pill" :class="`is-${stockTone(product)}`">{{ stockLabel(product) }}</span>
+                · 店宠可咨询
+              </p>
               <div class="product-side">
-                <strong>¥{{ money(product.price) }}</strong>
+                <strong>¥{{ money(productPrice(product)) }}</strong>
                 <div class="product-actions">
                   <button class="ghost-btn" type="button" @click.stop="useProduct(product)">
                     {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
@@ -703,15 +817,33 @@ onMounted(() => {
           <p class="product-detail-store">{{ shopScopeLabel }} · 店宠在线</p>
           <p class="product-detail-brand">{{ selectedProduct.brand || "店铺商品" }} · {{ selectedProduct.category }}</p>
           <div class="product-detail-price">
-            <strong>¥{{ money(selectedProduct.price) }}</strong>
-            <span>{{ productHint(selectedProduct) }}</span>
+            <strong>¥{{ money(activeSku?.price ?? selectedProduct.price) }}</strong>
+            <span>{{ activeSku ? skuStockLabel(activeSku) : productHint(selectedProduct) }}</span>
           </div>
           <div class="product-detail-tags">
-            <span>模拟订单</span><span>{{ productHint(selectedProduct) }}</span><span>7 天无理由</span>
+            <span>模拟订单</span><span>{{ activeSku ? skuStockLabel(activeSku) : productHint(selectedProduct) }}</span><span>7 天无理由</span>
+          </div>
+          <div v-if="detailSkus.length" class="sku-selector">
+            <p class="field-label">规格</p>
+            <div class="spec-row" role="group" aria-label="选择规格">
+              <button
+                v-for="sku in detailSkus"
+                :key="sku.sku"
+                type="button"
+                class="spec-chip"
+                :class="{ active: activeSku?.sku === sku.sku, soldout: !sku.in_stock }"
+                :disabled="!sku.in_stock"
+                @click="selectSku(sku)"
+              >
+                <span>{{ sku.spec }}</span>
+                <small>¥{{ money(sku.price) }}</small>
+                <em v-if="!sku.in_stock">缺货</em>
+              </button>
+            </div>
           </div>
           <dl class="product-detail-meta">
             <div><dt>商品编号</dt><dd>{{ selectedProduct.product_id }}</dd></div>
-            <div v-if="selectedProduct.sku"><dt>SKU</dt><dd>{{ selectedProduct.sku }}</dd></div>
+            <div v-if="activeSku?.sku"><dt>SKU</dt><dd>{{ activeSku.sku }}</dd></div>
             <div><dt>店铺</dt><dd>{{ shopScopeLabel }}</dd></div>
           </dl>
           <div class="product-detail-service">
@@ -719,10 +851,10 @@ onMounted(() => {
             <p>现货 48 小时内发出 · 支持 7 天无理由 · 成交前需逐单确认</p>
           </div>
           <div class="product-detail-actions">
-            <button type="button" class="primary-btn" @click="askProduct(selectedProduct)">
+            <button type="button" class="primary-btn" @click="askProduct(selectedProduct, activeSku)">
               {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
             </button>
-            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="negotiationBusy" @click="negotiateProduct(selectedProduct)">
+            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="negotiationBusy" @click="negotiateProduct(selectedProduct, activeSku)">
               {{ negotiationBusy ? "谈判中…" : "让小鱼去砍价" }}
             </button>
           </div>
@@ -2064,4 +2196,177 @@ onMounted(() => {
 .product-detail-art .product-photo {
   border-radius: inherit;
 }
+
+/* ---------- P2 搜索 / 排序 / SKU ---------- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.catalog-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.product-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.product-search .search-icon {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.product-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.product-search input::placeholder {
+  color: var(--muted);
+}
+
+.product-sort {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.product-sort select {
+  height: 34px;
+  max-width: 118px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 10px;
+}
+
+.stock-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.stock-pill.is-in {
+  color: var(--sage, #6f7f63);
+  background: var(--sage-soft, #e9eee3);
+}
+
+.stock-pill.is-low {
+  color: #9d4c31;
+  background: var(--accent-soft, #f6e3da);
+}
+
+.stock-pill.is-out {
+  color: var(--muted);
+  background: var(--surface-2, #f7f3ea);
+}
+
+.sku-selector {
+  margin-top: 14px;
+}
+
+.sku-selector .field-label {
+  margin: 0 0 7px;
+}
+
+.spec-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.spec-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.spec-chip small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.spec-chip.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: #9d4c31;
+  font-weight: 600;
+}
+
+.spec-chip.active small {
+  color: #9d4c31;
+}
+
+.spec-chip.soldout {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.spec-chip em {
+  color: var(--danger, #a33f36);
+  font-size: 9px;
+  font-style: normal;
+}
+
+@media (max-width: 560px) {
+  .catalog-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .product-sort {
+    justify-content: flex-end;
+  }
+
+  .product-sort select {
+    flex: 1;
+    max-width: none;
+  }
+}
+
 </style>

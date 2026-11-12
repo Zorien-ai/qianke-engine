@@ -589,12 +589,23 @@ def merchant_products(
         for product in products:
             skus = repo.list_product_skus(product.product_id, merchant_id=resolved_merchant)
             item = product.to_dict()
-            if skus:
-                inventory = repo.get_inventory(skus[0].sku, merchant_id=resolved_merchant)
-                item.update({
-                    "sku": skus[0].sku,
-                    "price": float(skus[0].price),
+            sku_payload = []
+            for sku in skus:
+                inventory = repo.get_inventory(sku.sku, merchant_id=resolved_merchant)
+                sku_payload.append({
+                    "sku": sku.sku,
+                    "spec": sku.spec,
+                    "price": float(sku.price),
                     "stock": inventory.available_qty if inventory else 0,
+                    "reserved_qty": inventory.reserved_qty if inventory else 0,
+                    "in_stock": inventory.in_stock if inventory else False,
+                })
+            item["skus"] = sku_payload
+            if sku_payload:
+                item.update({
+                    "sku": sku_payload[0]["sku"],
+                    "price": sku_payload[0]["price"],
+                    "stock": sku_payload[0]["stock"],
                 })
             payload.append(item)
         return {"source": "merchant_v1", "products": payload}
