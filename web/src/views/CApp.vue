@@ -328,6 +328,8 @@ const negotiationSkuSpec = ref("");
 const negotiationSkuOptions = ref([]);
 const negotiationSkuLoading = ref(false);
 const negotiationProductTitle = ref("");
+const negotiationProductOptions = ref([]);
+const negotiationProductId = ref("");
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
@@ -2035,6 +2037,8 @@ function openNegotiation(options = {}) {
   negotiationSkuOptions.value = [];
   negotiationSkuLoading.value = false;
   negotiationProductTitle.value = rememberedTitle;
+  negotiationProductOptions.value = [];
+  negotiationProductId.value = String(remembered?.product_id || "").trim();
   negotiationBudget.value = negotiationBudgetFromThread();
   negotiationQuantity.value = Math.max(
     1,
@@ -2047,41 +2051,72 @@ function openNegotiation(options = {}) {
 }
 
 async function loadNegotiationSkuOptions() {
-  const need = String(negotiationNeed.value || "").trim();
   const friendId = String(negotiationFriendId.value || "").trim();
-  if (!friendId || !need) return;
+  if (!friendId) return;
+  const need = String(negotiationNeed.value || "").trim();
+  const preferredSku = String(negotiationSku.value || "").trim();
+  const preferredProductId = String(negotiationProductId.value || "").trim();
   negotiationSkuLoading.value = true;
   try {
     const data = await getJson(
       `/api/c/merchant/products?friend_id=${encodeURIComponent(friendId)}&limit=12`
     );
-    const products = Array.isArray(data?.products) ? data.products : [];
-    const product = products.find((item) => {
-      const title = String(item?.title || "").trim();
-      return title && (title.includes(need) || need.includes(title));
-    });
-    if (!product) return;
-    negotiationProductTitle.value = String(product.title || "").trim();
-    negotiationSkuOptions.value = (Array.isArray(product.skus) ? product.skus : [])
-      .filter((item) => item && item.sku)
+    const products = (Array.isArray(data?.products) ? data.products : [])
+      .filter((item) => item && item.product_id && item.title)
       .map((item) => ({
-        sku: String(item.sku),
-        spec: String(item.spec || "默认规格"),
-        price: Number(item.price || 0),
-        stock: Number(item.stock || 0),
-        in_stock: item.in_stock !== false && Number(item.stock || 0) > 0,
+        product_id: String(item.product_id),
+        title: String(item.title),
+        skus: Array.isArray(item.skus) ? item.skus : [],
       }));
-    const known = negotiationSkuOptions.value.find((item) => item.sku === negotiationSku.value);
-    const selected = known || negotiationSkuOptions.value.find((item) => item.in_stock) || negotiationSkuOptions.value[0];
-    if (selected) {
-      negotiationSku.value = selected.sku;
-      negotiationSkuSpec.value = selected.spec;
+    negotiationProductOptions.value = products;
+    let product = products.find((item) => item.product_id === preferredProductId);
+    if (!product && need) {
+      product = products.find((item) => {
+        const title = item.title.trim();
+        return title && (title.includes(need) || need.includes(title));
+      });
     }
+    if (!product) return;
+    applyNegotiationProduct(product, preferredSku, false);
   } catch {
-    // 规格读取失败时保留手动商品名，不阻断砍价
+    // 商品/规格读取失败时保留手动输入，不阻断砍价
   } finally {
     negotiationSkuLoading.value = false;
   }
+}
+
+function applyNegotiationProduct(product, preferredSku = "", syncNeed = false) {
+  if (!product) return;
+  negotiationProductId.value = String(product.product_id || "");
+  negotiationProductTitle.value = String(product.title || "").trim();
+  if (syncNeed) negotiationNeed.value = negotiationProductTitle.value;
+  negotiationSkuOptions.value = (Array.isArray(product.skus) ? product.skus : [])
+    .filter((item) => item && item.sku)
+    .map((item) => ({
+      sku: String(item.sku),
+      spec: String(item.spec || "默认规格"),
+      price: Number(item.price || 0),
+      stock: Number(item.stock || 0),
+      in_stock: item.in_stock !== false && Number(item.stock || 0) > 0,
+    }));
+  const known = negotiationSkuOptions.value.find((item) => item.sku === preferredSku);
+  const selected = known || negotiationSkuOptions.value.find((item) => item.in_stock) || negotiationSkuOptions.value[0];
+  if (selected) {
+    negotiationSku.value = selected.sku;
+    negotiationSkuSpec.value = selected.spec;
+  }
+}
+
+function selectNegotiationProduct(productId) {
+  if (!productId) {
+    negotiationProductId.value = "";
+    negotiationSkuOptions.value = [];
+    negotiationSku.value = "";
+    negotiationSkuSpec.value = "";
+    return;
+  }
+  const product = negotiationProductOptions.value.find((item) => item.product_id === productId);
+  if (product) applyNegotiationProduct(product, negotiationSku.value, true);
 }
 
 function selectNegotiationSku(skuValue) {
@@ -2573,6 +2608,15 @@ onBeforeUnmount(() => {
           <button type="button" class="c-negotiate-close" aria-label="关闭" @click="closeNegotiation">×</button>
         </header>
         <p v-if="negotiationMerchant" class="c-negotiate-merchant">当前商家 · {{ negotiationMerchant }}</p>
+        <label v-if="negotiationProductOptions.length" class="c-negotiate-field">
+          <span>从店铺选择</span>
+          <select :value="negotiationProductId" @change="selectNegotiationProduct($event.target.value)">
+            <option value="">手动填写商品名</option>
+            <option v-for="product in negotiationProductOptions" :key="product.product_id" :value="product.product_id">
+              {{ product.title }}{{ product.skus.length ? ` · ${product.skus.length} 个规格` : "" }}
+            </option>
+          </select>
+        </label>
         <label class="c-negotiate-field">
           <span>想砍的商品</span>
           <input v-model="negotiationNeed" type="text" maxlength="80" placeholder="想买的商品名称" @change="loadNegotiationSkuOptions" />

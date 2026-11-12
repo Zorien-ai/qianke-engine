@@ -103,8 +103,7 @@ Console 错误：无
 
 ## 已知限制
 
-1. CApp 的 SKU 透传依赖用户先逛过 CShop 并留下 `lastProduct`；  
-   没有浏览上下文时仍是手填商品名，无 SKU。
+1. CApp 现在可以直接从店内商品列表选择商品和 SKU，不再依赖先逛 CShop；见 [capp-product-picker.md](capp-product-picker.md)。
 2. 商品通过标题匹配，同名商品/歧义标题可能匹配失败。
 3. CApp 报价卡当前显示单价，总价在对话 transcript 中。
 4. 一单一商品，没有购物车。
