@@ -185,6 +185,15 @@ def upload_bytes(key: str, data: bytes, content_type: str | None = None) -> str:
     return safe_key
 
 
+def delete_object(key: str) -> None:
+    """删除对象；调用方负责确认 key 属于自己业务前缀。"""
+    oss = _sdk()
+    client = get_client()
+    client.delete_object(
+        oss.DeleteObjectRequest(bucket=bucket(), key=normalize_key(key))
+    )
+
+
 def sign_url(key: str, expire_seconds: int | None = None) -> str:
     """
     生成私有桶的临时读地址；未启用/失败返回空串

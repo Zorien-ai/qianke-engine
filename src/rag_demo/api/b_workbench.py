@@ -160,19 +160,19 @@ def _save_product_image(raw: bytes, merchant_id: str, product_id: str, *, unique
         base = _safe_name(product_id)
         if unique:
             base = f"{base}-{uuid.uuid4().hex[:10]}"
-        folder = media.PRODUCT_UPLOAD_ROOT / _safe_name(merchant_id)
-        folder.mkdir(parents=True, exist_ok=True)
-        main_path = folder / f"{base}.webp"
-        thumb_path = folder / f"{base}.thumb.webp"
-        image.save(main_path, "WEBP", quality=86, method=6)
+        main_buffer = io.BytesIO()
+        thumb_buffer = io.BytesIO()
+        image.save(main_buffer, "WEBP", quality=86, method=6)
         thumb = image.copy()
         thumb.thumbnail((360, 360))
-        thumb.save(thumb_path, "WEBP", quality=78, method=6)
-    version = int(time.time() * 1000)
-    return {
-        "url": f"{media.public_url(f'uploads/products/{folder.name}/{main_path.name}')}?v={version}",
-        "thumb_url": f"{media.public_url(f'uploads/products/{folder.name}/{thumb_path.name}')}?v={version}",
-    }
+        thumb.save(thumb_buffer, "WEBP", quality=78, method=6)
+    return media.save_product_image_bytes(
+        main_buffer.getvalue(),
+        thumb_buffer.getvalue(),
+        merchant_id=merchant_id,
+        product_id=product_id,
+        base_name=base,
+    )
 
 
 def _current_product(repo: Any, merchant_id: str, product_id: str) -> Any:
@@ -273,11 +273,14 @@ def delete_product_image(product_id: str, url: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="商品不存在或不属于当前商家")
     current = _current_images(product)
     target = str(url or "").split("?", 1)[0]
-    remaining = [item for item in current if item.get("url", "").split("?", 1)[0] != target]
-    if len(remaining) == len(current):
+    removed = [item for item in current if item.get("url", "").split("?", 1)[0] == target]
+    remaining = [item for item in current if item not in removed]
+    if not removed:
         raise HTTPException(status_code=404, detail="图片不存在")
     if not repo.set_product_images(merchant_id, product_id, remaining):
         raise HTTPException(status_code=404, detail="商品不存在或不属于当前商家")
+    for image in removed:
+        media.delete_image_objects(image)
     media.record_image_audit(
         merchant_id=merchant_id, product_id=product_id,
         action="DELETE", image_url=url, actor_id=account.get("id"),

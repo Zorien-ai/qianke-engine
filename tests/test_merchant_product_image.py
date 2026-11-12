@@ -162,3 +162,27 @@ def test_delete_product_image_and_audit(repo, tmp_path, monkeypatch):
     assert [item["url"] for item in result["images"]] == ["/b.webp"]
     events = media.list_image_audit("m_tea_001", "P-TEA-001")
     assert events[0]["action"] == "DELETE"
+
+
+def test_oss_product_media_url_and_delete(monkeypatch):
+    uploaded = {}
+    deleted = []
+    monkeypatch.setattr(media, "oss_product_enabled", lambda: True)
+    monkeypatch.setattr(media.oss_store, "bucket", lambda: "qianke-products")
+    monkeypatch.setattr(media.oss_store, "endpoint", lambda: "https://oss-cn-shenzhen.aliyuncs.com")
+
+    def fake_upload(key, data, content_type=None):
+        uploaded[key] = (len(data), content_type)
+        return key
+
+    monkeypatch.setattr(media.oss_store, "upload_bytes", fake_upload)
+    monkeypatch.setattr(media.oss_store, "delete_object", lambda key: deleted.append(key))
+    image = media.save_product_image_bytes(
+        b"main", b"thumb",
+        merchant_id="m_tea_001", product_id="P-TEA-001", base_name="P-TEA-001-abc",
+    )
+    assert image["url"].startswith("https://qianke-products.oss-cn-shenzhen.aliyuncs.com/products/")
+    assert image["thumb_url"].endswith(".thumb.webp")
+    assert len(uploaded) == 2
+    media.delete_image_objects(image)
+    assert len(deleted) == 2

@@ -6,12 +6,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from rag_demo.config import BASE_DIR
+from rag_demo.storage import oss_store
+
+logger = logging.getLogger(__name__)
 
 UPLOAD_ROOT = Path(
     os.environ.get("QIANKE_UPLOAD_DIR") or (Path(BASE_DIR) / "var" / "uploads")
@@ -30,6 +35,84 @@ def public_url(relative: str) -> str:
     path = "/" + str(relative or "").lstrip("/")
     base = (os.environ.get("QIANKE_PRODUCT_MEDIA_BASE_URL") or "").strip().rstrip("/")
     return f"{base}{path}" if base else path
+
+
+def oss_product_enabled() -> bool:
+    backend = (os.environ.get("QIANKE_PRODUCT_MEDIA_BACKEND") or "local").strip().lower()
+    return backend == "oss" and oss_store.is_enabled()
+
+
+def product_key_prefix() -> str:
+    raw = (os.environ.get("QIANKE_PRODUCT_MEDIA_PREFIX") or "products/").strip("/")
+    return f"{raw}/" if raw else ""
+
+
+def oss_public_url(key: str) -> str:
+    base = (os.environ.get("QIANKE_PRODUCT_MEDIA_BASE_URL") or "").strip().rstrip("/")
+    if not base:
+        endpoint = oss_store.endpoint()
+        parsed = urlparse(endpoint if "://" in endpoint else f"https://{endpoint}")
+        base = f"https://{oss_store.bucket()}.{parsed.netloc}"
+    return f"{base}/{str(key or '').lstrip('/')}"
+
+
+def save_product_image_bytes(
+    main: bytes,
+    thumb: bytes,
+    *,
+    merchant_id: str,
+    product_id: str,
+    base_name: str,
+) -> dict[str, str]:
+    """保存主图/缩略图：OSS 优先，本地兜底；返回浏览器 URL。"""
+    safe_merchant = _safe_slug(merchant_id)
+    safe_product = _safe_slug(product_id)
+    safe_base = _safe_slug(base_name)
+    if oss_product_enabled():
+        prefix = product_key_prefix()
+        key = f"{prefix}{safe_merchant}/{safe_product}/{safe_base}.webp"
+        thumb_key = f"{prefix}{safe_merchant}/{safe_product}/{safe_base}.thumb.webp"
+        oss_store.upload_bytes(key, main, "image/webp")
+        oss_store.upload_bytes(thumb_key, thumb, "image/webp")
+        return {"url": oss_public_url(key), "thumb_url": oss_public_url(thumb_key)}
+
+    folder = PRODUCT_UPLOAD_ROOT / safe_merchant
+    folder.mkdir(parents=True, exist_ok=True)
+    main_path = folder / f"{safe_base}.webp"
+    thumb_path = folder / f"{safe_base}.thumb.webp"
+    main_path.write_bytes(main)
+    thumb_path.write_bytes(thumb)
+    version = int(time.time() * 1000)
+    return {
+        "url": f"{public_url(f'uploads/products/{folder.name}/{main_path.name}')}?v={version}",
+        "thumb_url": f"{public_url(f'uploads/products/{folder.name}/{thumb_path.name}')}?v={version}",
+    }
+
+
+def delete_image_objects(image: dict[str, str]) -> None:
+    """删除主图/缩略图对象；仅删除本模块生成的 URL，失败只记日志。"""
+    for field in ("url", "thumb_url"):
+        raw = str(image.get(field) or "").split("?", 1)[0]
+        if not raw:
+            continue
+        try:
+            if raw.startswith("/uploads/"):
+                local = UPLOAD_ROOT / raw.removeprefix("/uploads/")
+                local.unlink(missing_ok=True)
+                continue
+            if not oss_product_enabled():
+                continue
+            base = oss_public_url("").rstrip("/")
+            if raw.startswith(f"{base}/"):
+                oss_store.delete_object(raw[len(base) + 1:])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("删除商品图片失败（%s）: %s", raw, exc)
+
+
+def _safe_slug(value: str) -> str:
+    import re
+
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or ""))[:100]
 
 
 def record_image_audit(
