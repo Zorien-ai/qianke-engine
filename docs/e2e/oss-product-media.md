@@ -11,9 +11,11 @@ Endpoint：`https://oss-cn-shenzhen.aliyuncs.com`
 代码：已接 OSS 上传 + 删除 + 公网 URL，本地兜底
 RAM 用户：qianke-product-uploader
 AccessKey：已创建（Secret 不入库、不发聊天）
-Bucket 公共读：待确认
-.env：待配置
-实际 OSS 上传：待凭证配置后验收
+Bucket 公共读：已配置
+.env：已配置并重启 API
+实际 OSS 上传：已通过
+实际公网读取：已通过
+实际 OSS 删除：已通过
 ```
 
 ## RAM 策略
@@ -129,16 +131,42 @@ QIANKE_PRODUCT_MEDIA_BACKEND=local
 CShop 继续使用 /uploads/... URL
 ```
 
-## 待验证
-
-配置 `.env` 后需要实际跑：
+## 实测结果
 
 ```text
-1. B 端上传一张图 → OSS 返回 200
-2. 访问 OSS 公共 URL → 200 image/webp
-3. CShop 商品卡/详情显示 OSS URL
-4. 删除图片 → OSS 对象被删除
-5. 审计出现 UPLOAD / DELETE
+POST /api/b/workbench/products/P-TEA-004/images
+→ 200
+→ image_url = https://qianke-products.oss-cn-shenzhen.aliyuncs.com/products/m_tea_001/P-TEA-004/P-TEA-004-2e86e4be09.webp
+
+公网 GET 主图
+→ 200 image/webp
+
+CShop 详情
+→ 第 2 张缩略图为 OSS URL
+→ 点击后主图切换为 OSS 图片
 ```
 
-当前未配置真实 AK/SK，因此**不宣称 OSS 上传已通过**。
+![CShop OSS 图片](oss-cshop-detail.png)
+
+删除验证：
+
+```text
+DELETE /api/b/workbench/products/P-TEA-004/images?url=...
+→ 200
+→ 商品图片列表恢复为静态封面
+→ OSS URL 再次访问：404
+→ 审计出现 DELETE
+```
+
+## 验收结论
+
+```text
+OSS 上传：通过
+OSS 公网读取：通过
+CShop 显示 OSS 图片：通过
+OSS 删除：通过
+审计：通过
+本地兜底：保留
+```
+
+测试后已删除 P-TEA-004 的临时 OSS 图片，避免留下测试对象。

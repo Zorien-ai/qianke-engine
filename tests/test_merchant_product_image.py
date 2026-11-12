@@ -20,6 +20,12 @@ from rag_demo.merchant import (
 _STATIC_ROOT = Path(__file__).resolve().parents[1] / "src" / "rag_demo" / "api" / "static"
 
 
+@pytest.fixture(autouse=True)
+def _local_media(monkeypatch):
+    """图片单测不连真实 OSS；运行时配置通过环境变量显式选择。"""
+    monkeypatch.setenv("QIANKE_PRODUCT_MEDIA_BACKEND", "local")
+
+
 @pytest.fixture()
 def merchant_db(tmp_path, monkeypatch):
     db_path = tmp_path / "merchant.sqlite"

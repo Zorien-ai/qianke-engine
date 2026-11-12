@@ -179,7 +179,7 @@ tests/test_merchant_product_image.py：8 passed
   - 非图片拒绝
   - 租户隔离
 
-全量 pytest：759 passed, 5 skipped
+全量 pytest：760 passed, 5 skipped
 前端 build：success
 ```
 
