@@ -1,7 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { getJson, postJson } from "../api";
+import ShoppingCart from "../components/ShoppingCart.vue";
+import { cart } from "../cart";
 
 const route = useRoute();
 const products = ref([]);
@@ -14,6 +16,14 @@ const quoteError = ref("");
 const quoteDraft = ref(null);
 const quoteOrder = ref(null);
 const quoteBusy = ref(false);
+const cartHint = ref("");
+const cartQuote = ref(null);
+const quoteAmounts = ref(null);
+const quoteSignature = (items) => JSON.stringify(items.map((item) => [String(item.sku), Number(item.quantity)]).sort((a, b) => a[0].localeCompare(b[0])));
+const cartQuoteChanged = computed(() => cartQuote.value && quoteSignature(cart.items.value.filter((item) => item.friend_id === cartQuote.value.friend_id)) !== quoteSignature(cartQuote.value.items));
+const quoteItems = computed(() => quoteDraft.value?.items || quote.value?.product_refs || []);
+const quoteSubtotal = computed(() => quoteItems.value.reduce((sum, item) => sum + Math.round(Number(item.unit_price ?? item.price ?? 0) * 100) * Number(item.quantity || 1), 0) / 100);
+
 const negotiationBusy = ref(false);
 const negotiationBudget = ref(500);
 const message = ref("");
@@ -79,7 +89,7 @@ const filteredProducts = computed(() => {
 });
 const hasDraft = computed(() => !!draft.value);
 const hasOrder = computed(() => !!order.value);
-const canSend = computed(() => !running.value && !decisionLoading.value && !hasDraft.value && message.value.trim().length > 0);
+const canSend = computed(() => !running.value && !decisionLoading.value && !quoteBusy.value && !quoteDraft.value && !negotiationBusy.value && !hasDraft.value && message.value.trim().length > 0);
 
 function money(value) {
   const n = Number(value);
@@ -222,14 +232,17 @@ async function loadQuote() {
   const quoteId = typeof route.query.quote === "string" ? route.query.quote : "";
   if (!quoteId) return;
   try {
-    quote.value = await getJson(`/api/c/quotes/${encodeURIComponent(quoteId)}`);
+    await loadQuoteById(quoteId);
+    if (route.query.cart === "1" && quote.value?.friend_id) {
+      cartQuote.value = { friend_id: quote.value.friend_id, items: quote.value.product_refs || [] };
+    }
   } catch (e) {
     quoteError.value = e?.detail || e?.message || "聊天报价不存在或已失效";
   }
 }
 
 async function prepareQuote() {
-  if (!quote.value || quoteBusy.value) return;
+  if (!quote.value || quoteBusy.value || cartQuoteChanged.value) return;
   quoteBusy.value = true;
   quoteError.value = "";
   try {
@@ -243,6 +256,11 @@ async function prepareQuote() {
 
 async function confirmQuote() {
   if (!quoteDraft.value || quoteBusy.value) return;
+  cart.reload();
+  if (cartQuoteChanged.value) {
+    quoteError.value = "购物车已变化，请先取消草稿并重新合并报价";
+    return;
+  }
   quoteBusy.value = true;
   quoteError.value = "";
   try {
@@ -254,7 +272,9 @@ async function confirmQuote() {
         request_id: requestId,
       }
     );
+    cart.consumeOrder(quote.value, quoteOrder.value);
     quoteDraft.value = null;
+    cartQuote.value = null;
     await loadCompanion();
   } catch (e) {
     quoteError.value = e?.detail || e?.message || "订单确认失败";
@@ -284,6 +304,8 @@ async function cancelQuote() {
   try {
     await postJson(`/api/c/quotes/${encodeURIComponent(quote.value.quote_id)}/cancel`, {});
     quote.value = null;
+    cartQuote.value = null;
+    quoteAmounts.value = null;
   } catch (e) {
     quoteError.value = e?.detail || e?.message || "报价取消失败";
   } finally {
@@ -323,7 +345,10 @@ async function ensureMerchantFriend() {
 
 async function loadQuoteById(quoteId) {
   if (!quoteId) return;
-  quote.value = await getJson(`/api/c/quotes/${encodeURIComponent(quoteId)}`);
+  const nextQuote = await getJson(`/api/c/quotes/${encodeURIComponent(quoteId)}`);
+  quote.value = nextQuote;
+  cartQuote.value = null;
+  quoteAmounts.value = null;
   quoteDraft.value = null;
   quoteOrder.value = null;
   quoteError.value = "";
@@ -400,8 +425,9 @@ async function decide(approved) {
   }
 }
 
-async function runMerchantNegotiation(needOverride = "", sku = "", quantity = 1) {
-  if (!isMerchantShop.value || negotiationBusy.value) return;
+async function runMerchantNegotiation(needOverride = "", sku = "", quantity = 1, checkout = null) {
+  const friendId = checkout?.friend_id || merchantFriendId.value;
+  if (!friendId || negotiationBusy.value || quoteBusy.value || quoteDraft.value) return;
   negotiationBusy.value = true;
   agentError.value = "";
   lastAction.value = "";
@@ -414,15 +440,17 @@ async function runMerchantNegotiation(needOverride = "", sku = "", quantity = 1)
       "商品";
     const data = await postJson("/api/c/negotiations", {
       need: need.slice(0, 80),
-      budget: Math.max(1, Number(negotiationBudget.value) || 500),
+      budget: checkout?.budget ?? Math.max(1, Number(negotiationBudget.value) || 500),
       quantity: Math.max(1, Math.min(20, Number(quantity) || 1)),
-      friend_id: merchantFriendId.value,
-      ...(sku ? { sku } : {}),
+      friend_id: friendId,
+      ...(checkout ? { items: checkout.items } : sku ? { sku } : {}),
     });
     const transcript = Array.isArray(data?.transcript) ? data.transcript : [];
     reply.value = transcript.map((item) => `${item.name}：${item.text}`).join("\n\n");
     if (data?.quote?.quote_id) {
       await loadQuoteById(data.quote.quote_id);
+      if (checkout) cartQuote.value = { friend_id: checkout.friend_id, items: checkout.items };
+      quoteAmounts.value = { total: data.total_amount, discount: data.discount_amount };
       lastAction.value = "双宠谈判达成，报价已生成";
     } else {
       lastAction.value = "这轮没有谈成，可调整需求再试";
@@ -432,6 +460,22 @@ async function runMerchantNegotiation(needOverride = "", sku = "", quantity = 1)
   } finally {
     negotiationBusy.value = false;
   }
+}
+
+function checkoutCart(checkout) {
+  runMerchantNegotiation("购物车合并报价", "", 1, checkout);
+}
+
+function addProductToCart() {
+  const product = selectedProduct.value;
+  const sku = activeSku.value;
+  if (!product || !sku || !isMerchantShop.value) return;
+  try {
+    cart.add({ friend_id: merchantFriendId.value, merchant_name: shopScopeLabel.value,
+      product_id: product.product_id, title: product.title, image_url: product.image_url,
+      ...sku, quantity: detailQuantity.value });
+    cartHint.value = `已加入购物车：${product.title} ${sku.spec}`;
+  } catch (e) { cartHint.value = e.message; }
 }
 
 function rememberProduct(product, sku = null, quantity = 1) {
@@ -470,6 +514,7 @@ function openProductDetail(product) {
   selectedSku.value = defaultSku(product);
   detailQuantity.value = 1;
   selectedProduct.value = product;
+  cartHint.value = "";
 }
 
 function closeProductDetail() {
@@ -509,7 +554,10 @@ function negotiateProduct(product, sku = null) {
   runMerchantNegotiation(product.title, selected?.sku || "", detailQuantity.value);
 }
 
+watch(merchantFriendId, () => { loadProducts(); ensureMerchantFriend(); closeProductDetail(); });
+watch(() => route.query.quote, () => { if (!quoteDraft.value) loadQuote(); });
 onMounted(() => {
+  cart.reload();
   loadProducts();
   ensureMerchantFriend();
   loadCompanion();
@@ -543,6 +591,8 @@ onMounted(() => {
         {{ featuredProduct.category }} · {{ productHint(featuredProduct) }}。小鱼说：先看合不合用，再决定要不要买。
       </p>
     </section>
+
+    <ShoppingCart :busy="negotiationBusy || quoteBusy || !!quoteDraft" @checkout="checkoutCart" />
 
     <section class="shop-grid" aria-label="商品与导购">
       <div class="catalog-panel">
@@ -681,13 +731,18 @@ onMounted(() => {
             <span class="quote-status">{{ quoteOrder ? "已确认" : "待确认" }}</span>
           </div>
           <div class="quote-chips">
-            <span v-for="product in quote.product_refs" :key="product.product_id" class="quote-chip">
-              {{ product.title || product.product_id }} × {{ product.quantity || 1 }}
+            <span v-for="product in quote.product_refs" :key="product.sku || product.product_id" class="quote-chip">
+              {{ product.title || product.product_id }} · {{ product.spec || product.sku }} × {{ product.quantity || 1 }}
             </span>
             <span v-for="policy in quote.policy_refs" :key="policy.policy_id" class="quote-chip policy">
               {{ policy.title || policy.policy_id }}
             </span>
           </div>
+          <ul class="draft-items" aria-label="报价商品明细">
+            <li v-for="item in quoteItems" :key="item.sku || item.product_id"><span>{{ item.title }} · {{ item.spec || item.sku }}<small class="quote-sku">{{ item.sku }}</small></span><span>{{ item.quantity }} × ¥{{ money(item.unit_price ?? item.price) }}</span></li>
+          </ul>
+          <p class="quote-hint">商品小计 ¥{{ money(quoteSubtotal) }}<template v-if="quoteAmounts"> · 优惠 ¥{{ money(quoteAmounts.discount) }} · 报价 ¥{{ money(quoteAmounts.total) }}</template></p>
+          <p v-if="cartQuoteChanged && !quoteOrder" class="state-line state-error" role="alert">购物车已变化。请{{ quoteDraft ? "先取消草稿，再" : "" }}重新合并报价，以采用最新规格和数量。</p>
           <p v-if="quoteDraft" class="quote-hint">
             草稿金额 ¥{{ money(quoteDraft.original_amount) }}
             <template v-if="quoteDraft.discount_amount"> · 优惠 ¥{{ money(quoteDraft.discount_amount) }}</template>
@@ -703,7 +758,7 @@ onMounted(() => {
             <button class="ghost-btn" type="button" :disabled="quoteBusy" @click="cancelDraft">
               取消草稿
             </button>
-            <button class="primary-btn" type="button" :disabled="quoteBusy" @click="confirmQuote">
+            <button class="primary-btn" type="button" :disabled="quoteBusy || cartQuoteChanged" @click="confirmQuote">
               {{ quoteBusy ? "提交中…" : "确认并创建模拟订单" }}
             </button>
           </div>
@@ -711,7 +766,7 @@ onMounted(() => {
             <button class="ghost-btn" type="button" :disabled="quoteBusy" @click="cancelQuote">
               取消报价
             </button>
-            <button class="primary-btn" type="button" :disabled="quoteBusy" @click="prepareQuote">
+            <button class="primary-btn" type="button" :disabled="quoteBusy || cartQuoteChanged" @click="prepareQuote">
               {{ quoteBusy ? "准备中…" : "使用此报价准备订单" }}
             </button>
           </div>
@@ -744,8 +799,8 @@ onMounted(() => {
           <button
             class="ghost-btn"
             type="button"
-            :disabled="negotiationBusy || running"
-            @click="runMerchantNegotiation"
+            :disabled="negotiationBusy || running || quoteBusy || !!quoteDraft"
+            @click="runMerchantNegotiation()"
           >{{ negotiationBusy ? "双宠谈判中…" : "让小鱼去砍价" }}</button>
           <span>平台满减规则内协商，成交仍需确认</span>
         </div>
@@ -881,13 +936,15 @@ onMounted(() => {
             <p>现货 48 小时内发出 · 支持 7 天无理由 · 成交前需逐单确认</p>
           </div>
           <div class="product-detail-actions">
+            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="!activeSku?.in_stock || quoteBusy || !!quoteDraft" @click="addProductToCart">加入购物车</button>
             <button type="button" class="primary-btn" @click="askProduct(selectedProduct, activeSku)" :disabled="activeSku && !activeSku.in_stock">
               {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
             </button>
-            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="negotiationBusy || (activeSku && !activeSku.in_stock)" @click="negotiateProduct(selectedProduct, activeSku)">
+            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="negotiationBusy || quoteBusy || !!quoteDraft || (activeSku && !activeSku.in_stock)" @click="negotiateProduct(selectedProduct, activeSku)">
               {{ negotiationBusy ? "谈判中…" : "让小鱼去砍价" }}
             </button>
           </div>
+          <p v-if="cartHint" class="product-detail-note" role="status">{{ cartHint }}</p>
           <p class="product-detail-note">报价与订单均为模拟，不接真实支付。</p>
         </div>
       </div>
@@ -896,6 +953,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.quote-sku { display: block; margin-top: 4px; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }
 .shop-page {
   max-width: 1180px;
   margin: 0 auto;
