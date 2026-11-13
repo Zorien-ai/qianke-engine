@@ -108,7 +108,7 @@ class CAgentRunIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
     thread_id: str | None = Field(default=None, max_length=128)
     client_message_id: str | None = Field(default=None, max_length=128)
-    mode: str | None = Field(default=None, pattern="^(companion|advisor|transaction)$")
+    mode: str | None = Field(default=None, pattern="^(companion|advisor|order|transaction)$")
 
 
 class CAgentResumeIn(BaseModel):
@@ -1474,6 +1474,16 @@ def admin_receive_after_sale(ticket_id: str, req: AfterSaleReceiveIn) -> dict:
         raise _http_error(exc) from exc
 
 
+@router.get("/agent/session")
+def c_agent_session() -> dict:
+    """返回当前买家的稳定小鱼会话；用于刷新/换设备后恢复同一段对话。"""
+    buyer_id, _ = _buyer()
+    try:
+        return c_agent.get_c_agent_session(buyer_id, get_checkpointer())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @router.post("/agent/run")
 def c_agent_run(req: CAgentRunIn) -> dict:
     buyer_id, _ = _buyer()
@@ -1528,6 +1538,9 @@ def c_agent_run(req: CAgentRunIn) -> dict:
     response = {
         "thread_id": thread_id,
         "mode": result.get("mode", ""),
+        "route": result.get("route", ""),
+        "confidence": result.get("confidence", 0),
+        "slots": result.get("slots") or {},
         "status": result["status"],
         "interrupted": result["interrupted"],
         "requires_confirmation": result["interrupted"],

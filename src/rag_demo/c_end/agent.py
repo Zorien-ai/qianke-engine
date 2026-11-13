@@ -1,6 +1,7 @@
 """C 端导购 Agent：推荐 → 准备订单 → interrupt 人工确认 → 模拟下单。"""
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Annotated, Any, TypedDict
 
@@ -14,6 +15,15 @@ from pydantic import BaseModel, Field
 
 from rag_demo.c_end import persona as c_persona
 from rag_demo.c_end import express, store, store_agent
+from rag_demo.c_end import router as question_router
+from rag_demo.c_end.router import (
+    MODE_ADVISOR,
+    MODE_COMPANION,
+    MODE_ORDER,
+    MODE_TRANSACTION,
+    MODES,
+    route_question,
+)
 from rag_demo.c_end.catalog_search import is_browse_query, rank_product_matches
 from rag_demo.merchant import MerchantError, get_merchant_repository
 
@@ -35,16 +45,19 @@ C_TOOL_RULES = """你可以：
 - 如果商品或预算不匹配，如实说明。
 """
 
-MODE_COMPANION = "companion"
-MODE_ADVISOR = "advisor"
-MODE_TRANSACTION = "transaction"
-VALID_MODES = (MODE_COMPANION, MODE_ADVISOR, MODE_TRANSACTION)
+VALID_MODES = MODES
 
 _COMPANION_RULES = """【本次模式：陪伴】
 本轮只做陪伴和倾听，不主动推荐商品、不生成订单、不查询订单。
 用户只是聊天、倾诉、分享日常时，先接住情绪，再决定要不要给建议。
 不要为了完成销售把话题拉回商品；不要使用"买点东西会开心"这类引导消费的话。
 如果用户明确问商品、价格、订单，告诉用户可以切到"帮我挑东西"或直接说需求，再进入购物模式。
+"""
+
+_ORDER_RULES = """【本次模式：订单服务】
+本轮只处理订单、物流、售后状态查询，调用 query_my_orders / query_tracking。
+不主动推荐商品，不生成订单草稿；用户要下单时提示切到交易流程。
+物流服务不可用时如实说明，禁止编造物流节点。
 """
 
 _ADVISOR_RULES = """【本次模式：购物参谋】
@@ -66,6 +79,7 @@ _IMAGE_TOOL_RULES = """商品工具会返回 image_url。用户要看图片时�
 _MODE_RULES = {
     MODE_COMPANION: _COMPANION_RULES + "\n" + _IMAGE_RULES,
     MODE_ADVISOR: _ADVISOR_RULES + "\n" + _IMAGE_RULES + "\n" + _IMAGE_TOOL_RULES,
+    MODE_ORDER: _ORDER_RULES,
     MODE_TRANSACTION: C_TOOL_RULES + "\n" + _IMAGE_RULES + "\n" + _IMAGE_TOOL_RULES,
 }
 
@@ -87,17 +101,8 @@ _MEMORY_DECLARATION_MARKERS = (
 
 
 def detect_mode(message: str, requested: str | None = None) -> str:
-    """规则优先：显式模式 > 交易意图 > 记忆陈述 > 购物参谋意图 > 默认陪伴。"""
-    if requested in VALID_MODES:
-        return requested
-    text = (message or "").strip().lower()
-    if any(word in text for word in _TRANSACTION_HINTS):
-        return MODE_TRANSACTION
-    if any(marker in text for marker in _MEMORY_DECLARATION_MARKERS):
-        return MODE_COMPANION
-    if any(word in text for word in _ADVISOR_HINTS):
-        return MODE_ADVISOR
-    return MODE_COMPANION
+    """兼容旧调用：模式判断统一收口到问题 Router。"""
+    return route_question(message, requested_mode=requested).mode
 
 
 def build_system_prompt(
@@ -310,6 +315,8 @@ def _tools(buyer_id: str, mode: str = MODE_TRANSACTION):
         return []
     if mode == MODE_ADVISOR:
         return [recommend_products]
+    if mode == MODE_ORDER:
+        return [query_my_orders, query_tracking]
     return [recommend_products, query_my_orders, query_tracking, prepare_order]
 
 
@@ -510,6 +517,47 @@ def _load_app_history(buyer_id: str, current_message: str, *, limit: int = 20) -
     return history[-limit:]
 
 
+def companion_thread_id(buyer_id: str) -> str:
+    """同一买家的稳定小鱼会话 ID；服务端生成，客户端只引用。"""
+    digest = hashlib.sha256(f"qianke:c:companion:{buyer_id}".encode("utf-8")).hexdigest()[:24]
+    return f"c_conv_{digest}"
+
+
+class _SessionProbeLLM:
+    """只用于读取 checkpoint 状态，不执行模型调用。"""
+
+    def bind_tools(self, tools: Any) -> "_SessionProbeLLM":
+        return self
+
+    def invoke(self, messages: Any) -> Any:  # pragma: no cover - 防御性
+        raise RuntimeError("session probe 不应调用模型")
+
+
+def get_c_agent_session(buyer_id: str, checkpointer: Any) -> dict[str, Any]:
+    """返回稳定会话、当前模式以及是否还有待确认草稿。"""
+    thread_id = companion_thread_id(buyer_id)
+    graph = build_c_graph(buyer_id, checkpointer, llm=_SessionProbeLLM(), mode=MODE_TRANSACTION)
+    snapshot = graph.get_state({"configurable": {"thread_id": thread_id}})
+    values = snapshot.values or {}
+    if values and values.get("buyer_id") != buyer_id:
+        raise PermissionError("不能读取其他用户的 Agent 会话")
+    return {
+        "thread_id": thread_id,
+        "mode": values.get("mode") or MODE_COMPANION,
+        "interrupted": bool(snapshot.next),
+        "draft": _extract_draft(values.get("messages") or []),
+        "status": values.get("status") or "IDLE",
+    }
+
+
+def _mode_switch_message(mode: str, previous_mode: str) -> SystemMessage:
+    return SystemMessage(content=(
+        f"【模式切换】上一轮是 {previous_mode} 模式；本轮用户意图切换到 {mode} 模式。"
+        "忽略之前所有模式限制，从这一轮开始按下面的规则执行。\n"
+        + _MODE_RULES.get(mode, _MODE_RULES[MODE_COMPANION])
+    ))
+
+
 def run_c_agent(
     message: str,
     *,
@@ -519,7 +567,8 @@ def run_c_agent(
     llm: Any | None = None,
     mode: str | None = None,
 ) -> dict[str, Any]:
-    selected = detect_mode(message, mode)
+    decision = route_question(message, requested_mode=mode)
+    selected = decision.mode
     graph = build_c_graph(buyer_id, checkpointer, llm=llm, mode=selected)
     config = {"configurable": {"thread_id": thread_id}}
     snapshot = graph.get_state(config)
@@ -530,13 +579,14 @@ def run_c_agent(
             raise PermissionError("不能继续其他用户的 Agent 会话")
         if snapshot.next:
             raise ValueError("当前会话有待确认订单，请先确认或取消后再发新消息")
-        # 同一会话保持创建时的模式，避免中途切换导致图节点不匹配。
-        existing_mode = str(existing.get("mode") or "")
-        if existing_mode and existing_mode != selected:
-            selected = existing_mode
+        existing_mode = str(existing.get("mode") or MODE_COMPANION)
+        switch_messages: list[Any] = []
+        if existing_mode != selected:
+            # 允许同一 thread 内随用户意图切模式；只重建工具图，不丢历史消息。
             graph = build_c_graph(buyer_id, checkpointer, llm=llm, mode=selected)
+            switch_messages = [_mode_switch_message(selected, existing_mode)]
         payload: dict[str, Any] = {
-            "messages": [HumanMessage(content=message)],
+            "messages": [*switch_messages, HumanMessage(content=message)],
             "buyer_id": buyer_id,
             "thread_id": thread_id,
             "mode": selected,
@@ -568,6 +618,9 @@ def run_c_agent(
     return {
         "thread_id": thread_id,
         "mode": selected,
+        "route": decision.route,
+        "confidence": decision.confidence,
+        "slots": decision.slots,
         "interrupted": interrupted,
         "status": status,
         "draft": draft,

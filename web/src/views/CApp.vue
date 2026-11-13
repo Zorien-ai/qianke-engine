@@ -1634,6 +1634,19 @@ function resumeGroupSocket() {
   openGroupSocket(activeId.value, true);
 }
 
+async function loadAgentSession() {
+  try {
+    const data = await getJson("/api/c/agent/session");
+    if (data?.thread_id) liveThreadId.value = data.thread_id;
+    if (data?.interrupted && data?.draft) {
+      liveDraft.value = data.draft;
+      liveOrder.value = null;
+    }
+  } catch {
+    // 会话恢复失败时保留当前页面内存中的 thread 作为降级。
+  }
+}
+
 async function loadCompanionMessages() {
   try {
     const data = await getJson("/api/c/app/messages?thread_id=companion&limit=30");
@@ -2769,6 +2782,7 @@ onMounted(async () => {
   stripDemoSeedForRealAccount();
   await loadMerchantThreads();
   cart.reload();
+  await loadAgentSession();
   await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm(), loadDiary()]);
   await pollCheckin();
   await refreshUnread();

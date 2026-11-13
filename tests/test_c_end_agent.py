@@ -242,3 +242,65 @@ def test_c_agent_cannot_resume_other_buyer(c_store, tmp_path):
             checkpointer=saver,
             llm=fake,
         )
+
+
+def test_c_agent_switches_mode_in_same_thread(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+    from langchain_core.messages import AIMessage as _AIMessage
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_switch.sqlite")
+    fake = _FakeLLM([
+        _AIMessage(content="先休息一下。"),
+        _AIMessage(content="绿茶有两款。"),
+    ])
+    first = c_agent.run_c_agent(
+        "今天有点累，陪我聊聊",
+        buyer_id="buyer_1",
+        thread_id="c_thread_switch_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    second = c_agent.run_c_agent(
+        "推荐一款绿茶",
+        buyer_id="buyer_1",
+        thread_id="c_thread_switch_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    assert first["mode"] == "companion"
+    assert second["mode"] == "advisor"
+    assert second["route"] == "shopping"
+    context = "\n".join(str(getattr(m, "content", "")) for m in fake.calls[-1])
+    assert "模式切换" in context
+    assert "购物参谋" in context
+
+
+def test_companion_session_id_is_stable_per_buyer(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_session.sqlite")
+    first = c_agent.get_c_agent_session("buyer_1", saver)
+    second = c_agent.get_c_agent_session("buyer_1", saver)
+    other = c_agent.get_c_agent_session("buyer_2", saver)
+    assert first["thread_id"].startswith("c_conv_")
+    assert first["thread_id"] == second["thread_id"]
+    assert first["thread_id"] != other["thread_id"]
+
+
+def test_companion_session_restores_pending_draft(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_session_draft.sqlite")
+    thread_id = c_agent.companion_thread_id("buyer_1")
+    fake = _FakeLLM([_prepare_call()])
+    c_agent.run_c_agent(
+        "我想买一双跑鞋",
+        buyer_id="buyer_1",
+        thread_id=thread_id,
+        checkpointer=saver,
+        llm=fake,
+    )
+    session = c_agent.get_c_agent_session("buyer_1", saver)
+    assert session["thread_id"] == thread_id
+    assert session["interrupted"] is True
+    assert session["draft"]["order_id"]
