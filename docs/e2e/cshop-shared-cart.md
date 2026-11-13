@@ -18,13 +18,24 @@
 
 清购物车优先使用订单返回的 SKU。若缺失，必须同时满足订单状态为 `CONFIRMED`、订单 `quote_id` 与报价一致、按商品及单价汇总的数量完全一致，才使用该报价引用的 SKU。任一条件不符则保留购物车，避免误删。已覆盖同商品多 SKU、错误报价 ID 和不匹配数量的单测。
 
+## 截图
+
+CShop 读取 CApp 的购物车（同一 `qianke:cart`），支持行内数量与规格编辑：
+
+![CShop 共享购物车](shared-cart-cshop.png)
+
+合并报价 → 确认订单后，购物车清空；CApp 侧角标同步消失：
+
+![共享购物车订单](shared-cart-order.png)
+
 ## 验证结果
 
 | 检查 | 结果 |
 | --- | --- |
 | `cd web; npm run test:cart` | 12 passed |
 | `cd web; npm run build` | PASS；存在原有大 bundle 警告 |
-| Python 3.12：`python -m pytest tests/ -q` | 734 passed, 35 skipped |
+| 维护者环境：`python -m pytest tests/ -q` | 764 passed, 5 skipped |
+| 维护者环境：前端 `npm run build` | PASS |
 | CApp 加入两种茶 50g 各 2 件 → CShop | 商品、SKU、数量一致，小计 312 元 |
 | CShop 改数量及 250g 规格 → 另一 CApp 标签页 | 实时同步；反向修改也同步 |
 | 预算 50 元合并报价 | 后端拒绝，购物车 4 件保留 |
@@ -37,7 +48,7 @@
 
 浏览器验证使用本机临时 SQLite 数据库与测试账号，调用实际 C 端路由、谈判和订单代码，无真实支付或模型调用。窄屏通过 390px iframe 运行原应用，实测 `innerWidth=390`；未宣称真机触屏或软键盘验证。
 
-Python 环境按仓库 CI 的轻量依赖搭建，并补充缺失依赖。首次全量测试为 733 passed / 1 failed / 35 skipped：图片上传测试缺少运行时审计目录 `var/uploads/products`。创建该忽略目录后重跑全量，得到上表结果；未修改后端测试或跳过条件。
+Codex 环境首次全量测试为 733 passed / 1 failed / 35 skipped：图片上传测试缺少运行时审计目录 `var/uploads/products`。创建该忽略目录后重跑全量通过；维护者环境独立复跑为 764 passed / 5 skipped。未修改后端测试或跳过条件。
 
 ## 限制
 
