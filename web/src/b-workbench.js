@@ -2185,6 +2185,11 @@ function ordersView() {
             ${ORDER_FILTERS.map((value) => `<option value="${value}" ${state.orderFilter === value ? "selected" : ""}>${value ? statusLabel(value) : "全部状态"}</option>`).join("")}
           </select>
         </label>
+        <label class="b-filter">每页
+          <select data-order-limit ${state.loading ? "disabled" : ""}>
+            ${[10, 20, 50, 100].map((value) => `<option value="${value}" ${state.orderLimit === value ? "selected" : ""}>${value} 条</option>`).join("")}
+          </select>
+        </label>
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
     </div>
@@ -3106,6 +3111,15 @@ function bindEvents() {
       return;
     }
     if (!(target instanceof HTMLSelectElement)) return;
+    if (target.matches("[data-order-limit]")) {
+      const nextLimit = Number(target.value || 20);
+      state.orderLimit = [10, 20, 50, 100].includes(nextLimit) ? nextLimit : 20;
+      state.orderOffset = 0;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
+      return;
+    }
     if (target.matches("[data-order-filter]")) {
       state.orderFilter = target.value;
       await loadOrders();
