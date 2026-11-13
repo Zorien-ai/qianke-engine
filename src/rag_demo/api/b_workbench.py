@@ -10,7 +10,9 @@ import io
 import re
 import time
 import uuid
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
@@ -25,6 +27,26 @@ router = APIRouter(prefix="/api/b/workbench", tags=["b-workbench"])
 
 DEFAULT_MERCHANT_ID = "m_gear_002"
 MERCHANT_NAMES = {"m_gear_002": "山野户外旗舰店", "m_tea_001": "山雾茶业"}
+BUSINESS_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def _business_day_utc_range(date_from: str | None, date_to: str | None) -> tuple[str | None, str | None]:
+    """把商家营业日（Asia/Shanghai）转成 UTC 左闭右开区间。"""
+    start = None
+    end = None
+    try:
+        if date_from:
+            start_dt = datetime.combine(date.fromisoformat(date_from), time.min, tzinfo=BUSINESS_TIMEZONE)
+            start = start_dt.astimezone(timezone.utc).isoformat()
+        if date_to:
+            end_day = date.fromisoformat(date_to) + timedelta(days=1)
+            end_dt = datetime.combine(end_day, time.min, tzinfo=BUSINESS_TIMEZONE)
+            end = end_dt.astimezone(timezone.utc).isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="日期格式应为 YYYY-MM-DD") from exc
+    if start and end and start >= end:
+        raise HTTPException(status_code=400, detail="date_from 不能晚于 date_to")
+    return start, end
 
 ROLE_PERMISSIONS = {
     "owner": {
@@ -470,12 +492,44 @@ def workbench_chat_profile(buyer_id: str) -> dict[str, Any]:
 
 
 @router.get("/orders")
-def workbench_orders(status: str | None = None, limit: int = 100) -> dict[str, Any]:
+def workbench_orders(
+    status: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
     account = _account()
-    merchant_id = _membership(account)["merchant_id"]
+    merchant_id = _require_permission(account, "view_orders")["merchant_id"]
     repo = get_merchant_repository()
-    orders = repo.list_orders(merchant_id, status=status, limit=limit)
-    return {"merchant_id": merchant_id, "orders": [order.to_dict() for order in orders]}
+    bounded_limit = max(1, min(int(limit or 20), 100))
+    safe_offset = min(max(0, int(offset or 0)), 10000)
+    start, end = _business_day_utc_range(date_from, date_to)
+    query = (q or "").strip()[:80] or None
+    total = repo.count_orders(
+        merchant_id,
+        status=status,
+        q=query,
+        created_from=start,
+        created_to=end,
+    )
+    orders = repo.search_orders(
+        merchant_id,
+        status=status,
+        q=query,
+        created_from=start,
+        created_to=end,
+        limit=bounded_limit,
+        offset=safe_offset,
+    )
+    return {
+        "merchant_id": merchant_id,
+        "orders": [order.to_dict() for order in orders],
+        "total": total,
+        "limit": bounded_limit,
+        "offset": safe_offset,
+    }
 
 
 @router.patch("/orders/{order_id}/status")

@@ -882,6 +882,83 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             rows = cur.fetchall()
             return self._hydrate_orders(cur, rows)
 
+    def search_orders(
+        self,
+        merchant_id: str,
+        *,
+        status: str | None = None,
+        q: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        limit: int | None = DEFAULT_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[Order]:
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        bounded = clamp_limit(limit)
+        start = max(0, int(offset or 0))
+        sql = (
+            "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
+            "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE merchant_id = %s"
+        )
+        params: list[Any] = [merchant]
+        status_value = _clean_optional(status)
+        if status_value is not None:
+            sql += " AND status = %s"
+            params.append(status_value.upper())
+        query = _clean_optional(q)
+        if query is not None:
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE %s ESCAPE '\\' OR LOWER(buyer_id) LIKE %s ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE %s ESCAPE '\\' OR LOWER(i.sku) LIKE %s ESCAPE '\\')))"
+            params.extend([like, like, like, like])
+        if created_from:
+            sql += " AND created_at::timestamptz >= %s::timestamptz"
+            params.append(str(created_from))
+        if created_to:
+            sql += " AND created_at::timestamptz < %s::timestamptz"
+            params.append(str(created_to))
+        sql += " ORDER BY created_at DESC, order_id DESC LIMIT %s OFFSET %s"
+        params.extend([bounded, start])
+        with self._lock, self._read() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            return self._hydrate_orders(cur, rows)
+
+    def count_orders(
+        self,
+        merchant_id: str,
+        *,
+        status: str | None = None,
+        q: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+    ) -> int:
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        sql = "SELECT COUNT(*) AS total FROM m_order WHERE merchant_id = %s"
+        params: list[Any] = [merchant]
+        status_value = _clean_optional(status)
+        if status_value is not None:
+            sql += " AND status = %s"
+            params.append(status_value.upper())
+        query = _clean_optional(q)
+        if query is not None:
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE %s ESCAPE '\\' OR LOWER(buyer_id) LIKE %s ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE %s ESCAPE '\\' OR LOWER(i.sku) LIKE %s ESCAPE '\\')))"
+            params.extend([like, like, like, like])
+        if created_from:
+            sql += " AND created_at::timestamptz >= %s::timestamptz"
+            params.append(str(created_from))
+        if created_to:
+            sql += " AND created_at::timestamptz < %s::timestamptz"
+            params.append(str(created_to))
+        with self._lock, self._read() as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            return int(row["total"] if row else 0)
+
     def get_order(
         self,
         order_id: str,

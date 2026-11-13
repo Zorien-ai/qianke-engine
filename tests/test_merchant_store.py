@@ -375,6 +375,22 @@ class _FakeMemoryRepository:
     def list_orders(self, merchant_id, buyer_id=None, status=None, limit=DEFAULT_LIST_LIMIT):
         return []
 
+    def search_orders(
+        self,
+        merchant_id,
+        *,
+        status=None,
+        q=None,
+        created_from=None,
+        created_to=None,
+        limit=DEFAULT_LIST_LIMIT,
+        offset=0,
+    ):
+        return []
+
+    def count_orders(self, merchant_id, *, status=None, q=None, created_from=None, created_to=None):
+        return 0
+
     def get_order(self, order_id, *, merchant_id=None, buyer_id=None):
         return None
 

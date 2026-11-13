@@ -697,6 +697,80 @@ class SqliteMerchantRepository:
             rows = conn.execute(sql, params).fetchall()
             return self._hydrate_orders(conn, rows)
 
+    def search_orders(
+        self,
+        merchant_id: str,
+        *,
+        status: str | None = None,
+        q: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        limit: int | None = DEFAULT_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[Order]:
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        bounded = clamp_limit(limit)
+        start = max(0, int(offset or 0))
+        sql = (
+            "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
+            "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE merchant_id = ?"
+        )
+        params: list[Any] = [merchant]
+        status_value = _clean_optional(status)
+        if status_value is not None:
+            sql += " AND status = ?"
+            params.append(status_value.upper())
+        query = _clean_optional(q)
+        if query is not None:
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE ? ESCAPE '\\' OR LOWER(buyer_id) LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE ? ESCAPE '\\' OR LOWER(i.sku) LIKE ? ESCAPE '\\')))"
+            params.extend([like, like, like, like])
+        if created_from:
+            sql += " AND datetime(created_at) >= datetime(?)"
+            params.append(str(created_from))
+        if created_to:
+            sql += " AND datetime(created_at) < datetime(?)"
+            params.append(str(created_to))
+        sql += " ORDER BY created_at DESC, order_id DESC LIMIT ? OFFSET ?"
+        params.extend([bounded, start])
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            return self._hydrate_orders(conn, rows)
+
+    def count_orders(
+        self,
+        merchant_id: str,
+        *,
+        status: str | None = None,
+        q: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+    ) -> int:
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        sql = "SELECT COUNT(*) FROM m_order WHERE merchant_id = ?"
+        params: list[Any] = [merchant]
+        status_value = _clean_optional(status)
+        if status_value is not None:
+            sql += " AND status = ?"
+            params.append(status_value.upper())
+        query = _clean_optional(q)
+        if query is not None:
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE ? ESCAPE '\\' OR LOWER(buyer_id) LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE ? ESCAPE '\\' OR LOWER(i.sku) LIKE ? ESCAPE '\\')))"
+            params.extend([like, like, like, like])
+        if created_from:
+            sql += " AND datetime(created_at) >= datetime(?)"
+            params.append(str(created_from))
+        if created_to:
+            sql += " AND datetime(created_at) < datetime(?)"
+            params.append(str(created_to))
+        with self._lock, self._connect() as conn:
+            return int(conn.execute(sql, params).fetchone()[0])
+
     def get_order(
         self,
         order_id: str,

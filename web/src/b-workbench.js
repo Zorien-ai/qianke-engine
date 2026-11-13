@@ -9,14 +9,16 @@ import "./b-workbench.css";
 const root = document.getElementById("b-root");
 
 const VIEWS = [
-  { key: "orders", label: "订单", short: "订单" },
-  { key: "after-sales", label: "售后", short: "售后" },
-  { key: "products", label: "商品", short: "商品" },
-  { key: "chat-profiles", label: "用户画像", short: "画像" },
-  { key: "superagent", label: "Super-agent", short: "Super" },
-  { key: "policy", label: "动作策略", short: "策略" },
-  { key: "audit", label: "执行审计", short: "审计" },
+  { key: "overview", label: "工作首页", short: "首页", group: "工作台" },
+  { key: "orders", label: "订单", short: "订单", group: "交易" },
+  { key: "after-sales", label: "售后", short: "售后", group: "交易" },
+  { key: "products", label: "商品与 SKU", short: "商品", group: "商品与库存" },
+  { key: "chat-profiles", label: "用户画像", short: "画像", group: "客户" },
+  { key: "superagent", label: "调查与审批", short: "协作", group: "经营协作" },
+  { key: "policy", label: "动作策略", short: "策略", group: "管理" },
+  { key: "audit", label: "执行审计", short: "审计", group: "管理" },
 ];
+const NAV_GROUPS = ["工作台", "交易", "商品与库存", "客户", "经营协作", "管理"];
 
 const ORDER_STATUS_LABELS = {
   CREATED: "待支付",
@@ -89,7 +91,7 @@ const SUPERAGENT_EVENT_EXAMPLE =
   "请查订单 order_xxx，买家反馈物流异常要售后，确认是否需要人工介入。";
 
 const state = {
-  view: "orders",
+  view: "overview",
   me: null,
   meLoaded: false,
   loginRequired: false,
@@ -100,7 +102,16 @@ const state = {
   error: "",
   toast: { message: "", type: "" },
   orderFilter: "",
+  orderQuery: "",
+  orderDateFrom: "",
+  orderDateTo: "",
+  orderLimit: 20,
+  orderOffset: 0,
+  orderTotal: 0,
   afterSaleFilter: "",
+  overview: null,
+  overviewLoaded: false,
+  overviewLoading: false,
   orders: [],
   ordersLoaded: false,
   afterSales: [],
@@ -110,6 +121,8 @@ const state = {
   chatProfiles: [],
   chatProfilesLoaded: false,
   productFilter: "all",
+  productQuery: "",
+  productView: "products",
   productSummary: null,
   inventoryAlerts: [],
   inventoryAlertsLoaded: false,
@@ -137,6 +150,10 @@ const state = {
   },
   shipForm: null,
   cancelConfirmId: "",
+  orderDetailId: "",
+  statusConfirm: null,
+  selectedOrderIds: new Set(),
+  mobileMoreOpen: false,
   /* Super-agent */
   workItems: [],
   workItemsLoaded: false,
@@ -358,10 +375,17 @@ async function loadOrders(force = true) {
   state.error = "";
   render();
   try {
-    const query = new URLSearchParams({ limit: "100" });
+    const query = new URLSearchParams({
+      limit: String(state.orderLimit),
+      offset: String(state.orderOffset),
+    });
     if (state.orderFilter) query.set("status", state.orderFilter);
+    if (state.orderQuery) query.set("q", state.orderQuery);
+    if (state.orderDateFrom) query.set("date_from", state.orderDateFrom);
+    if (state.orderDateTo) query.set("date_to", state.orderDateTo);
     const data = await api(`/api/b/workbench/orders?${query.toString()}`);
     state.orders = collectionFrom(data, ["orders"]);
+    state.orderTotal = Number(data?.total ?? state.orders.length);
     state.ordersLoaded = true;
   } catch (error) {
     if (handleAuthFailure(error)) return;
@@ -675,6 +699,10 @@ function auditPolicyExportUrl() {
 }
 
 async function ensureViewData(view = state.view) {
+  if (view === "overview") {
+    if (!state.overviewLoaded) await loadOverview();
+    return;
+  }
   if (view === "orders") {
     if (!state.ordersLoaded) await loadOrders();
     return;
@@ -714,6 +742,9 @@ async function switchView(view) {
   state.error = "";
   state.shipForm = null;
   state.cancelConfirmId = "";
+  state.orderDetailId = "";
+  state.statusConfirm = null;
+  state.selectedOrderIds.clear();
   state.workItemDetailId = "";
   state.workItemDetail = null;
   state.approveConfirm = null;
@@ -723,7 +754,8 @@ async function switchView(view) {
 
 async function refreshCurrent() {
   state.error = "";
-  if (state.view === "orders") await loadOrders();
+  if (state.view === "overview") await loadOverview();
+  else if (state.view === "orders") await loadOrders();
   else if (state.view === "after-sales") await loadAfterSales();
   else if (state.view === "superagent") await loadWorkItems();
   else if (state.view === "policy") await loadPolicy();
@@ -1536,10 +1568,20 @@ async function onOrderAction(action, orderId) {
   if (state.busy) return;
   const order = findOrder(orderId);
   if (!order) return;
-  if (action === "paid") {
-    await patchOrderStatus(orderId, "PAID");
-  } else if (action === "complete") {
-    await patchOrderStatus(orderId, "COMPLETED");
+  if (action === "paid" || action === "complete") {
+    state.statusConfirm = { orderId, action };
+    render();
+    return;
+  } else if (action === "status-confirm") {
+    const statusAction = state.statusConfirm?.action;
+    if (!["paid", "complete"].includes(statusAction) || state.statusConfirm?.orderId !== orderId) return;
+    state.statusConfirm = null;
+    await patchOrderStatus(orderId, statusAction === "complete" ? "COMPLETED" : "PAID");
+    return;
+  } else if (action === "status-dismiss") {
+    state.statusConfirm = null;
+    render();
+    return;
   } else if (action === "ship") {
     openShipForm(orderId);
   } else if (action === "ship-submit") {
@@ -1676,80 +1718,21 @@ function fatalViewMarkup(message) {
 function orderCard(order) {
   const id = String(order.order_id || "");
   const status = String(order.status || "").toUpperCase();
-  const busy = state.busy === `order:${id}`;
-  const attrs = `data-order-id="${escapeHtml(id)}" ${busy || !can("operate_orders") ? "disabled" : ""}`;
-  const showShipForm = state.shipForm && String(state.shipForm.orderId) === id;
-  const showCancelConfirm = state.cancelConfirmId === id;
-  const items = Array.isArray(order.items) ? order.items : [];
-  const itemsText = items.length
-    ? items
-        .map((item) => `${text(item.title || item.product_id, "商品")} × ${Number(item.quantity || 1)}`)
-        .join("、")
-    : text(order.item_count, "—");
-  const logistics =
-    order.carrier || order.tracking_no
-      ? [order.carrier, order.tracking_no].filter(Boolean).join(" · ")
-      : "—";
-
-  const buttons = [];
-  if (status === "CREATED") {
-    buttons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="paid" ${attrs}>标记已支付</button>`);
-    buttons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
-  } else if (status === "PAID") {
-    buttons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="ship" ${attrs}>发货</button>`);
-    buttons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
-  } else if (status === "SHIPPED") {
-    buttons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="complete" ${attrs}>完成订单</button>`);
-  } else {
-    buttons.push(`<span class="b-muted">当前状态无可用操作</span>`);
-  }
-
-  const shipForm = showShipForm
-    ? `<div class="b-ship-form">
-        <p class="b-form-title">填写物流信息后发货</p>
-        <div class="b-ship-fields">
-          <label>物流单号（必填）
-            <input id="b-ship-tracking" type="text" maxlength="64" value="${escapeHtml(state.shipForm.tracking)}" placeholder="如 SF1234567890" autocomplete="off" />
-          </label>
-          <label>承运商（可选）
-            <input id="b-ship-carrier" type="text" maxlength="64" value="${escapeHtml(state.shipForm.carrier)}" placeholder="如 顺丰速运" autocomplete="off" />
-          </label>
-        </div>
-        ${state.shipForm.error ? `<p class="b-field-error" role="alert">${escapeHtml(state.shipForm.error)}</p>` : ""}
-        <div class="b-actions">
-          <button type="button" class="b-btn b-btn-primary" data-order-action="ship-submit" ${attrs}>${busy ? "提交中…" : "确认发货"}</button>
-          <button type="button" class="b-btn b-btn-ghost" data-order-action="ship-cancel" ${busy ? "disabled" : ""}>取消</button>
-        </div>
-      </div>`
-    : "";
-
-  const cancelConfirm = showCancelConfirm
-    ? `<div class="b-confirm">
-        <p>确认取消订单 <code>${escapeHtml(id)}</code>？取消后不可恢复。</p>
-        <div class="b-actions">
-          <button type="button" class="b-btn b-btn-danger" data-order-action="cancel-confirm" ${attrs}>确认取消</button>
-          <button type="button" class="b-btn b-btn-ghost" data-order-action="cancel-dismiss" ${busy ? "disabled" : ""}>放弃</button>
-        </div>
-      </div>`
-    : "";
-
+  const logistics = order.carrier || order.tracking_no
+    ? [order.carrier, order.tracking_no].filter(Boolean).join(" · ")
+    : "—";
   return `<article class="b-card b-order-card">
     <div class="b-card-head">
-      <div class="b-card-title">
-        <code class="b-mono">${escapeHtml(text(id))}</code>
-        ${badge(status, statusLabel(status))}
-      </div>
+      <div class="b-card-title"><input type="checkbox" data-order-select="${escapeHtml(id)}" ${state.selectedOrderIds.has(id) ? "checked" : ""} aria-label="选择订单 ${escapeHtml(id)}" /><code class="b-mono">${escapeHtml(text(id))}</code>${badge(status, statusLabel(status))}</div>
       <time>${escapeHtml(timeText(order.created_at))}</time>
     </div>
     <dl class="b-meta">
       <div><dt>买家</dt><dd>${escapeHtml(text(order.buyer_id))}</dd></div>
       <div><dt>金额</dt><dd class="b-amount">${money(order.total_amount)}</dd></div>
-      <div><dt>商品</dt><dd>${escapeHtml(itemsText)}</dd></div>
+      <div><dt>商品</dt><dd>${escapeHtml(orderItemsText(order))}</dd></div>
       <div><dt>物流</dt><dd>${escapeHtml(logistics)}</dd></div>
     </dl>
-    <div class="b-actions">${buttons.join("")}</div>
-    ${cancelConfirm}
-    ${shipForm}
+    <div class="b-actions"><button type="button" class="b-btn b-btn-ghost" data-order-detail="${escapeHtml(id)}">查看详情${status === "CREATED" || status === "PAID" || status === "SHIPPED" ? " / 处理" : ""}</button></div>
   </article>`;
 }
 
@@ -1884,17 +1867,323 @@ function emptyMarkup(message) {
   return `<div class="b-empty">${escapeHtml(message)}</div>`;
 }
 
+/* ---------------- B 2.0 P0：角色工作首页 ---------------- */
+
+function workspaceRole() {
+  const role = String(state.me?.role || "").toLowerCase();
+  const permissions = state.me?.permissions || [];
+  if (role === "owner" || role === "admin") return "owner";
+  if (permissions.includes("operate_inventory") && !permissions.includes("view_after_sales")) {
+    return "warehouse";
+  }
+  if (permissions.includes("view_after_sales") || permissions.includes("view_orders")) {
+    return "support";
+  }
+  return "owner";
+}
+
+function workspaceRoleLabel(role) {
+  return role === "warehouse" ? "仓库" : role === "support" ? "客服" : "店主";
+}
+
+async function overviewRequest(path, permission) {
+  if (permission && !can(permission)) {
+    return { ok: false, error: "当前角色无此数据权限" };
+  }
+  try {
+    return { ok: true, data: await api(path) };
+  } catch (error) {
+    if (handleAuthFailure(error)) throw error;
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+async function loadOverview() {
+  if (state.overviewLoading) return;
+  state.overviewLoading = true;
+  state.error = "";
+  render();
+  const [orders, afterSales, products, alerts, workItems] = await Promise.all([
+    overviewRequest("/api/b/workbench/orders?limit=100", "view_orders"),
+    overviewRequest("/api/b/workbench/after-sales?limit=100", "view_after_sales"),
+    overviewRequest("/api/b/workbench/products", "view_products"),
+    overviewRequest("/api/b/workbench/inventory/alerts?status=PENDING&limit=100", "operate_inventory"),
+    overviewRequest("/api/superagent/work-items?limit=50", "view_superagent"),
+  ]);
+  const productPayload = products.ok ? products.data : null;
+  const productList = productPayload ? collectionFrom(productPayload, ["products"]) : [];
+  state.overview = {
+    orders: orders.ok ? collectionFrom(orders.data, ["orders"]) : [],
+    afterSales: afterSales.ok ? collectionFrom(afterSales.data, ["tickets", "after_sales", "afterSales", "aftersales"]) : [],
+    products: productList,
+    productSummary: productPayload?.summary || null,
+    alerts: alerts.ok ? collectionFrom(alerts.data, ["alerts"]) : [],
+    workItems: workItems.ok ? collectionFrom(workItems.data, ["work_items", "workItems"]) : [],
+    errors: {
+      orders: orders.ok ? "" : orders.error,
+      afterSales: afterSales.ok ? "" : afterSales.error,
+      products: products.ok ? "" : products.error,
+      alerts: alerts.ok ? "" : alerts.error,
+      workItems: workItems.ok ? "" : workItems.error,
+    },
+  };
+  state.overviewLoaded = true;
+  state.overviewLoading = false;
+  render();
+}
+
+function overviewMetric(label, value, note, tone = "") {
+  return `<article class="b-metric ${tone ? `is-${tone}` : ""}">
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(value)}</strong>
+    <small>${escapeHtml(note)}</small>
+  </article>`;
+}
+
+function overviewTaskRow(label, detail, count, view) {
+  return `<button type="button" class="b-overview-task" data-view="${escapeHtml(view)}">
+    <span class="b-overview-task-copy"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small></span>
+    <span class="b-overview-task-count">${escapeHtml(String(count))}</span>
+    <span class="b-overview-task-arrow" aria-hidden="true">查看</span>
+  </button>`;
+}
+
+function overviewView() {
+  const role = workspaceRole();
+  if (state.overviewLoading && !state.overview) {
+    return `<section class="b-view b-overview" aria-label="工作首页">
+      <div class="b-overview-head"><div><p class="b-eyebrow">WORKSPACE / ${workspaceRoleLabel(role)}</p><h1>工作首页</h1><p class="b-muted">正在加载当前工作范围…</p></div></div>
+      ${skeletonMarkup(3)}
+    </section>`;
+  }
+  const data = state.overview || { orders: [], afterSales: [], products: [], productSummary: null, alerts: [], workItems: [], errors: {} };
+  const orders = data.orders || [];
+  const afterSales = data.afterSales || [];
+  const products = data.products || [];
+  const alerts = data.alerts || [];
+  const workItems = data.workItems || [];
+  const completed = orders.filter((order) => String(order.status || "").toUpperCase() === "COMPLETED");
+  const completedRevenue = completed.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+  const pendingShipment = orders.filter((order) => String(order.status || "").toUpperCase() === "PAID");
+  const openAfterSales = afterSales.filter((ticket) => ["OPEN", "RETURN_SHIPPED", "RETURN_PENDING"].includes(String(ticket.status || "").toUpperCase()));
+  const lowStockSkus = products.reduce((sum, product) => {
+    const skus = Array.isArray(product.skus) ? product.skus : [];
+    return sum + skus.filter((sku) => {
+      const available = Number(sku.available_qty ?? sku.stock ?? 0);
+      const safety = Number(sku.safety_stock ?? 0);
+      return safety > 0 && available <= safety;
+    }).length;
+  }, 0);
+  const pendingApproval = workItems.filter((item) => ["WAITING_APPROVAL", "EXECUTION_FAILED"].includes(String(item.status || "").toUpperCase()));
+  const lockedSkus = products.reduce((sum, product) => {
+    const skus = Array.isArray(product.skus) ? product.skus : [];
+    return sum + skus.filter((sku) => Number(sku.locked_qty || 0) > 0).length;
+  }, 0);
+  const errorNotes = Object.entries(data.errors || {}).filter(([, value]) => value);
+  const partialNote = errorNotes.length ? `部分数据未加载：${errorNotes.map(([key]) => key).join("、")}。` : "";
+  const scopeNote = `当前加载范围：${orders.length} 笔订单、${afterSales.length} 笔售后。`;
+  const lowStockSummary = data.productSummary || {};
+  const lowStockCount = Number(lowStockSummary.low_stock_skus || lowStockSkus);
+  const roleTitle = role === "warehouse" ? "今天先看库存和发货" : role === "support" ? "今天先看售后和顾客" : "今天经营，一眼有数";
+  const roleSubtitle = role === "warehouse"
+    ? "优先处理缺货、锁定库存和待发货商品。"
+    : role === "support"
+      ? "优先处理售后工单；客服会话能力待接入，不展示假会话。"
+      : "先看完成口径的模拟流水，再处理待发货和库存提醒。";
+
+  const metrics = role === "warehouse"
+    ? [
+        overviewMetric("低库存 SKU", String(lowStockCount), "当前加载范围 · 可用 ≤ 安全库存", "warn"),
+        overviewMetric("待发货订单", String(pendingShipment.length), "当前加载范围 · 模拟交易"),
+        overviewMetric("商品数", String(products.length), "当前加载范围"),
+        overviewMetric("有锁定库存 SKU", String(lockedSkus), "锁定库存不可当可售库存"),
+      ]
+    : role === "support"
+      ? [
+          overviewMetric("待处理售后", String(openAfterSales.length), "当前加载范围 · OPEN / 退货中", "warn"),
+          overviewMetric("待发货订单", String(pendingShipment.length), "用于核对顾客咨询", "info"),
+          overviewMetric("客服会话", "待接入", "B 端坐席后端尚未接入"),
+          overviewMetric("可查订单", String(orders.length), "当前加载范围"),
+        ]
+      : [
+          overviewMetric("当前加载完成流水", money(completedRevenue), "当前加载范围 · 非真实收款", "accent"),
+          overviewMetric("当前加载完成订单", `${completed.length} 笔`, "不是全店汇总"),
+          overviewMetric("待发货样例", `${pendingShipment.length} 笔`, "与完成流水分开"),
+          overviewMetric("低库存 SKU", String(lowStockCount), "当前加载范围 · 可用 ≤ 安全库存", "warn"),
+        ];
+
+  const priorityRows = role === "warehouse"
+    ? [
+        overviewTaskRow("低库存 SKU", "核对可用、锁定和安全库存差额", lowStockCount, "products"),
+        overviewTaskRow("待发货订单", "先核对商品、数量和履约信息", pendingShipment.length, "orders"),
+        overviewTaskRow("待处理告警", "通知处理不等于补货入库", alerts.length, "products"),
+      ]
+    : role === "support"
+      ? [
+          overviewTaskRow("待处理售后", "核对申请、订单商品与金额", openAfterSales.length, "after-sales"),
+          overviewTaskRow("待发货订单", "用于回答顾客物流/发货咨询", pendingShipment.length, "orders"),
+          overviewTaskRow("客服会话", "能力待接入，当前不展示假会话", 0, "after-sales"),
+        ]
+      : [
+          overviewTaskRow("待发货订单", "先核对商品、数量和履约信息", pendingShipment.length, "orders"),
+          overviewTaskRow("待处理售后", "退款、退货和验收影响需分别确认", openAfterSales.length, "after-sales"),
+          overviewTaskRow("待人工审批", "调查与审批工作项", pendingApproval.length, "superagent"),
+          overviewTaskRow("低库存 SKU", "查看可用量与安全库存差额", lowStockCount, "products"),
+        ];
+
+  return `<section class="b-view b-overview" aria-label="工作首页">
+    <div class="b-overview-head">
+      <div>
+        <p class="b-eyebrow">WORKSPACE / ${workspaceRoleLabel(role)}</p>
+        <h1>${roleTitle}</h1>
+        <p class="b-muted">${roleSubtitle}</p>
+      </div>
+      <div class="b-overview-date">${escapeHtml(timeText(new Date().toISOString()).slice(0, 10))}<small>当前会话 · 模拟交易</small></div>
+    </div>
+    ${partialNote ? `<p class="b-overview-notice" role="status">${escapeHtml(partialNote)}</p>` : ""}
+    <div class="b-overview-scope">${escapeHtml(scopeNote)} 数字只代表已加载范围，不是全店汇总。</div>
+    <div class="b-metrics">${metrics.join("")}</div>
+    <div class="b-overview-columns">
+      <section class="b-card b-overview-panel">
+        <div class="b-panel-head"><div><h2>优先处理</h2><p>把注意力放在明确的待办上</p></div><span class="b-chip">当前范围</span></div>
+        <div class="b-overview-tasks">${priorityRows.join("")}</div>
+      </section>
+      <section class="b-card b-overview-panel">
+        <div class="b-panel-head"><div><h2>${role === "support" ? "客服能力" : role === "warehouse" ? "库存口径" : "经营报告"}</h2><p>${role === "support" ? "明确当前能力边界" : role === "warehouse" ? "先对齐字段含义" : "先把统计口径说清楚"}</p></div><span class="b-chip">${role === "support" ? "待接入" : "待接入"}</span></div>
+        ${role === "support"
+          ? `<div class="b-overview-placeholder"><strong>客服会话待接入</strong><p>当前 B 端有用户画像和售后数据，但没有完整的客服坐席收件箱。正式接入前不展示假会话、假在线状态。</p><button type="button" class="b-btn b-btn-ghost" disabled>进入客服会话</button></div>`
+          : role === "warehouse"
+            ? `<div class="b-overview-placeholder"><strong>库存字段待后端确认</strong><p>可用、锁定、安全库存目前来自商品快照；批量保存、并发版本和部分失败契约尚未接入。</p><button type="button" class="b-btn b-btn-ghost" data-view="products">查看商品与 SKU</button></div>`
+            : `<div class="b-overview-placeholder"><strong>暂不绘制经营趋势</strong><p>当前是模拟交易；按完成时间统计的口径已确认，但退款冲减、跨月归属和真实支付尚未接入。</p><button type="button" class="b-btn b-btn-ghost" disabled>查看经营报告</button></div>`}
+      </section>
+    </div>
+  </section>`;
+}
+
+function orderItemsText(order) {
+  const items = Array.isArray(order.items) ? order.items : [];
+  if (!items.length) return text(order.item_count, "—");
+  return items.map((item) => `${text(item.title || item.product_id, "商品")} × ${Number(item.quantity || 1)}`).join("、");
+}
+
+function orderTableRow(order) {
+  const id = String(order.order_id || "");
+  const status = String(order.status || "").toUpperCase();
+  const itemsText = orderItemsText(order);
+  const logistics = order.carrier || order.tracking_no
+    ? [order.carrier, order.tracking_no].filter(Boolean).join(" · ")
+    : "—";
+  const selected = state.selectedOrderIds.has(id) ? "checked" : "";
+  return `<tr>
+    <td class="b-select-cell"><input type="checkbox" data-order-select="${escapeHtml(id)}" ${selected} aria-label="选择订单 ${escapeHtml(id)}" /></td>
+    <td><button type="button" class="b-table-link" data-order-detail="${escapeHtml(id)}"><code class="b-mono">${escapeHtml(text(id))}</code></button><br /><small>${escapeHtml(timeText(order.created_at))}</small></td>
+    <td>${escapeHtml(text(order.buyer_id))}</td>
+    <td class="b-order-items-cell">${escapeHtml(itemsText)}</td>
+    <td class="b-num">${escapeHtml(money(order.total_amount))}</td>
+    <td>${badge(status, statusLabel(status))}</td>
+    <td>${escapeHtml(logistics)}</td>
+    <td><button type="button" class="b-btn b-btn-ghost b-btn-small" data-order-detail="${escapeHtml(id)}">详情</button></td>
+  </tr>`;
+}
+
+function orderDrawerMarkup() {
+  const order = state.orders.find((item) => String(item.order_id || "") === state.orderDetailId);
+  if (!order) return "";
+  const id = String(order.order_id || "");
+  const status = String(order.status || "").toUpperCase();
+  const items = Array.isArray(order.items) ? order.items : [];
+  const attrs = `data-order-id="${escapeHtml(id)}" ${state.busy === `order:${id}` || !can("operate_orders") ? "disabled" : ""}`;
+  const actionButtons = [];
+  if (status === "CREATED") {
+    actionButtons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="paid" ${attrs} title="演示动作：不产生真实收款">模拟支付（演示）</button>`);
+    actionButtons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
+  } else if (status === "PAID") {
+    actionButtons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="ship" ${attrs}>发货</button>`);
+    actionButtons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
+  } else if (status === "SHIPPED") {
+    actionButtons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="complete" ${attrs} title="演示动作：不代表真实交易完成">模拟完成（演示）</button>`);
+  }
+  const shipForm = state.shipForm && String(state.shipForm.orderId) === id
+    ? `<div class="b-ship-form"><p class="b-form-title">填写物流信息后发货</p><div class="b-ship-fields"><label>物流单号（必填）<input id="b-ship-tracking" type="text" maxlength="64" value="${escapeHtml(state.shipForm.tracking)}" placeholder="如 SF1234567890" autocomplete="off" /></label><label>承运商（可选）<input id="b-ship-carrier" type="text" maxlength="64" value="${escapeHtml(state.shipForm.carrier)}" placeholder="如 顺丰速运" autocomplete="off" /></label></div>${state.shipForm.error ? `<p class="b-field-error" role="alert">${escapeHtml(state.shipForm.error)}</p>` : ""}<div class="b-actions"><button type="button" class="b-btn b-btn-primary" data-order-action="ship-submit" ${attrs}>确认发货</button><button type="button" class="b-btn b-btn-ghost" data-order-action="ship-cancel">取消</button></div></div>`
+    : "";
+  const cancelConfirm = state.cancelConfirmId === id
+    ? `<div class="b-confirm"><p>确认取消订单 <code>${escapeHtml(id)}</code>？取消后不可恢复。</p><div class="b-actions"><button type="button" class="b-btn b-btn-danger" data-order-action="cancel-confirm" ${attrs}>确认取消</button><button type="button" class="b-btn b-btn-ghost" data-order-action="cancel-dismiss">放弃</button></div></div>`
+    : "";
+  const statusConfirm = state.statusConfirm?.orderId === id
+    ? `<div class="b-confirm"><p>${state.statusConfirm.action === "paid" ? "确认标记为“模拟支付”？会写入当前商家订单状态和 paid_at，但不会产生真实收款。" : "确认标记为“模拟完成”？会写入当前商家订单状态和 completed_at，不会改变外部支付或结算。"}<br /><code>${escapeHtml(id)}</code> · ${escapeHtml(money(order.total_amount))}</p><div class="b-actions"><button type="button" class="b-btn b-btn-primary" data-order-action="status-confirm" ${attrs}>确认写入模拟状态</button><button type="button" class="b-btn b-btn-ghost" data-order-action="status-dismiss">返回</button></div></div>`
+    : "";
+  return `<div class="b-drawer-backdrop" data-order-detail-close></div>
+    <aside class="b-order-drawer" role="dialog" aria-modal="true" aria-label="订单详情">
+      <header class="b-drawer-head"><div><p class="b-eyebrow">订单详情 · 模拟交易</p><h2><code class="b-mono">${escapeHtml(text(id))}</code></h2></div><button type="button" class="b-btn b-btn-ghost" data-order-detail-close aria-label="关闭订单详情">关闭</button></header>
+      <div class="b-drawer-body">
+        <div class="b-drawer-summary"><span>${badge(status, statusLabel(status))}</span><strong>${escapeHtml(money(order.total_amount))}</strong><small>金额为模拟交易金额，非真实收款</small></div>
+        <dl class="b-detail-list"><div><dt>下单时间</dt><dd>${escapeHtml(timeText(order.created_at))}</dd></div><div><dt>买家</dt><dd>${escapeHtml(text(order.buyer_id))}</dd></div><div><dt>物流</dt><dd>${escapeHtml([order.carrier, order.tracking_no].filter(Boolean).join(" · ") || "—")}</dd></div></dl>
+        <h3>商品明细</h3>
+        <div class="b-drawer-items">${items.length ? items.map((item) => `<div><span>${escapeHtml(text(item.title || item.product_id, "商品"))}</span><small>${escapeHtml(text(item.sku || item.spec, "未提供规格"))} · ×${Number(item.quantity || 1)}</small></div>`).join("") : `<p class="b-muted">订单未返回商品明细。</p>`}</div>
+        ${actionButtons.length ? `<div class="b-drawer-actions">${actionButtons.join("")}</div>` : ""}
+        ${statusConfirm}
+        ${cancelConfirm}
+        ${shipForm}
+        <p class="b-drawer-note">演示操作会写入当前商家订单状态和时间，但不会创建真实支付、结算、物流或库存变更；正式接入前仍需补服务端审计、模拟标记和权限。</p>
+      </div>
+    </aside>`;
+}
+
+function selectedOrders() {
+  return state.orders.filter((order) => state.selectedOrderIds.has(String(order.order_id || "")));
+}
+
+function batchBarMarkup() {
+  const selected = selectedOrders();
+  if (!selected.length) return "";
+  const eligible = selected.filter((order) => String(order.status || "").toUpperCase() === "PAID");
+  return `<div class="b-batch-bar" role="status">
+    <div><strong>已选择 ${selected.length} 笔订单</strong><small>当前加载范围 · 其中 ${eligible.length} 笔待发货可进入预览</small></div>
+    <button type="button" class="b-btn b-btn-ghost" data-order-export>导出选中 CSV</button>
+    <button type="button" class="b-btn b-btn-primary" disabled title="批量发货接口尚未接入">预览批量发货</button>
+    <button type="button" class="b-btn b-btn-ghost" data-order-clear-selection>清除选择</button>
+  </div>`;
+}
+
+function exportSelectedOrders() {
+  const selected = selectedOrders();
+  if (!selected.length) return;
+  const escapeCsv = (value) => {
+    let cell = String(value ?? "");
+    if (/^[=+\-@]/.test(cell.trimStart())) cell = "'" + cell;
+    return `"${cell.replace(/"/g, '""')}"`;
+  };
+  const rows = [["订单号", "创建时间", "买家", "商品", "金额", "状态", "物流", "模拟数据"]];
+  for (const order of selected) {
+    rows.push([
+      order.order_id || "", order.created_at || "", order.buyer_id || "",
+      orderItemsText(order), order.total_amount ?? "", order.status || "",
+      [order.carrier, order.tracking_no].filter(Boolean).join(" · "), "1",
+    ]);
+  }
+  const csv = rows.map((row) => row.map(escapeCsv).join(",")).join("\r\n");
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `qianke-b-orders-selected-${Date.now()}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  showToast(`已导出 ${selected.length} 笔订单`, "success");
+}
+
 function ordersView() {
   const body = state.loading && !state.orders.length
     ? skeletonMarkup()
     : state.orders.length
-      ? `<div class="b-list">${state.orders.map(orderCard).join("")}</div>`
+      ? `<div class="b-order-table-wrap"><table class="b-order-table"><thead><tr><th class="b-select-cell"><input type="checkbox" data-order-select-all ${state.orders.length && state.orders.every((order) => state.selectedOrderIds.has(String(order.order_id || ""))) ? "checked" : ""} aria-label="选择当前页面全部订单" /></th><th>订单</th><th>买家</th><th>商品</th><th class="b-num">金额</th><th>状态</th><th>物流</th><th></th></tr></thead><tbody>${state.orders.map(orderTableRow).join("")}</tbody></table></div>
+         <div class="b-order-cards">${state.orders.map(orderCard).join("")}</div>`
       : emptyMarkup("暂无订单");
   return `<section class="b-view" aria-label="订单">
     <div class="b-view-head">
       <div>
         <h1>订单</h1>
-        <p class="b-muted">共 ${state.orders.length} 单${state.loading ? " · 刷新中…" : ""}</p>
+        <p class="b-muted">共 ${state.orderTotal} 单（当前筛选）${state.loading ? " · 刷新中…" : ""}</p>
       </div>
       <div class="b-view-tools">
         <label class="b-filter">状态
@@ -1902,10 +2191,24 @@ function ordersView() {
             ${ORDER_FILTERS.map((value) => `<option value="${value}" ${state.orderFilter === value ? "selected" : ""}>${value ? statusLabel(value) : "全部状态"}</option>`).join("")}
           </select>
         </label>
+        <label class="b-filter">每页
+          <select data-order-limit ${state.loading ? "disabled" : ""}>
+            ${[10, 20, 50, 100].map((value) => `<option value="${value}" ${state.orderLimit === value ? "selected" : ""}>${value} 条</option>`).join("")}
+          </select>
+        </label>
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
     </div>
+    <div class="b-order-filters">
+      <label>搜索<input type="search" data-order-query value="${escapeHtml(state.orderQuery)}" placeholder="订单号 / 买家 / 商品" maxlength="80" /></label>
+      <label>从<input type="date" data-order-date-from value="${escapeHtml(state.orderDateFrom)}" /></label>
+      <label>到<input type="date" data-order-date-to value="${escapeHtml(state.orderDateTo)}" /></label>
+      <button type="button" class="b-btn b-btn-primary" data-order-search ${state.loading ? "disabled" : ""}>查找</button>
+    </div>
     ${body}
+    <div class="b-order-pager"><span>第 ${Math.floor(state.orderOffset / state.orderLimit) + 1} / ${Math.max(1, Math.ceil(state.orderTotal / state.orderLimit))} 页 · 共 ${state.orderTotal} 条（当前筛选）</span><button type="button" class="b-btn b-btn-ghost" data-order-prev ${state.orderOffset <= 0 || state.loading ? "disabled" : ""}>上一页</button><button type="button" class="b-btn b-btn-ghost" data-order-next ${state.orderOffset + state.orderLimit >= state.orderTotal || state.loading ? "disabled" : ""}>下一页</button></div>
+    ${batchBarMarkup()}
+    ${orderDrawerMarkup()}
   </section>`;
 }
 
@@ -1976,15 +2279,79 @@ function chatProfilesView() {
   </section>`;
 }
 
+function productTableRow(product) {
+  const skus = Array.isArray(product.skus) ? product.skus : [];
+  const prices = skus.map((sku) => Number(sku.price)).filter((value) => Number.isFinite(value));
+  const priceText = prices.length
+    ? (Math.min(...prices) === Math.max(...prices) ? money(Math.min(...prices)) : `${money(Math.min(...prices))}–${money(Math.max(...prices))}`)
+    : "—";
+  const available = skus.reduce((sum, sku) => sum + Number(sku.available_qty ?? 0), 0);
+  const locked = skus.reduce((sum, sku) => sum + Number(sku.locked_qty ?? 0), 0);
+  const lowCount = skus.filter((sku) => {
+    const safety = Number(sku.safety_stock ?? 0);
+    return safety > 0 && Number(sku.available_qty ?? 0) <= safety;
+  }).length;
+  const status = String(product.status || "").toUpperCase();
+  return `<tr>
+    <td><strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong><br /><small><code class="b-mono">${escapeHtml(text(product.product_id))}</code> · ${escapeHtml(text(product.category))}</small></td>
+    <td>${status === "ACTIVE" ? "在售" : escapeHtml(status || "—")}</td>
+    <td class="b-num">${skus.length}</td>
+    <td class="b-num">${escapeHtml(priceText)}</td>
+    <td class="b-num">${available}</td>
+    <td class="b-num">${locked}</td>
+    <td>${lowCount ? `<span class="b-badge is-warn">${lowCount} 个低库存</span>` : "—"}</td>
+  </tr>`;
+}
+
+function filteredProducts() {
+  let list = [...state.products];
+  if (state.productFilter === "low") {
+    list = list.filter((product) => product.low_stock || (Array.isArray(product.skus) && product.skus.some((sku) => sku.low_stock)));
+  }
+  const query = String(state.productQuery || "").trim().toLowerCase();
+  if (!query) return list;
+  return list.filter((product) => {
+    const text = [
+      product.title, product.name, product.product_id, product.category, product.brand,
+      ...(Array.isArray(product.skus) ? product.skus.flatMap((sku) => [sku.sku, sku.spec]) : []),
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+    return text.includes(query);
+  });
+}
+
+function skuTableRows(products) {
+  return products.flatMap((product) => {
+    const skus = Array.isArray(product.skus) ? product.skus : [];
+    return skus.map((sku) => {
+      const safety = Number(sku.safety_stock ?? 0);
+      const available = Number(sku.available_qty ?? 0);
+      const low = safety > 0 && available <= safety;
+      return `<tr>
+        <td><strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong><br /><small>${escapeHtml(text(product.product_id))}</small></td>
+        <td><code class="b-mono">${escapeHtml(text(sku.sku))}</code><br /><small>${escapeHtml(text(sku.spec))}</small></td>
+        <td class="b-num">${escapeHtml(money(sku.price))}</td>
+        <td class="b-num">${escapeHtml(String(available))}</td>
+        <td class="b-num">${escapeHtml(String(Number(sku.locked_qty ?? 0)))}</td>
+        <td class="b-num">${escapeHtml(String(safety))}</td>
+        <td>${low ? `<span class="b-badge is-warn">低库存</span>` : "—"}</td>
+      </tr>`;
+    });
+  }).join("");
+}
+
 function productsView() {
   const summary = state.productSummary || {};
   const lowProducts = state.products.filter((product) => product.low_stock);
-  const visibleProducts = state.productFilter === "low" ? lowProducts : state.products;
+  const visibleProducts = filteredProducts();
   const body = state.loading && !state.products.length
     ? skeletonMarkup(2)
     : visibleProducts.length
-      ? `<div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
-      : emptyMarkup(state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
+      ? state.productView === "skus"
+        ? `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>SKU / 规格</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th class="b-num">安全库存</th><th>库存</th></tr></thead><tbody>${skuTableRows(visibleProducts)}</tbody></table></div>
+           <div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
+        : `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>状态</th><th class="b-num">SKU</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th>库存</th></tr></thead><tbody>${visibleProducts.map(productTableRow).join("")}</tbody></table></div>
+           <div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
+      : emptyMarkup(state.productQuery ? "没有匹配的商品或 SKU" : state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
   const alert = Number(summary.low_stock_products || 0) > 0
     ? `<div class="b-stock-alert" role="status">
         <div>
@@ -2015,9 +2382,19 @@ function productsView() {
     <div class="b-view-head">
       <div>
         <h1>商品</h1>
-        <p class="b-muted">商品图片可由 owner/admin 更换 · 共 ${state.products.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
+        <p class="b-muted">商品图片可由 owner/admin 更换 · 当前 ${visibleProducts.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
       </div>
       <div class="b-view-tools">
+        <label class="b-filter b-product-search">搜索
+          <input type="search" data-product-query value="${escapeHtml(state.productQuery)}" placeholder="商品名 / ID / SKU / 规格" maxlength="80" />
+        </label>
+        <button type="button" class="b-btn b-btn-ghost" data-product-search>查找</button>
+        <label class="b-filter">视图
+          <select data-product-view>
+            <option value="products" ${state.productView === "products" ? "selected" : ""}>商品</option>
+            <option value="skus" ${state.productView === "skus" ? "selected" : ""}>SKU</option>
+          </select>
+        </label>
         <label class="b-filter">库存
           <select data-product-filter ${state.loading ? "disabled" : ""}>
             <option value="all" ${state.productFilter === "all" ? "selected" : ""}>全部商品</option>
@@ -2332,7 +2709,9 @@ function superAgentView() {
 function shellMarkup() {
   const activeView = VIEWS.find((view) => view.key === state.view) || VIEWS[0];
   const viewMarkup =
-    activeView.key === "orders"
+    activeView.key === "overview"
+      ? overviewView()
+      : activeView.key === "orders"
       ? ordersView()
       : activeView.key === "after-sales"
         ? afterSalesView()
@@ -2347,22 +2726,49 @@ function shellMarkup() {
                 : productsView();
   const merchantName = state.me?.name || "商家";
   const merchantId = state.me?.id || "";
+  const role = String(state.me?.role || "").toLowerCase();
+  const roleText = workspaceRoleLabel(workspaceRole());
+  const navMarkup = NAV_GROUPS.map((group) => {
+    const views = VIEWS.filter((view) => view.group === group);
+    if (!views.length) return "";
+    return `<div class="b-nav-group">
+      <p class="b-nav-group-label">${group}</p>
+      ${views.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" ${state.loading || state.busy ? 'aria-disabled="true"' : ""}><span class="b-nav-full">${view.label}</span><span class="b-nav-short">${view.short || view.label}</span></button>`).join("")}
+    </div>`;
+  }).join("");
   return `<div class="b-shell">
-    <header class="b-header">
+    <header class="b-topbar">
       <div class="b-brand"><span class="b-brand-mark">千客</span><span class="b-brand-sub">商家工作台</span></div>
-      <div class="b-merchant">
-        <strong>${escapeHtml(merchantName)}</strong>
-        ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
+      <div class="b-context">
+        <div class="b-merchant">
+          <strong>${escapeHtml(merchantName)}</strong>
+          ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
+        </div>
+        <span class="b-role">${escapeHtml(roleText)}</span>
+        <button type="button" class="b-store-switch" disabled title="多店成员关系接口尚未接入">切换店铺</button>
+        <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
       </div>
       <div class="b-header-actions">
         <a class="b-text-link" href="/v2/#/home">返回入口</a>
       </div>
     </header>
-    <nav class="b-nav" aria-label="商家工作台视图">
-      ${VIEWS.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" ${state.loading || state.busy ? 'aria-disabled="true"' : ""}><span class="b-nav-full">${view.label}</span><span class="b-nav-short">${view.short || view.label}</span></button>`).join("")}
+    <div class="b-body">
+      <aside class="b-sidebar" aria-label="商家工作台导航">
+        ${navMarkup}
+      </aside>
+      <main class="b-main">
+        ${state.error ? `<p class="b-inline-error" role="alert"><span>${escapeHtml(state.error)}</span><button type="button" class="b-inline-close" data-clear-error aria-label="关闭错误提示">×</button></p>` : ""}
+        ${viewMarkup}
+      </main>
+    </div>
+    <nav class="b-bottom-nav" aria-label="移动端快捷导航">
+      <button type="button" class="${state.view === "overview" ? "active" : ""}" data-view="overview" ${state.view === "overview" ? 'aria-current="page"' : ""}>首页</button>
+      <button type="button" class="${state.view === "orders" ? "active" : ""}" data-view="orders" ${state.view === "orders" ? 'aria-current="page"' : ""}>订单</button>
+      <button type="button" class="${state.view === "products" ? "active" : ""}" data-view="products" ${state.view === "products" ? 'aria-current="page"' : ""}>商品</button>
+      <button type="button" class="${state.view === "after-sales" ? "active" : ""}" data-view="after-sales" ${state.view === "after-sales" ? 'aria-current="page"' : ""}>售后</button>
+      <button type="button" class="${state.mobileMoreOpen ? "active" : ""}" data-mobile-more aria-expanded="${state.mobileMoreOpen ? "true" : "false"}">更多</button>
     </nav>
-    ${state.error ? `<p class="b-inline-error" role="alert"><span>${escapeHtml(state.error)}</span><button type="button" class="b-inline-close" data-clear-error aria-label="关闭错误提示">×</button></p>` : ""}
-    <main class="b-main">${viewMarkup}</main>
+    ${state.mobileMoreOpen ? `<div class="b-mobile-sheet"><div class="b-mobile-sheet-head"><strong>全部功能</strong><button type="button" class="b-btn b-btn-ghost" data-mobile-more>关闭</button></div>${navMarkup}</div>` : ""}
     ${toastMarkup()}
   </div>`;
 }
@@ -2433,6 +2839,25 @@ function bindEvents() {
   root.addEventListener("change", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+    if (target.matches("[data-order-select]")) {
+      const id = target.dataset.orderSelect || "";
+      if (target.checked) state.selectedOrderIds.add(id);
+      else state.selectedOrderIds.delete(id);
+      render();
+      return;
+    }
+    if (target.matches("[data-order-select-all]")) {
+      const visible = state.orders.map((order) => String(order.order_id || "")).filter(Boolean);
+      if (target.checked) visible.forEach((id) => state.selectedOrderIds.add(id));
+      else visible.forEach((id) => state.selectedOrderIds.delete(id));
+      render();
+      return;
+    }
+    if (target.matches("[data-product-view]")) {
+      state.productView = target.value === "skus" ? "skus" : "products";
+      render();
+      return;
+    }
     if (target.matches("[data-product-filter]")) {
       state.productFilter = target.value === "low" ? "low" : "all";
       render();
@@ -2477,6 +2902,20 @@ function bindEvents() {
     }
   });
 
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (state.orderDetailId || state.statusConfirm) {
+      state.orderDetailId = "";
+      state.statusConfirm = null;
+      render();
+      return;
+    }
+    if (state.mobileMoreOpen) {
+      state.mobileMoreOpen = false;
+      render();
+    }
+  });
+
   root.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
@@ -2518,8 +2957,71 @@ function bindEvents() {
       await deleteProductImage(imageDeleteButton.dataset.productId, imageDeleteButton.dataset.productImageDelete);
       return;
     }
+    if (target.closest("[data-product-search]")) {
+      const input = root.querySelector("[data-product-query]");
+      state.productQuery = String(input?.value || "").trim();
+      render();
+      return;
+    }
+    if (target.closest("[data-order-search]")) {
+      const query = root.querySelector("[data-order-query]");
+      const dateFrom = root.querySelector("[data-order-date-from]");
+      const dateTo = root.querySelector("[data-order-date-to]");
+      state.orderQuery = String(query?.value || "").trim();
+      state.orderDateFrom = String(dateFrom?.value || "");
+      state.orderDateTo = String(dateTo?.value || "");
+      state.orderOffset = 0;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
+      return;
+    }
+    if (target.closest("[data-order-prev]")) {
+      state.orderOffset = Math.max(0, state.orderOffset - state.orderLimit);
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
+      return;
+    }
+    if (target.closest("[data-order-next]")) {
+      state.orderOffset += state.orderLimit;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
+      return;
+    }
+    if (target.closest("[data-order-export]")) {
+      exportSelectedOrders();
+      return;
+    }
+    if (target.closest("[data-order-clear-selection]")) {
+      state.selectedOrderIds.clear();
+      render();
+      return;
+    }
+    const detailButton = target.closest("[data-order-detail]");
+    if (detailButton) {
+      state.orderDetailId = detailButton.dataset.orderDetail || "";
+      render();
+      requestAnimationFrame(() => {
+        root.querySelector(".b-order-drawer [data-order-detail-close]")?.focus();
+      });
+      return;
+    }
+    if (target.closest("[data-order-detail-close]")) {
+      state.orderDetailId = "";
+      state.statusConfirm = null;
+      render();
+      return;
+    }
+    if (target.closest("[data-mobile-more]")) {
+      state.mobileMoreOpen = !state.mobileMoreOpen;
+      render();
+      return;
+    }
     const viewButton = target.closest("[data-view]");
     if (viewButton) {
+      state.mobileMoreOpen = false;
       await switchView(viewButton.dataset.view);
       return;
     }
@@ -2647,8 +3149,21 @@ function bindEvents() {
       return;
     }
     if (!(target instanceof HTMLSelectElement)) return;
+    if (target.matches("[data-order-limit]")) {
+      const nextLimit = Number(target.value || 20);
+      state.orderLimit = [10, 20, 50, 100].includes(nextLimit) ? nextLimit : 20;
+      state.orderOffset = 0;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
+      return;
+    }
     if (target.matches("[data-order-filter]")) {
       state.orderFilter = target.value;
+      state.orderOffset = 0;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      render();
       await loadOrders();
       return;
     }
@@ -2722,6 +3237,9 @@ async function boot() {
   state.afterSalesLoaded = false;
   state.productsLoaded = false;
   state.workItemsLoaded = false;
+  state.overview = null;
+  state.overviewLoaded = false;
+  state.overviewLoading = false;
   state.orders = [];
   state.afterSales = [];
   state.products = [];
@@ -2740,10 +3258,13 @@ async function boot() {
   state.error = "";
   state.shipForm = null;
   state.cancelConfirmId = "";
+  state.orderDetailId = "";
+  state.statusConfirm = null;
   render();
   try {
     await loadMe();
-    await loadOrders();
+    state.view = "overview";
+    await loadOverview();
   } catch (error) {
     if (handleAuthFailure(error)) return;
     state.fatalError = errorMessage(error);

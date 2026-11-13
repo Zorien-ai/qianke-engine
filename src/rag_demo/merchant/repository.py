@@ -79,6 +79,32 @@ class MerchantRepository(Protocol):
         """按商家列出订单（可再按买家/状态过滤，limit 钳制，含订单行快照）。"""
         ...
 
+    def search_orders(
+        self,
+        merchant_id: str,
+        *,
+        status: str | None = None,
+        q: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+        limit: int | None = DEFAULT_LIST_LIMIT,
+        offset: int = 0,
+    ) -> list[Order]:
+        """按状态/关键词/创建时间搜索订单，支持偏移分页。"""
+        ...
+
+    def count_orders(
+        self,
+        merchant_id: str,
+        *,
+        status: str | None = None,
+        q: str | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+    ) -> int:
+        """与 search_orders 同口径的总数。"""
+        ...
+
     def get_order(
         self,
         order_id: str,

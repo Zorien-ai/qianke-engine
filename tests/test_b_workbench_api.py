@@ -197,3 +197,52 @@ def test_after_sales_only_for_bound_merchant(c_store, monkeypatch):
     for ticket in data["tickets"]:
         order = c_store.get_order(ticket["order_id"])
         assert order is not None
+
+
+def test_orders_search_pagination_and_total(c_store, monkeypatch):
+    _admin(monkeypatch)
+    first = b_workbench.workbench_orders(limit=2, offset=0)
+    assert first["limit"] == 2
+    assert first["offset"] == 0
+    assert first["total"] >= len(first["orders"])
+    assert len(first["orders"]) <= 2
+    second = b_workbench.workbench_orders(limit=2, offset=2)
+    assert second["offset"] == 2
+    # 搜索订单号时总数和结果同口径。
+    known = first["orders"][0]["order_id"]
+    searched = b_workbench.workbench_orders(q=known, limit=20, offset=0)
+    assert searched["total"] >= 1
+    assert any(order["order_id"] == known for order in searched["orders"])
+    assert all(known in str(order.get("order_id") or "") or known in str(order.get("buyer_id") or "") or known in str(order) for order in searched["orders"])
+
+
+def test_orders_reject_invalid_date(c_store, monkeypatch):
+    _admin(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_orders(date_from="2026-13-99")
+    assert exc.value.status_code == 400
+
+
+def test_orders_limit_is_capped_at_repository_limit(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_orders(limit=150)
+    assert data["limit"] == 100
+    assert len(data["orders"]) <= 100
+
+
+def test_orders_search_wildcard_is_literal(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_orders(q="%", limit=100)
+    assert data["total"] == 0
+    assert data["orders"] == []
+
+
+def test_orders_date_filter_uses_shanghai_business_day(c_store, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    _admin(monkeypatch)
+    sample = b_workbench.workbench_orders(limit=1)["orders"][0]
+    local_date = datetime.fromisoformat(sample["created_at"]).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    data = b_workbench.workbench_orders(date_from=local_date, date_to=local_date, limit=100)
+    assert any(order["order_id"] == sample["order_id"] for order in data["orders"])
