@@ -333,6 +333,8 @@ const negotiationProductId = ref("");
 const negotiationProductSearch = ref("");
 const negotiationCartHint = ref("");
 const cartItems = ref([]);
+const cartOpen = ref(false);
+const cartDrawerError = ref("");
 const CART_STORAGE_KEY = "qianke:cart";
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
@@ -2048,6 +2050,15 @@ const cartTotal = computed(() =>
     0
   )
 );
+const globalCartCount = computed(() =>
+  cartItems.value.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+);
+const globalCartTotal = computed(() =>
+  cartItems.value.reduce(
+    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+    0
+  )
+);
 
 function loadCart() {
   try {
@@ -2109,6 +2120,53 @@ function addSelectedToCart() {
 function removeCartItem(sku) {
   cartItems.value = cartItems.value.filter((item) => item.sku !== sku);
   saveCart();
+}
+
+function cartLineMax(item) {
+  return Math.max(1, Math.min(20, Number(item?.stock || 20) || 20));
+}
+
+function changeCartItemQuantity(sku, delta) {
+  const item = cartItems.value.find((line) => line.sku === sku);
+  if (!item) return;
+  const next = Number(item.quantity || 1) + Number(delta || 0);
+  item.quantity = Math.max(1, Math.min(cartLineMax(item), next));
+  saveCart();
+}
+
+function openCartDrawer() {
+  cartDrawerError.value = "";
+  cartOpen.value = true;
+}
+
+function closeCartDrawer() {
+  cartOpen.value = false;
+}
+
+function openCartCheckout() {
+  const items = cartItems.value;
+  if (!items.length) return;
+  const friendId = String(items[0].friend_id || "").trim();
+  if (items.some((item) => String(item.friend_id || "").trim() !== friendId)) {
+    cartDrawerError.value = "购物车里有多个商家的商品，请分开结算";
+    return;
+  }
+  cartOpen.value = false;
+  cartDrawerError.value = "";
+  negotiationFriendId.value = friendId;
+  negotiationMerchant.value = String(items[0].merchant_name || latestMerchantThread()?.name || "");
+  negotiationNeed.value = "购物车合并报价";
+  negotiationBudget.value = Math.max(1, Math.ceil(globalCartTotal.value));
+  negotiationQuantity.value = 1;
+  negotiationSku.value = "";
+  negotiationSkuSpec.value = "";
+  negotiationSkuOptions.value = [];
+  negotiationProductId.value = "";
+  negotiationProductOptions.value = [];
+  negotiationFormError.value = "";
+  negotiationCartHint.value = "";
+  negotiationOpen.value = true;
+  void loadNegotiationSkuOptions();
 }
 
 function clearCurrentCart() {
@@ -2827,7 +2885,12 @@ onBeforeUnmount(() => {
               </span>
               <span class="c-cart-info">
                 <strong>{{ item.title }}</strong>
-                <small>{{ item.spec }} · ¥{{ Number(item.price).toFixed(2) }} × {{ item.quantity }}</small>
+                <small>{{ item.spec }} · ¥{{ Number(item.price).toFixed(2) }}</small>
+              </span>
+              <span class="c-cart-qty">
+                <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item.sku, -1)">−</button>
+                <strong>{{ item.quantity }}</strong>
+                <button type="button" aria-label="增加数量" :disabled="Number(item.quantity) >= cartLineMax(item)" @click="changeCartItemQuantity(item.sku, 1)">＋</button>
               </span>
               <button type="button" class="c-cart-remove" :aria-label="`移除 ${item.title}`" @click="removeCartItem(item.sku)">×</button>
             </div>
@@ -2852,6 +2915,46 @@ onBeforeUnmount(() => {
           <button type="submit" class="c-negotiate-submit" :disabled="negotiating">{{ negotiating ? "谈判中…" : "开始谈判" }}</button>
         </div>
       </form>
+    </div>
+
+    <div v-if="cartOpen" class="c-cart-drawer-mask" @click.self="closeCartDrawer">
+      <aside class="c-cart-drawer" role="dialog" aria-modal="true" aria-labelledby="c-cart-drawer-title">
+        <header class="c-cart-drawer-head">
+          <div>
+            <strong id="c-cart-drawer-title">购物车</strong>
+            <small>{{ globalCartCount }} 件 · ¥{{ globalCartTotal.toFixed(2) }}</small>
+          </div>
+          <button type="button" class="c-icon-btn" aria-label="关闭购物车" @click="closeCartDrawer">×</button>
+        </header>
+        <div v-if="!cartItems.length" class="c-cart-drawer-empty">
+          <strong>购物车是空的</strong>
+          <p>在砍价确认层里选商品，加入购物车。</p>
+        </div>
+        <div v-else class="c-cart-drawer-list">
+          <div v-for="item in cartItems" :key="item.sku" class="c-cart-drawer-item">
+            <span class="c-cart-thumb">
+              <img v-if="item.image_url" :src="item.image_url" :alt="item.title" loading="lazy" @error="$event.target.style.display = 'none'" />
+              <span>{{ item.title.slice(0, 1) }}</span>
+            </span>
+            <div class="c-cart-drawer-copy">
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.merchant_name }} · {{ item.spec }}</small>
+              <span>¥{{ Number(item.price).toFixed(2) }}</span>
+            </div>
+            <div class="c-cart-qty">
+              <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item.sku, -1)">−</button>
+              <strong>{{ item.quantity }}</strong>
+              <button type="button" aria-label="增加数量" :disabled="Number(item.quantity) >= cartLineMax(item)" @click="changeCartItemQuantity(item.sku, 1)">＋</button>
+            </div>
+            <button type="button" class="c-cart-remove" :aria-label="`移除 ${item.title}`" @click="removeCartItem(item.sku)">×</button>
+          </div>
+        </div>
+        <p v-if="cartDrawerError" class="c-inline-error" role="alert">{{ cartDrawerError }}</p>
+        <footer v-if="cartItems.length" class="c-cart-drawer-foot">
+          <div><span>合计</span><strong>¥{{ globalCartTotal.toFixed(2) }}</strong></div>
+          <button type="button" class="c-cart-checkout" @click="openCartCheckout">去合并报价</button>
+        </footer>
+      </aside>
     </div>
 
     <div class="c-shell">
@@ -3049,6 +3152,20 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="c-chat-actions">
+              <button
+                type="button"
+                class="c-icon-btn c-cart-trigger"
+                :aria-label="`购物车，${globalCartCount} 件`"
+                title="购物车"
+                @click="openCartDrawer"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                  <path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h7.7a2 2 0 0 0 2-1.6L20 8H6" />
+                  <circle cx="9.5" cy="19" r="1.2" />
+                  <circle cx="17" cy="19" r="1.2" />
+                </svg>
+                <span v-if="globalCartCount" class="c-cart-trigger-badge">{{ globalCartCount }}</span>
+              </button>
               <button
                 type="button"
                 class="c-icon-btn c-voice-toggle"
@@ -6730,6 +6847,217 @@ onBeforeUnmount(() => {
 .c-cart-merge:disabled {
   cursor: wait;
   opacity: 0.6;
+}
+
+
+/* ---------- P2.6 全局购物车抽屉 ---------- */
+.c-cart-trigger {
+  position: relative;
+}
+
+.c-cart-trigger-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: grid;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--c-accent, #a8623f);
+  color: #fff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.c-cart-drawer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(41, 37, 31, 0.34);
+  backdrop-filter: blur(2px);
+}
+
+.c-cart-drawer {
+  display: flex;
+  width: min(420px, 94vw);
+  height: 100%;
+  flex-direction: column;
+  padding: 16px;
+  background: var(--c-bg, #fbf8f1);
+  box-shadow: -12px 0 40px rgba(50, 44, 35, 0.16);
+}
+
+.c-cart-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--c-line-soft, #ece4d8);
+}
+
+.c-cart-drawer-head strong {
+  display: block;
+  font-size: 15px;
+}
+
+.c-cart-drawer-head small {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-text-3, #948b7e);
+  font-size: 10px;
+}
+
+.c-cart-drawer-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--c-text-3, #948b7e);
+  text-align: center;
+}
+
+.c-cart-drawer-empty strong {
+  color: var(--c-text-2, #6b6258);
+  font-size: 13px;
+}
+
+.c-cart-drawer-empty p {
+  margin: 0;
+  font-size: 10px;
+}
+
+.c-cart-drawer-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding: 10px 0;
+}
+
+.c-cart-drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--c-line-soft, #ece4d8);
+  border-radius: 9px;
+  background: var(--c-panel, #fffdf8);
+}
+
+.c-cart-drawer-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.c-cart-drawer-copy strong {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-cart-drawer-copy small {
+  overflow: hidden;
+  color: var(--c-text-3, #948b7e);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-cart-drawer-copy > span {
+  color: #9d4c31;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.c-cart-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-line-soft, #ece4d8);
+}
+
+.c-cart-drawer-foot > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--c-text-3, #948b7e);
+  font-size: 10px;
+}
+
+.c-cart-drawer-foot strong {
+  color: #9d4c31;
+  font-size: 16px;
+}
+
+.c-cart-checkout {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--c-accent, #a8623f);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.c-cart-qty {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.c-cart-qty button {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--c-line-soft, #ece4d8);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--c-text-2, #6b6258);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.c-cart-qty button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.c-cart-qty strong {
+  min-width: 15px;
+  color: var(--c-text-2, #6b6258);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .c-cart-drawer {
+    width: 100%;
+    padding: 14px;
+  }
 }
 
 </style>

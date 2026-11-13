@@ -1,6 +1,6 @@
 ﻿/* 千客 C 端 PWA：静态资源 runtime cache + 导航外壳。 */
-const CACHE = "qianke-c-end-static-v17";
-const SHELL_CACHE = "qianke-c-end-shell-v16";
+const CACHE = "qianke-c-end-static-v18";
+const SHELL_CACHE = "qianke-c-end-shell-v17";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
