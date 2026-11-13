@@ -1795,3 +1795,496 @@ code,
     display: none;
   }
 }
+
+
+/* ---------------- B 2.0 P0：角色工作首页 ---------------- */
+
+.b-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.b-overview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 2px;
+}
+
+.b-overview-head h1 {
+  margin: 4px 0 6px;
+  font-size: clamp(26px, 3vw, 34px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.b-overview-head p {
+  margin: 0;
+  max-width: 680px;
+}
+
+.b-eyebrow {
+  color: var(--b-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.b-overview-date {
+  flex: 0 0 auto;
+  color: var(--b-text-2);
+  font-family: var(--b-mono);
+  font-size: 14px;
+  text-align: right;
+}
+
+.b-overview-date small {
+  display: block;
+  margin-top: 3px;
+  color: var(--b-muted);
+  font-family: var(--b-font);
+  font-size: 13px;
+}
+
+.b-overview-scope,
+.b-overview-notice {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg-softer);
+  color: var(--b-text-2);
+  font-size: 15px;
+}
+
+.b-overview-notice {
+  border-color: var(--b-warn);
+  background: var(--b-warn-soft);
+  color: var(--b-warn);
+}
+
+.b-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.b-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 17px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius);
+  background: var(--b-bg-softer);
+}
+
+.b-metric span {
+  color: var(--b-text-2);
+  font-size: 15px;
+}
+
+.b-metric strong {
+  color: var(--b-text);
+  font-size: 29px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.b-metric small {
+  color: var(--b-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.b-metric.is-accent {
+  border-color: var(--b-accent);
+  background: var(--b-accent-soft);
+}
+
+.b-metric.is-accent strong {
+  color: var(--b-accent-strong);
+}
+
+.b-metric.is-warn strong {
+  color: var(--b-warn);
+}
+
+.b-overview-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.8fr);
+  gap: 14px;
+}
+
+.b-overview-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.b-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.b-panel-head h2 {
+  margin: 0 0 3px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.b-panel-head p {
+  margin: 0;
+  color: var(--b-muted);
+  font-size: 14px;
+}
+
+.b-chip {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--b-bg-soft);
+  color: var(--b-text-2);
+  font-size: 12px;
+}
+
+.b-overview-tasks {
+  border-top: 1px solid var(--b-line);
+}
+
+.b-overview-task {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 3px;
+  border: 0;
+  border-bottom: 1px solid var(--b-line);
+  background: transparent;
+  color: var(--b-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.b-overview-task:hover {
+  background: var(--b-bg-softer);
+}
+
+.b-overview-task-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.b-overview-task-copy strong {
+  font-size: 17px;
+  font-weight: 550;
+}
+
+.b-overview-task-copy small {
+  color: var(--b-muted);
+  font-size: 14px;
+}
+
+.b-overview-task-count {
+  min-width: 34px;
+  color: var(--b-text);
+  font-family: var(--b-mono);
+  font-size: 22px;
+  text-align: right;
+}
+
+.b-overview-task-arrow {
+  flex: 0 0 auto;
+  color: var(--b-accent);
+  font-size: 14px;
+}
+
+.b-overview-placeholder {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--b-line-strong);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg-softer);
+}
+
+.b-overview-placeholder strong {
+  font-size: 17px;
+}
+
+.b-overview-placeholder p {
+  margin: 0;
+  color: var(--b-text-2);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+@media (max-width: 1100px) {
+  .b-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .b-overview-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .b-overview-head {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .b-overview-date {
+    text-align: left;
+  }
+
+  .b-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .b-metric {
+    padding: 13px 14px;
+  }
+
+  .b-metric strong {
+    font-size: 25px;
+  }
+
+  .b-overview-task {
+    gap: 8px;
+  }
+}
+
+
+/* ---------------- B 2.0 P0：订单表格 / 详情抽屉 ---------------- */
+
+.b-order-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius);
+  background: var(--b-bg);
+}
+
+.b-order-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+
+.b-order-table th,
+.b-order-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--b-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.b-order-table th {
+  color: var(--b-muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.b-order-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.b-order-table tbody tr:hover {
+  background: var(--b-bg-softer);
+}
+
+.b-order-table td small {
+  color: var(--b-muted);
+  font-size: 13px;
+}
+
+.b-order-items-cell {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-num {
+  text-align: right !important;
+  font-family: var(--b-mono);
+  white-space: nowrap;
+}
+
+.b-table-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--b-accent);
+  text-align: left;
+  cursor: pointer;
+}
+
+.b-table-link:hover {
+  text-decoration: underline;
+}
+
+.b-btn-small {
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 14px;
+}
+
+.b-order-cards {
+  display: none;
+}
+
+.b-drawer-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  background: rgba(23, 34, 31, 0.28);
+}
+
+.b-order-drawer {
+  position: fixed;
+  z-index: 81;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  width: min(570px, 100vw);
+  flex-direction: column;
+  overflow-y: auto;
+  border-left: 1px solid var(--b-line);
+  background: var(--b-bg);
+  box-shadow: -18px 0 40px rgba(23, 34, 31, 0.12);
+}
+
+.b-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 22px 16px;
+  border-bottom: 1px solid var(--b-line);
+}
+
+.b-drawer-head h2 {
+  margin: 3px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.b-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 22px 32px;
+}
+
+.b-drawer-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg-softer);
+}
+
+.b-drawer-summary strong {
+  margin-left: auto;
+  font-family: var(--b-mono);
+  font-size: 23px;
+}
+
+.b-drawer-summary small {
+  flex-basis: 100%;
+  color: var(--b-muted);
+  font-size: 13px;
+}
+
+.b-detail-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 0;
+}
+
+.b-detail-list div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.b-detail-list dt {
+  color: var(--b-muted);
+  font-size: 13px;
+}
+
+.b-detail-list dd {
+  margin: 0;
+  font-size: 16px;
+}
+
+.b-drawer-body h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.b-drawer-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.b-drawer-items div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg-softer);
+}
+
+.b-drawer-items small {
+  color: var(--b-muted);
+  font-size: 14px;
+}
+
+.b-drawer-note {
+  margin: 0;
+  color: var(--b-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .b-order-table-wrap {
+    display: none;
+  }
+
+  .b-order-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .b-order-drawer {
+    width: 100vw;
+  }
+
+  .b-detail-list {
+    grid-template-columns: 1fr;
+  }
+}
