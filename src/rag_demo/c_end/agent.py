@@ -54,10 +54,19 @@ _ADVISOR_RULES = """【本次模式：购物参谋】
 不要催单，不要把"陪伴"当作推销理由。
 """
 
+_IMAGE_RULES = """【商品图片】
+CApp 会自动把商品结果显示成图片卡，不需要你“上传”图片。
+用户要看图片、实拍、汤色、商品页时，直接说“给你看图片/商品图在下面”，
+禁止说“图发不了、传不过去、我做不到”。如果当前没有商品结果，如实说明需要先选商品。
+"""
+
+_IMAGE_TOOL_RULES = """商品工具会返回 image_url。用户要看图片时，调用 recommend_products 获取商品，
+再正常介绍；图片会由界面自动展示。"""
+
 _MODE_RULES = {
-    MODE_COMPANION: _COMPANION_RULES,
-    MODE_ADVISOR: _ADVISOR_RULES,
-    MODE_TRANSACTION: C_TOOL_RULES,
+    MODE_COMPANION: _COMPANION_RULES + "\n" + _IMAGE_RULES,
+    MODE_ADVISOR: _ADVISOR_RULES + "\n" + _IMAGE_RULES + "\n" + _IMAGE_TOOL_RULES,
+    MODE_TRANSACTION: C_TOOL_RULES + "\n" + _IMAGE_RULES + "\n" + _IMAGE_TOOL_RULES,
 }
 
 _TRANSACTION_HINTS = (
@@ -68,6 +77,7 @@ _TRANSACTION_HINTS = (
 _ADVISOR_HINTS = (
     "推荐", "挑", "选", "对比", "值不值", "预算", "价格", "多少钱", "活动",
     "优惠", "便宜", "礼物", "送", "尺码", "库存", "哪个", "怎么选", "跑鞋",
+    "图片", "看图", "看看图", "照片", "实拍", "商品图", "商品页", "我要看看",
     "鞋", "衣服", "包", "推荐一下", "recommend",
 )
 _MEMORY_DECLARATION_MARKERS = (
@@ -372,6 +382,23 @@ def _extract_product_refs(messages: list[Any]) -> list[dict[str, Any]]:
     return refs[:6]
 
 
+def _is_image_request(text: str) -> bool:
+    return any(word in (text or "") for word in ("图片", "看图", "看看图", "照片", "实拍", "商品图", "商品页", "我要看看"))
+
+
+def _last_saved_product_refs(buyer_id: str) -> list[dict[str, Any]]:
+    try:
+        messages = store.list_app_messages(buyer_id, "companion", limit=30)
+    except Exception:  # noqa: BLE001 - 历史消息不可用不应阻断当前回复
+        return []
+    for message in reversed(messages):
+        metadata = message.get("metadata") or {}
+        refs = metadata.get("product_refs") if isinstance(metadata, dict) else None
+        if message.get("role") == "companion" and isinstance(refs, list) and refs:
+            return refs[:6]
+    return []
+
+
 def _last_ai_text(messages: list[Any]) -> str:
     for msg in reversed(messages or []):
         if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
@@ -546,7 +573,8 @@ def run_c_agent(
         "draft": draft,
         "order": state.get("order"),
         "messages": state.get("messages") or [],
-        "product_refs": _extract_product_refs(state.get("messages") or []),
+        "product_refs": _extract_product_refs(state.get("messages") or [])
+        or (_last_saved_product_refs(buyer_id) if _is_image_request(message) else []),
         "next": list(snapshot.next or ()),
     }
 

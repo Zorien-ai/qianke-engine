@@ -4666,14 +4666,15 @@ onBeforeUnmount(() => {
 .c-product-refs {
   display: flex;
   max-width: min(420px, 100%);
+  flex-wrap: wrap;
   gap: 7px;
-  overflow-x: auto;
   padding: 2px 0;
 }
 
 .c-product-ref {
   display: flex;
-  flex: 0 0 170px;
+  flex: 1 1 150px;
+  max-width: 210px;
   align-items: center;
   gap: 7px;
   min-width: 0;

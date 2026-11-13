@@ -49,3 +49,9 @@ def test_merchant_chat_can_implicitly_wake_store_pet_but_group_still_requires_at
     assert store_agent.intent_gate("你家有什么东西")[0] is False
     assert store_agent.intent_gate("你家有什么东西", implicit_wake=True)[:2] == (True, True)
     assert store_agent.intent_gate("@店宠 推荐茶叶")[:2] == (True, True)
+
+
+def test_image_request_routes_to_advisor():
+    assert c_agent.detect_mode("我要看看") == c_agent.MODE_ADVISOR
+    assert c_agent._is_image_request("我要看看")
+    assert not c_agent._is_image_request("今天有点累")
