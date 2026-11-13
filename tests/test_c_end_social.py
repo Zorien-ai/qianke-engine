@@ -23,14 +23,14 @@ def test_friends_are_seeded(c_store):
     assert any(f["friend_id"] == "friend_demo" for f in friends)
 
 
-def test_store_pet_requires_at_wake(c_store):
+def test_store_pet_replies_in_merchant_chat_without_at(c_store):
+    # 商家单聊不再要求每条都 @店宠；没有 Agent provider 时走诚实降级。
     inactive = social.send_message("buyer_1", "store_demo", "这个多少钱？")
-    assert inactive["reply"]["awakened"] is False
-    assert "未被唤醒" in inactive["reply"]["content"]
+    assert inactive["reply"]["awakened"] is True
+    assert "暂时没连上" in inactive["reply"]["content"]
 
     active = social.send_message("buyer_1", "store_demo", "@店宠 我想砍价")
     assert active["reply"]["awakened"] is True
-    assert "砍价" in active["reply"]["content"]
 
 
 def test_user_friend_has_no_mock_reply(c_store):

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from rag_demo.agent.tools.calculator import calculator
 from rag_demo.c_end import store, store_policy
+from rag_demo.c_end.catalog_search import is_browse_query, rank_product_matches
 from rag_demo.merchant import MerchantError, get_merchant_repository
 
 logger = logging.getLogger(__name__)
@@ -57,9 +58,10 @@ def merchant_display_name(merchant_id: str) -> str:
     return str(merchant_id)
 
 INTENT_KEYWORDS = (
-    "推荐", "商品", "价格", "多少钱", "优惠", "券", "砍价", "便宜",
+    "推荐", "商品", "产品", "价格", "多少钱", "优惠", "券", "砍价", "便宜",
     "售后", "退货", "换货", "物流", "发货", "尺码", "库存", "买", "选",
     "活动", "SOP", "sop", "规则", "政策", "运费", "包邮", "退款",
+    "什么", "有什么", "东西", "茶", "茶叶", "现货", "到货", "适合", "款", "货",
 )
 
 SYSTEM_PROMPT_TEMPLATE = """你是{merchant_name}的店宠，负责 IM 里的售前咨询。
@@ -95,14 +97,19 @@ class OrderLookupInput(BaseModel):
     status: str | None = Field(default=None, max_length=20, description="订单状态，如 SHIPPED / COMPLETED")
 
 
-def intent_gate(text: str) -> tuple[bool, bool, str]:
-    """返回 (wake, allowed, cleaned_text)。"""
+def intent_gate(text: str, *, implicit_wake: bool = False) -> tuple[bool, bool, str]:
+    """返回 (wake, allowed, cleaned_text)。
+
+    ``implicit_wake`` 只给商家单聊使用：用户不必每条都 @店宠。群聊仍显式 @。
+    """
     raw = (text or "").strip()
-    if WAKE_TOKEN not in raw:
+    explicit = WAKE_TOKEN in raw
+    if not explicit and not implicit_wake:
         return False, False, raw
     cleaned = raw.replace(WAKE_TOKEN, "").strip()
-    if not any(keyword in cleaned for keyword in INTENT_KEYWORDS):
+    if not cleaned:
         return True, False, cleaned
+    # 不再用关键词白名单把用户挡在门外；店宠的 system prompt 负责收敛边界。
     return True, True, cleaned
 
 
@@ -130,7 +137,10 @@ def _tools(buyer_id: str = "buyer_1", merchant_id: str | None = None):
         """查询当前商家商品库；返回价格、库存、SKU 和商品 ID。"""
         try:
             repo = get_merchant_repository()
-            products = repo.list_products(resolved_merchant, keyword=need, limit=20)
+            all_products = repo.list_products(resolved_merchant, limit=100)
+            products = rank_product_matches(all_products, need, limit=20)
+            if not products and is_browse_query(need):
+                products = all_products[:20]
             result = []
             for product in products:
                 skus = repo.list_product_skus(product.product_id, merchant_id=resolved_merchant)
@@ -284,14 +294,15 @@ def reply_with_meta(
     llm: Any | None = None,
     friend_id: str | None = None,
     merchant_id: str | None = None,
+    implicit_wake: bool = False,
 ) -> StoreReply:
     """返回结构化店宠回复：文本 + 是否唤醒 + 商品/政策引用。"""
     resolved_merchant = resolve_merchant_id(friend_id=friend_id, merchant_id=merchant_id)
-    wake, allowed, cleaned = intent_gate(text)
+    wake, allowed, cleaned = intent_gate(text, implicit_wake=implicit_wake)
     if not wake:
         return StoreReply("（店宠未被唤醒：请 @店宠 并说明售前、售后或砍价需求）", False)
     if not allowed:
-        return StoreReply("（店宠只处理商品、价格、优惠、售后类问题；这句话不进入大模型）", True)
+        return StoreReply("在的，你想了解哪款商品、价格或者售后？", True)
 
     tools = _tools(buyer_id, merchant_id=resolved_merchant)
     tool_map = {item.name: item for item in tools}
@@ -339,11 +350,16 @@ def reply_with_meta(
                         for product in result.get("products") or []:
                             product_refs.append({
                                 "product_id": product.get("product_id"),
+                                "merchant_id": product.get("merchant_id") or resolved_merchant,
+                                "merchant_name": merchant_display_name(resolved_merchant),
                                 "title": product.get("title"),
                                 "price": product.get("price"),
                                 "sku": product.get("sku"),
+                                "spec": product.get("spec"),
                                 "stock": product.get("stock"),
                                 "quantity": quantity,
+                                "image_url": product.get("image_url") or "",
+                                "thumb_url": product.get("image_url") or "",
                                 "source": product.get("source"),
                             })
                     elif name == "search_my_orders":

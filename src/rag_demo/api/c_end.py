@@ -1144,7 +1144,7 @@ def _send_store_message_once(
             buyer_id,
             friend_id,
             content,
-            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text, friend_id=friend_id),
+            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text, friend_id=friend_id, implicit_wake=True),
             commentary_provider=lambda text, reply_text: companion_agent.commentary(
                 buyer_id, text, reply_text
             ),
@@ -1167,7 +1167,7 @@ def _send_store_message_once(
             buyer_id,
             friend_id,
             content,
-            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text, friend_id=friend_id),
+            reply_provider=lambda text: store_agent.reply_with_meta(buyer_id, text, friend_id=friend_id, implicit_wake=True),
             commentary_provider=lambda text, reply_text: companion_agent.commentary(
                 buyer_id, text, reply_text
             ),
@@ -1534,6 +1534,7 @@ def c_agent_run(req: CAgentRunIn) -> dict:
         "draft": result["draft"],
         "order": result["order"],
         "memories_added": len(memories_added),
+        "product_refs": result.get("product_refs") or [],
         # 模型输出统一过 persona guard；确认/取消文案由代码生成，不走这里。
         "reply": c_persona.guard(_last_ai_text(result["messages"]), tier="L2").text
         if _last_ai_text(result["messages"])

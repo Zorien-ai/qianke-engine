@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from rag_demo.c_end import persona as c_persona
 from rag_demo.c_end import express, store, store_agent
+from rag_demo.c_end.catalog_search import is_browse_query, rank_product_matches
 from rag_demo.merchant import MerchantError, get_merchant_repository
 
 C_TOOL_RULES = """你可以：
@@ -176,14 +177,31 @@ def _tools(buyer_id: str, mode: str = MODE_TRANSACTION):
         """按需求关键词和预算推荐真实商家商品；返回价格、库存、SKU 和商品 ID。"""
         try:
             repo = get_merchant_repository()
-            products = repo.list_products(store_agent.STORE_MERCHANT_ID, keyword=need, limit=20)
+            # 先按商品目录做语义召回；没有命中时再跨商家兜底，
+            # 避免 CApp 小伴因为默认商家不是当前店铺而“查不到在售商品”。
+            products = rank_product_matches(
+                repo.list_products(store_agent.STORE_MERCHANT_ID, limit=100),
+                need,
+                limit=20,
+            )
+            if not products:
+                all_products = []
+                for tenant in store.list_tenants():
+                    tenant_id = str(tenant.get("merchant_id") or "").strip()
+                    if not tenant_id:
+                        continue
+                    all_products.extend(repo.list_products(tenant_id, limit=100))
+                products = rank_product_matches(all_products, need, limit=20)
+                if not products and is_browse_query(need):
+                    products = all_products[:20]
             result = []
             for product in products:
-                skus = repo.list_product_skus(product.product_id, merchant_id=store_agent.STORE_MERCHANT_ID)
+                product_merchant = str(getattr(product, "merchant_id", "") or store_agent.STORE_MERCHANT_ID)
+                skus = repo.list_product_skus(product.product_id, merchant_id=product_merchant)
                 if not skus:
                     continue
                 sku = skus[0]
-                inventory = repo.get_inventory(sku.sku, merchant_id=store_agent.STORE_MERCHANT_ID)
+                inventory = repo.get_inventory(sku.sku, merchant_id=product_merchant)
                 price = float(sku.price)
                 if budget is not None and price > float(budget):
                     continue
@@ -212,25 +230,32 @@ def _tools(buyer_id: str, mode: str = MODE_TRANSACTION):
         try:
             repo = get_merchant_repository()
             m_buyer = store_agent.merchant_buyer_id(buyer_id)
+            merchant_ids = [
+                str(tenant.get("merchant_id") or "").strip()
+                for tenant in store.list_tenants()
+                if str(tenant.get("merchant_id") or "").strip()
+            ]
+            if not merchant_ids:
+                merchant_ids = [store_agent.STORE_MERCHANT_ID]
             if order_id:
-                order = repo.get_order(
-                    order_id,
-                    merchant_id=store_agent.STORE_MERCHANT_ID,
+                for merchant_id in merchant_ids:
+                    order = repo.get_order(order_id, merchant_id=merchant_id, buyer_id=m_buyer)
+                    if order is not None:
+                        return {"ok": True, "source": "merchant_v1", "order": order.to_dict()}
+                return {"ok": False, "error": {"code": "ORDER_NOT_FOUND", "message": "没有找到这笔订单"}}
+            orders = []
+            for merchant_id in merchant_ids:
+                orders.extend(repo.list_orders(
+                    merchant_id,
                     buyer_id=m_buyer,
-                )
-                if order is None:
-                    return {"ok": False, "error": {"code": "ORDER_NOT_FOUND", "message": "没有找到这笔订单"}}
-                return {"ok": True, "source": "merchant_v1", "order": order.to_dict()}
-            orders = repo.list_orders(
-                store_agent.STORE_MERCHANT_ID,
-                buyer_id=m_buyer,
-                status=status,
-                limit=10,
-            )
+                    status=status,
+                    limit=10,
+                ))
+            orders.sort(key=lambda item: str(getattr(item, "created_at", "") or ""), reverse=True)
             return {
                 "ok": True,
                 "source": "merchant_v1",
-                "orders": [order.to_dict() for order in orders],
+                "orders": [order.to_dict() for order in orders[:10]],
             }
         except MerchantError as exc:
             return {"ok": False, "error": {"code": "MERCHANT_UNAVAILABLE", "message": str(exc)}}
@@ -311,6 +336,40 @@ def _extract_draft(messages: list[Any]) -> dict[str, Any] | None:
             if candidate.get("order_id") and candidate.get("confirmation_token"):
                 return candidate
     return None
+
+
+def _extract_product_refs(messages: list[Any]) -> list[dict[str, Any]]:
+    """从本轮工具结果提取商品卡片，供 CApp 气泡直接展示图片。"""
+    refs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for message in messages or []:
+        name = getattr(message, "name", "")
+        if name not in {"recommend_products", "search_catalog"}:
+            continue
+        payload = getattr(message, "content", "")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+        if not isinstance(payload, dict):
+            continue
+        for product in payload.get("products") or []:
+            product_id = str(product.get("product_id") or "").strip()
+            if not product_id or product_id in seen:
+                continue
+            seen.add(product_id)
+            refs.append({
+                "product_id": product_id,
+                "merchant_id": product.get("merchant_id") or "",
+                "title": product.get("title") or "",
+                "price": product.get("price"),
+                "sku": product.get("sku") or "",
+                "spec": product.get("spec") or "",
+                "image_url": product.get("image_url") or "",
+                "thumb_url": product.get("image_url") or "",
+            })
+    return refs[:6]
 
 
 def _last_ai_text(messages: list[Any]) -> str:
@@ -487,6 +546,7 @@ def run_c_agent(
         "draft": draft,
         "order": state.get("order"),
         "messages": state.get("messages") or [],
+        "product_refs": _extract_product_refs(state.get("messages") or []),
         "next": list(snapshot.next or ()),
     }
 

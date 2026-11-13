@@ -227,12 +227,8 @@ def _insert_message(
 
 
 def _mock_store_reply(content: str) -> tuple[str, bool]:
-    text = content.strip()
-    if "@店宠" not in text and "店宠" not in text:
-        return "（店宠未被唤醒：请 @店宠 并说明售前、售后或砍价需求）", False
-    if "砍价" in text or "优惠" in text or "券" in text:
-        return "喵~ 收到砍价请求。当前是 mock 店宠，优惠需要用户确认后才会生效。", True
-    return "喵~ 店宠已收到你的问题，当前是 mock 回复，后续接入商家 Agent 后会查商品库和 SOP。", True
+    """店宠 Agent 不可用时的诚实降级，不伪造商品/价格/优惠。"""
+    return "（店宠暂时没连上，请稍后再试）", True
 
 
 def add_friend(

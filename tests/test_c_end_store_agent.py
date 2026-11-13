@@ -42,7 +42,7 @@ def _policy_call():
 
 def test_intent_gate_requires_wake_and_business_intent():
     assert store_agent.intent_gate("这双鞋多少钱") == (False, False, "这双鞋多少钱")
-    assert store_agent.intent_gate("@店宠 你好") == (True, False, "你好")
+    assert store_agent.intent_gate("@店宠 你好") == (True, True, "你好")
     wake, allowed, cleaned = store_agent.intent_gate("@店宠 推荐一双跑鞋")
     assert (wake, allowed, cleaned) == (True, True, "推荐一双跑鞋")
 

@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 3.25.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 3.26.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v3.25.0 |
+| AGENTS.md | v3.26.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -642,6 +642,7 @@ IM 社交载体
 | 3.23.0 | 2026-11-13 | P2.6：CApp 全局购物车入口/抽屉、角标、行内数量增减；PWA v18 |
 | 3.24.0 | 2026-11-13 | P2.7：购物车商品规格编辑、价格/库存/数量联动、同 SKU 合并；PWA v19 |
 | 3.25.0 | 2026-11-13 | 公网验收共享购物车：PWA v20、桌面/手机、报价→订单→双入口清空；测试订单待清理 |
+| 3.26.0 | 2026-11-13 | CApp 语义商品检索、商家单聊自动唤醒、购物车/聊天商品图片；767 tests |
 
 
 

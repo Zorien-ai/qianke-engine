@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router";
 import CompanionAvatar from "../components/CompanionAvatar.vue";
 import { getJson, postJson, patchJson, del, postForm } from "../api";
+import { productMatchesQuery } from "../catalogSearch";
 import { cart, cartItemKey, cartLineMax, cartCheckoutPayload } from "../cart";
 
 const threads = ref([
@@ -1217,6 +1218,7 @@ function mapStoreMessage(message) {
         ? "user"
         : "merchant",
     text: cleanReply(message.content),
+    productRefs: Array.isArray(message.metadata?.product_refs) ? message.metadata.product_refs : [],
     time: (message.created_at || "").slice(11, 16),
     createdAt: message.created_at,
   };
@@ -1379,7 +1381,11 @@ function handleStoreSocket(event) {
     pendingRetry.value = null;
     lastStoreSend.value = null;
     if (payload.reply) {
-      pushMessage({ role: "merchant", text: cleanReply(payload.reply.content) });
+      pushMessage({
+        role: "merchant",
+        text: cleanReply(payload.reply.content),
+        productRefs: Array.isArray(payload.reply.metadata?.product_refs) ? payload.reply.metadata.product_refs : [],
+      });
       if (payload.reply.metadata?.quote_id) storeQuote.value = payload.reply.metadata;
     }
     if (payload.companion_message) {
@@ -1636,6 +1642,7 @@ async function loadCompanionMessages() {
         id: message.message_id,
         role: message.role === "user" ? "user" : "companion",
         text: cleanReply(message.content),
+        productRefs: Array.isArray(message.metadata?.product_refs) ? message.metadata.product_refs : [],
         time: (message.created_at || "").slice(11, 16),
         createdAt: message.created_at,
       }));
@@ -1658,6 +1665,7 @@ async function loadOlderCompanion() {
       id: message.message_id,
       role: message.role === "user" ? "user" : "companion",
       text: cleanReply(message.content),
+      productRefs: Array.isArray(message.metadata?.product_refs) ? message.metadata.product_refs : [],
       time: (message.created_at || "").slice(11, 16),
       createdAt: message.created_at,
     }));
@@ -1821,7 +1829,11 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
         }
       );
       if (result.reply) {
-        pushMessage({ role: "merchant", text: cleanReply(result.reply.content) });
+        pushMessage({
+          role: "merchant",
+          text: cleanReply(result.reply.content),
+          productRefs: Array.isArray(result.reply.metadata?.product_refs) ? result.reply.metadata.product_refs : [],
+        });
         if (result.reply.metadata?.quote_id) storeQuote.value = result.reply.metadata;
       }
       if (result.companion_message) {
@@ -1862,11 +1874,13 @@ async function deliverText(text, isRetry = false, clientId = null, mode = "") {
     liveThreadId.value = result.thread_id || liveThreadId.value;
     agentError.value = "";
     const replyText = cleanReply(result.reply) || "已处理，请查看当前待确认信息。";
+    const productRefs = Array.isArray(result.product_refs) ? result.product_refs : [];
     pushMessage({
       role: "companion",
       text: replyText,
+      productRefs,
     });
-    await persistAppMessage("companion", replyText);
+    await persistAppMessage("companion", replyText, productRefs.length ? { product_refs: productRefs } : {});
     applyReplyEmotion(replyText);
     speakReply(replyText);
     if (result.memories_added) await loadMemories();
@@ -2032,14 +2046,9 @@ function fallbackProductNeed() {
 }
 
 const filteredNegotiationProducts = computed(() => {
-  const keyword = String(negotiationProductSearch.value || "").trim().toLowerCase();
+  const keyword = String(negotiationProductSearch.value || "").trim();
   if (!keyword) return negotiationProductOptions.value;
-  return negotiationProductOptions.value.filter((product) => {
-    const haystack = [product.title, product.category, product.brand]
-      .map((value) => String(value || "").toLowerCase())
-      .join(" ");
-    return haystack.includes(keyword);
-  });
+  return negotiationProductOptions.value.filter((product) => productMatchesQuery(product, keyword));
 });
 
 const visibleCartItems = computed(() =>
@@ -3366,6 +3375,15 @@ onBeforeUnmount(() => {
                   >{{ part.text }}</span>
                   <time class="c-bubble-time">{{ message.time }}</time>
                 </p>
+                <div v-if="message.productRefs?.length" class="c-product-refs">
+                  <div v-for="item in message.productRefs" :key="`${item.product_id}-${item.sku}`" class="c-product-ref">
+                    <img v-if="item.thumb_url || item.image_url" :src="item.thumb_url || item.image_url" :alt="item.title" loading="lazy" @error="$event.target.style.display = 'none'" />
+                    <div>
+                      <strong>{{ item.title }}</strong>
+                      <small>{{ item.spec || item.sku }} · ¥{{ Number(item.price || 0).toFixed(2) }}</small>
+                    </div>
+                  </div>
+                </div>
                 <div v-if="message.quote" class="c-quote-attachment">
                   <span class="c-quote-label">报价引用</span>
                   <div class="c-quote-row">
@@ -4643,6 +4661,58 @@ onBeforeUnmount(() => {
 
 .c-message.merchant .c-bubble {
   background: var(--c-bg-soft);
+}
+
+.c-product-refs {
+  display: flex;
+  max-width: min(420px, 100%);
+  gap: 7px;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+.c-product-ref {
+  display: flex;
+  flex: 0 0 170px;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-panel);
+}
+
+.c-product-ref img {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--c-bg-soft);
+}
+
+.c-product-ref div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.c-product-ref strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.c-product-ref small {
+  overflow: hidden;
+  color: var(--c-text-3);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .c-quote-attachment {

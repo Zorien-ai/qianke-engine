@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { getJson, postJson } from "../api";
+import { productMatchesQuery } from "../catalogSearch";
 import ShoppingCart from "../components/ShoppingCart.vue";
 import { cart } from "../cart";
 
@@ -72,10 +73,7 @@ const filteredProducts = computed(() => {
   let list = products.value.filter((product) => {
     if (categoryFilter.value !== "全部" && product.category !== categoryFilter.value) return false;
     if (!keyword) return true;
-    const haystack = [product.title, product.category, product.brand]
-      .map((value) => String(value || "").toLowerCase())
-      .join(" ");
-    return haystack.includes(keyword);
+    return productMatchesQuery(product, keyword);
   });
   list = [...list];
   if (sortMode.value === "price-asc") {
