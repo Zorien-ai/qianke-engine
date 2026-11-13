@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { RouterLink } from "vue-router";
 import CompanionAvatar from "../components/CompanionAvatar.vue";
 import { getJson, postJson, patchJson, del, postForm } from "../api";
+import { cart, cartItemKey, cartLineMax, cartCheckoutPayload } from "../cart";
 
 const threads = ref([
   {
@@ -332,7 +333,7 @@ const negotiationProductOptions = ref([]);
 const negotiationProductId = ref("");
 const negotiationProductSearch = ref("");
 const negotiationCartHint = ref("");
-const cartItems = ref([]);
+const cartItems = cart.items;
 const cartOpen = ref(false);
 const cartDrawerError = ref("");
 const cartEditItem = ref(null);
@@ -341,7 +342,6 @@ const cartEditQuantity = ref(1);
 const cartEditOptions = ref([]);
 const cartEditLoading = ref(false);
 const cartEditError = ref("");
-const CART_STORAGE_KEY = "qianke:cart";
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
 const clearingCompanion = ref(false);
@@ -2072,79 +2072,31 @@ const cartEditMaxQuantity = computed(() =>
   Math.max(1, Math.min(20, Number(cartEditActiveSku.value?.stock || 1) || 1))
 );
 
-function loadCart() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "[]");
-    cartItems.value = Array.isArray(stored)
-      ? stored.filter((item) => item && item.sku && Number(item.quantity) > 0)
-      : [];
-  } catch {
-    cartItems.value = [];
-  }
-}
-
-function saveCart() {
-  try {
-    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cartItems.value));
-  } catch {
-    // 本地存储不可用时购物车只在当前页面生命周期内有效
-  }
-}
-
 function addSelectedToCart() {
-  const product = negotiationProductOptions.value.find(
-    (item) => item.product_id === negotiationProductId.value
-  );
+  const product = negotiationProductOptions.value.find((item) => item.product_id === negotiationProductId.value);
   const sku = negotiationSkuOptions.value.find((item) => item.sku === negotiationSku.value);
-  if (!product || !sku) {
-    negotiationCartHint.value = "先选择商品和规格";
+  if (!product || !sku || !sku.in_stock) {
+    negotiationCartHint.value = "请选择有库存的商品和规格";
     return;
   }
-  if (!sku.in_stock) {
-    negotiationCartHint.value = "这个规格暂时缺货";
-    return;
-  }
-  const quantity = Math.max(1, Math.min(Number(sku.stock || 1), Number(negotiationQuantity.value) || 1, 20));
-  const friendId = String(negotiationFriendId.value || "").trim();
-  const existing = cartItems.value.find(
-    (item) => item.friend_id === friendId && item.sku === sku.sku
-  );
-  if (existing) {
-    existing.quantity = Math.min(Number(sku.stock || 20), Number(existing.quantity || 0) + quantity, 20);
-  } else {
-    cartItems.value.push({
-      friend_id: friendId,
+  try {
+    cart.add({
+      friend_id: String(negotiationFriendId.value || "").trim(),
       merchant_name: negotiationMerchant.value,
       product_id: product.product_id,
       title: product.title,
       image_url: product.image_url,
-      sku: sku.sku,
-      spec: sku.spec,
-      price: Number(sku.price || 0),
-      stock: Number(sku.stock || 0),
-      quantity,
+      ...sku,
+      quantity: Math.max(1, Math.min(cartLineMax(sku), Number(negotiationQuantity.value) || 1)),
     });
+    negotiationCartHint.value = `已加入购物车：${product.title} ${sku.spec}`;
+  } catch (error) {
+    negotiationCartHint.value = error.message;
   }
-  saveCart();
-  negotiationCartHint.value = `已加入购物车：${product.title} ${sku.spec}`;
 }
 
-function removeCartItem(sku) {
-  cartItems.value = cartItems.value.filter((item) => item.sku !== sku);
-  saveCart();
-}
-
-function cartLineMax(item) {
-  return Math.max(1, Math.min(20, Number(item?.stock || 20) || 20));
-}
-
-function changeCartItemQuantity(sku, delta) {
-  const item = cartItems.value.find((line) => line.sku === sku);
-  if (!item) return;
-  const next = Number(item.quantity || 1) + Number(delta || 0);
-  item.quantity = Math.max(1, Math.min(cartLineMax(item), next));
-  saveCart();
-}
+function removeCartItem(item) { cart.remove(item); }
+function changeCartItemQuantity(item, delta) { cart.setQuantity(item, item.quantity + delta); }
 
 function openCartDrawer() {
   cartDrawerError.value = "";
@@ -2245,46 +2197,35 @@ function saveCartEdit() {
     cartEditError.value = "这个规格暂时缺货";
     return;
   }
-  const quantity = Math.max(
-    1,
-    Math.min(Number(sku.stock || 1), Number(cartEditQuantity.value) || 1, 20)
-  );
-  const duplicate = cartItems.value.find(
-    (item) =>
-      item !== original &&
-      item.friend_id === original.friend_id &&
-      item.sku === sku.sku
-  );
-  if (duplicate) {
-    duplicate.quantity = Math.min(cartLineMax(duplicate), Number(duplicate.quantity || 0) + quantity);
-    cartItems.value = cartItems.value.filter((item) => item !== original);
-  } else {
-    original.sku = sku.sku;
-    original.spec = sku.spec;
-    original.price = sku.price;
-    original.stock = sku.stock;
-    original.quantity = quantity;
+  try {
+    cart.edit(original, sku, cartEditQuantity.value);
+    closeCartItemEditor();
+  } catch (error) {
+    cartEditError.value = error.message;
   }
-  saveCart();
-  closeCartItemEditor();
 }
 
 function clearCurrentCart() {
-  const friendId = String(negotiationFriendId.value || "").trim();
-  cartItems.value = cartItems.value.filter((item) => item.friend_id !== friendId);
-  saveCart();
+  cart.clearMerchant(String(negotiationFriendId.value || "").trim());
 }
 
 async function confirmCartQuote() {
   if (!visibleCartItems.value.length || negotiating.value) return;
+  let payload;
+  try {
+    payload = cartCheckoutPayload(visibleCartItems.value);
+  } catch (error) {
+    negotiationFormError.value = error.message;
+    return;
+  }
   const budget = Math.max(1, Number(negotiationBudget.value) || NEGOTIATION_DEFAULT_BUDGET);
   negotiationOpen.value = false;
   await runNegotiation("购物车合并报价", budget, 1, {
-    friendId: negotiationFriendId.value,
+    friendId: payload.friend_id,
     echoUser: negotiationEchoUser.value,
-    items: visibleCartItems.value.map((item) => ({ sku: item.sku, quantity: item.quantity })),
+    items: payload.items,
   });
-  if (!negotiationRejected.value && storeQuote.value) clearCurrentCart();
+  // Keep cart contents until CShop confirms the order successfully.
 }
 
 function quoteRefCount(quote) {
@@ -2501,7 +2442,7 @@ async function runNegotiation(need, budget = NEGOTIATION_DEFAULT_BUDGET, quantit
     }
     if (String(data?.status || "").toUpperCase() === "ACCEPTED" && data?.quote) {
       // 复用既有结构化报价卡 / 查看报价链接；成交仍由用户在商城逐单确认
-      storeQuote.value = data.quote;
+      storeQuote.value = { ...data.quote, cart_quote: cartPayload.length > 0 };
       negotiationRejected.value = false;
     } else {
       // 拒绝时不生成报价卡，只补一条伙伴解释（原因码映射为界面文案）
@@ -2818,7 +2759,7 @@ onMounted(async () => {
   await loadAccountContext();
   stripDemoSeedForRealAccount();
   await loadMerchantThreads();
-  loadCart();
+  cart.reload();
   await Promise.all([loadCompanion(), loadCompanionMessages(), loadRecentOrders(), loadMemories(), loadRhythm(), loadDiary()]);
   await pollCheckin();
   await refreshUnread();
@@ -2978,7 +2919,7 @@ onBeforeUnmount(() => {
             <button type="button" @click="clearCurrentCart">清空</button>
           </div>
           <div class="c-cart-list">
-            <div v-for="item in visibleCartItems" :key="item.sku" class="c-cart-item">
+            <div v-for="item in visibleCartItems" :key="cartItemKey(item)" class="c-cart-item">
               <span class="c-cart-thumb">
                 <img v-if="item.image_url" :src="item.image_url" :alt="item.title" loading="lazy" @error="$event.target.style.display = 'none'" />
                 <span>{{ item.title.slice(0, 1) }}</span>
@@ -2989,11 +2930,11 @@ onBeforeUnmount(() => {
               </span>
               <button type="button" class="c-cart-edit" @click="openCartItemEditor(item)">改规格</button>
               <span class="c-cart-qty">
-                <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item.sku, -1)">−</button>
+                <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item, -1)">−</button>
                 <strong>{{ item.quantity }}</strong>
-                <button type="button" aria-label="增加数量" :disabled="Number(item.quantity) >= cartLineMax(item)" @click="changeCartItemQuantity(item.sku, 1)">＋</button>
+                <button type="button" aria-label="增加数量" :disabled="Number(item.quantity) >= cartLineMax(item)" @click="changeCartItemQuantity(item, 1)">＋</button>
               </span>
-              <button type="button" class="c-cart-remove" :aria-label="`移除 ${item.title}`" @click="removeCartItem(item.sku)">×</button>
+              <button type="button" class="c-cart-remove" :aria-label="`移除 ${item.title}`" @click="removeCartItem(item)">×</button>
             </div>
           </div>
           <button type="button" class="c-cart-merge" :disabled="negotiating" @click="confirmCartQuote">
@@ -3032,7 +2973,7 @@ onBeforeUnmount(() => {
           <p>在砍价确认层里选商品，加入购物车。</p>
         </div>
         <div v-else class="c-cart-drawer-list">
-          <div v-for="item in cartItems" :key="item.sku" class="c-cart-drawer-item">
+          <div v-for="item in cartItems" :key="cartItemKey(item)" class="c-cart-drawer-item">
             <span class="c-cart-thumb">
               <img v-if="item.image_url" :src="item.image_url" :alt="item.title" loading="lazy" @error="$event.target.style.display = 'none'" />
               <span>{{ item.title.slice(0, 1) }}</span>
@@ -3044,11 +2985,11 @@ onBeforeUnmount(() => {
             </div>
             <button type="button" class="c-cart-edit" @click="openCartItemEditor(item)">改规格</button>
             <div class="c-cart-qty">
-              <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item.sku, -1)">−</button>
+              <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item, -1)">−</button>
               <strong>{{ item.quantity }}</strong>
-              <button type="button" aria-label="增加数量" :disabled="Number(item.quantity) >= cartLineMax(item)" @click="changeCartItemQuantity(item.sku, 1)">＋</button>
+              <button type="button" aria-label="增加数量" :disabled="Number(item.quantity) >= cartLineMax(item)" @click="changeCartItemQuantity(item, 1)">＋</button>
             </div>
-            <button type="button" class="c-cart-remove" :aria-label="`移除 ${item.title}`" @click="removeCartItem(item.sku)">×</button>
+            <button type="button" class="c-cart-remove" :aria-label="`移除 ${item.title}`" @click="removeCartItem(item)">×</button>
           </div>
         </div>
         <p v-if="cartDrawerError" class="c-inline-error" role="alert">{{ cartDrawerError }}</p>
@@ -3727,7 +3668,8 @@ onBeforeUnmount(() => {
                   path: '/c',
                   query: {
                     quote: storeQuote.quote_id,
-                    friend_id: activeId,
+                    cart: storeQuote.cart_quote ? '1' : undefined,
+                    friend_id: storeQuote.friend_id || activeId,
                     merchant_id: storeQuote.merchant_id,
                     merchant_name: storeQuote.merchant_name,
                   },
