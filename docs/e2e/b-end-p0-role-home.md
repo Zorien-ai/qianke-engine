@@ -43,7 +43,32 @@ web/src/b-workbench.css
 
 ## 静态验证
 
-本地 API 因 PostgreSQL/Docker 停止不可用，使用构建产物 + Playwright 路由 mock 验证布局和交互，不是生产接口验收。
+## 真实接口验收
+
+PostgreSQL/Docker 恢复后，使用 B 端账号 `test_b_image` 完成真实接口浏览器验收：
+
+```text
+GET /api/b/workbench/me                 200
+GET /api/b/workbench/orders?limit=100   200
+GET /api/b/workbench/after-sales?limit=100 200
+GET /api/b/workbench/products           200
+GET /api/b/workbench/inventory/alerts?limit=100 200
+GET /api/superagent/work-items?limit=50 200
+console errors / warnings               0
+```
+
+真实数据：
+
+```text
+订单 11 笔
+商品 8 个
+工作首页：今日模拟完成流水 ¥602.00、1 笔完成、1 笔待发货
+订单表格：11 行；详情抽屉显示 order_1579fdd829d7443a
+商品表格：8 行；价格范围、可售、锁定、低库存列正常
+手机 390 视口：document.scrollWidth = clientWidth = 375
+```
+
+之前静态 mock 验证仍然保留，作为无后端时的布局回归。
 
 ```text
 桌面 1440×1000
@@ -68,6 +93,7 @@ web/src/b-workbench.css
 docs/design/b-end-2.0-p0-prod-overview.png
 docs/design/b-end-2.0-p0-prod-orders.png
 docs/design/b-end-2.0-p0-prod-products.png
+docs/design/b-end-2.0-p0-prod-order-drawer.png
 docs/design/b-end-2.0-p0-prod-mobile.png
 ```
 
@@ -78,5 +104,5 @@ docs/design/b-end-2.0-p0-prod-mobile.png
 - 经营报告、客服会话、批量能力仍为待接入/禁用态
 - 订单操作已移入详情抽屉并加入模拟支付/完成确认；真实支付/完成仍待后端契约
 - 批量发货/改库存/导出尚未接入
-- 本地没有 API 运行环境，尚未做真实接口浏览器验收
+- 真实接口已验收；测试订单 order_1579fdd829d7443a 仍在数据中，待清理
 ```
