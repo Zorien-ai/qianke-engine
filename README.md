@@ -35,9 +35,33 @@
 
 ---
 
+## 核心功能截图
+
+> 截图均来自真实运行环境，覆盖商家工作台、C 端商城、商品图管理、SKU、砍价、
+> 购物车与多商品订单链路。更多验收记录见 [docs/e2e](docs/e2e)。
+
+| B 端商家工作台：商品 / 库存 / SKU | B 端商品图管理：实拍图与多规格 |
+| --- | --- |
+| ![B 端商家工作台](docs/e2e/b-workbench-stock-sku.png) | ![B 端商品图管理](docs/e2e/b-product-images.png) |
+
+| CShop：搜索、分类与商品卡 | CShop：SKU 规格切换与库存联动 |
+| --- | --- |
+| ![CShop 商品搜索](docs/e2e/p2-cshop-list.png) | ![CShop SKU 详情](docs/e2e/p2-cshop-detail.png) |
+
+| CApp：商品搜索与图片商品卡 | CApp：全局购物车与合并报价 |
+| --- | --- |
+| ![CApp 商品卡](docs/e2e/p24-capp-cards.png) | ![CApp 购物车](docs/e2e/p26-capp-cart-drawer.png) |
+
+| 双宠谈判 → 报价 → 订单确认 | 多商品合并报价 → 多 SKU 订单 |
+| --- | --- |
+| ![砍价报价确认](docs/e2e/p21-confirmed.png) | ![多商品订单](docs/e2e/p25-cshop-order.png) |
+
+---
+
 ## 目录
 
 - [宣传片](#宣传片)
+- [核心功能截图](#核心功能截图)
 - [核心特性](#核心特性)
 - [系统架构](#系统架构)
 - [能力清单](#能力清单)
