@@ -335,6 +335,12 @@ const negotiationCartHint = ref("");
 const cartItems = ref([]);
 const cartOpen = ref(false);
 const cartDrawerError = ref("");
+const cartEditItem = ref(null);
+const cartEditSku = ref("");
+const cartEditQuantity = ref(1);
+const cartEditOptions = ref([]);
+const cartEditLoading = ref(false);
+const cartEditError = ref("");
 const CART_STORAGE_KEY = "qianke:cart";
 const hasMoreCompanion = ref(false);
 const companionBefore = ref("");
@@ -2059,6 +2065,12 @@ const globalCartTotal = computed(() =>
     0
   )
 );
+const cartEditActiveSku = computed(() =>
+  cartEditOptions.value.find((sku) => sku.sku === cartEditSku.value) || null
+);
+const cartEditMaxQuantity = computed(() =>
+  Math.max(1, Math.min(20, Number(cartEditActiveSku.value?.stock || 1) || 1))
+);
 
 function loadCart() {
   try {
@@ -2167,6 +2179,94 @@ function openCartCheckout() {
   negotiationCartHint.value = "";
   negotiationOpen.value = true;
   void loadNegotiationSkuOptions();
+}
+
+async function openCartItemEditor(item) {
+  if (!item) return;
+  cartEditItem.value = item;
+  cartEditSku.value = String(item.sku || "");
+  cartEditQuantity.value = Math.max(1, Number(item.quantity || 1));
+  cartEditOptions.value = [];
+  cartEditError.value = "";
+  cartEditLoading.value = true;
+  try {
+    const friendId = String(item.friend_id || negotiationFriendId.value || "").trim();
+    if (!friendId) throw new Error("缺少商家信息");
+    const data = await getJson(
+      `/api/c/merchant/products?friend_id=${encodeURIComponent(friendId)}&limit=12`
+    );
+    const products = Array.isArray(data?.products) ? data.products : [];
+    const product = products.find((entry) => entry.product_id === item.product_id);
+    if (!product) throw new Error("商品已下架或不在当前店铺");
+    cartEditOptions.value = (Array.isArray(product.skus) ? product.skus : [])
+      .filter((sku) => sku && sku.sku)
+      .map((sku) => ({
+        sku: String(sku.sku),
+        spec: String(sku.spec || "默认规格"),
+        price: Number(sku.price || 0),
+        stock: Number(sku.stock || 0),
+        in_stock: sku.in_stock !== false && Number(sku.stock || 0) > 0,
+      }));
+    const known = cartEditOptions.value.find((sku) => sku.sku === cartEditSku.value);
+    const selected = known || cartEditOptions.value.find((sku) => sku.in_stock) || cartEditOptions.value[0];
+    if (selected) {
+      cartEditSku.value = selected.sku;
+      cartEditQuantity.value = Math.max(
+        1,
+        Math.min(Number(selected.stock || 1), cartEditQuantity.value, 20)
+      );
+    }
+  } catch (error) {
+    cartEditError.value = error?.detail || error?.message || "规格读取失败";
+  } finally {
+    cartEditLoading.value = false;
+  }
+}
+
+function closeCartItemEditor() {
+  cartEditItem.value = null;
+  cartEditError.value = "";
+  cartEditOptions.value = [];
+}
+
+function changeCartEditQuantity(delta) {
+  const next = Number(cartEditQuantity.value || 1) + Number(delta || 0);
+  cartEditQuantity.value = Math.max(1, Math.min(cartEditMaxQuantity.value, next));
+}
+
+function saveCartEdit() {
+  const original = cartEditItem.value;
+  const sku = cartEditActiveSku.value;
+  if (!original || !sku) {
+    cartEditError.value = "请选择有效规格";
+    return;
+  }
+  if (!sku.in_stock) {
+    cartEditError.value = "这个规格暂时缺货";
+    return;
+  }
+  const quantity = Math.max(
+    1,
+    Math.min(Number(sku.stock || 1), Number(cartEditQuantity.value) || 1, 20)
+  );
+  const duplicate = cartItems.value.find(
+    (item) =>
+      item !== original &&
+      item.friend_id === original.friend_id &&
+      item.sku === sku.sku
+  );
+  if (duplicate) {
+    duplicate.quantity = Math.min(cartLineMax(duplicate), Number(duplicate.quantity || 0) + quantity);
+    cartItems.value = cartItems.value.filter((item) => item !== original);
+  } else {
+    original.sku = sku.sku;
+    original.spec = sku.spec;
+    original.price = sku.price;
+    original.stock = sku.stock;
+    original.quantity = quantity;
+  }
+  saveCart();
+  closeCartItemEditor();
 }
 
 function clearCurrentCart() {
@@ -2887,6 +2987,7 @@ onBeforeUnmount(() => {
                 <strong>{{ item.title }}</strong>
                 <small>{{ item.spec }} · ¥{{ Number(item.price).toFixed(2) }}</small>
               </span>
+              <button type="button" class="c-cart-edit" @click="openCartItemEditor(item)">改规格</button>
               <span class="c-cart-qty">
                 <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item.sku, -1)">−</button>
                 <strong>{{ item.quantity }}</strong>
@@ -2941,6 +3042,7 @@ onBeforeUnmount(() => {
               <small>{{ item.merchant_name }} · {{ item.spec }}</small>
               <span>¥{{ Number(item.price).toFixed(2) }}</span>
             </div>
+            <button type="button" class="c-cart-edit" @click="openCartItemEditor(item)">改规格</button>
             <div class="c-cart-qty">
               <button type="button" aria-label="减少数量" :disabled="Number(item.quantity) <= 1" @click="changeCartItemQuantity(item.sku, -1)">−</button>
               <strong>{{ item.quantity }}</strong>
@@ -2955,6 +3057,47 @@ onBeforeUnmount(() => {
           <button type="button" class="c-cart-checkout" @click="openCartCheckout">去合并报价</button>
         </footer>
       </aside>
+    </div>
+
+    <div v-if="cartEditItem" class="c-cart-editor-mask" @click.self="closeCartItemEditor">
+      <section class="c-cart-editor" role="dialog" aria-modal="true" aria-labelledby="c-cart-editor-title">
+        <header class="c-cart-editor-head">
+          <div>
+            <strong id="c-cart-editor-title">改规格</strong>
+            <small>{{ cartEditItem.title }}</small>
+          </div>
+          <button type="button" class="c-icon-btn" aria-label="关闭改规格" @click="closeCartItemEditor">×</button>
+        </header>
+        <p v-if="cartEditLoading" class="c-cart-editor-hint">正在读取规格…</p>
+        <p v-else-if="cartEditError" class="c-inline-error" role="alert">{{ cartEditError }}</p>
+        <template v-else>
+          <label class="c-cart-editor-field">
+            <span>规格</span>
+            <select v-model="cartEditSku">
+              <option v-for="sku in cartEditOptions" :key="sku.sku" :value="sku.sku" :disabled="!sku.in_stock">
+                {{ sku.spec }} · ¥{{ Number(sku.price).toFixed(2) }}{{ sku.in_stock ? "" : "（缺货）" }}
+              </option>
+            </select>
+          </label>
+          <div class="c-cart-editor-row">
+            <span>数量</span>
+            <div class="c-cart-qty">
+              <button type="button" aria-label="减少数量" :disabled="cartEditQuantity <= 1" @click="changeCartEditQuantity(-1)">−</button>
+              <strong>{{ cartEditQuantity }}</strong>
+              <button type="button" aria-label="增加数量" :disabled="cartEditQuantity >= cartEditMaxQuantity" @click="changeCartEditQuantity(1)">＋</button>
+            </div>
+            <small>库存 {{ cartEditActiveSku?.stock ?? 0 }}</small>
+          </div>
+          <p class="c-cart-editor-sum">
+            单价 ¥{{ Number(cartEditActiveSku?.price || 0).toFixed(2) }}
+            · 小计 ¥{{ (Number(cartEditActiveSku?.price || 0) * Number(cartEditQuantity || 1)).toFixed(2) }}
+          </p>
+          <div class="c-cart-editor-actions">
+            <button type="button" class="c-cart-editor-cancel" @click="closeCartItemEditor">取消</button>
+            <button type="button" class="c-cart-editor-save" @click="saveCartEdit">保存规格</button>
+          </div>
+        </template>
+      </section>
     </div>
 
     <div class="c-shell">
@@ -7058,6 +7201,142 @@ onBeforeUnmount(() => {
     width: 100%;
     padding: 14px;
   }
+}
+
+
+.c-cart-edit {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--c-text-3, #948b7e);
+  font: inherit;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.c-cart-edit:hover {
+  background: var(--c-accent-soft, #f6e3da);
+  color: #9d4c31;
+}
+
+.c-cart-editor-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(41, 37, 31, 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.c-cart-editor {
+  width: min(360px, 92vw);
+  padding: 16px;
+  border: 1px solid var(--c-line-soft, #ece4d8);
+  border-radius: 12px;
+  background: var(--c-bg, #fbf8f1);
+  box-shadow: 0 18px 50px rgba(50, 44, 35, 0.22);
+}
+
+.c-cart-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.c-cart-editor-head strong {
+  display: block;
+  font-size: 14px;
+}
+
+.c-cart-editor-head small {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-text-3, #948b7e);
+  font-size: 10px;
+}
+
+.c-cart-editor-hint {
+  margin: 0;
+  color: var(--c-text-3, #948b7e);
+  font-size: 11px;
+}
+
+.c-cart-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
+  color: var(--c-text-2, #6b6258);
+  font-size: 10px;
+}
+
+.c-cart-editor-field select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--c-line-soft, #ece4d8);
+  border-radius: 8px;
+  background: var(--c-panel, #fffdf8);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+}
+
+.c-cart-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--c-text-2, #6b6258);
+  font-size: 10px;
+}
+
+.c-cart-editor-row small {
+  color: var(--c-text-3, #948b7e);
+  font-size: 9px;
+}
+
+.c-cart-editor-sum {
+  margin: 12px 0;
+  padding: 8px 9px;
+  border-radius: 7px;
+  background: var(--c-bg-soft, #f7f3ea);
+  color: var(--c-text-2, #6b6258);
+  font-size: 10px;
+}
+
+.c-cart-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.c-cart-editor-cancel,
+.c-cart-editor-save {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.c-cart-editor-cancel {
+  border: 1px solid var(--c-line-soft, #ece4d8);
+  background: transparent;
+  color: var(--c-text-2, #6b6258);
+}
+
+.c-cart-editor-save {
+  border: 1px solid var(--c-accent, #a8623f);
+  background: var(--c-accent, #a8623f);
+  color: #fff;
+  font-weight: 600;
 }
 
 </style>
