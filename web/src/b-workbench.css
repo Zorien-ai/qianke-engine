@@ -2637,21 +2637,3 @@ code,
 }
 
 
-/* 角色预览控件（仅 owner/admin，服务端权限不变） */
-.b-role-preview {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--b-muted);
-  font-size: 12px;
-}
-
-.b-role-preview select {
-  height: 28px;
-  padding: 0 4px;
-  border: 1px solid var(--b-line);
-  border-radius: 6px;
-  background: var(--b-bg-soft);
-  color: var(--b-text-2);
-  font-size: 12px;
-}

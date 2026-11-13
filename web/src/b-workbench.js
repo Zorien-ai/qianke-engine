@@ -154,7 +154,6 @@ const state = {
   statusConfirm: null,
   selectedOrderIds: new Set(),
   mobileMoreOpen: false,
-  workspaceRoleOverride: "",
   /* Super-agent */
   workItems: [],
   workItemsLoaded: false,
@@ -1871,9 +1870,6 @@ function emptyMarkup(message) {
 /* ---------------- B 2.0 P0：角色工作首页 ---------------- */
 
 function workspaceRole() {
-  if (["owner", "warehouse", "support"].includes(state.workspaceRoleOverride)) {
-    return state.workspaceRoleOverride;
-  }
   const role = String(state.me?.role || "").toLowerCase();
   const permissions = state.me?.permissions || [];
   if (role === "owner" || role === "admin") return "owner";
@@ -1966,16 +1962,8 @@ function overviewView() {
   const products = data.products || [];
   const alerts = data.alerts || [];
   const workItems = data.workItems || [];
-  const businessDateKey = (value) => {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-  };
-  const todayKey = businessDateKey(new Date().toISOString());
   const completed = orders.filter((order) => String(order.status || "").toUpperCase() === "COMPLETED");
-  const completedToday = completed.filter((order) => businessDateKey(order.completed_at) === todayKey);
-  const completedRevenue = completedToday.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+  const completedRevenue = completed.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
   const pendingShipment = orders.filter((order) => String(order.status || "").toUpperCase() === "PAID");
   const openAfterSales = afterSales.filter((ticket) => ["OPEN", "RETURN_SHIPPED", "RETURN_PENDING"].includes(String(ticket.status || "").toUpperCase()));
   const lowStockSkus = products.reduce((sum, product) => {
@@ -2018,8 +2006,8 @@ function overviewView() {
           overviewMetric("可查订单", String(orders.length), "当前加载范围"),
         ]
       : [
-          overviewMetric("今日模拟完成流水", money(completedRevenue), "当前加载 · 按 completed_at · 非真实收款", "accent"),
-          overviewMetric("今日完成订单", `${completedToday.length} 笔`, "当前加载范围"),
+          overviewMetric("当前加载完成流水", money(completedRevenue), "当前加载范围 · 非真实收款", "accent"),
+          overviewMetric("当前加载完成订单", `${completed.length} 笔`, "不是全店汇总"),
           overviewMetric("待发货样例", `${pendingShipment.length} 笔`, "与完成流水分开"),
           overviewMetric("低库存 SKU", String(lowStockCount), "当前加载范围 · 可用 ≤ 安全库存", "warn"),
         ];
@@ -2757,7 +2745,6 @@ function shellMarkup() {
           ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
         </div>
         <span class="b-role">${escapeHtml(roleText)}</span>
-        ${["owner", "admin"].includes(String(state.me?.role || "").toLowerCase()) ? `<label class="b-role-preview">视角<select data-workspace-role><option value="">自动</option><option value="owner" ${state.workspaceRoleOverride === "owner" ? "selected" : ""}>店主</option><option value="warehouse" ${state.workspaceRoleOverride === "warehouse" ? "selected" : ""}>仓库</option><option value="support" ${state.workspaceRoleOverride === "support" ? "selected" : ""}>客服</option></select></label>` : ""}
         <button type="button" class="b-store-switch" disabled title="多店成员关系接口尚未接入">切换店铺</button>
         <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
       </div>
@@ -3035,7 +3022,6 @@ function bindEvents() {
     const viewButton = target.closest("[data-view]");
     if (viewButton) {
       state.mobileMoreOpen = false;
-  state.workspaceRoleOverride = "";
       await switchView(viewButton.dataset.view);
       return;
     }
@@ -3163,11 +3149,6 @@ function bindEvents() {
       return;
     }
     if (!(target instanceof HTMLSelectElement)) return;
-    if (target.matches("[data-workspace-role]")) {
-      state.workspaceRoleOverride = ["owner", "warehouse", "support"].includes(target.value) ? target.value : "";
-      render();
-      return;
-    }
     if (target.matches("[data-order-limit]")) {
       const nextLimit = Number(target.value || 20);
       state.orderLimit = [10, 20, 50, 100].includes(nextLimit) ? nextLimit : 20;
@@ -3179,6 +3160,10 @@ function bindEvents() {
     }
     if (target.matches("[data-order-filter]")) {
       state.orderFilter = target.value;
+      state.orderOffset = 0;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      render();
       await loadOrders();
       return;
     }
