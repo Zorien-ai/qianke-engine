@@ -221,3 +221,28 @@ def test_orders_reject_invalid_date(c_store, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         b_workbench.workbench_orders(date_from="2026-13-99")
     assert exc.value.status_code == 400
+
+
+def test_orders_limit_is_capped_at_repository_limit(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_orders(limit=150)
+    assert data["limit"] == 100
+    assert len(data["orders"]) <= 100
+
+
+def test_orders_search_wildcard_is_literal(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_orders(q="%", limit=100)
+    assert data["total"] == 0
+    assert data["orders"] == []
+
+
+def test_orders_date_filter_uses_shanghai_business_day(c_store, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    _admin(monkeypatch)
+    sample = b_workbench.workbench_orders(limit=1)["orders"][0]
+    local_date = datetime.fromisoformat(sample["created_at"]).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    data = b_workbench.workbench_orders(date_from=local_date, date_to=local_date, limit=100)
+    assert any(order["order_id"] == sample["order_id"] for order in data["orders"])

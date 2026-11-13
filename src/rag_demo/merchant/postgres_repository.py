@@ -910,14 +910,14 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             params.append(status_value.upper())
         query = _clean_optional(q)
         if query is not None:
-            like = f"%{query}%"
-            sql += " AND (order_id LIKE %s OR buyer_id LIKE %s OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (i.title LIKE %s OR i.sku LIKE %s)))"
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE %s ESCAPE '\\' OR LOWER(buyer_id) LIKE %s ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE %s ESCAPE '\\' OR LOWER(i.sku) LIKE %s ESCAPE '\\')))"
             params.extend([like, like, like, like])
         if created_from:
-            sql += " AND created_at >= %s"
+            sql += " AND created_at::timestamptz >= %s::timestamptz"
             params.append(str(created_from))
         if created_to:
-            sql += " AND created_at <= %s"
+            sql += " AND created_at::timestamptz < %s::timestamptz"
             params.append(str(created_to))
         sql += " ORDER BY created_at DESC, order_id DESC LIMIT %s OFFSET %s"
         params.extend([bounded, start])
@@ -945,14 +945,14 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             params.append(status_value.upper())
         query = _clean_optional(q)
         if query is not None:
-            like = f"%{query}%"
-            sql += " AND (order_id LIKE %s OR buyer_id LIKE %s OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (i.title LIKE %s OR i.sku LIKE %s)))"
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE %s ESCAPE '\\' OR LOWER(buyer_id) LIKE %s ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE %s ESCAPE '\\' OR LOWER(i.sku) LIKE %s ESCAPE '\\')))"
             params.extend([like, like, like, like])
         if created_from:
-            sql += " AND created_at >= %s"
+            sql += " AND created_at::timestamptz >= %s::timestamptz"
             params.append(str(created_from))
         if created_to:
-            sql += " AND created_at <= %s"
+            sql += " AND created_at::timestamptz < %s::timestamptz"
             params.append(str(created_to))
         with self._lock, self._read() as cur:
             cur.execute(sql, params)

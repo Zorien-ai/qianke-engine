@@ -154,6 +154,7 @@ const state = {
   statusConfirm: null,
   selectedOrderIds: new Set(),
   mobileMoreOpen: false,
+  workspaceRoleOverride: "",
   /* Super-agent */
   workItems: [],
   workItemsLoaded: false,
@@ -1574,6 +1575,7 @@ async function onOrderAction(action, orderId) {
     return;
   } else if (action === "status-confirm") {
     const statusAction = state.statusConfirm?.action;
+    if (!["paid", "complete"].includes(statusAction) || state.statusConfirm?.orderId !== orderId) return;
     state.statusConfirm = null;
     await patchOrderStatus(orderId, statusAction === "complete" ? "COMPLETED" : "PAID");
     return;
@@ -1869,6 +1871,9 @@ function emptyMarkup(message) {
 /* ---------------- B 2.0 P0：角色工作首页 ---------------- */
 
 function workspaceRole() {
+  if (["owner", "warehouse", "support"].includes(state.workspaceRoleOverride)) {
+    return state.workspaceRoleOverride;
+  }
   const role = String(state.me?.role || "").toLowerCase();
   const permissions = state.me?.permissions || [];
   if (role === "owner" || role === "admin") return "owner";
@@ -1961,8 +1966,16 @@ function overviewView() {
   const products = data.products || [];
   const alerts = data.alerts || [];
   const workItems = data.workItems || [];
+  const businessDateKey = (value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  };
+  const todayKey = businessDateKey(new Date().toISOString());
   const completed = orders.filter((order) => String(order.status || "").toUpperCase() === "COMPLETED");
-  const completedRevenue = completed.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
+  const completedToday = completed.filter((order) => businessDateKey(order.completed_at) === todayKey);
+  const completedRevenue = completedToday.reduce((sum, order) => sum + Number(order.total_amount || 0), 0);
   const pendingShipment = orders.filter((order) => String(order.status || "").toUpperCase() === "PAID");
   const openAfterSales = afterSales.filter((ticket) => ["OPEN", "RETURN_SHIPPED", "RETURN_PENDING"].includes(String(ticket.status || "").toUpperCase()));
   const lowStockSkus = products.reduce((sum, product) => {
@@ -2005,8 +2018,8 @@ function overviewView() {
           overviewMetric("可查订单", String(orders.length), "当前加载范围"),
         ]
       : [
-          overviewMetric("今日模拟完成流水", money(completedRevenue), "按完成时间归属 · 非真实收款", "accent"),
-          overviewMetric("模拟完成订单", `${completed.length} 笔`, "当前加载范围"),
+          overviewMetric("今日模拟完成流水", money(completedRevenue), "当前加载 · 按 completed_at · 非真实收款", "accent"),
+          overviewMetric("今日完成订单", `${completedToday.length} 笔`, "当前加载范围"),
           overviewMetric("待发货样例", `${pendingShipment.length} 笔`, "与完成流水分开"),
           overviewMetric("低库存 SKU", String(lowStockCount), "当前加载范围 · 可用 ≤ 安全库存", "warn"),
         ];
@@ -2109,7 +2122,7 @@ function orderDrawerMarkup() {
     ? `<div class="b-confirm"><p>确认取消订单 <code>${escapeHtml(id)}</code>？取消后不可恢复。</p><div class="b-actions"><button type="button" class="b-btn b-btn-danger" data-order-action="cancel-confirm" ${attrs}>确认取消</button><button type="button" class="b-btn b-btn-ghost" data-order-action="cancel-dismiss">放弃</button></div></div>`
     : "";
   const statusConfirm = state.statusConfirm?.orderId === id
-    ? `<div class="b-confirm"><p>${state.statusConfirm.action === "paid" ? "确认把该订单标记为“模拟支付”？不会产生真实收款。" : "确认把该订单标记为“模拟完成”？不会代表真实交易完成。"}<br /><code>${escapeHtml(id)}</code> · ${escapeHtml(money(order.total_amount))}</p><div class="b-actions"><button type="button" class="b-btn b-btn-primary" data-order-action="status-confirm" ${attrs}>仅更新演示状态</button><button type="button" class="b-btn b-btn-ghost" data-order-action="status-dismiss">返回</button></div></div>`
+    ? `<div class="b-confirm"><p>${state.statusConfirm.action === "paid" ? "确认标记为“模拟支付”？会写入当前商家订单状态和 paid_at，但不会产生真实收款。" : "确认标记为“模拟完成”？会写入当前商家订单状态和 completed_at，不会改变外部支付或结算。"}<br /><code>${escapeHtml(id)}</code> · ${escapeHtml(money(order.total_amount))}</p><div class="b-actions"><button type="button" class="b-btn b-btn-primary" data-order-action="status-confirm" ${attrs}>确认写入模拟状态</button><button type="button" class="b-btn b-btn-ghost" data-order-action="status-dismiss">返回</button></div></div>`
     : "";
   return `<div class="b-drawer-backdrop" data-order-detail-close></div>
     <aside class="b-order-drawer" role="dialog" aria-modal="true" aria-label="订单详情">
@@ -2123,7 +2136,7 @@ function orderDrawerMarkup() {
         ${statusConfirm}
         ${cancelConfirm}
         ${shipForm}
-        <p class="b-drawer-note">演示订单操作只推进状态，不写入真实支付、结算、物流或库存；正式接入必须补服务端审计和权限。</p>
+        <p class="b-drawer-note">演示操作会写入当前商家订单状态和时间，但不会创建真实支付、结算、物流或库存变更；正式接入前仍需补服务端审计、模拟标记和权限。</p>
       </div>
     </aside>`;
 }
@@ -2147,7 +2160,11 @@ function batchBarMarkup() {
 function exportSelectedOrders() {
   const selected = selectedOrders();
   if (!selected.length) return;
-  const escapeCsv = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const escapeCsv = (value) => {
+    let cell = String(value ?? "");
+    if (/^[=+\-@]/.test(cell.trimStart())) cell = "'" + cell;
+    return `"${cell.replace(/"/g, '""')}"`;
+  };
   const rows = [["订单号", "创建时间", "买家", "商品", "金额", "状态", "物流", "模拟数据"]];
   for (const order of selected) {
     rows.push([
@@ -2164,21 +2181,21 @@ function exportSelectedOrders() {
   link.download = `qianke-b-orders-selected-${Date.now()}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  showToast(`已导出 ${selected.length} 笔虚构样例订单`, "success");
+  showToast(`已导出 ${selected.length} 笔订单`, "success");
 }
 
 function ordersView() {
   const body = state.loading && !state.orders.length
     ? skeletonMarkup()
     : state.orders.length
-      ? `<div class="b-order-table-wrap"><table class="b-order-table"><thead><tr><th class="b-select-cell"><input type="checkbox" data-order-select-all aria-label="选择当前加载的全部订单" /></th><th>订单</th><th>买家</th><th>商品</th><th class="b-num">金额</th><th>状态</th><th>物流</th><th></th></tr></thead><tbody>${state.orders.map(orderTableRow).join("")}</tbody></table></div>
+      ? `<div class="b-order-table-wrap"><table class="b-order-table"><thead><tr><th class="b-select-cell"><input type="checkbox" data-order-select-all ${state.orders.length && state.orders.every((order) => state.selectedOrderIds.has(String(order.order_id || ""))) ? "checked" : ""} aria-label="选择当前页面全部订单" /></th><th>订单</th><th>买家</th><th>商品</th><th class="b-num">金额</th><th>状态</th><th>物流</th><th></th></tr></thead><tbody>${state.orders.map(orderTableRow).join("")}</tbody></table></div>
          <div class="b-order-cards">${state.orders.map(orderCard).join("")}</div>`
       : emptyMarkup("暂无订单");
   return `<section class="b-view" aria-label="订单">
     <div class="b-view-head">
       <div>
         <h1>订单</h1>
-        <p class="b-muted">共 ${state.orders.length} 单 · 当前加载范围${state.loading ? " · 刷新中…" : ""}</p>
+        <p class="b-muted">共 ${state.orderTotal} 单（当前筛选）${state.loading ? " · 刷新中…" : ""}</p>
       </div>
       <div class="b-view-tools">
         <label class="b-filter">状态
@@ -2342,7 +2359,8 @@ function productsView() {
     ? skeletonMarkup(2)
     : visibleProducts.length
       ? state.productView === "skus"
-        ? `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>SKU / 规格</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th class="b-num">安全库存</th><th>库存</th></tr></thead><tbody>${skuTableRows(visibleProducts)}</tbody></table></div>`
+        ? `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>SKU / 规格</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th class="b-num">安全库存</th><th>库存</th></tr></thead><tbody>${skuTableRows(visibleProducts)}</tbody></table></div>
+           <div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
         : `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>状态</th><th class="b-num">SKU</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th>库存</th></tr></thead><tbody>${visibleProducts.map(productTableRow).join("")}</tbody></table></div>
            <div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
       : emptyMarkup(state.productQuery ? "没有匹配的商品或 SKU" : state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
@@ -2739,6 +2757,7 @@ function shellMarkup() {
           ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
         </div>
         <span class="b-role">${escapeHtml(roleText)}</span>
+        ${["owner", "admin"].includes(String(state.me?.role || "").toLowerCase()) ? `<label class="b-role-preview">视角<select data-workspace-role><option value="">自动</option><option value="owner" ${state.workspaceRoleOverride === "owner" ? "selected" : ""}>店主</option><option value="warehouse" ${state.workspaceRoleOverride === "warehouse" ? "selected" : ""}>仓库</option><option value="support" ${state.workspaceRoleOverride === "support" ? "selected" : ""}>客服</option></select></label>` : ""}
         <button type="button" class="b-store-switch" disabled title="多店成员关系接口尚未接入">切换店铺</button>
         <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
       </div>
@@ -2756,11 +2775,11 @@ function shellMarkup() {
       </main>
     </div>
     <nav class="b-bottom-nav" aria-label="移动端快捷导航">
-      <button type="button" class="${state.view === "overview" ? "active" : ""}" data-view="overview">首页</button>
-      <button type="button" class="${state.view === "orders" ? "active" : ""}" data-view="orders">订单</button>
-      <button type="button" class="${state.view === "products" ? "active" : ""}" data-view="products">商品</button>
-      <button type="button" class="${state.view === "after-sales" ? "active" : ""}" data-view="after-sales">售后</button>
-      <button type="button" class="${state.mobileMoreOpen ? "active" : ""}" data-mobile-more>更多</button>
+      <button type="button" class="${state.view === "overview" ? "active" : ""}" data-view="overview" ${state.view === "overview" ? 'aria-current="page"' : ""}>首页</button>
+      <button type="button" class="${state.view === "orders" ? "active" : ""}" data-view="orders" ${state.view === "orders" ? 'aria-current="page"' : ""}>订单</button>
+      <button type="button" class="${state.view === "products" ? "active" : ""}" data-view="products" ${state.view === "products" ? 'aria-current="page"' : ""}>商品</button>
+      <button type="button" class="${state.view === "after-sales" ? "active" : ""}" data-view="after-sales" ${state.view === "after-sales" ? 'aria-current="page"' : ""}>售后</button>
+      <button type="button" class="${state.mobileMoreOpen ? "active" : ""}" data-mobile-more aria-expanded="${state.mobileMoreOpen ? "true" : "false"}">更多</button>
     </nav>
     ${state.mobileMoreOpen ? `<div class="b-mobile-sheet"><div class="b-mobile-sheet-head"><strong>全部功能</strong><button type="button" class="b-btn b-btn-ghost" data-mobile-more>关闭</button></div>${navMarkup}</div>` : ""}
     ${toastMarkup()}
@@ -2896,6 +2915,20 @@ function bindEvents() {
     }
   });
 
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (state.orderDetailId || state.statusConfirm) {
+      state.orderDetailId = "";
+      state.statusConfirm = null;
+      render();
+      return;
+    }
+    if (state.mobileMoreOpen) {
+      state.mobileMoreOpen = false;
+      render();
+    }
+  });
+
   root.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
@@ -2983,6 +3016,9 @@ function bindEvents() {
     if (detailButton) {
       state.orderDetailId = detailButton.dataset.orderDetail || "";
       render();
+      requestAnimationFrame(() => {
+        root.querySelector(".b-order-drawer [data-order-detail-close]")?.focus();
+      });
       return;
     }
     if (target.closest("[data-order-detail-close]")) {
@@ -2999,6 +3035,7 @@ function bindEvents() {
     const viewButton = target.closest("[data-view]");
     if (viewButton) {
       state.mobileMoreOpen = false;
+  state.workspaceRoleOverride = "";
       await switchView(viewButton.dataset.view);
       return;
     }
@@ -3126,6 +3163,11 @@ function bindEvents() {
       return;
     }
     if (!(target instanceof HTMLSelectElement)) return;
+    if (target.matches("[data-workspace-role]")) {
+      state.workspaceRoleOverride = ["owner", "warehouse", "support"].includes(target.value) ? target.value : "";
+      render();
+      return;
+    }
     if (target.matches("[data-order-limit]")) {
       const nextLimit = Number(target.value || 20);
       state.orderLimit = [10, 20, 50, 100].includes(nextLimit) ? nextLimit : 20;

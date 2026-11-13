@@ -725,14 +725,14 @@ class SqliteMerchantRepository:
             params.append(status_value.upper())
         query = _clean_optional(q)
         if query is not None:
-            like = f"%{query}%"
-            sql += " AND (order_id LIKE ? OR buyer_id LIKE ? OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (i.title LIKE ? OR i.sku LIKE ?)))"
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE ? ESCAPE '\\' OR LOWER(buyer_id) LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE ? ESCAPE '\\' OR LOWER(i.sku) LIKE ? ESCAPE '\\')))"
             params.extend([like, like, like, like])
         if created_from:
-            sql += " AND created_at >= ?"
+            sql += " AND datetime(created_at) >= datetime(?)"
             params.append(str(created_from))
         if created_to:
-            sql += " AND created_at <= ?"
+            sql += " AND datetime(created_at) < datetime(?)"
             params.append(str(created_to))
         sql += " ORDER BY created_at DESC, order_id DESC LIMIT ? OFFSET ?"
         params.extend([bounded, start])
@@ -759,14 +759,14 @@ class SqliteMerchantRepository:
             params.append(status_value.upper())
         query = _clean_optional(q)
         if query is not None:
-            like = f"%{query}%"
-            sql += " AND (order_id LIKE ? OR buyer_id LIKE ? OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (i.title LIKE ? OR i.sku LIKE ?)))"
+            like = f"%{_escape_like(query.lower())}%"
+            sql += " AND (LOWER(order_id) LIKE ? ESCAPE '\\' OR LOWER(buyer_id) LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM m_order_item i WHERE i.order_id = m_order.order_id AND (LOWER(i.title) LIKE ? ESCAPE '\\' OR LOWER(i.sku) LIKE ? ESCAPE '\\')))"
             params.extend([like, like, like, like])
         if created_from:
-            sql += " AND created_at >= ?"
+            sql += " AND datetime(created_at) >= datetime(?)"
             params.append(str(created_from))
         if created_to:
-            sql += " AND created_at <= ?"
+            sql += " AND datetime(created_at) < datetime(?)"
             params.append(str(created_to))
         with self._lock, self._connect() as conn:
             return int(conn.execute(sql, params).fetchone()[0])
