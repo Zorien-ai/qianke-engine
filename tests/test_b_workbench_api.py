@@ -197,3 +197,27 @@ def test_after_sales_only_for_bound_merchant(c_store, monkeypatch):
     for ticket in data["tickets"]:
         order = c_store.get_order(ticket["order_id"])
         assert order is not None
+
+
+def test_orders_search_pagination_and_total(c_store, monkeypatch):
+    _admin(monkeypatch)
+    first = b_workbench.workbench_orders(limit=2, offset=0)
+    assert first["limit"] == 2
+    assert first["offset"] == 0
+    assert first["total"] >= len(first["orders"])
+    assert len(first["orders"]) <= 2
+    second = b_workbench.workbench_orders(limit=2, offset=2)
+    assert second["offset"] == 2
+    # 搜索订单号时总数和结果同口径。
+    known = first["orders"][0]["order_id"]
+    searched = b_workbench.workbench_orders(q=known, limit=20, offset=0)
+    assert searched["total"] >= 1
+    assert any(order["order_id"] == known for order in searched["orders"])
+    assert all(known in str(order.get("order_id") or "") or known in str(order.get("buyer_id") or "") or known in str(order) for order in searched["orders"])
+
+
+def test_orders_reject_invalid_date(c_store, monkeypatch):
+    _admin(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_orders(date_from="2026-13-99")
+    assert exc.value.status_code == 400

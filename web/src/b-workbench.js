@@ -102,6 +102,12 @@ const state = {
   error: "",
   toast: { message: "", type: "" },
   orderFilter: "",
+  orderQuery: "",
+  orderDateFrom: "",
+  orderDateTo: "",
+  orderLimit: 20,
+  orderOffset: 0,
+  orderTotal: 0,
   afterSaleFilter: "",
   overview: null,
   overviewLoaded: false,
@@ -366,10 +372,17 @@ async function loadOrders(force = true) {
   state.error = "";
   render();
   try {
-    const query = new URLSearchParams({ limit: "100" });
+    const query = new URLSearchParams({
+      limit: String(state.orderLimit),
+      offset: String(state.orderOffset),
+    });
     if (state.orderFilter) query.set("status", state.orderFilter);
+    if (state.orderQuery) query.set("q", state.orderQuery);
+    if (state.orderDateFrom) query.set("date_from", state.orderDateFrom);
+    if (state.orderDateTo) query.set("date_to", state.orderDateTo);
     const data = await api(`/api/b/workbench/orders?${query.toString()}`);
     state.orders = collectionFrom(data, ["orders"]);
+    state.orderTotal = Number(data?.total ?? state.orders.length);
     state.ordersLoaded = true;
   } catch (error) {
     if (handleAuthFailure(error)) return;
@@ -2173,7 +2186,14 @@ function ordersView() {
         <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
       </div>
     </div>
+    <div class="b-order-filters">
+      <label>搜索<input type="search" data-order-query value="${escapeHtml(state.orderQuery)}" placeholder="订单号 / 买家 / 商品" maxlength="80" /></label>
+      <label>从<input type="date" data-order-date-from value="${escapeHtml(state.orderDateFrom)}" /></label>
+      <label>到<input type="date" data-order-date-to value="${escapeHtml(state.orderDateTo)}" /></label>
+      <button type="button" class="b-btn b-btn-primary" data-order-search ${state.loading ? "disabled" : ""}>查找</button>
+    </div>
     ${body}
+    <div class="b-order-pager"><span>第 ${Math.floor(state.orderOffset / state.orderLimit) + 1} / ${Math.max(1, Math.ceil(state.orderTotal / state.orderLimit))} 页 · 共 ${state.orderTotal} 条（当前筛选）</span><button type="button" class="b-btn b-btn-ghost" data-order-prev ${state.orderOffset <= 0 || state.loading ? "disabled" : ""}>上一页</button><button type="button" class="b-btn b-btn-ghost" data-order-next ${state.orderOffset + state.orderLimit >= state.orderTotal || state.loading ? "disabled" : ""}>下一页</button></div>
     ${batchBarMarkup()}
     ${orderDrawerMarkup()}
   </section>`;
@@ -2846,6 +2866,33 @@ function bindEvents() {
     const imageDeleteButton = target.closest("[data-product-image-delete]");
     if (imageDeleteButton) {
       await deleteProductImage(imageDeleteButton.dataset.productId, imageDeleteButton.dataset.productImageDelete);
+      return;
+    }
+    if (target.closest("[data-order-search]")) {
+      const query = root.querySelector("[data-order-query]");
+      const dateFrom = root.querySelector("[data-order-date-from]");
+      const dateTo = root.querySelector("[data-order-date-to]");
+      state.orderQuery = String(query?.value || "").trim();
+      state.orderDateFrom = String(dateFrom?.value || "");
+      state.orderDateTo = String(dateTo?.value || "");
+      state.orderOffset = 0;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
+      return;
+    }
+    if (target.closest("[data-order-prev]")) {
+      state.orderOffset = Math.max(0, state.orderOffset - state.orderLimit);
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
+      return;
+    }
+    if (target.closest("[data-order-next]")) {
+      state.orderOffset += state.orderLimit;
+      state.selectedOrderIds.clear();
+      state.ordersLoaded = false;
+      await loadOrders();
       return;
     }
     if (target.closest("[data-order-export]")) {

@@ -2435,3 +2435,70 @@ code,
     display: none;
   }
 }
+
+
+/* B 2.0 P0：订单搜索 / 分页 */
+
+.b-order-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius);
+  background: var(--b-bg);
+}
+
+.b-order-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--b-muted);
+  font-size: 13px;
+}
+
+.b-order-filters label:first-child {
+  flex: 1 1 260px;
+}
+
+.b-order-filters input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--b-line-strong);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg);
+  color: var(--b-text);
+  font-size: 16px;
+}
+
+.b-order-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--b-muted);
+  font-size: 14px;
+}
+
+@media (max-width: 720px) {
+  .b-order-filters {
+    align-items: stretch;
+  }
+
+  .b-order-filters label {
+    flex: 1 1 100%;
+  }
+
+  .b-order-filters input {
+    width: 100%;
+    font-size: 16px;
+  }
+
+  .b-order-pager {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}

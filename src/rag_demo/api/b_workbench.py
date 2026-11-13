@@ -10,6 +10,7 @@ import io
 import re
 import time
 import uuid
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -470,12 +471,54 @@ def workbench_chat_profile(buyer_id: str) -> dict[str, Any]:
 
 
 @router.get("/orders")
-def workbench_orders(status: str | None = None, limit: int = 100) -> dict[str, Any]:
+def workbench_orders(
+    status: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    q: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
     account = _account()
     merchant_id = _membership(account)["merchant_id"]
     repo = get_merchant_repository()
-    orders = repo.list_orders(merchant_id, status=status, limit=limit)
-    return {"merchant_id": merchant_id, "orders": [order.to_dict() for order in orders]}
+    bounded_limit = max(1, min(int(limit or 20), 200))
+    safe_offset = max(0, int(offset or 0))
+    start = None
+    end = None
+    try:
+        if date_from:
+            start = f"{date.fromisoformat(date_from)}T00:00:00"
+        if date_to:
+            end = f"{date.fromisoformat(date_to)}T23:59:59"
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="日期格式应为 YYYY-MM-DD") from exc
+    if start and end and start > end:
+        raise HTTPException(status_code=400, detail="date_from 不能晚于 date_to")
+    query = (q or "").strip() or None
+    total = repo.count_orders(
+        merchant_id,
+        status=status,
+        q=query,
+        created_from=start,
+        created_to=end,
+    )
+    orders = repo.search_orders(
+        merchant_id,
+        status=status,
+        q=query,
+        created_from=start,
+        created_to=end,
+        limit=bounded_limit,
+        offset=safe_offset,
+    )
+    return {
+        "merchant_id": merchant_id,
+        "orders": [order.to_dict() for order in orders],
+        "total": total,
+        "limit": bounded_limit,
+        "offset": safe_offset,
+    }
 
 
 @router.patch("/orders/{order_id}/status")
