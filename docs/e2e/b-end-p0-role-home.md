@@ -17,6 +17,8 @@
 商品/SKU 桌面表格 + 手机卡片
 订单操作移入详情抽屉
 模拟支付/模拟完成二次确认
+订单多选、批量预览禁用态、选中 CSV 导出
+多店切换禁用态
 ``` 
 
 未完成：
@@ -94,6 +96,7 @@ docs/design/b-end-2.0-p0-prod-overview.png
 docs/design/b-end-2.0-p0-prod-orders.png
 docs/design/b-end-2.0-p0-prod-products.png
 docs/design/b-end-2.0-p0-prod-order-drawer.png
+docs/design/b-end-2.0-p0-prod-batch.png
 docs/design/b-end-2.0-p0-prod-mobile.png
 ```
 
@@ -103,6 +106,6 @@ docs/design/b-end-2.0-p0-prod-mobile.png
 - 首页数字来自“当前加载范围”，不是全店汇总
 - 经营报告、客服会话、批量能力仍为待接入/禁用态
 - 订单操作已移入详情抽屉并加入模拟支付/完成确认；真实支付/完成仍待后端契约
-- 批量发货/改库存/导出尚未接入
+- 批量发货/改库存接口尚未接入；当前只支持选中导出的前端 CSV 样例
 - 真实接口已验收；测试订单 order_1579fdd829d7443a 仍在数据中，待清理
 ```

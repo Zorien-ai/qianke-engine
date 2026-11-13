@@ -144,6 +144,7 @@ const state = {
   cancelConfirmId: "",
   orderDetailId: "",
   statusConfirm: null,
+  selectedOrderIds: new Set(),
   /* Super-agent */
   workItems: [],
   workItemsLoaded: false,
@@ -727,6 +728,7 @@ async function switchView(view) {
   state.cancelConfirmId = "";
   state.orderDetailId = "";
   state.statusConfirm = null;
+  state.selectedOrderIds.clear();
   state.workItemDetailId = "";
   state.workItemDetail = null;
   state.approveConfirm = null;
@@ -1704,7 +1706,7 @@ function orderCard(order) {
     : "—";
   return `<article class="b-card b-order-card">
     <div class="b-card-head">
-      <div class="b-card-title"><code class="b-mono">${escapeHtml(text(id))}</code>${badge(status, statusLabel(status))}</div>
+      <div class="b-card-title"><input type="checkbox" data-order-select="${escapeHtml(id)}" ${state.selectedOrderIds.has(id) ? "checked" : ""} aria-label="选择订单 ${escapeHtml(id)}" /><code class="b-mono">${escapeHtml(text(id))}</code>${badge(status, statusLabel(status))}</div>
       <time>${escapeHtml(timeText(order.created_at))}</time>
     </div>
     <dl class="b-meta">
@@ -2054,7 +2056,9 @@ function orderTableRow(order) {
   const logistics = order.carrier || order.tracking_no
     ? [order.carrier, order.tracking_no].filter(Boolean).join(" · ")
     : "—";
+  const selected = state.selectedOrderIds.has(id) ? "checked" : "";
   return `<tr>
+    <td class="b-select-cell"><input type="checkbox" data-order-select="${escapeHtml(id)}" ${selected} aria-label="选择订单 ${escapeHtml(id)}" /></td>
     <td><button type="button" class="b-table-link" data-order-detail="${escapeHtml(id)}"><code class="b-mono">${escapeHtml(text(id))}</code></button><br /><small>${escapeHtml(timeText(order.created_at))}</small></td>
     <td>${escapeHtml(text(order.buyer_id))}</td>
     <td class="b-order-items-cell">${escapeHtml(itemsText)}</td>
@@ -2108,11 +2112,50 @@ function orderDrawerMarkup() {
     </aside>`;
 }
 
+function selectedOrders() {
+  return state.orders.filter((order) => state.selectedOrderIds.has(String(order.order_id || "")));
+}
+
+function batchBarMarkup() {
+  const selected = selectedOrders();
+  if (!selected.length) return "";
+  const eligible = selected.filter((order) => String(order.status || "").toUpperCase() === "PAID");
+  return `<div class="b-batch-bar" role="status">
+    <div><strong>已选择 ${selected.length} 笔订单</strong><small>当前加载范围 · 其中 ${eligible.length} 笔待发货可进入预览</small></div>
+    <button type="button" class="b-btn b-btn-ghost" data-order-export>导出选中 CSV</button>
+    <button type="button" class="b-btn b-btn-primary" disabled title="批量发货接口尚未接入">预览批量发货</button>
+    <button type="button" class="b-btn b-btn-ghost" data-order-clear-selection>清除选择</button>
+  </div>`;
+}
+
+function exportSelectedOrders() {
+  const selected = selectedOrders();
+  if (!selected.length) return;
+  const escapeCsv = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const rows = [["订单号", "创建时间", "买家", "商品", "金额", "状态", "物流", "模拟数据"]];
+  for (const order of selected) {
+    rows.push([
+      order.order_id || "", order.created_at || "", order.buyer_id || "",
+      orderItemsText(order), order.total_amount ?? "", order.status || "",
+      [order.carrier, order.tracking_no].filter(Boolean).join(" · "), "1",
+    ]);
+  }
+  const csv = rows.map((row) => row.map(escapeCsv).join(",")).join("\r\n");
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `qianke-b-orders-selected-${Date.now()}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  showToast(`已导出 ${selected.length} 笔虚构样例订单`, "success");
+}
+
 function ordersView() {
   const body = state.loading && !state.orders.length
     ? skeletonMarkup()
     : state.orders.length
-      ? `<div class="b-order-table-wrap"><table class="b-order-table"><thead><tr><th>订单</th><th>买家</th><th>商品</th><th class="b-num">金额</th><th>状态</th><th>物流</th><th></th></tr></thead><tbody>${state.orders.map(orderTableRow).join("")}</tbody></table></div>
+      ? `<div class="b-order-table-wrap"><table class="b-order-table"><thead><tr><th class="b-select-cell"><input type="checkbox" data-order-select-all aria-label="选择当前加载的全部订单" /></th><th>订单</th><th>买家</th><th>商品</th><th class="b-num">金额</th><th>状态</th><th>物流</th><th></th></tr></thead><tbody>${state.orders.map(orderTableRow).join("")}</tbody></table></div>
          <div class="b-order-cards">${state.orders.map(orderCard).join("")}</div>`
       : emptyMarkup("暂无订单");
   return `<section class="b-view" aria-label="订单">
@@ -2131,6 +2174,7 @@ function ordersView() {
       </div>
     </div>
     ${body}
+    ${batchBarMarkup()}
     ${orderDrawerMarkup()}
   </section>`;
 }
@@ -2619,6 +2663,7 @@ function shellMarkup() {
           ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
         </div>
         <span class="b-role">${escapeHtml(roleText)}</span>
+        <button type="button" class="b-store-switch" disabled title="多店成员关系接口尚未接入">切换店铺</button>
         <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
       </div>
       <div class="b-header-actions">
@@ -2704,6 +2749,20 @@ function bindEvents() {
   root.addEventListener("change", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+    if (target.matches("[data-order-select]")) {
+      const id = target.dataset.orderSelect || "";
+      if (target.checked) state.selectedOrderIds.add(id);
+      else state.selectedOrderIds.delete(id);
+      render();
+      return;
+    }
+    if (target.matches("[data-order-select-all]")) {
+      const visible = state.orders.map((order) => String(order.order_id || "")).filter(Boolean);
+      if (target.checked) visible.forEach((id) => state.selectedOrderIds.add(id));
+      else visible.forEach((id) => state.selectedOrderIds.delete(id));
+      render();
+      return;
+    }
     if (target.matches("[data-product-filter]")) {
       state.productFilter = target.value === "low" ? "low" : "all";
       render();
@@ -2787,6 +2846,15 @@ function bindEvents() {
     const imageDeleteButton = target.closest("[data-product-image-delete]");
     if (imageDeleteButton) {
       await deleteProductImage(imageDeleteButton.dataset.productId, imageDeleteButton.dataset.productImageDelete);
+      return;
+    }
+    if (target.closest("[data-order-export]")) {
+      exportSelectedOrders();
+      return;
+    }
+    if (target.closest("[data-order-clear-selection]")) {
+      state.selectedOrderIds.clear();
+      render();
       return;
     }
     const detailButton = target.closest("[data-order-detail]");
