@@ -153,6 +153,7 @@ const state = {
   orderDetailId: "",
   statusConfirm: null,
   selectedOrderIds: new Set(),
+  mobileMoreOpen: false,
   /* Super-agent */
   workItems: [],
   workItemsLoaded: false,
@@ -2754,6 +2755,14 @@ function shellMarkup() {
         ${viewMarkup}
       </main>
     </div>
+    <nav class="b-bottom-nav" aria-label="移动端快捷导航">
+      <button type="button" class="${state.view === "overview" ? "active" : ""}" data-view="overview">首页</button>
+      <button type="button" class="${state.view === "orders" ? "active" : ""}" data-view="orders">订单</button>
+      <button type="button" class="${state.view === "products" ? "active" : ""}" data-view="products">商品</button>
+      <button type="button" class="${state.view === "after-sales" ? "active" : ""}" data-view="after-sales">售后</button>
+      <button type="button" class="${state.mobileMoreOpen ? "active" : ""}" data-mobile-more>更多</button>
+    </nav>
+    ${state.mobileMoreOpen ? `<div class="b-mobile-sheet"><div class="b-mobile-sheet-head"><strong>全部功能</strong><button type="button" class="b-btn b-btn-ghost" data-mobile-more>关闭</button></div>${navMarkup}</div>` : ""}
     ${toastMarkup()}
   </div>`;
 }
@@ -2982,8 +2991,14 @@ function bindEvents() {
       render();
       return;
     }
+    if (target.closest("[data-mobile-more]")) {
+      state.mobileMoreOpen = !state.mobileMoreOpen;
+      render();
+      return;
+    }
     const viewButton = target.closest("[data-view]");
     if (viewButton) {
+      state.mobileMoreOpen = false;
       await switchView(viewButton.dataset.view);
       return;
     }

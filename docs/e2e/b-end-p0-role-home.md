@@ -101,6 +101,7 @@ docs/design/b-end-2.0-p0-prod-batch.png
 docs/design/b-end-2.0-p0-prod-search.png
 docs/design/b-end-2.0-p0-prod-pagesize.png
 docs/design/b-end-2.0-p0-prod-sku-search.png
+docs/design/b-end-2.0-p0-prod-mobile-nav.png
 docs/design/b-end-2.0-p0-prod-mobile.png
 ```
 

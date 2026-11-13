@@ -2534,3 +2534,104 @@ code,
     align-items: stretch;
   }
 }
+
+
+/* B 2.0 P0：移动端底部导航 */
+
+.b-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .b-sidebar {
+    display: none;
+  }
+
+  .b-main {
+    padding-bottom: 108px;
+  }
+
+  .b-bottom-nav {
+    position: fixed;
+    z-index: 40;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    justify-content: space-around;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--b-line);
+    background: color-mix(in srgb, var(--b-bg) 96%, transparent);
+    backdrop-filter: blur(12px);
+  }
+
+  .b-bottom-nav button {
+    display: flex;
+    min-width: 54px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--b-muted);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .b-bottom-nav button.active {
+    background: var(--b-accent-soft);
+    color: var(--b-accent-strong);
+    font-weight: 600;
+  }
+
+  .b-mobile-sheet {
+    position: fixed;
+    z-index: 45;
+    right: 8px;
+    bottom: calc(66px + env(safe-area-inset-bottom));
+    left: 8px;
+    max-height: 60vh;
+    padding: 14px;
+    overflow-y: auto;
+    border: 1px solid var(--b-line);
+    border-radius: var(--b-radius);
+    background: var(--b-bg);
+    box-shadow: 0 16px 48px rgba(23, 34, 31, 0.2);
+  }
+
+  .b-mobile-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .b-mobile-sheet .b-nav-group + .b-nav-group {
+    margin-top: 12px;
+  }
+
+  .b-mobile-sheet .b-nav-btn {
+    display: flex;
+    width: 100%;
+    padding: 9px 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--b-text);
+    font-size: 16px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .b-mobile-sheet .b-nav-btn.active {
+    background: var(--b-accent-soft);
+    color: var(--b-accent-strong);
+    font-weight: 600;
+  }
+
+  .b-batch-bar {
+    bottom: 74px;
+  }
+}
