@@ -2502,3 +2502,35 @@ code,
     justify-content: flex-start;
   }
 }
+
+
+/* B 2.0 P0：商品搜索 / SKU 视图 */
+
+.b-product-search input {
+  height: 36px;
+  min-width: 210px;
+  padding: 0 10px;
+  border: 1px solid var(--b-line-strong);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-bg);
+  color: var(--b-text);
+  font-size: 16px;
+}
+
+.b-product-table .b-mono {
+  font-size: 15px;
+}
+
+@media (max-width: 720px) {
+  .b-product-search {
+    flex: 1 1 100%;
+  }
+
+  .b-product-search input {
+    width: 100%;
+  }
+
+  .b-view-tools {
+    align-items: stretch;
+  }
+}

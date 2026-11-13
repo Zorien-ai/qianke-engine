@@ -121,6 +121,8 @@ const state = {
   chatProfiles: [],
   chatProfilesLoaded: false,
   productFilter: "all",
+  productQuery: "",
+  productView: "products",
   productSummary: null,
   inventoryAlerts: [],
   inventoryAlertsLoaded: false,
@@ -2290,16 +2292,54 @@ function productTableRow(product) {
   </tr>`;
 }
 
+function filteredProducts() {
+  let list = [...state.products];
+  if (state.productFilter === "low") {
+    list = list.filter((product) => product.low_stock || (Array.isArray(product.skus) && product.skus.some((sku) => sku.low_stock)));
+  }
+  const query = String(state.productQuery || "").trim().toLowerCase();
+  if (!query) return list;
+  return list.filter((product) => {
+    const text = [
+      product.title, product.name, product.product_id, product.category, product.brand,
+      ...(Array.isArray(product.skus) ? product.skus.flatMap((sku) => [sku.sku, sku.spec]) : []),
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+    return text.includes(query);
+  });
+}
+
+function skuTableRows(products) {
+  return products.flatMap((product) => {
+    const skus = Array.isArray(product.skus) ? product.skus : [];
+    return skus.map((sku) => {
+      const safety = Number(sku.safety_stock ?? 0);
+      const available = Number(sku.available_qty ?? 0);
+      const low = safety > 0 && available <= safety;
+      return `<tr>
+        <td><strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong><br /><small>${escapeHtml(text(product.product_id))}</small></td>
+        <td><code class="b-mono">${escapeHtml(text(sku.sku))}</code><br /><small>${escapeHtml(text(sku.spec))}</small></td>
+        <td class="b-num">${escapeHtml(money(sku.price))}</td>
+        <td class="b-num">${escapeHtml(String(available))}</td>
+        <td class="b-num">${escapeHtml(String(Number(sku.locked_qty ?? 0)))}</td>
+        <td class="b-num">${escapeHtml(String(safety))}</td>
+        <td>${low ? `<span class="b-badge is-warn">低库存</span>` : "—"}</td>
+      </tr>`;
+    });
+  }).join("");
+}
+
 function productsView() {
   const summary = state.productSummary || {};
   const lowProducts = state.products.filter((product) => product.low_stock);
-  const visibleProducts = state.productFilter === "low" ? lowProducts : state.products;
+  const visibleProducts = filteredProducts();
   const body = state.loading && !state.products.length
     ? skeletonMarkup(2)
     : visibleProducts.length
-      ? `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>状态</th><th class="b-num">SKU</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th>库存</th></tr></thead><tbody>${visibleProducts.map(productTableRow).join("")}</tbody></table></div>
-         <div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
-      : emptyMarkup(state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
+      ? state.productView === "skus"
+        ? `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>SKU / 规格</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th class="b-num">安全库存</th><th>库存</th></tr></thead><tbody>${skuTableRows(visibleProducts)}</tbody></table></div>`
+        : `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>状态</th><th class="b-num">SKU</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th>库存</th></tr></thead><tbody>${visibleProducts.map(productTableRow).join("")}</tbody></table></div>
+           <div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
+      : emptyMarkup(state.productQuery ? "没有匹配的商品或 SKU" : state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
   const alert = Number(summary.low_stock_products || 0) > 0
     ? `<div class="b-stock-alert" role="status">
         <div>
@@ -2330,9 +2370,19 @@ function productsView() {
     <div class="b-view-head">
       <div>
         <h1>商品</h1>
-        <p class="b-muted">商品图片可由 owner/admin 更换 · 共 ${state.products.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
+        <p class="b-muted">商品图片可由 owner/admin 更换 · 当前 ${visibleProducts.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
       </div>
       <div class="b-view-tools">
+        <label class="b-filter b-product-search">搜索
+          <input type="search" data-product-query value="${escapeHtml(state.productQuery)}" placeholder="商品名 / ID / SKU / 规格" maxlength="80" />
+        </label>
+        <button type="button" class="b-btn b-btn-ghost" data-product-search>查找</button>
+        <label class="b-filter">视图
+          <select data-product-view>
+            <option value="products" ${state.productView === "products" ? "selected" : ""}>商品</option>
+            <option value="skus" ${state.productView === "skus" ? "selected" : ""}>SKU</option>
+          </select>
+        </label>
         <label class="b-filter">库存
           <select data-product-filter ${state.loading ? "disabled" : ""}>
             <option value="all" ${state.productFilter === "all" ? "selected" : ""}>全部商品</option>
@@ -2783,6 +2833,11 @@ function bindEvents() {
       render();
       return;
     }
+    if (target.matches("[data-product-view]")) {
+      state.productView = target.value === "skus" ? "skus" : "products";
+      render();
+      return;
+    }
     if (target.matches("[data-product-filter]")) {
       state.productFilter = target.value === "low" ? "low" : "all";
       render();
@@ -2866,6 +2921,12 @@ function bindEvents() {
     const imageDeleteButton = target.closest("[data-product-image-delete]");
     if (imageDeleteButton) {
       await deleteProductImage(imageDeleteButton.dataset.productId, imageDeleteButton.dataset.productImageDelete);
+      return;
+    }
+    if (target.closest("[data-product-search]")) {
+      const input = root.querySelector("[data-product-query]");
+      state.productQuery = String(input?.value || "").trim();
+      render();
       return;
     }
     if (target.closest("[data-order-search]")) {

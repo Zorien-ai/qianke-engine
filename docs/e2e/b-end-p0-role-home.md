@@ -67,6 +67,7 @@ console errors / warnings               0
 工作首页：今日模拟完成流水 ¥602.00、1 笔完成、1 笔待发货
 订单表格：11 行；详情抽屉显示 order_1579fdd829d7443a
 商品表格：8 行；价格范围、可售、锁定、低库存列正常
+商品搜索“龙井”：1 个商品；SKU 视图：2 行（250g / 50g）
 手机 390 视口：document.scrollWidth = clientWidth = 375
 ```
 
@@ -98,6 +99,7 @@ docs/design/b-end-2.0-p0-prod-products.png
 docs/design/b-end-2.0-p0-prod-order-drawer.png
 docs/design/b-end-2.0-p0-prod-batch.png
 docs/design/b-end-2.0-p0-prod-search.png
+docs/design/b-end-2.0-p0-prod-sku-search.png
 docs/design/b-end-2.0-p0-prod-mobile.png
 ```
 
@@ -110,4 +112,5 @@ docs/design/b-end-2.0-p0-prod-mobile.png
 - 批量发货/改库存接口尚未接入；当前只支持选中导出的前端 CSV 样例
 - 真实接口已验收；测试订单 order_1579fdd829d7443a 仍在数据中，待清理
 - 默认页大小 20；如需 10/50/100 可再加页大小选择
+- 商品搜索当前为前端当前加载范围过滤；大目录需接服务端查询
 ```
