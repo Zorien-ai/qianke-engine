@@ -11,11 +11,18 @@
 语义：模拟支付/模拟完成明确标注
 ```
 
+本轮补充：
+
+```text
+商品/SKU 桌面表格 + 手机卡片
+订单操作移入详情抽屉
+模拟支付/模拟完成二次确认
+``` 
+
 未完成：
 
 ```text
 真实 API 端到端验收（本地 PostgreSQL/Docker 停止）
-商品/SKU 表格重构
 批量发货/改库存/导出
 多店切换后端契约
 客服会话
@@ -44,11 +51,14 @@ web/src/b-workbench.css
 - 店主首页：4 张指标卡、4 条优先处理
 - 订单表格 4 行
 - 点击详情打开 570px 抽屉，显示模拟交易说明
+- 抽屉内“模拟支付（演示）”先出现影响确认，再提交状态
+- 商品视图：2 行商品表格，价格范围/可售/锁定/低库存
 - document.scrollWidth = clientWidth = 1440
 
 手机 390×844
 - document.scrollWidth = clientWidth = 375
 - 订单表格隐藏，卡片显示
+- 商品表格隐藏，商品卡片显示
 - 首页 4 张指标卡纵向排列
 ```
 
@@ -57,6 +67,7 @@ web/src/b-workbench.css
 ```text
 docs/design/b-end-2.0-p0-prod-overview.png
 docs/design/b-end-2.0-p0-prod-orders.png
+docs/design/b-end-2.0-p0-prod-products.png
 docs/design/b-end-2.0-p0-prod-mobile.png
 ```
 
@@ -65,6 +76,7 @@ docs/design/b-end-2.0-p0-prod-mobile.png
 ```text
 - 首页数字来自“当前加载范围”，不是全店汇总
 - 经营报告、客服会话、批量能力仍为待接入/禁用态
-- 订单表格的支付/完成动作尚未加入二次确认（P1）
+- 订单操作已移入详情抽屉并加入模拟支付/完成确认；真实支付/完成仍待后端契约
+- 批量发货/改库存/导出尚未接入
 - 本地没有 API 运行环境，尚未做真实接口浏览器验收
 ```

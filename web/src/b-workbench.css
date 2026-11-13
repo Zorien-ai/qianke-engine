@@ -2288,3 +2288,58 @@ code,
     grid-template-columns: 1fr;
   }
 }
+
+
+/* B 2.0 P0：商品 / SKU 表格 */
+
+.b-product-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius);
+  background: var(--b-bg);
+}
+
+.b-product-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+
+.b-product-table th,
+.b-product-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--b-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.b-product-table th {
+  color: var(--b-muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.b-product-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.b-product-table tbody tr:hover {
+  background: var(--b-bg-softer);
+}
+
+.b-product-table td small {
+  color: var(--b-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .b-product-table-wrap {
+    display: none;
+  }
+
+  .b-product-grid {
+    display: flex;
+    flex-direction: column;
+  }
+}

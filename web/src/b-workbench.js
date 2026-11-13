@@ -143,6 +143,7 @@ const state = {
   shipForm: null,
   cancelConfirmId: "",
   orderDetailId: "",
+  statusConfirm: null,
   /* Super-agent */
   workItems: [],
   workItemsLoaded: false,
@@ -725,6 +726,7 @@ async function switchView(view) {
   state.shipForm = null;
   state.cancelConfirmId = "";
   state.orderDetailId = "";
+  state.statusConfirm = null;
   state.workItemDetailId = "";
   state.workItemDetail = null;
   state.approveConfirm = null;
@@ -1548,10 +1550,19 @@ async function onOrderAction(action, orderId) {
   if (state.busy) return;
   const order = findOrder(orderId);
   if (!order) return;
-  if (action === "paid") {
-    await patchOrderStatus(orderId, "PAID");
-  } else if (action === "complete") {
-    await patchOrderStatus(orderId, "COMPLETED");
+  if (action === "paid" || action === "complete") {
+    state.statusConfirm = { orderId, action };
+    render();
+    return;
+  } else if (action === "status-confirm") {
+    const statusAction = state.statusConfirm?.action;
+    state.statusConfirm = null;
+    await patchOrderStatus(orderId, statusAction === "complete" ? "COMPLETED" : "PAID");
+    return;
+  } else if (action === "status-dismiss") {
+    state.statusConfirm = null;
+    render();
+    return;
   } else if (action === "ship") {
     openShipForm(orderId);
   } else if (action === "ship-submit") {
@@ -1688,80 +1699,21 @@ function fatalViewMarkup(message) {
 function orderCard(order) {
   const id = String(order.order_id || "");
   const status = String(order.status || "").toUpperCase();
-  const busy = state.busy === `order:${id}`;
-  const attrs = `data-order-id="${escapeHtml(id)}" ${busy || !can("operate_orders") ? "disabled" : ""}`;
-  const showShipForm = state.shipForm && String(state.shipForm.orderId) === id;
-  const showCancelConfirm = state.cancelConfirmId === id;
-  const items = Array.isArray(order.items) ? order.items : [];
-  const itemsText = items.length
-    ? items
-        .map((item) => `${text(item.title || item.product_id, "商品")} × ${Number(item.quantity || 1)}`)
-        .join("、")
-    : text(order.item_count, "—");
-  const logistics =
-    order.carrier || order.tracking_no
-      ? [order.carrier, order.tracking_no].filter(Boolean).join(" · ")
-      : "—";
-
-  const buttons = [];
-  if (status === "CREATED") {
-    buttons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="paid" ${attrs} title="演示动作：不产生真实收款">模拟支付（演示）</button>`);
-    buttons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
-  } else if (status === "PAID") {
-    buttons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="ship" ${attrs}>发货</button>`);
-    buttons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
-  } else if (status === "SHIPPED") {
-    buttons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="complete" ${attrs} title="演示动作：不代表真实交易完成">模拟完成（演示）</button>`);
-  } else {
-    buttons.push(`<span class="b-muted">当前状态无可用操作</span>`);
-  }
-
-  const shipForm = showShipForm
-    ? `<div class="b-ship-form">
-        <p class="b-form-title">填写物流信息后发货</p>
-        <div class="b-ship-fields">
-          <label>物流单号（必填）
-            <input id="b-ship-tracking" type="text" maxlength="64" value="${escapeHtml(state.shipForm.tracking)}" placeholder="如 SF1234567890" autocomplete="off" />
-          </label>
-          <label>承运商（可选）
-            <input id="b-ship-carrier" type="text" maxlength="64" value="${escapeHtml(state.shipForm.carrier)}" placeholder="如 顺丰速运" autocomplete="off" />
-          </label>
-        </div>
-        ${state.shipForm.error ? `<p class="b-field-error" role="alert">${escapeHtml(state.shipForm.error)}</p>` : ""}
-        <div class="b-actions">
-          <button type="button" class="b-btn b-btn-primary" data-order-action="ship-submit" ${attrs}>${busy ? "提交中…" : "确认发货"}</button>
-          <button type="button" class="b-btn b-btn-ghost" data-order-action="ship-cancel" ${busy ? "disabled" : ""}>取消</button>
-        </div>
-      </div>`
-    : "";
-
-  const cancelConfirm = showCancelConfirm
-    ? `<div class="b-confirm">
-        <p>确认取消订单 <code>${escapeHtml(id)}</code>？取消后不可恢复。</p>
-        <div class="b-actions">
-          <button type="button" class="b-btn b-btn-danger" data-order-action="cancel-confirm" ${attrs}>确认取消</button>
-          <button type="button" class="b-btn b-btn-ghost" data-order-action="cancel-dismiss" ${busy ? "disabled" : ""}>放弃</button>
-        </div>
-      </div>`
-    : "";
-
+  const logistics = order.carrier || order.tracking_no
+    ? [order.carrier, order.tracking_no].filter(Boolean).join(" · ")
+    : "—";
   return `<article class="b-card b-order-card">
     <div class="b-card-head">
-      <div class="b-card-title">
-        <code class="b-mono">${escapeHtml(text(id))}</code>
-        ${badge(status, statusLabel(status))}
-      </div>
+      <div class="b-card-title"><code class="b-mono">${escapeHtml(text(id))}</code>${badge(status, statusLabel(status))}</div>
       <time>${escapeHtml(timeText(order.created_at))}</time>
     </div>
     <dl class="b-meta">
       <div><dt>买家</dt><dd>${escapeHtml(text(order.buyer_id))}</dd></div>
       <div><dt>金额</dt><dd class="b-amount">${money(order.total_amount)}</dd></div>
-      <div><dt>商品</dt><dd>${escapeHtml(itemsText)}</dd></div>
+      <div><dt>商品</dt><dd>${escapeHtml(orderItemsText(order))}</dd></div>
       <div><dt>物流</dt><dd>${escapeHtml(logistics)}</dd></div>
     </dl>
-    <div class="b-actions">${buttons.join("")}<button type="button" class="b-btn b-btn-ghost" data-order-detail="${escapeHtml(id)}">详情</button></div>
-    ${cancelConfirm}
-    ${shipForm}
+    <div class="b-actions"><button type="button" class="b-btn b-btn-ghost" data-order-detail="${escapeHtml(id)}">查看详情${status === "CREATED" || status === "PAID" || status === "SHIPPED" ? " / 处理" : ""}</button></div>
   </article>`;
 }
 
@@ -2117,23 +2069,41 @@ function orderDrawerMarkup() {
   const order = state.orders.find((item) => String(item.order_id || "") === state.orderDetailId);
   if (!order) return "";
   const id = String(order.order_id || "");
+  const status = String(order.status || "").toUpperCase();
   const items = Array.isArray(order.items) ? order.items : [];
+  const attrs = `data-order-id="${escapeHtml(id)}" ${state.busy === `order:${id}` || !can("operate_orders") ? "disabled" : ""}`;
+  const actionButtons = [];
+  if (status === "CREATED") {
+    actionButtons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="paid" ${attrs} title="演示动作：不产生真实收款">模拟支付（演示）</button>`);
+    actionButtons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
+  } else if (status === "PAID") {
+    actionButtons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="ship" ${attrs}>发货</button>`);
+    actionButtons.push(`<button type="button" class="b-btn b-btn-ghost b-btn-danger" data-order-action="cancel" ${attrs}>取消订单</button>`);
+  } else if (status === "SHIPPED") {
+    actionButtons.push(`<button type="button" class="b-btn b-btn-primary" data-order-action="complete" ${attrs} title="演示动作：不代表真实交易完成">模拟完成（演示）</button>`);
+  }
+  const shipForm = state.shipForm && String(state.shipForm.orderId) === id
+    ? `<div class="b-ship-form"><p class="b-form-title">填写物流信息后发货</p><div class="b-ship-fields"><label>物流单号（必填）<input id="b-ship-tracking" type="text" maxlength="64" value="${escapeHtml(state.shipForm.tracking)}" placeholder="如 SF1234567890" autocomplete="off" /></label><label>承运商（可选）<input id="b-ship-carrier" type="text" maxlength="64" value="${escapeHtml(state.shipForm.carrier)}" placeholder="如 顺丰速运" autocomplete="off" /></label></div>${state.shipForm.error ? `<p class="b-field-error" role="alert">${escapeHtml(state.shipForm.error)}</p>` : ""}<div class="b-actions"><button type="button" class="b-btn b-btn-primary" data-order-action="ship-submit" ${attrs}>确认发货</button><button type="button" class="b-btn b-btn-ghost" data-order-action="ship-cancel">取消</button></div></div>`
+    : "";
+  const cancelConfirm = state.cancelConfirmId === id
+    ? `<div class="b-confirm"><p>确认取消订单 <code>${escapeHtml(id)}</code>？取消后不可恢复。</p><div class="b-actions"><button type="button" class="b-btn b-btn-danger" data-order-action="cancel-confirm" ${attrs}>确认取消</button><button type="button" class="b-btn b-btn-ghost" data-order-action="cancel-dismiss">放弃</button></div></div>`
+    : "";
+  const statusConfirm = state.statusConfirm?.orderId === id
+    ? `<div class="b-confirm"><p>${state.statusConfirm.action === "paid" ? "确认把该订单标记为“模拟支付”？不会产生真实收款。" : "确认把该订单标记为“模拟完成”？不会代表真实交易完成。"}<br /><code>${escapeHtml(id)}</code> · ${escapeHtml(money(order.total_amount))}</p><div class="b-actions"><button type="button" class="b-btn b-btn-primary" data-order-action="status-confirm" ${attrs}>仅更新演示状态</button><button type="button" class="b-btn b-btn-ghost" data-order-action="status-dismiss">返回</button></div></div>`
+    : "";
   return `<div class="b-drawer-backdrop" data-order-detail-close></div>
     <aside class="b-order-drawer" role="dialog" aria-modal="true" aria-label="订单详情">
-      <header class="b-drawer-head">
-        <div><p class="b-eyebrow">订单详情 · 模拟交易</p><h2><code class="b-mono">${escapeHtml(text(id))}</code></h2></div>
-        <button type="button" class="b-btn b-btn-ghost" data-order-detail-close aria-label="关闭订单详情">关闭</button>
-      </header>
+      <header class="b-drawer-head"><div><p class="b-eyebrow">订单详情 · 模拟交易</p><h2><code class="b-mono">${escapeHtml(text(id))}</code></h2></div><button type="button" class="b-btn b-btn-ghost" data-order-detail-close aria-label="关闭订单详情">关闭</button></header>
       <div class="b-drawer-body">
-        <div class="b-drawer-summary"><span>${badge(String(order.status || ""), statusLabel(order.status))}</span><strong>${escapeHtml(money(order.total_amount))}</strong><small>金额为模拟交易金额，非真实收款</small></div>
-        <dl class="b-detail-list">
-          <div><dt>下单时间</dt><dd>${escapeHtml(timeText(order.created_at))}</dd></div>
-          <div><dt>买家</dt><dd>${escapeHtml(text(order.buyer_id))}</dd></div>
-          <div><dt>物流</dt><dd>${escapeHtml([order.carrier, order.tracking_no].filter(Boolean).join(" · ") || "—")}</dd></div>
-        </dl>
+        <div class="b-drawer-summary"><span>${badge(status, statusLabel(status))}</span><strong>${escapeHtml(money(order.total_amount))}</strong><small>金额为模拟交易金额，非真实收款</small></div>
+        <dl class="b-detail-list"><div><dt>下单时间</dt><dd>${escapeHtml(timeText(order.created_at))}</dd></div><div><dt>买家</dt><dd>${escapeHtml(text(order.buyer_id))}</dd></div><div><dt>物流</dt><dd>${escapeHtml([order.carrier, order.tracking_no].filter(Boolean).join(" · ") || "—")}</dd></div></dl>
         <h3>商品明细</h3>
         <div class="b-drawer-items">${items.length ? items.map((item) => `<div><span>${escapeHtml(text(item.title || item.product_id, "商品"))}</span><small>${escapeHtml(text(item.sku || item.spec, "未提供规格"))} · ×${Number(item.quantity || 1)}</small></div>`).join("") : `<p class="b-muted">订单未返回商品明细。</p>`}</div>
-        <p class="b-drawer-note">这是演示订单详情。支付、完成和库存动作仍需在列表中按权限操作；不会在本抽屉内写入真实交易。</p>
+        ${actionButtons.length ? `<div class="b-drawer-actions">${actionButtons.join("")}</div>` : ""}
+        ${statusConfirm}
+        ${cancelConfirm}
+        ${shipForm}
+        <p class="b-drawer-note">演示订单操作只推进状态，不写入真实支付、结算、物流或库存；正式接入必须补服务端审计和权限。</p>
       </div>
     </aside>`;
 }
@@ -2232,6 +2202,30 @@ function chatProfilesView() {
   </section>`;
 }
 
+function productTableRow(product) {
+  const skus = Array.isArray(product.skus) ? product.skus : [];
+  const prices = skus.map((sku) => Number(sku.price)).filter((value) => Number.isFinite(value));
+  const priceText = prices.length
+    ? (Math.min(...prices) === Math.max(...prices) ? money(Math.min(...prices)) : `${money(Math.min(...prices))}–${money(Math.max(...prices))}`)
+    : "—";
+  const available = skus.reduce((sum, sku) => sum + Number(sku.available_qty ?? 0), 0);
+  const locked = skus.reduce((sum, sku) => sum + Number(sku.locked_qty ?? 0), 0);
+  const lowCount = skus.filter((sku) => {
+    const safety = Number(sku.safety_stock ?? 0);
+    return safety > 0 && Number(sku.available_qty ?? 0) <= safety;
+  }).length;
+  const status = String(product.status || "").toUpperCase();
+  return `<tr>
+    <td><strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong><br /><small><code class="b-mono">${escapeHtml(text(product.product_id))}</code> · ${escapeHtml(text(product.category))}</small></td>
+    <td>${status === "ACTIVE" ? "在售" : escapeHtml(status || "—")}</td>
+    <td class="b-num">${skus.length}</td>
+    <td class="b-num">${escapeHtml(priceText)}</td>
+    <td class="b-num">${available}</td>
+    <td class="b-num">${locked}</td>
+    <td>${lowCount ? `<span class="b-badge is-warn">${lowCount} 个低库存</span>` : "—"}</td>
+  </tr>`;
+}
+
 function productsView() {
   const summary = state.productSummary || {};
   const lowProducts = state.products.filter((product) => product.low_stock);
@@ -2239,7 +2233,8 @@ function productsView() {
   const body = state.loading && !state.products.length
     ? skeletonMarkup(2)
     : visibleProducts.length
-      ? `<div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
+      ? `<div class="b-product-table-wrap"><table class="b-product-table"><thead><tr><th>商品</th><th>状态</th><th class="b-num">SKU</th><th class="b-num">价格</th><th class="b-num">可售</th><th class="b-num">锁定</th><th>库存</th></tr></thead><tbody>${visibleProducts.map(productTableRow).join("")}</tbody></table></div>
+         <div class="b-product-grid">${visibleProducts.map(productCard).join("")}</div>`
       : emptyMarkup(state.productFilter === "low" ? "当前没有低库存商品" : "暂无商品");
   const alert = Number(summary.low_stock_products || 0) > 0
     ? `<div class="b-stock-alert" role="status">
@@ -2802,6 +2797,7 @@ function bindEvents() {
     }
     if (target.closest("[data-order-detail-close]")) {
       state.orderDetailId = "";
+      state.statusConfirm = null;
       render();
       return;
     }
@@ -3031,6 +3027,7 @@ async function boot() {
   state.shipForm = null;
   state.cancelConfirmId = "";
   state.orderDetailId = "";
+  state.statusConfirm = null;
   render();
   try {
     await loadMe();
