@@ -9,14 +9,15 @@ import "./b-workbench.css";
 const root = document.getElementById("b-root");
 
 const VIEWS = [
-  { key: "orders", label: "订单", short: "订单" },
-  { key: "after-sales", label: "售后", short: "售后" },
-  { key: "products", label: "商品", short: "商品" },
-  { key: "chat-profiles", label: "用户画像", short: "画像" },
-  { key: "superagent", label: "Super-agent", short: "Super" },
-  { key: "policy", label: "动作策略", short: "策略" },
-  { key: "audit", label: "执行审计", short: "审计" },
+  { key: "orders", label: "订单", short: "订单", group: "交易" },
+  { key: "after-sales", label: "售后", short: "售后", group: "交易" },
+  { key: "products", label: "商品与 SKU", short: "商品", group: "商品与库存" },
+  { key: "chat-profiles", label: "用户画像", short: "画像", group: "客户" },
+  { key: "superagent", label: "调查与审批", short: "协作", group: "经营协作" },
+  { key: "policy", label: "动作策略", short: "策略", group: "管理" },
+  { key: "audit", label: "执行审计", short: "审计", group: "管理" },
 ];
+const NAV_GROUPS = ["交易", "商品与库存", "客户", "经营协作", "管理"];
 
 const ORDER_STATUS_LABELS = {
   CREATED: "待支付",
@@ -2347,22 +2348,40 @@ function shellMarkup() {
                 : productsView();
   const merchantName = state.me?.name || "商家";
   const merchantId = state.me?.id || "";
+  const role = String(state.me?.role || "").toLowerCase();
+  const roleText = role === "owner" ? "店主" : role === "admin" ? "管理员" : role === "staff" ? "成员" : "商家";
+  const navMarkup = NAV_GROUPS.map((group) => {
+    const views = VIEWS.filter((view) => view.group === group);
+    if (!views.length) return "";
+    return `<div class="b-nav-group">
+      <p class="b-nav-group-label">${group}</p>
+      ${views.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" ${state.loading || state.busy ? 'aria-disabled="true"' : ""}><span class="b-nav-full">${view.label}</span><span class="b-nav-short">${view.short || view.label}</span></button>`).join("")}
+    </div>`;
+  }).join("");
   return `<div class="b-shell">
-    <header class="b-header">
+    <header class="b-topbar">
       <div class="b-brand"><span class="b-brand-mark">千客</span><span class="b-brand-sub">商家工作台</span></div>
-      <div class="b-merchant">
-        <strong>${escapeHtml(merchantName)}</strong>
-        ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
+      <div class="b-context">
+        <div class="b-merchant">
+          <strong>${escapeHtml(merchantName)}</strong>
+          ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
+        </div>
+        <span class="b-role">${escapeHtml(roleText)}</span>
+        <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
       </div>
       <div class="b-header-actions">
         <a class="b-text-link" href="/v2/#/home">返回入口</a>
       </div>
     </header>
-    <nav class="b-nav" aria-label="商家工作台视图">
-      ${VIEWS.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" ${state.loading || state.busy ? 'aria-disabled="true"' : ""}><span class="b-nav-full">${view.label}</span><span class="b-nav-short">${view.short || view.label}</span></button>`).join("")}
-    </nav>
-    ${state.error ? `<p class="b-inline-error" role="alert"><span>${escapeHtml(state.error)}</span><button type="button" class="b-inline-close" data-clear-error aria-label="关闭错误提示">×</button></p>` : ""}
-    <main class="b-main">${viewMarkup}</main>
+    <div class="b-body">
+      <aside class="b-sidebar" aria-label="商家工作台导航">
+        ${navMarkup}
+      </aside>
+      <main class="b-main">
+        ${state.error ? `<p class="b-inline-error" role="alert"><span>${escapeHtml(state.error)}</span><button type="button" class="b-inline-close" data-clear-error aria-label="关闭错误提示">×</button></p>` : ""}
+        ${viewMarkup}
+      </main>
+    </div>
     ${toastMarkup()}
   </div>`;
 }
