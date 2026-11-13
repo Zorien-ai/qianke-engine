@@ -56,6 +56,10 @@
 | --- | --- |
 | ![砍价报价确认](docs/e2e/p21-confirmed.png) | ![多商品订单](docs/e2e/p25-cshop-order.png) |
 
+| CShop / CApp 共享购物车（公网） | 公网 390px 共享购物车 |
+| --- | --- |
+| ![共享购物车](docs/e2e/public-shared-cart.png) | ![手机端共享购物车](docs/e2e/public-shared-cart-mobile.png) |
+
 ---
 
 ## 目录
