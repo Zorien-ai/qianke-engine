@@ -28,14 +28,18 @@ iOS 键盘弹起时浏览器仍可滚动 body
   overflow: hidden
 进入 CApp 时锁 body overflow，卸载恢复
 syncViewportHeight 同时记录 visualViewport.height / offsetTop
+键盘关闭时强制回落到 window.innerHeight，offsetTop 归零
+增加 window resize 监听和 blur 后延迟复位
 ```
 
 ## 验证
 
 ```text
-390x844 -> 模拟键盘缩到 390x500
-app height = 500
-composer bottom = 484
+键盘打开：跟随 visualViewport 高度 / offsetTop
+键盘关闭：app height 回到 window.innerHeight
+390x844 -> 390x500 -> 390x844
+app height 844
+offsetTop 0
 window.scrollY = 0
 宽度 390 / 390，无横向溢出
 ```
