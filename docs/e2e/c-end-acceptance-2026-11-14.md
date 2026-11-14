@@ -153,7 +153,7 @@ document.title（修复前）: /c/app = 千客 · C 端；其余 5 页 = 千客�
 
 `docs/design/c-end-acceptance/` 下 25 张：320（6 页）、390（4 页）、768（3 页）、1440（6 页），另 6 张 `*-fixed.png` / `cend-320-social-warm.png` / `cend-320-app-nav-cells.png` 为修复后复验。
 
-## 本次改动（未提交）
+## 本次改动（已提交 `60c1bf4`）
 
 ```text
 web/src/views/COrders.vue  补基础 .ghost-btn 样式（scoped）

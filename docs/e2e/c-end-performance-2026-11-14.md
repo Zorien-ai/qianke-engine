@@ -167,6 +167,9 @@ CShop CLS      1440：0.17 → 0.03；390：0.576 → 0.00（阈值 0.1）
 CApp 慢网 LCP  Fast 3G：8,004ms → 870ms
 ```
 
+提交：`e40b704 perf(c): stabilize CShop CLS, split routes and enable gzip`
+（同批 UI 修复 `60c1bf4`）
+
 ## 改动清单（工作区未提交）
 
 ```text
