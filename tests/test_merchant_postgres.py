@@ -169,6 +169,7 @@ def test_postgres_schema_isolation(repo, seed):
         conn.close()
     assert tables == [
         "m_inventory",
+        "m_inventory_adjustment",
         "m_meta",
         "m_order",
         "m_order_item",

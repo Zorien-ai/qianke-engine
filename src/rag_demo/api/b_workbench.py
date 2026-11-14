@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import re
 import time
 import uuid
@@ -16,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from rag_demo import auth, product_media as media
 from rag_demo.c_end import alerts as alert_notifier
@@ -77,6 +79,38 @@ class WorkbenchAfterSaleResolveIn(BaseModel):
 
 class WorkbenchAfterSaleReceiveIn(BaseModel):
     accepted: bool
+
+
+class InventoryAdjustItemIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str = Field(..., min_length=1, max_length=80)
+    sku: str = Field(..., min_length=1, max_length=80)
+    target_available: int = Field(..., ge=0)
+
+
+class InventoryPreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    warehouse_id: str | None = Field(default=None, max_length=80)
+    reason_code: str = Field(default="MANUAL_RECONCILIATION", max_length=64)
+    reason: str = Field(default="批量可售量调整", max_length=300)
+    items: list[InventoryAdjustItemIn] = Field(..., min_length=1, max_length=50)
+
+
+class InventoryBatchItemIn(InventoryAdjustItemIn):
+    warehouse_id: str = Field(..., min_length=1, max_length=80)
+    expected_available: int = Field(..., ge=0)
+    expected_reserved: int = Field(..., ge=0)
+
+
+class InventoryBatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_request_id: str = Field(..., min_length=1, max_length=80)
+    reason_code: str = Field(default="MANUAL_RECONCILIATION", max_length=64)
+    reason: str = Field(default="批量可售量调整", max_length=300)
+    items: list[InventoryBatchItemIn] = Field(..., min_length=1, max_length=50)
 
 
 def _account() -> dict[str, Any]:
@@ -322,6 +356,147 @@ def product_image_audit(product_id: str, limit: int = 20) -> dict[str, Any]:
         "merchant_id": member["merchant_id"],
         "product_id": product_id,
         "events": media.list_image_audit(member["merchant_id"], product_id, limit=limit),
+    }
+
+
+@router.get("/inventory/capabilities")
+def workbench_inventory_capabilities() -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "operate_inventory")
+    return {
+        "merchant_id": member["merchant_id"],
+        "mode": "SET_AVAILABLE",
+        "max_items": 50,
+        "physical_count_supported": False,
+        "simulation_mode": "SIMULATED",
+    }
+
+
+@router.post("/inventory/preview")
+def workbench_inventory_preview(req: InventoryPreviewIn) -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "operate_inventory")
+    merchant_id = member["merchant_id"]
+    repo = get_merchant_repository()
+    seen: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for item in req.items:
+        if item.sku in seen:
+            raise HTTPException(status_code=422, detail="同一批次不能重复 SKU")
+        seen.add(item.sku)
+        inventory = repo.get_inventory(item.sku, merchant_id=merchant_id)
+        if inventory is None or not inventory.warehouses:
+            items.append({
+                "item_id": item.item_id, "sku": item.sku, "status": "INVALID",
+                "error": {"code": "NOT_FOUND", "message": "找不到当前商家的库存记录"},
+            })
+            continue
+        warehouses = inventory.warehouses
+        selected = next((w for w in warehouses if w.warehouse_id == req.warehouse_id), None) if req.warehouse_id else warehouses[0]
+        if selected is None:
+            items.append({
+                "item_id": item.item_id, "sku": item.sku, "status": "INVALID",
+                "error": {"code": "NOT_FOUND", "message": "指定仓库下没有该 SKU"},
+            })
+            continue
+        before = selected.available_qty
+        target = int(item.target_available)
+        items.append({
+            "item_id": item.item_id,
+            "sku": item.sku,
+            "warehouse_id": selected.warehouse_id,
+            "expected_available": before,
+            "expected_reserved": selected.reserved_qty,
+            "before": {"available_qty": before, "reserved_qty": selected.reserved_qty, "safety_stock": selected.safety_stock},
+            "after": {"available_qty": target, "reserved_qty": selected.reserved_qty, "safety_stock": selected.safety_stock},
+            "delta_available": target - before,
+            "status": "READY" if target != before else "UNCHANGED",
+        })
+    return {
+        "merchant_id": merchant_id,
+        "mode": "SET_AVAILABLE",
+        "simulation_mode": "SIMULATED",
+        "max_items": 50,
+        "warehouse_id": req.warehouse_id,
+        "valid_count": sum(1 for item in items if item["status"] == "READY"),
+        "invalid_count": sum(1 for item in items if item["status"] == "INVALID"),
+        "items": items,
+    }
+
+
+@router.post("/inventory/batch")
+def workbench_inventory_batch(req: InventoryBatchIn) -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "operate_inventory")
+    merchant_id = member["merchant_id"]
+    repo = get_merchant_repository()
+    seen: set[str] = set()
+    for item in req.items:
+        if item.sku in seen:
+            raise HTTPException(status_code=422, detail="同一批次不能重复 SKU")
+        seen.add(item.sku)
+    batch_id = f"adjbatch_{uuid.uuid4().hex}"
+    actor_id = str(account["id"])
+    results: list[dict[str, Any]] = []
+    for item in req.items:
+        payload = {
+            "warehouse_id": item.warehouse_id,
+            "sku": item.sku,
+            "target_available": item.target_available,
+            "expected_available": item.expected_available,
+            "expected_reserved": item.expected_reserved,
+            "reason_code": req.reason_code,
+            "reason": req.reason,
+        }
+        payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        row = repo.adjust_inventory_available(
+            merchant_id,
+            batch_id=batch_id,
+            item_id=item.item_id,
+            actor_id=actor_id,
+            client_request_id=req.client_request_id,
+            warehouse_id=item.warehouse_id,
+            sku=item.sku,
+            target_available=item.target_available,
+            expected_available=item.expected_available,
+            expected_reserved=item.expected_reserved,
+            payload_hash=payload_hash,
+            reason_code=req.reason_code,
+            reason=req.reason,
+        )
+        results.append({
+            "item_id": row["item_id"],
+            "sku": row["sku"],
+            "warehouse_id": row["warehouse_id"],
+            "status": row["status"],
+            "before_available": row["before_available"],
+            "after_available": row["after_available"],
+            "reserved_qty": row["reserved_qty"],
+            "target_available": row["target_available"],
+            "error_code": row["error_code"],
+            "audit_event_id": row["event_id"],
+        })
+    succeeded = sum(1 for row in results if row["status"] == "SUCCEEDED")
+    unchanged = sum(1 for row in results if row["status"] == "UNCHANGED")
+    failed = sum(1 for row in results if row["status"] == "FAILED")
+    if failed == 0 and (succeeded or unchanged):
+        status = "SUCCEEDED"
+    elif succeeded or unchanged:
+        status = "PARTIAL_SUCCESS"
+    else:
+        status = "FAILED"
+    return {
+        "merchant_id": merchant_id,
+        "batch_id": batch_id,
+        "client_request_id": req.client_request_id,
+        "mode": "SET_AVAILABLE",
+        "simulation_mode": "SIMULATED",
+        "status": status,
+        "total": len(results),
+        "succeeded": succeeded,
+        "failed": failed,
+        "unchanged": unchanged,
+        "items": results,
     }
 
 

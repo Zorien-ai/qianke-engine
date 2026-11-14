@@ -29,6 +29,7 @@ import json
 import os
 import re
 import threading
+import uuid
 from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -400,6 +401,33 @@ CREATE TABLE IF NOT EXISTS {schema}.m_inventory (
 
 CREATE INDEX IF NOT EXISTS idx_m_inventory_merchant
     ON {schema}.m_inventory (merchant_id);
+
+CREATE TABLE IF NOT EXISTS {schema}.m_inventory_adjustment (
+    event_id          TEXT PRIMARY KEY,
+    batch_id          TEXT NOT NULL,
+    merchant_id       TEXT NOT NULL,
+    actor_id          TEXT NOT NULL,
+    client_request_id TEXT NOT NULL,
+    item_id           TEXT NOT NULL,
+    warehouse_id      TEXT NOT NULL,
+    sku               TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    before_available  INTEGER,
+    after_available   INTEGER,
+    reserved_qty      INTEGER,
+    target_available  INTEGER NOT NULL,
+    payload_hash      TEXT NOT NULL,
+    error_code        TEXT,
+    reason_code       TEXT,
+    reason            TEXT,
+    created_at        TEXT NOT NULL,
+    UNIQUE (merchant_id, actor_id, client_request_id, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_m_inventory_adjustment_request
+    ON {schema}.m_inventory_adjustment (merchant_id, actor_id, client_request_id);
+CREATE INDEX IF NOT EXISTS idx_m_inventory_adjustment_batch
+    ON {schema}.m_inventory_adjustment (batch_id);
 
 CREATE TABLE IF NOT EXISTS {schema}.m_order (
     order_id     TEXT PRIMARY KEY,
@@ -849,6 +877,92 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
                 for row in rows
             ),
         )
+
+    def adjust_inventory_available(
+        self,
+        merchant_id: str,
+        *,
+        batch_id: str,
+        item_id: str,
+        actor_id: str,
+        client_request_id: str,
+        warehouse_id: str,
+        sku: str,
+        target_available: int,
+        expected_available: int,
+        expected_reserved: int,
+        payload_hash: str,
+        reason_code: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """按 READY 快照调整单个 (merchant, warehouse, sku) 的可售量并写审计。"""
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        actor = _required_text(actor_id, "actor_id", max_length=128)
+        request = _required_text(client_request_id, "client_request_id", max_length=80)
+        batch = _required_text(batch_id, "batch_id", max_length=80)
+        item = _required_text(item_id, "item_id", max_length=80)
+        warehouse = _required_text(warehouse_id, "warehouse_id", max_length=80)
+        sku_value = _required_text(sku, "sku", max_length=80)
+        target = int(target_available)
+        expected_a = int(expected_available)
+        expected_r = int(expected_reserved)
+        if target < 0 or expected_a < 0 or expected_r < 0:
+            raise MerchantInvalidError("库存数量必须为非负整数")
+        reason_value = _required_text(reason, "reason", max_length=300)
+        reason_code_value = _required_text(reason_code, "reason_code", max_length=64)
+
+        def insert_row(cur, *, status: str, before: int | None, after: int | None, reserved: int | None, error_code: str | None) -> dict[str, Any]:
+            event_id = f"adj_{uuid.uuid4().hex}"
+            cur.execute(
+                "INSERT INTO m_inventory_adjustment "
+                "(event_id, batch_id, merchant_id, actor_id, client_request_id, item_id, "
+                "warehouse_id, sku, status, before_available, after_available, reserved_qty, "
+                "target_available, payload_hash, error_code, reason_code, reason, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    event_id, batch, merchant, actor, request, item,
+                    warehouse, sku_value, status, before, after, reserved,
+                    target, payload_hash, error_code, reason_code_value, reason_value, _now(),
+                ),
+            )
+            cur.execute("SELECT * FROM m_inventory_adjustment WHERE event_id = %s", (event_id,))
+            return dict(cur.fetchone())
+
+        with self._lock, self._transaction() as cur:
+            cur.execute(
+                "SELECT * FROM m_inventory_adjustment "
+                "WHERE merchant_id = %s AND actor_id = %s AND client_request_id = %s AND item_id = %s",
+                (merchant, actor, request, item),
+            )
+            existing = cur.fetchone()
+            if existing is not None:
+                if existing["payload_hash"] != payload_hash:
+                    raise MerchantConflictError("同一 client_request_id 的库存调整内容不一致")
+                return dict(existing)
+            cur.execute(
+                "SELECT available_qty, reserved_qty FROM m_inventory "
+                "WHERE merchant_id = %s AND warehouse_id = %s AND sku = %s",
+                (merchant, warehouse, sku_value),
+            )
+            inventory = cur.fetchone()
+            if inventory is None:
+                return insert_row(cur, status="FAILED", before=None, after=None, reserved=None, error_code="NOT_FOUND")
+            before = int(inventory["available_qty"])
+            reserved = int(inventory["reserved_qty"])
+            if before != expected_a or reserved != expected_r:
+                return insert_row(cur, status="FAILED", before=before, after=before, reserved=reserved, error_code="VERSION_CONFLICT")
+            if target == before:
+                return insert_row(cur, status="UNCHANGED", before=before, after=before, reserved=reserved, error_code=None)
+            cur.execute(
+                "UPDATE m_inventory SET available_qty = %s, updated_at = %s "
+                "WHERE merchant_id = %s AND warehouse_id = %s AND sku = %s "
+                "AND available_qty = %s AND reserved_qty = %s",
+                (target, _now(), merchant, warehouse, sku_value, before, reserved),
+            )
+            if cur.rowcount != 1:
+                return insert_row(cur, status="FAILED", before=before, after=before, reserved=reserved, error_code="VERSION_CONFLICT")
+            return insert_row(cur, status="SUCCEEDED", before=before, after=target, reserved=reserved, error_code=None)
 
     def list_orders(
         self,
