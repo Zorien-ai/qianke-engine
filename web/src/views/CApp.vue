@@ -3104,19 +3104,23 @@ onBeforeUnmount(() => {
         </label>
 
         <nav class="c-nav" aria-label="主要导航">
+          <RouterLink class="c-nav-item" to="/c/home">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" /></svg>
+            <span>首页</span>
+          </RouterLink>
           <RouterLink class="c-nav-item active" to="/c/app">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" />
               <path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" />
             </svg>
-            <span>对话</span>
+            <span>聊</span>
           </RouterLink>
           <RouterLink class="c-nav-item" to="/c">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
               <path d="M3 6h18M16 10a4 4 0 0 1-8 0" />
             </svg>
-            <span>商城</span>
+            <span>逛</span>
           </RouterLink>
           <RouterLink class="c-nav-item" to="/c/orders">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -3124,6 +3128,12 @@ onBeforeUnmount(() => {
               <path d="M9 7h6M9 11h6M9 15h4" />
             </svg>
             <span>订单</span>
+          </RouterLink>
+          <RouterLink class="c-nav-item" to="/c/social">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9 9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" />
+            </svg>
+            <span>消息</span>
           </RouterLink>
         </nav>
 
@@ -3927,6 +3937,10 @@ onBeforeUnmount(() => {
     </div>
 
     <nav class="c-mobile-nav" aria-label="移动端导航">
+      <RouterLink to="/c/home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" /></svg>
+        <span>首页</span>
+      </RouterLink>
       <RouterLink to="/c/app" class="active">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
           <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.9 8.9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" />
