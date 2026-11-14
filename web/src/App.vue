@@ -88,11 +88,14 @@ const navGroups = computed(() => {
     .filter((group) => group.items.length);
 });
 // 登录后的工作台统一 Tab 标题；公开营销页 /home 由 Landing 自己设置更完整的标题
+// C 端是独立产品面（cShell 路由），标签页不能显示企业端的“新版工作台”。
 watch(
   () => route.path,
   () => {
     if (route.meta && route.meta.standalone) {
       document.title = route.meta.title || "千客";
+    } else if (route.meta && route.meta.cShell) {
+      document.title = `千客 C 端 · ${route.meta.title || "首页"}`;
     } else if (!(route.meta && route.meta.public)) {
       document.title = "千客引擎 · 新版工作台";
     }

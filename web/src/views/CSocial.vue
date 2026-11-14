@@ -1189,8 +1189,8 @@ onBeforeUnmount(() => {
 
 .social-avatar.is-group {
   border-radius: 13px;
-  background: #e8eaf8;
-  color: #4c568b;
+  background: #f2e2d2;
+  color: #8a5a3b;
 }
 
 .social-conv-copy {

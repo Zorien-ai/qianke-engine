@@ -118,26 +118,23 @@ C 端相关测试至少：
 5. 改完删除的代码/截图放 docs/e2e 与 docs/design
 ```
 
-## 待接性能任务（task-67，P0）
+## 待接性能任务（task-67，P0）— 已完成 2026-11-14 20:30
 
 共享任务板 id：`task-67`  
 报告：`docs/e2e/c-end-performance-2026-11-14.md`
 
 ```text
-1. CShop CLS
-   桌面 0.17-0.53 / 移动 0.576，阈值 0.1
-   原因：商品数据返回后插入今日手记/购物车到已有内容上方
-   要求：预留稳定高度或调整顺序；商品图固定尺寸
-   验收：1440/390 冷启动 CLS <= 0.1
+提交：
+  e40b704 perf(c): stabilize CShop CLS, split routes and enable gzip
+  60c1bf4 fix(c): repair default buttons, tab hit areas, page titles and group avatar
 
-2. 首屏体积
-   main JS 1.20MB + CSS 309KB，首屏约 1.59MB，无 gzip/brotli
-   Fast 3G 冷启动 CApp LCP 约 8.0s
-   要求：路由级代码分割 + gzip/brotli
-   验收：构建通过；首屏显著下降；压缩生效；补测 1440/390
-
-3. 回传
-   commit hash、build/pytest、前后 CLS/transfer/FCP/LCP、截图
+结果：
+  CShop CLS     1440 0.17→0.03；390 0.576→0.00
+  首屏传输      1.59MB→约 104KB（gzip 生效）
+  CApp Fast3G   LCP 8,004ms→870ms
+  build 5.99s；pytest 823 passed / 6 skipped；C 端子集 30 passed
+  截图：docs/design/c-end-perf/
+  注意：main.py 加了 GZipMiddleware，本地 uvicorn 已重启（PID 17592）
 ```
 
 边界：只改 C 端；共享后端压缩中间件先与本会话确认；不要动 B/企业端文件。
