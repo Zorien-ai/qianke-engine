@@ -694,6 +694,7 @@ onBeforeUnmount(() => {
           >
             {{ link.label }}
           </button>
+          <a href="/v2/b.html" class="l-nav-link l-nav-b">商家工作台</a>
         </nav>
 
         <div class="l-nav-actions">
@@ -739,6 +740,7 @@ onBeforeUnmount(() => {
               <button type="button" class="l-btn l-btn-ghost l-btn-lg" @click="docsOpen = true">
                 查看文档
               </button>
+              <a href="/v2/b.html" class="l-btn l-btn-ghost l-btn-lg">商家工作台</a>
             </div>
           </div>
 
@@ -892,6 +894,45 @@ onBeforeUnmount(() => {
               <span>{{ scene.title }}</span>
             </h2>
           </article>
+        </div>
+      </section>
+
+      <!-- ============ B 端商家工作台 ============ -->
+      <section id="b-workbench" class="l-bw">
+        <div class="l-shell">
+          <div class="l-bw-head" v-reveal>
+            <p class="l-bw-kicker">B 端 · 商家工作台 2.0</p>
+            <h2 class="l-bw-title">订单、库存、经营报告，<br />放进同一个工作台。</h2>
+            <p class="l-bw-lead">
+              店主看流水，仓库改库存，客服处理售后。把每天的店务动作收进一个明确、可审计的界面，而不是来回切十几个后台。
+            </p>
+          </div>
+          <div class="l-bw-grid">
+            <article class="l-bw-card" v-reveal>
+              <span class="l-bw-index">01</span>
+              <h3>订单与履约</h3>
+              <p>服务端搜索、日期筛选、分页和订单详情；发货、取消与模拟支付/完成动作。</p>
+            </article>
+            <article class="l-bw-card" v-reveal :style="{ '--reveal-delay': '80ms' }">
+              <span class="l-bw-index">02</span>
+              <h3>商品与 SKU</h3>
+              <p>商品、规格、库存一屏看清；支持 SKU 视图和低库存筛选。</p>
+            </article>
+            <article class="l-bw-card" v-reveal :style="{ '--reveal-delay': '160ms' }">
+              <span class="l-bw-index">03</span>
+              <h3>批量改库存</h3>
+              <p>选仓、预检、逐 SKU 提交；写入当前商家库存与审计，不碰预占。</p>
+            </article>
+            <article class="l-bw-card" v-reveal :style="{ '--reveal-delay': '240ms' }">
+              <span class="l-bw-index">04</span>
+              <h3>经营报告</h3>
+              <p>按完成时间统计 GMV、退款和净额，服务端全量聚合，不再用前端列表求和。</p>
+            </article>
+          </div>
+          <div class="l-bw-foot" v-reveal>
+            <span>当前为模拟交易，不接真实支付 · 经营报告按完成口径</span>
+            <a href="/v2/b.html" class="l-btn l-btn-primary l-btn-lg">进入商家工作台</a>
+          </div>
         </div>
       </section>
 
