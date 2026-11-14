@@ -2856,3 +2856,84 @@ code,
   font-weight: 600;
   text-decoration: none;
 }
+
+
+/* B 端商品工具栏：桌面一行，手机三行等宽 */
+.b-product-tools {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.b-product-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.b-product-search-row {
+  flex: 1 1 300px;
+}
+
+.b-product-search {
+  flex: 1 1 220px;
+}
+
+.b-product-search-row .b-product-search input {
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  .b-product-tools {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .b-product-row {
+    width: 100%;
+    display: grid;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .b-product-search-row {
+    flex: 0 0 auto;
+    grid-template-columns: minmax(0, 1fr) 68px;
+  }
+
+  .b-product-filter-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .b-product-action-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .b-product-tools .b-filter {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .b-product-tools .b-filter select,
+  .b-product-tools .b-product-search input {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+  }
+
+  .b-product-tools .b-btn {
+    width: 100%;
+    min-width: 0;
+    height: 38px;
+    padding: 0 6px;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+
+  .b-c-home-link {
+    display: none;
+  }
+}
