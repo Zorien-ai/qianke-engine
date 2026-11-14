@@ -627,12 +627,27 @@ onMounted(() => {
       </div>
     </header>
 
-    <section v-if="featuredProduct" class="market-note" aria-label="今日手记">
+    <!-- 今日手记常驻渲染：加载前后结构、行高一致，避免数据返回时整体下推（CLS）。 -->
+    <section
+      class="market-note"
+      :class="{ 'is-placeholder': !featuredProduct }"
+      aria-label="今日手记"
+    >
       <p class="market-note-kicker">TODAY'S NOTE</p>
-      <h3>{{ featuredProduct.title }}</h3>
-      <p class="market-note-text">
-        {{ featuredProduct.category }} · {{ productHint(featuredProduct) }}。小鱼说：先看合不合用，再决定要不要买。
-      </p>
+      <template v-if="featuredProduct">
+        <h3>{{ featuredProduct.title }}</h3>
+        <p class="market-note-text">
+          {{ featuredProduct.category }} · {{ productHint(featuredProduct) }}。小鱼说：先看合不合用，再决定要不要买。
+        </p>
+      </template>
+      <template v-else-if="productsLoading">
+        <h3 class="skeleton-line" aria-hidden="true">&nbsp;</h3>
+        <p class="market-note-text skeleton-line" aria-hidden="true">&nbsp;</p>
+      </template>
+      <template v-else>
+        <h3>今日手记</h3>
+        <p class="market-note-text">店里今天还没有上架商品，先和小鱼聊聊想要什么。</p>
+      </template>
     </section>
 
     <ShoppingCart :busy="negotiationBusy || quoteBusy || !!quoteDraft" @checkout="checkoutCart" />
@@ -1663,17 +1678,32 @@ onMounted(() => {
   border-radius: 14px;
 }
 
+/* 标题单行 + 正文固定两行：加载态与完成态高度一致，CLS 不随数据返回抖动。 */
 .market-note h3 {
   margin: 0 0 5px;
+  overflow: hidden;
   font-size: 20px;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .market-note-text {
+  display: -webkit-box;
+  min-height: 34px;
   margin: 0;
+  overflow: hidden;
   color: var(--text-2);
   font-size: 10px;
   line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.market-note.is-placeholder .skeleton-line {
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: transparent;
 }
 
 .panel-head h3 {

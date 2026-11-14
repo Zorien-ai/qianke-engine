@@ -43,6 +43,7 @@ from contextlib import asynccontextmanager, contextmanager
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import APIError
@@ -718,6 +719,9 @@ register_monitor(app)
 register_ops(app)
 install_security_headers(app)
 install_csp_report(app)
+# 响应压缩：main/css 未压缩时首屏约 1.59MB，Fast 3G 冷启动 LCP 8s。
+# 只压缩响应体（>=1KB），不改任何业务逻辑；静态产物与接口一起生效。
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Vue 3 新界面（M3）：把构建产物挂到 /v2。
 # 项目根从本文件位置向上推导（api/main.py → api → rag_demo → src → 项目根），

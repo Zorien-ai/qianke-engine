@@ -1,32 +1,34 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import { boot, hasCap, isDemo, isManager, store, toast } from "./store";
 
-import Landing from "./views/Landing.vue";
-import Dashboard from "./views/Dashboard.vue";
-import Chat from "./views/Chat.vue";
-import Kb from "./views/Kb.vue";
-import KbProfiles from "./views/KbProfiles.vue";
-import KbDocs from "./views/KbDocs.vue";
-import KbHistory from "./views/KbHistory.vue";
-import Staff from "./views/Staff.vue";
-import Settings from "./views/Settings.vue";
-import Setup from "./views/Setup.vue";
-import Eval from "./views/Eval.vue";
-import Monitor from "./views/Monitor.vue";
-import Billing from "./views/Billing.vue";
-import MonitorAdmin from "./views/MonitorAdmin.vue";
-import AgentDemo from "./views/AgentDemo.vue";
-import AgentActions from "./views/AgentActions.vue";
-import MyAgent from "./views/MyAgent.vue";
-import CHome from "./views/CHome.vue";
-import CShop from "./views/CShop.vue";
-import CSocial from "./views/CSocial.vue";
-import COrders from "./views/COrders.vue";
-import CApp from "./views/CApp.vue";
-import CMe from "./views/CMe.vue";
-import CAdminAudit from "./views/CAdminAudit.vue";
-import ChatProfiles from "./views/ChatProfiles.vue";
-import MerchantStoreFriends from "./views/MerchantStoreFriends.vue";
+// 路由级懒加载：首屏只下载当前页面需要的 chunk，避免把 B/C/A 全部视图
+// 打进 1.2MB 的 main bundle（C 端冷启动首屏传输 1.59MB 的主要来源）。
+const Landing = () => import("./views/Landing.vue");
+const Dashboard = () => import("./views/Dashboard.vue");
+const Chat = () => import("./views/Chat.vue");
+const Kb = () => import("./views/Kb.vue");
+const KbProfiles = () => import("./views/KbProfiles.vue");
+const KbDocs = () => import("./views/KbDocs.vue");
+const KbHistory = () => import("./views/KbHistory.vue");
+const Staff = () => import("./views/Staff.vue");
+const Settings = () => import("./views/Settings.vue");
+const Setup = () => import("./views/Setup.vue");
+const Eval = () => import("./views/Eval.vue");
+const Monitor = () => import("./views/Monitor.vue");
+const Billing = () => import("./views/Billing.vue");
+const MonitorAdmin = () => import("./views/MonitorAdmin.vue");
+const AgentDemo = () => import("./views/AgentDemo.vue");
+const AgentActions = () => import("./views/AgentActions.vue");
+const MyAgent = () => import("./views/MyAgent.vue");
+const CHome = () => import("./views/CHome.vue");
+const CShop = () => import("./views/CShop.vue");
+const CSocial = () => import("./views/CSocial.vue");
+const COrders = () => import("./views/COrders.vue");
+const CApp = () => import("./views/CApp.vue");
+const CMe = () => import("./views/CMe.vue");
+const CAdminAudit = () => import("./views/CAdminAudit.vue");
+const ChatProfiles = () => import("./views/ChatProfiles.vue");
+const MerchantStoreFriends = () => import("./views/MerchantStoreFriends.vue");
 
 /**
  * 用 hash 路由：后端把 web/dist 静态挂到 /v2/，没有服务端 fallback，
