@@ -187,7 +187,9 @@ onMounted(load);
 .pack-name { color: var(--muted); font-size: 12px; }
 .pack-card b { font-size: 25px; }
 .pack-tokens { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
-.billing-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-top: 16px; }
+.billing-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-top: 16px; min-width: 0; }
+.billing-grid > .card { min-width: 0; }
+.billing-grid .table-wrap { max-width: 100%; overflow-x: auto; }
 .invoice-list { display: flex; flex-direction: column; gap: 6px; }
 .invoice-row { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .invoice-row > div { flex: 1; min-width: 0; }
@@ -195,4 +197,10 @@ onMounted(load);
 .invoice-row span { display: block; color: var(--muted); font-size: 10.5px; margin-top: 3px; }
 .invoice-row b { font-size: 12px; }
 @media (max-width: 900px) { .billing-grid { grid-template-columns: 1fr; } .pack-grid { grid-template-columns: 1fr; } }
+
+@media (max-width: 420px) {
+  .wallet-card { padding: 16px; }
+  .wallet-main { min-width: 0; }
+  .wallet-side { gap: 14px; width: 100%; justify-content: space-between; }
+}
 </style>
