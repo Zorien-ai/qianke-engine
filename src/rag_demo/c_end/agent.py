@@ -573,6 +573,7 @@ def run_c_agent(
     config = {"configurable": {"thread_id": thread_id}}
     snapshot = graph.get_state(config)
     existing = snapshot.values or {}
+    previous_message_count = len(existing.get("messages") or [])
     history: list[Any] = []
     if existing:
         if existing.get("buyer_id") != buyer_id:
@@ -607,6 +608,10 @@ def run_c_agent(
         }
     state = graph.invoke(payload, config=config)
     snapshot = graph.get_state(config)
+    state_messages = state.get("messages") or []
+    # 只从本轮新增消息提取商品卡；不能扫描整个 checkpoint 历史，
+    # 否则上一轮购物工具结果会泄漏到本轮纯聊天回复里。
+    new_messages = state_messages[previous_message_count:]
     interrupted = bool(snapshot.next)
     draft = _extract_draft(state.get("messages") or [])
     if interrupted:
@@ -625,8 +630,8 @@ def run_c_agent(
         "status": status,
         "draft": draft,
         "order": state.get("order"),
-        "messages": state.get("messages") or [],
-        "product_refs": _extract_product_refs(state.get("messages") or [])
+        "messages": state_messages,
+        "product_refs": _extract_product_refs(new_messages)
         or (_last_saved_product_refs(buyer_id) if _is_image_request(message) else []),
         "next": list(snapshot.next or ()),
     }
