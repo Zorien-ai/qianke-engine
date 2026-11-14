@@ -1723,12 +1723,12 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.product-row:nth-child(1) .product-mark { background: linear-gradient(145deg, #d9ccb7, #b6a084 58%, #efe5d3); }
-.product-row:nth-child(2) .product-mark { background: linear-gradient(145deg, #cdd5c5, #81927b 60%, #e6e9df); }
-.product-row:nth-child(3) .product-mark { background: linear-gradient(145deg, #e6d2c2, #c38d70 65%, #f2e5d9); }
-.product-row:nth-child(4) .product-mark { background: linear-gradient(145deg, #d8d2c7, #a89a87 62%, #ece5da); }
-.product-row:nth-child(5) .product-mark { background: linear-gradient(145deg, #e4d9c2, #bda474 62%, #f1e8d8); }
-.product-row:nth-child(6) .product-mark { background: linear-gradient(145deg, #d9d9d1, #999a8e 62%, #ecece5); }
+.product-row:nth-child(1) .product-mark { background: #d9ccb7; }
+.product-row:nth-child(2) .product-mark { background: #cdd5c5; }
+.product-row:nth-child(3) .product-mark { background: #e6d2c2; }
+.product-row:nth-child(4) .product-mark { background: #d8d2c7; }
+.product-row:nth-child(5) .product-mark { background: #e4d9c2; }
+.product-row:nth-child(6) .product-mark { background: #d9d9d1; }
 
 .product-main {
   width: 100%;
@@ -1978,11 +1978,11 @@ onMounted(() => {
   letter-spacing: 0.08em;
 }
 
-.product-mark.tone-sage { background: linear-gradient(145deg, #d9e1cf, #9bab8b 60%, #edf0e4) !important; }
-.product-mark.tone-stone { background: linear-gradient(145deg, #e4e0d6, #b8b1a5 60%, #f1ede4) !important; }
-.product-mark.tone-clay { background: linear-gradient(145deg, #e8cfbf, #c88f74 62%, #f3e6dc) !important; }
-.product-mark.tone-amber { background: linear-gradient(145deg, #ecd9bd, #c5a06d 62%, #f5ebdc) !important; }
-.product-mark.tone-rose { background: linear-gradient(145deg, #e8d1ca, #c99c92 62%, #f5e8e4) !important; }
+.product-mark.tone-sage { background: #d9e1cf !important; }
+.product-mark.tone-stone { background: #e4e0d6 !important; }
+.product-mark.tone-clay { background: #e8cfbf !important; }
+.product-mark.tone-amber { background: #ecd9bd !important; }
+.product-mark.tone-rose { background: #e8d1ca !important; }
 
 .product-side {
   align-items: flex-end;
@@ -2083,13 +2083,13 @@ onMounted(() => {
   min-height: 340px;
   margin: 20px;
   border-radius: 15px;
-  background: linear-gradient(145deg, #d9e1cf, #9bab8b 60%, #edf0e4);
+  background: #d9e1cf;
 }
 
-.product-detail-art.tone-stone { background: linear-gradient(145deg, #e4e0d6, #b8b1a5 60%, #f1ede4); }
-.product-detail-art.tone-clay { background: linear-gradient(145deg, #e8cfbf, #c88f74 62%, #f3e6dc); }
-.product-detail-art.tone-amber { background: linear-gradient(145deg, #ecd9bd, #c5a06d 62%, #f5ebdc); }
-.product-detail-art.tone-rose { background: linear-gradient(145deg, #e8d1ca, #c99c92 62%, #f5e8e4); }
+.product-detail-art.tone-stone { background: #e4e0d6; }
+.product-detail-art.tone-clay { background: #e8cfbf; }
+.product-detail-art.tone-amber { background: #ecd9bd; }
+.product-detail-art.tone-rose { background: #e8d1ca; }
 
 .product-detail-art .product-mark-char {
   font-size: 92px;

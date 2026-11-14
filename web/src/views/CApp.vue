@@ -6871,7 +6871,7 @@ onBeforeUnmount(() => {
   height: 42px;
   overflow: hidden;
   border-radius: 7px;
-  background: linear-gradient(145deg, #e6ecdb, #d7e2c9);
+  background: #dbe4d0;
 }
 
 .c-product-thumb img {
