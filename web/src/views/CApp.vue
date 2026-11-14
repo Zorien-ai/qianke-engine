@@ -1102,10 +1102,10 @@ function syncViewportHeight() {
   // 键盘没开时一律回到布局视口高度，避免 iOS 关闭键盘后 visualViewport
   // 残留小高度，导致 CApp 只占半屏、下方留白。
   const height = composerFocused.value && keyboardOpen ? viewport.height : layoutHeight;
-  const offset = composerFocused.value && keyboardOpen ? (viewport?.offsetTop || 0) : 0;
   if (!height) return;
   document.documentElement.style.setProperty("--c-vh", `${height}px`);
-  document.documentElement.style.setProperty("--c-vh-offset", `${offset}px`);
+  // 外壳始终固定在 top:0；不再使用 offsetTop，避免键盘收起后整页悬空。
+  document.documentElement.style.setProperty("--c-vh-offset", "0px");
 }
 
 function onViewportResize() {
@@ -2793,6 +2793,9 @@ function selectMobileThread(id) {
 onMounted(async () => {
   previousBodyOverflow = document.body.style.overflow;
   document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = "0";
+  document.body.style.width = "100%";
   await loadAccountContext();
   stripDemoSeedForRealAccount();
   await loadMerchantThreads();
@@ -2830,6 +2833,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   document.body.style.overflow = previousBodyOverflow;
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.width = "";
   if (copyTipTimer) clearTimeout(copyTipTimer);
   if (messagePressTimer) clearTimeout(messagePressTimer);
   if (groupMentionHintTimer) clearTimeout(groupMentionHintTimer);
@@ -6448,8 +6454,9 @@ onBeforeUnmount(() => {
 @media (max-width: 760px) {
   .c-app {
     position: fixed;
-    top: var(--c-vh-offset, 0);
+    top: 0;
     right: 0;
+    bottom: auto;
     left: 0;
     height: var(--c-vh, 100dvh);
     min-height: 0;

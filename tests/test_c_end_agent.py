@@ -304,3 +304,42 @@ def test_companion_session_restores_pending_draft(c_store, tmp_path):
     assert session["thread_id"] == thread_id
     assert session["interrupted"] is True
     assert session["draft"]["order_id"]
+
+
+def test_companion_turn_does_not_reuse_previous_product_cards(c_store, tmp_path):
+    from rag_demo.agent.checkpoint import sqlite_checkpointer
+    from langchain_core.messages import AIMessage as _AIMessage
+
+    saver = sqlite_checkpointer(tmp_path / "c_agent_ref_scope.sqlite")
+    fake = _FakeLLM([
+        _AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "recommend_products",
+                "args": {"need": "跑鞋", "budget": 300},
+                "id": "call_scope_1",
+                "type": "tool_call",
+            }],
+        ),
+        _AIMessage(content="有几双跑鞋可以看。"),
+        _AIMessage(content="好，陪你聊会儿。"),
+    ])
+    first = c_agent.run_c_agent(
+        "帮我挑一双 300 以内的跑鞋",
+        buyer_id="buyer_1",
+        thread_id="c_thread_ref_scope_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    assert first["mode"] == "advisor"
+    assert first["product_refs"]
+
+    second = c_agent.run_c_agent(
+        "你能陪我聊聊天吗",
+        buyer_id="buyer_1",
+        thread_id="c_thread_ref_scope_1",
+        checkpointer=saver,
+        llm=fake,
+    )
+    assert second["mode"] == "companion"
+    assert second["product_refs"] == []
