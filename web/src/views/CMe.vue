@@ -353,9 +353,7 @@ onMounted(loadProfile);
   padding: 20px 16px 16px;
   border: 1px solid var(--border);
   border-radius: 18px;
-  background:
-    radial-gradient(circle at 100% 0, rgba(217, 95, 59, 0.14), transparent 52%),
-    var(--surface);
+  background: var(--surface);
 }
 
 .c-me-avatar,
@@ -625,8 +623,7 @@ onMounted(loadProfile);
 .c-me-skeleton {
   height: 120px;
   border-radius: 16px;
-  background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2));
-  background-size: 200% 100%;
+  background: var(--surface-2);
   animation: c-me-shimmer 1.2s ease-in-out infinite;
 }
 
@@ -635,8 +632,8 @@ onMounted(loadProfile);
 }
 
 @keyframes c-me-shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 .c-me-error {

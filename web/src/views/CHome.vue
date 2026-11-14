@@ -139,9 +139,7 @@ onMounted(() => {
   padding: 22px;
   border: 1px solid var(--border);
   border-radius: 18px;
-  background:
-    radial-gradient(circle at 100% 0, rgba(217, 95, 59, 0.12), transparent 48%),
-    var(--surface);
+  background: var(--surface);
 }
 
 .c-home-kicker {

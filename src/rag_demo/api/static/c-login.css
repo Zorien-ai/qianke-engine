@@ -23,10 +23,7 @@ html, body {
 
 body {
   min-height: 100vh;
-  background:
-    radial-gradient(520px 300px at 85% -10%, rgba(217, 95, 59, 0.12), transparent 62%),
-    radial-gradient(420px 280px at 0% 100%, rgba(111, 127, 99, 0.12), transparent 60%),
-    var(--paper);
+  background: var(--paper);
 }
 
 .c-auth-page {

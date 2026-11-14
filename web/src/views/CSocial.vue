@@ -538,7 +538,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="social-qq" :class="{ 'is-chat': !!active }">
-    <header class="social-qq-head">
+    <header v-if="active || section === 'contacts'" class="social-qq-head">
       <div class="social-qq-heading">
         <button
           v-if="active"
@@ -547,17 +547,17 @@ onBeforeUnmount(() => {
           aria-label="返回消息列表"
           @click="closeChat"
         >‹</button>
-        <div>
-          <p class="social-qq-kicker">{{ active ? "CHAT" : section === "contacts" ? "CONTACTS" : "MESSAGES" }}</p>
-          <h2>{{ active ? active.name : section === "contacts" ? "联系人" : "消息" }}</h2>
+        <div v-if="active || section === 'contacts'">
+          <p class="social-qq-kicker">{{ active ? "CHAT" : "CONTACTS" }}</p>
+          <h2>{{ active ? active.name : "联系人" }}</h2>
         </div>
       </div>
       <button
-        v-if="!active"
+        v-if="!active && section === 'contacts'"
         type="button"
         class="social-qq-add"
         aria-label="添加好友"
-        @click="section = 'contacts'; contactFilter = 'all'"
+        @click="contactFilter = 'all'"
       >＋</button>
       <button v-else type="button" class="social-qq-more" aria-label="会话设置" @click="openConversationMenu(active)">⋯</button>
     </header>
@@ -568,6 +568,13 @@ onBeforeUnmount(() => {
         <path d="m20 20-3.2-3.2" />
       </svg>
       <input id="social-search-input" name="search" v-model="search" type="search" :placeholder="section === 'contacts' ? '搜索联系人或群聊' : '搜索会话'" aria-label="搜索" />
+      <button
+        v-if="section === 'conversations'"
+        type="button"
+        class="social-qq-search-add"
+        aria-label="添加好友"
+        @click="section = 'contacts'; contactFilter = 'all'"
+      >＋</button>
     </div>
 
     <div v-if="!active" class="social-qq-segment" role="tablist" aria-label="消息或联系人">
@@ -963,6 +970,10 @@ onBeforeUnmount(() => {
   flex: none;
 }
 
+.social-qq-search > input {
+  min-width: 0;
+}
+
 .social-qq-search input {
   width: 100%;
   height: 38px;
@@ -972,6 +983,20 @@ onBeforeUnmount(() => {
   color: var(--text);
   font: inherit;
   font-size: 16px;
+}
+
+.social-qq-search-add {
+  width: 27px;
+  height: 27px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .social-qq-segment {
