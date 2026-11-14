@@ -263,3 +263,54 @@ C 端子集                    → 30 passed
 4. 商家商品接口 5 并发 p95 870ms 未处理（归属 B 端会话）。
 ```
 
+## 系统/测评会话独立复测（e40b704 后）
+
+```text
+复测时间：2026-11-14
+代码：HEAD 5348656（C 端修复 e40b704 已合入）
+服务：重启 uvicorn 后 /ready 200；GZipMiddleware 生效
+```
+
+### 传输与 gzip
+
+```text
+main JS  gzip 192,903 B
+main CSS gzip  75,746 B
+/c/home 冷启动 transfer 164,475 B
+/c 390 冷启动 transfer 182,260 B
+```
+
+### CLS
+
+| 页面 | 复测 CLS | 阈值 |
+|---|---:|---:|
+| /c 1440 冷启动 | 0.0477 | <=0.1 |
+| /c 390 冷启动 | 0.0180 | <=0.1 |
+| /c/app 390 Fast3G + 4x CPU | 0.0000 | <=0.1 |
+
+### 慢网
+
+```text
+Fast 3G + 4x CPU，CApp 冷缓存：
+  FCP  896ms
+  LCP  2,316ms
+  CLS  0
+  transfer 130,860 B（CApp 分包后）
+```
+
+LCP 2.316s 仍低于 2.5s 门禁；C 端会话记录的无 CPU 限速 870ms 是另一种测试口径，不冲突。
+
+截图：
+
+![CShop 390 复测](docs/design/c-retest-shop-mobile.png)
+
+![CApp 慢网复测](docs/design/c-retest-app-slow-mobile.png)
+
+### 结论
+
+```text
+CShop CLS：通过
+首屏体积：通过（gzip + 路由分包）
+慢网 LCP：通过（2.316s < 2.5s）
+task-67 可关闭
+```
