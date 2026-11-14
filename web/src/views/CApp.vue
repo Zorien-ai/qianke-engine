@@ -1088,14 +1088,24 @@ function onComposerBlur() {
   composerFocused.value = false;
   closeMention();
   if (companionState.value === "listening") setCompanionState("idle");
+  // iOS 键盘收起不一定立刻触发 visualViewport resize，显式复位一次。
+  window.setTimeout(() => {
+    syncViewportHeight();
+    window.scrollTo(0, 0);
+  }, 80);
 }
 
 function syncViewportHeight() {
   const viewport = window.visualViewport;
-  const height = viewport?.height || window.innerHeight;
+  const layoutHeight = window.innerHeight;
+  const keyboardOpen = Boolean(viewport && viewport.height < layoutHeight - 120);
+  // 键盘没开时一律回到布局视口高度，避免 iOS 关闭键盘后 visualViewport
+  // 残留小高度，导致 CApp 只占半屏、下方留白。
+  const height = composerFocused.value && keyboardOpen ? viewport.height : layoutHeight;
+  const offset = composerFocused.value && keyboardOpen ? (viewport?.offsetTop || 0) : 0;
   if (!height) return;
   document.documentElement.style.setProperty("--c-vh", `${height}px`);
-  document.documentElement.style.setProperty("--c-vh-offset", `${viewport?.offsetTop || 0}px`);
+  document.documentElement.style.setProperty("--c-vh-offset", `${offset}px`);
 }
 
 function onViewportResize() {
@@ -2804,6 +2814,7 @@ onMounted(async () => {
   syncViewportHeight();
   window.visualViewport?.addEventListener("resize", onViewportResize);
   window.visualViewport?.addEventListener("scroll", onViewportResize);
+  window.addEventListener("resize", onViewportResize);
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.addEventListener("beforeinstallprompt", onBeforeInstall);
@@ -2850,6 +2861,7 @@ onBeforeUnmount(() => {
   avatarPreviewUrls.clear();
   window.visualViewport?.removeEventListener("resize", onViewportResize);
   window.visualViewport?.removeEventListener("scroll", onViewportResize);
+  window.removeEventListener("resize", onViewportResize);
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("beforeinstallprompt", onBeforeInstall);
