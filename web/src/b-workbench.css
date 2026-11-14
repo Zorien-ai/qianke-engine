@@ -2902,6 +2902,7 @@ code,
   .b-product-search-row {
     flex: 0 0 auto;
     grid-template-columns: minmax(0, 1fr) 68px;
+    align-items: end;
   }
 
   .b-product-filter-row {
@@ -2931,6 +2932,10 @@ code,
     padding: 0 6px;
     font-size: 15px;
     white-space: nowrap;
+  }
+
+  .b-product-search-row .b-btn {
+    align-self: end;
   }
 
   .b-c-home-link {
