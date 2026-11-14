@@ -1096,8 +1096,11 @@ def available_merchants() -> dict:
 def add_merchant_friend(req: MerchantFriendIn) -> dict:
     """把指定商家的店宠加入当前买家好友。"""
     buyer_id, _ = _buyer()
+    # C 商品种子里的 m_demo 对应真实商家 m_gear_002；统一收口别名，
+    # 否则通用市集加入购物车会报“商家店宠不存在或未绑定”。
+    merchant_id = {"m_demo": "m_gear_002"}.get(req.merchant_id, req.merchant_id)
     mapping = next(
-        (item for item in store.list_store_friend_mappings() if str(item.get("merchant_id")) == req.merchant_id),
+        (item for item in store.list_store_friend_mappings() if str(item.get("merchant_id")) == merchant_id),
         None,
     )
     if mapping is None:
