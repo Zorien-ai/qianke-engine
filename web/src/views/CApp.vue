@@ -373,6 +373,7 @@ const avatarPreviewUrls = new Set();
 const AVATAR_MAX_BYTES = 1024 * 1024;
 const AVATAR_ACCEPT_TYPES = ["image/png", "image/jpeg", "image/webp"];
 let copyTipTimer = null;
+let previousBodyOverflow = "";
 let messagePressTimer = null;
 let messagePressPoint = null;
 
@@ -1090,9 +1091,11 @@ function onComposerBlur() {
 }
 
 function syncViewportHeight() {
-  const height = window.visualViewport?.height || window.innerHeight;
+  const viewport = window.visualViewport;
+  const height = viewport?.height || window.innerHeight;
   if (!height) return;
   document.documentElement.style.setProperty("--c-vh", `${height}px`);
+  document.documentElement.style.setProperty("--c-vh-offset", `${viewport?.offsetTop || 0}px`);
 }
 
 function onViewportResize() {
@@ -2778,6 +2781,8 @@ function selectMobileThread(id) {
 }
 
 onMounted(async () => {
+  previousBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
   await loadAccountContext();
   stripDemoSeedForRealAccount();
   await loadMerchantThreads();
@@ -2813,6 +2818,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  document.body.style.overflow = previousBodyOverflow;
   if (copyTipTimer) clearTimeout(copyTipTimer);
   if (messagePressTimer) clearTimeout(messagePressTimer);
   if (groupMentionHintTimer) clearTimeout(groupMentionHintTimer);
@@ -6429,8 +6435,13 @@ onBeforeUnmount(() => {
 /* 移动端对话：更紧凑的头部、更清晰的发件块 */
 @media (max-width: 760px) {
   .c-app {
+    position: fixed;
+    top: var(--c-vh-offset, 0);
+    right: 0;
+    left: 0;
     height: var(--c-vh, 100dvh);
     min-height: 0;
+    overflow: hidden;
   }
 
   .c-app .c-shell {
