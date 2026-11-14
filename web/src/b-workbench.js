@@ -1553,7 +1553,9 @@ async function simulateOrderAction(orderId, action, requestId) {
   } catch (error) {
     if (handleAuthFailure(error)) return;
     state.error = errorMessage(error);
-    showToast(state.error, "error");
+    // 保留同一个 request_id，超时/断网重试不会生成第二个模拟动作。
+    state.statusConfirm = { orderId, action, requestId };
+    showToast(`${state.error} · 可重试同一请求`, "error");
   } finally {
     state.busy = "";
     render();
