@@ -4,18 +4,17 @@
  *
  * 渲染优先级：
  *   1) WebGL / Three.js：3D 粒子云（1200~2000 颗、近大远小、additive、正弦扰动）+ 中心泛光 sprite
- *      + UnrealBloomPass 强泛光 + ~250 颗 kNN 密集网络连线（LineSegments additive）+ 缓慢自转；
- *   2) WebGL 不可用时降级 Canvas2D：大 radial gradient 光晕 + lighter 叠加 + 正弦扰动粒子 + 密集连线。
+ *      + ~250 颗 kNN 密集网络连线（LineSegments additive）+ 缓慢自转；
+ *   2) WebGL 不可用时降级 Canvas2D：纯色光点 + lighter 叠加 + 正弦扰动粒子 + 密集连线。
  *
  * 阶段（由 Landing.vue 的 7s 时间轴驱动）：search → absorb → result → final。
- *   absorb：Bloom ×~3 爆闪 0.15~0.25s + 一次性闪光环 + 粒子轻微向内收。
+ *   absorb：一次性闪光环 + 粒子轻微向内收。
  * 生命周期：页面隐藏/离屏暂停；卸载 dispose geometry/material/texture/renderer 与 rAF；reduced-motion 只渲染单帧。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 const props = defineProps({
@@ -32,7 +31,6 @@ const tooltip = ref(null);
 
 const TAU = Math.PI * 2;
 const MAX_DT = 48;
-const BLOOM_BASE = 0.55;
 const WEBGL_RENDER_SCALE = 0.6;
 const FALLBACK_SCALE = 0.62;
 const PARTICLE_COUNT = 1600;
@@ -54,7 +52,6 @@ let hiddenAt = 0;
 
 let renderer = null;
 let composer = null;
-let bloomPass = null;
 let scene = null;
 let camera = null;
 let cloud = null;
@@ -105,7 +102,7 @@ let runStartedAt = 0;
 let fpsChecked = 0;
 
 /* 自适应画质档位：SwiftShader/低端 GPU 自动降分辨率，真机保持高画质 */
-const WebGLQuality = { level: 0, scale: WEBGL_RENDER_SCALE, bloomScale: 0.5 };
+const WebGLQuality = { level: 0, scale: WEBGL_RENDER_SCALE };
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const rand = (min, max) => min + Math.random() * (max - min);
@@ -188,9 +185,8 @@ const fragmentShader = /* glsl */ `
   varying float vAlpha;
   void main() {
     float d = length(gl_PointCoord - vec2(0.5));
-    // 收紧光点核心：泛光压低后每一颗要能看清，而不是糊成一团光
-    float a = smoothstep(0.5, 0.08, d);
-    a = pow(a, 2.6);
+    // 纯色硬边点，不使用径向 alpha 衰减。
+    float a = 1.0 - step(0.5, d);
     gl_FragColor = vec4(vColor, a * uOpacity * vAlpha);
   }
 `;
@@ -346,78 +342,11 @@ function initWebGL() {
   linkLines = new THREE.LineSegments(linkGeom, linkMat);
   cloud.add(linkLines);
 
-  // 中心强泛光 sprite（两层）
-  coreTex = makeGlowTexture();
-  coreMat = new THREE.SpriteMaterial({
-    map: coreTex,
-    color: 0xffe2b4,
-    transparent: true,
-    opacity: 0.45,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  coreSprite = new THREE.Sprite(coreMat);
-  coreSprite.scale.set(0.95, 0.95, 1);
-  coreSprite.position.set(0, -0.5, 0);
-  scene.add(coreSprite);
-
-  outerMat = new THREE.SpriteMaterial({
-    map: coreTex,
-    color: 0xf5b35a,
-    transparent: true,
-    opacity: 0.1,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  outerSprite = new THREE.Sprite(outerMat);
-  outerSprite.scale.set(2.2, 2.2, 1);
-  outerSprite.position.set(0, -0.55, -0.1);
-  scene.add(outerSprite);
-
-  // 体积雾感：两片超低透明度的大 sprite，让云有「星云」而不是纯线框
-  // （泛光压低后雾也要更轻，否则又会糊成一片）
-  for (const [x, y, z, s, op] of [
-    [-1.4, 0.6, -1.8, 7.2, 0.022],
-    [1.5, -0.9, -2.4, 8.6, 0.018],
-  ]) {
-    const hazeMat = new THREE.SpriteMaterial({
-      map: coreTex,
-      color: 0xf0b46a,
-      transparent: true,
-      opacity: op,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const haze = new THREE.Sprite(hazeMat);
-    haze.position.set(x, y, z);
-    haze.scale.set(s, s * 0.8, 1);
-    scene.add(haze);
-  }
-
-  // 一次性闪光环
-  flashMat = new THREE.MeshBasicMaterial({
-    color: 0xffe3b8,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-  });
-  flashRing = new THREE.Mesh(new THREE.RingGeometry(0.985, 1.0, 96), flashMat);
-  flashRing.position.z = 0.1;
-  scene.add(flashRing);
-
+  // 纯色点线：不再创建中心泛光 sprite、体积雾 sprite 或闪光环。
   composer = new EffectComposer(renderer);
   composer.setPixelRatio(1);
   composer.addPass(new RenderPass(scene, camera));
-  const size = currentSize();
-  bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(Math.max(64, size.w * WEBGL_RENDER_SCALE * 0.45), Math.max(64, size.h * WEBGL_RENDER_SCALE * 0.45)),
-    BLOOM_BASE,
-    0.42,
-    0.3
-  );
-  composer.addPass(bloomPass);
+  // 不启用 Bloom / 任何泛光后处理：星云只用纯色点线。
   composer.addPass(new OutputPass());
 
   setSize();
@@ -446,12 +375,6 @@ function setSize() {
       camera.updateProjectionMatrix();
     }
     if (composer) composer.setSize(rw, rh);
-    if (bloomPass) {
-      bloomPass.setSize(
-        Math.round(rw * WebGLQuality.bloomScale),
-        Math.round(rh * WebGLQuality.bloomScale)
-      );
-    }
     if (pointsMat) pointsMat.uniforms.uPixelRatio.value = (w * WebGLQuality.scale) / w;
   } else if (mode === "canvas2d" && ctx2d) {
     const rw = Math.max(160, Math.round(w * FALLBACK_SCALE));
@@ -469,10 +392,8 @@ function applyQuality(level) {
   WebGLQuality.level = level;
   if (level >= 2) {
     WebGLQuality.scale = 0.42;
-    WebGLQuality.bloomScale = 0.3;
   } else if (level === 1) {
     WebGLQuality.scale = 0.5;
-    WebGLQuality.bloomScale = 0.38;
   }
   setSize();
   updateDebug();
@@ -513,10 +434,6 @@ function renderFrame(ts) {
 
   const since = absorbStart >= 0 ? ts - absorbStart : Infinity;
   const absorbPulse = absorbStart >= 0 && since < 700 ? 1 - clamp(since / 700, 0, 1) : 0;
-  let bloomBoost = absorbPulse * 0.18;
-  if (absorbStart >= 0 && since < 220) {
-    bloomBoost = BLOOM_BASE * 1.8 * (1 - clamp(since / 220, 0, 1));
-  }
 
   if (coreSprite) {
     const pulse = 1 + Math.sin(time * 1.9) * 0.05 + absorbPulse * 0.45;
@@ -529,7 +446,6 @@ function renderFrame(ts) {
   }
   if (pointsMat) pointsMat.uniforms.uOpacity.value = 0.82 + absorbPulse * 0.08;
   if (linkMat) linkMat.opacity = 0.085 + absorbPulse * 0.06;
-  if (bloomPass) bloomPass.strength = BLOOM_BASE + bloomBoost;
 
   if (flashRing && flashMat) {
     if (absorbStart >= 0 && since < 700) {
@@ -915,13 +831,11 @@ function updateDebug() {
     running,
     particles: mode === "webgl" ? PARTICLE_COUNT : fallbackParticles.length,
     links: mode === "webgl" ? (linkPairs ? linkPairs.length : 0) : fallbackPairs.length,
-    bloom: bloomPass ? Number(bloomPass.strength.toFixed(2)) : null,
     dpr: renderer ? renderer.getPixelRatio() : 1,
     hovered: hoveredIndex >= 0 ? userAt(hoveredIndex)?.uid || null : null,
     pinned: pinnedIndex >= 0 ? userAt(pinnedIndex)?.uid || null : null,
     quality: {
       renderScale: WebGLQuality.scale,
-      bloomScale: WebGLQuality.bloomScale,
       level: WebGLQuality.level,
     },
   };
@@ -972,7 +886,6 @@ function stop() {
 function renderStatic() {
   if (mode === "webgl" && composer) {
     absorbStart = -1;
-    if (bloomPass) bloomPass.strength = BLOOM_BASE;
     renderFrame(0);
   } else if (mode === "canvas2d" && ctx2d) {
     absorbStart = -1;
@@ -1028,7 +941,6 @@ function disposeWebGL() {
   coreMat = null;
   outerMat = null;
   flashMat = null;
-  bloomPass = null;
   camera = null;
   cloud = null;
   basePositions = null;

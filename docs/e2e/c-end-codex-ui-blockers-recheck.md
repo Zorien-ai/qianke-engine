@@ -19,6 +19,12 @@ web/src/components/landing/HeroNebula.vue
 Playwright 注入 CanvasRenderingContext2D 计数：
   createRadialGradient/createLinearGradient = 0
 CSS background-image gradient = false
+第二轮（Codex 复验后）：
+  删除 UnrealBloomPass / EffectComposer Bloom pass
+  删除 shader smoothstep/pow 径向 alpha
+  删除中心泛光 sprite、体积雾 sprite、闪光环
+  只保留纯色点 + 纯色连线
+  window.__nebulaDebug 无 bloom 字段
 ```
 
 截图：docs/design/landing-no-gradient-desktop.png
