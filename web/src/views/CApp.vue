@@ -3314,7 +3314,7 @@ onBeforeUnmount(() => {
               <span v-else class="c-avatar">{{ activeThread.name.slice(0, 1) }}</span>
               <div>
                 <h1>{{ activeThread.name }}</h1>
-                <p><i class="c-dot" :class="threadDotClass" />{{ statusText }}<span class="c-head-divider">·</span>只做建议，成交需你确认</p>
+                <p><i class="c-dot" :class="threadDotClass" />{{ statusText }}<span class="c-head-divider">·</span><span class="c-head-note">只做建议，成交需你确认</span></p>
               </div>
             </div>
             <div class="c-chat-actions">
@@ -4564,6 +4564,18 @@ onBeforeUnmount(() => {
   color: var(--c-line);
 }
 
+/* 320 窄屏：状态说明会把“在线”拆成两行，只保留状态本身。 */
+@media (max-width: 360px) {
+  .c-chat-head p {
+    white-space: nowrap;
+  }
+
+  .c-chat-head .c-head-note,
+  .c-chat-head .c-head-divider {
+    display: none;
+  }
+}
+
 .c-chat-actions {
   display: flex;
   gap: 4px;
@@ -5287,10 +5299,22 @@ onBeforeUnmount(() => {
   font-size: 9px;
 }
 
+/* 这个类同时用在 <a> 和 <button> 上（如“试听”），
+   按钮必须自己复位 UA 样式，否则会渲染成灰底 outset 默认按钮。 */
 .c-context-link {
+  border: 0;
+  padding: 0;
+  background: none;
   color: var(--c-text-3);
+  font: inherit;
   font-size: 9px;
   text-decoration: none;
+  cursor: pointer;
+}
+
+.c-context-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .c-memory-clear {
@@ -6030,9 +6054,14 @@ onBeforeUnmount(() => {
   .c-mobile-nav a,
   .c-mobile-nav button {
     display: flex;
+    flex: 1 1 0;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 3px;
+    min-width: 0;
+    min-height: 100%;
+    padding: 6px 0;
     border: 0;
     background: transparent;
     color: var(--c-text-3);

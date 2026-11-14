@@ -771,6 +771,35 @@ onMounted(loadOrders);
 </template>
 
 <style scoped>
+/* 基础按钮：本组件自己也用 ghost-btn（刷新 / 取消 / 保留订单），
+   但基础定义在 CShop.vue 的 scoped 样式里，跨组件不继承，
+   缺了这条就会掉回浏览器默认按钮（灰底 outset 边框）。 */
+.ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.ghost-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.ghost-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .orders-page {
   max-width: 960px;
   margin: 0 auto;
