@@ -807,6 +807,28 @@ class SqliteMerchantRepository:
                 return insert_row(conn, status="FAILED", before=before, after=before, reserved=reserved, error_code="VERSION_CONFLICT")
             return insert_row(conn, status="SUCCEEDED", before=before, after=target, reserved=reserved, error_code=None)
 
+    def list_orders_for_completion_report(
+        self,
+        merchant_id: str,
+        *,
+        start_at: str,
+        end_at: str,
+    ) -> list[Order]:
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        sql = (
+            "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
+            "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE merchant_id = ? AND ("
+            "(completed_at IS NOT NULL AND datetime(completed_at) >= datetime(?) AND datetime(completed_at) < datetime(?)) "
+            "OR (refunded_at IS NOT NULL AND datetime(refunded_at) >= datetime(?) AND datetime(refunded_at) < datetime(?))"
+            ") ORDER BY completed_at DESC, order_id DESC"
+        )
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(sql, (merchant, str(start_at), str(end_at), str(start_at), str(end_at))).fetchall()
+            return self._hydrate_orders(conn, rows)
+
     def list_orders(
         self,
         merchant_id: str,

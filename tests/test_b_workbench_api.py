@@ -405,3 +405,26 @@ def test_inventory_preview_uses_explicit_warehouse(c_store, monkeypatch):
     ))
     assert preview["items"][0]["warehouse_id"] == warehouse["warehouse_id"]
     assert preview["items"][0]["expected_available"] == int(warehouse["available_qty"])
+
+
+def test_completion_report_is_owner_only(c_store, monkeypatch):
+    _admin(monkeypatch)
+    report = b_workbench.workbench_completion_report(date_from="2000-01-01", date_to="2100-01-01")
+    assert report["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+    assert report["period"]["timezone"] == "Asia/Shanghai"
+    assert report["simulation_mode"] == "SIMULATED"
+    assert "completed_gmv" in report
+    assert "cohort_net_amount" in report
+    assert isinstance(report["daily"], list)
+
+
+def test_completion_report_rejects_staff(c_store, monkeypatch):
+    store.bind_merchant_member(43, b_workbench.DEFAULT_MERCHANT_ID, role="staff")
+    monkeypatch.setattr(
+        b_workbench.auth,
+        "current_account",
+        lambda: {"id": 43, "username": "staff-report", "status": "active", "is_system_admin": False},
+    )
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_completion_report(date_from="2026-11-01", date_to="2026-11-30")
+    assert exc.value.status_code == 403

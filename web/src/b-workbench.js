@@ -10,6 +10,7 @@ const root = document.getElementById("b-root");
 
 const VIEWS = [
   { key: "overview", label: "工作首页", short: "首页", group: "工作台" },
+  { key: "reports", label: "经营报告", short: "报告", group: "经营分析" },
   { key: "orders", label: "订单", short: "订单", group: "交易" },
   { key: "after-sales", label: "售后", short: "售后", group: "交易" },
   { key: "products", label: "商品与 SKU", short: "商品", group: "商品与库存" },
@@ -18,7 +19,7 @@ const VIEWS = [
   { key: "policy", label: "动作策略", short: "策略", group: "管理" },
   { key: "audit", label: "执行审计", short: "审计", group: "管理" },
 ];
-const NAV_GROUPS = ["工作台", "交易", "商品与库存", "客户", "经营协作", "管理"];
+const NAV_GROUPS = ["工作台", "经营分析", "交易", "商品与库存", "客户", "经营协作", "管理"];
 
 const ORDER_STATUS_LABELS = {
   CREATED: "待支付",
@@ -111,6 +112,13 @@ const state = {
   afterSaleFilter: "",
   overview: null,
   overviewLoaded: false,
+  report: null,
+  reportLoaded: false,
+  reportFilters: {
+    date_from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
+    date_to: new Date().toISOString().slice(0, 10),
+  },
+  reportLoading: false,
   overviewLoading: false,
   orders: [],
   ordersLoaded: false,
@@ -704,6 +712,10 @@ async function ensureViewData(view = state.view) {
     if (!state.overviewLoaded) await loadOverview();
     return;
   }
+  if (view === "reports") {
+    if (!state.reportLoaded) await loadCompletionReport();
+    return;
+  }
   if (view === "orders") {
     if (!state.ordersLoaded) await loadOrders();
     return;
@@ -756,6 +768,7 @@ async function switchView(view) {
 async function refreshCurrent() {
   state.error = "";
   if (state.view === "overview") await loadOverview();
+  else if (state.view === "reports") await loadCompletionReport();
   else if (state.view === "orders") await loadOrders();
   else if (state.view === "after-sales") await loadAfterSales();
   else if (state.view === "superagent") await loadWorkItems();
@@ -2575,6 +2588,91 @@ async function submitInventoryDraft() {
   }
 }
 
+async function loadCompletionReport() {
+  if (state.reportLoading) return;
+  state.reportLoading = true;
+  state.error = "";
+  render();
+  try {
+    const query = new URLSearchParams({
+      date_from: state.reportFilters.date_from,
+      date_to: state.reportFilters.date_to,
+    });
+    state.report = await api(`/api/b/workbench/reports/completion?${query.toString()}`);
+    state.reportLoaded = true;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+  } finally {
+    state.reportLoading = false;
+    render();
+  }
+}
+
+function reportDateValue(date) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+function applyReportPreset(preset) {
+  const now = new Date();
+  const today = reportDateValue(now);
+  let start = today;
+  if (preset === "week") {
+    const local = new Date(now);
+    const offset = (local.getDay() + 6) % 7;
+    start = reportDateValue(new Date(now.getTime() - offset * 86400000));
+  } else if (preset === "month") {
+    const local = new Date(now);
+    start = reportDateValue(new Date(local.getFullYear(), local.getMonth(), 1));
+  }
+  state.reportFilters = { date_from: start, date_to: today };
+  state.reportLoaded = false;
+  loadCompletionReport();
+}
+
+function reportsView() {
+  const report = state.report;
+  const filters = state.reportFilters;
+  const metrics = report ? [
+    ["完成 GMV", money(report.completed_gmv), "按 completed_at · 模拟交易", "accent"],
+    ["完成订单", `${Number(report.completed_orders || 0)} 笔`, "当前查询范围", ""],
+    ["期间退款", money(report.refund_amount), `${Number(report.refund_orders || 0)} 笔退款事件`, ""],
+    ["期间净额", money(report.net_amount), "完成 GMV − 期间退款", ""],
+    ["完成订单群净额", money(report.cohort_net_amount), "完成订单扣除后续退款", ""],
+  ] : [];
+  const dailyRows = report?.daily?.length
+    ? report.daily.map((row) => `<tr><td>${escapeHtml(row.date)}</td><td class="b-num">${Number(row.completed_orders || 0)}</td><td class="b-num">${money(row.completed_gmv)}</td><td class="b-num">${Number(row.refund_orders || 0)}</td><td class="b-num">${money(row.refund_amount)}</td><td class="b-num">${money(row.net_amount)}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="b-empty">当前范围没有完成或退款记录</td></tr>`;
+  return `<section class="b-view" aria-label="经营报告">
+    <div class="b-view-head">
+      <div>
+        <h1>经营报告</h1>
+        <p class="b-muted">完成口径 · ${escapeHtml(report?.period?.timezone || "Asia/Shanghai")} 营业日 · 模拟交易，不是真实收款</p>
+      </div>
+      <div class="b-view-tools">
+        <button type="button" class="b-btn b-btn-ghost" data-report-preset="today">今日</button>
+        <button type="button" class="b-btn b-btn-ghost" data-report-preset="week">本周</button>
+        <button type="button" class="b-btn b-btn-ghost" data-report-preset="month">本月</button>
+      </div>
+    </div>
+    <div class="b-report-filters">
+      <label>开始<input type="date" data-report-from value="${escapeHtml(filters.date_from)}" /></label>
+      <label>结束<input type="date" data-report-to value="${escapeHtml(filters.date_to)}" /></label>
+      <button type="button" class="b-btn b-btn-primary" data-report-query ${state.reportLoading ? "disabled" : ""}>查询</button>
+      <button type="button" class="b-btn b-btn-ghost" data-report-refresh ${state.reportLoading ? "disabled" : ""}>刷新</button>
+    </div>
+    ${state.reportLoading && !report ? skeletonMarkup(2) : report ? `
+      <div class="b-metric-grid">${metrics.map(([label, value, note, tone]) => `<div class="b-metric ${tone || ""}"><span>${escapeHtml(label)}</span><strong>${value}</strong><small>${escapeHtml(note)}</small></div>`).join("")}</div>
+      <div class="b-report-note">${escapeHtml(report.note || "")}</div>
+      <div class="b-card">
+        <h2 class="b-card-title">按日完成与退款</h2>
+        <div class="b-table-wrap"><table class="b-order-table"><thead><tr><th>日期</th><th class="b-num">完成订单</th><th class="b-num">完成 GMV</th><th class="b-num">退款笔数</th><th class="b-num">退款金额</th><th class="b-num">净额</th></tr></thead><tbody>${dailyRows}</tbody></table></div>
+      </div>
+      <div class="b-report-meta">币种：${escapeHtml(report.currency || "CNY")} · 数据范围：${escapeHtml(report.period?.date_from || "")} 至 ${escapeHtml(report.period?.date_to || "")} · 服务端全量聚合</div>
+    ` : emptyMarkup("选择日期后查询经营报告")}
+  </section>`;
+}
+
 function productsView() {
   const summary = state.productSummary || {};
   const lowProducts = state.products.filter((product) => product.low_stock);
@@ -2949,6 +3047,8 @@ function shellMarkup() {
   const viewMarkup =
     activeView.key === "overview"
       ? overviewView()
+      : activeView.key === "reports"
+      ? reportsView()
       : activeView.key === "orders"
       ? ordersView()
       : activeView.key === "after-sales"
@@ -2967,7 +3067,7 @@ function shellMarkup() {
   const role = String(state.me?.role || "").toLowerCase();
   const roleText = workspaceRoleLabel(workspaceRole());
   const navMarkup = NAV_GROUPS.map((group) => {
-    const views = VIEWS.filter((view) => view.group === group);
+    const views = VIEWS.filter((view) => view.group === group && (view.key !== "reports" || ["owner", "admin"].includes(role)));
     if (!views.length) return "";
     return `<div class="b-nav-group">
       <p class="b-nav-group-label">${group}</p>
@@ -3227,6 +3327,27 @@ function bindEvents() {
     const imageDeleteButton = target.closest("[data-product-image-delete]");
     if (imageDeleteButton) {
       await deleteProductImage(imageDeleteButton.dataset.productId, imageDeleteButton.dataset.productImageDelete);
+      return;
+    }
+    if (target.closest("[data-report-preset]")) {
+      applyReportPreset(target.closest("[data-report-preset]").dataset.reportPreset);
+      return;
+    }
+    if (target.closest("[data-report-query]")) {
+      const from = root.querySelector("[data-report-from]")?.value || "";
+      const to = root.querySelector("[data-report-to]")?.value || "";
+      if (!from || !to || from > to) {
+        showToast("请选择有效的开始/结束日期", "error");
+        return;
+      }
+      state.reportFilters = { date_from: from, date_to: to };
+      state.reportLoaded = false;
+      await loadCompletionReport();
+      return;
+    }
+    if (target.closest("[data-report-refresh]")) {
+      state.reportLoaded = false;
+      await loadCompletionReport();
       return;
     }
     if (target.closest("[data-inventory-open]")) {

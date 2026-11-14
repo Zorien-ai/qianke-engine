@@ -105,6 +105,16 @@ class MerchantRepository(Protocol):
         """与 search_orders 同口径的总数。"""
         ...
 
+    def list_orders_for_completion_report(
+        self,
+        merchant_id: str,
+        *,
+        start_at: str,
+        end_at: str,
+    ) -> list[Order]:
+        """按完成/退款事件时间取订单（报告聚合用，不受列表 limit 限制）。"""
+        ...
+
     def get_order(
         self,
         order_id: str,
