@@ -429,6 +429,27 @@ CREATE INDEX IF NOT EXISTS idx_m_inventory_adjustment_request
 CREATE INDEX IF NOT EXISTS idx_m_inventory_adjustment_batch
     ON {schema}.m_inventory_adjustment (batch_id);
 
+CREATE TABLE IF NOT EXISTS {schema}.m_order_simulation_action (
+    action_id         TEXT PRIMARY KEY,
+    merchant_id       TEXT NOT NULL,
+    order_id          TEXT NOT NULL,
+    actor_id          TEXT NOT NULL,
+    client_request_id TEXT NOT NULL,
+    action            TEXT NOT NULL,
+    before_status     TEXT NOT NULL,
+    after_status      TEXT NOT NULL,
+    transaction_mode  TEXT NOT NULL,
+    is_simulated      INTEGER NOT NULL,
+    amount            TEXT NOT NULL,
+    currency          TEXT NOT NULL,
+    reason            TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    UNIQUE (merchant_id, actor_id, client_request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_m_order_simulation_action_order
+    ON {schema}.m_order_simulation_action (merchant_id, order_id);
+
 CREATE TABLE IF NOT EXISTS {schema}.m_order (
     order_id     TEXT PRIMARY KEY,
     merchant_id  TEXT NOT NULL,
@@ -1407,6 +1428,100 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
             )
         cur.execute("SELECT * FROM m_order WHERE order_id = %s", (order,))
         return self._hydrate_orders(cur, [cur.fetchone()])[0]
+
+    def apply_order_simulation_action(
+        self,
+        merchant_id: str,
+        *,
+        order_id: str,
+        actor_id: str,
+        client_request_id: str,
+        action: str,
+        expected_status: str,
+        expected_amount: str,
+        expected_currency: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """模拟支付/完成：订单状态、时间、动作审计同事务；按 request 幂等。"""
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        order = _required_text(order_id, "order_id", max_length=80)
+        actor = _required_text(actor_id, "actor_id", max_length=128)
+        request = _required_text(client_request_id, "client_request_id", max_length=80)
+        action_value = _required_text(action, "action", max_length=32).upper()
+        expected = _required_text(expected_status, "expected_status", max_length=32).upper()
+        amount = _required_text(expected_amount, "expected_amount", max_length=64)
+        currency = _required_text(expected_currency, "expected_currency", max_length=8).upper()
+        reason_value = _required_text(reason, "reason", max_length=300)
+        transitions = {
+            "SIMULATE_PAYMENT": ("CREATED", "PAID"),
+            "SIMULATE_COMPLETION": ("SHIPPED", "COMPLETED"),
+        }
+        if action_value not in transitions:
+            raise MerchantInvalidError("未知模拟动作")
+        source_status, target_status = transitions[action_value]
+        if expected != source_status:
+            raise MerchantConflictError(f"模拟动作要求订单状态为 {source_status}")
+
+        with self._lock, self._transaction() as cur:
+            cur.execute(
+                "SELECT * FROM m_order_simulation_action "
+                "WHERE merchant_id = %s AND actor_id = %s AND client_request_id = %s",
+                (merchant, actor, request),
+            )
+            existing = cur.fetchone()
+            if existing is not None:
+                if existing["order_id"] != order or existing["action"] != action_value:
+                    raise MerchantConflictError("同一 client_request_id 的订单动作不一致")
+                return dict(existing)
+            cur.execute("SELECT * FROM m_order WHERE order_id = %s FOR UPDATE", (order,))
+            order_row = cur.fetchone()
+            if order_row is None or str(order_row["merchant_id"]) != merchant:
+                raise MerchantNotFoundError(f"订单不存在: {order}")
+            current = str(order_row["status"]).upper()
+            if current != source_status:
+                raise MerchantConflictError(f"订单当前状态为 {current}，不能执行 {action_value}")
+            if str(order_row["total_amount"]) != amount or str(order_row["currency"]).upper() != currency:
+                raise MerchantConflictError("订单金额或币种与确认不一致")
+            now = _now()
+            field = "paid_at" if target_status == "PAID" else "completed_at"
+            cur.execute(
+                f"UPDATE m_order SET status = %s, {field} = %s "
+                "WHERE order_id = %s AND merchant_id = %s AND status = %s",
+                (target_status, now, order, merchant, current),
+            )
+            if cur.rowcount != 1:
+                raise MerchantConflictError("订单状态已变化，请刷新后重试")
+            action_id = f"oact_{uuid.uuid4().hex}"
+            cur.execute(
+                "INSERT INTO m_order_simulation_action "
+                "(action_id, merchant_id, order_id, actor_id, client_request_id, action, "
+                "before_status, after_status, transaction_mode, is_simulated, amount, currency, reason, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (action_id, merchant, order, actor, request, action_value,
+                 source_status, target_status, "SIMULATED", 1, amount, currency, reason_value, now),
+            )
+            cur.execute("SELECT * FROM m_order_simulation_action WHERE action_id = %s", (action_id,))
+            return dict(cur.fetchone())
+
+    def get_order_simulation_action(
+        self,
+        merchant_id: str,
+        *,
+        order_id: str,
+        actor_id: str,
+        client_request_id: str,
+    ) -> dict[str, Any] | None:
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        with self._lock, self._read() as cur:
+            cur.execute(
+                "SELECT * FROM m_order_simulation_action "
+                "WHERE merchant_id = %s AND actor_id = %s AND client_request_id = %s AND order_id = %s",
+                (merchant, str(actor_id), str(client_request_id), str(order_id)),
+            )
+            row = cur.fetchone()
+            return dict(row) if row is not None else None
 
     def update_order_status(
         self,
