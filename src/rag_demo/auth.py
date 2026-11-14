@@ -227,14 +227,18 @@ CREATE TABLE IF NOT EXISTS session (
 CREATE INDEX IF NOT EXISTS idx_session_expires ON session (expires_at);
 CREATE INDEX IF NOT EXISTS idx_session_user ON session (user_id);
 
--- 上传批次属于哪个企业：上传、构建、查询三处都要校验，
+-- 上传批次属于哪个企业/商户：上传、构建、查询三处都要校验，
 -- 否则拿到别人的 upload_id 就能读/构建/查询别人的数据。
 CREATE TABLE IF NOT EXISTS upload_owner (
     upload_id     TEXT PRIMARY KEY,
     enterprise_id BIGINT,
+    merchant_id   TEXT,
     user_id       BIGINT NOT NULL REFERENCES app_user (id) ON DELETE CASCADE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 老库补列（商户导入画像会用到；企业批次该列为 NULL）
+ALTER TABLE upload_owner ADD COLUMN IF NOT EXISTS merchant_id TEXT;
 """
 
 
@@ -1124,14 +1128,34 @@ def purge_expired_sessions() -> int:
 # ==================== 上传归属 ====================
 
 
+def _merchant_id_for_user(user: dict[str, Any] | None) -> str | None:
+    """账号绑定的商户号；控制面异常/未绑定返回 None。"""
+    if not user:
+        return None
+    try:
+        from rag_demo.c_end import store as c_store
+
+        member = c_store.get_merchant_member(int(user["id"]))
+        return str(member["merchant_id"]) if member else None
+    except Exception:  # noqa: BLE001 - 账号库不该因控制面异常而登录失败
+        return None
+
+
 def bind_upload(upload_id: str, user: dict[str, Any]) -> None:
     with _cursor() as cur:
         cur.execute(
-            """INSERT INTO upload_owner (upload_id, enterprise_id, user_id)
-               VALUES (%s, %s, %s)
+            """INSERT INTO upload_owner (upload_id, enterprise_id, merchant_id, user_id)
+               VALUES (%s, %s, %s, %s)
                ON CONFLICT (upload_id) DO UPDATE
-               SET enterprise_id = EXCLUDED.enterprise_id, user_id = EXCLUDED.user_id""",
-            (upload_id, user.get("enterprise_id"), user["id"]),
+               SET enterprise_id = EXCLUDED.enterprise_id,
+                   merchant_id = EXCLUDED.merchant_id,
+                   user_id = EXCLUDED.user_id""",
+            (
+                upload_id,
+                user.get("enterprise_id"),
+                _merchant_id_for_user(user),
+                user["id"],
+            ),
         )
 
 
@@ -1149,10 +1173,12 @@ def unbind_upload(upload_id: str) -> None:
 
 def can_access_upload(user: dict[str, Any] | None, upload_id: str) -> bool:
     """
-    谁能用这批上传：同企业的人 + 系统管理员
+    谁能用这批上传：同企业的人 + 同商户的人 + 系统管理员
 
     没有归属记录（M2 之前的历史批次）只有系统管理员能碰：
     否则任何人都能猜/捡到一个旧 id 去构建别人的数据。
+    商户批次没有 enterprise_id（商户账号不属于企业），必须靠 merchant_id
+    判断——否则商户上传完自己的批次，构建时会被 403 卡死。
     """
     if user is None:
         return False
@@ -1161,4 +1187,9 @@ def can_access_upload(user: dict[str, Any] | None, upload_id: str) -> bool:
     owner = upload_owner(upload_id)
     if owner is None:
         return False
-    return owner.get("enterprise_id") is not None and owner["enterprise_id"] == user.get("enterprise_id")
+    if owner.get("enterprise_id") is not None and owner["enterprise_id"] == user.get("enterprise_id"):
+        return True
+    owner_merchant = str(owner.get("merchant_id") or "")
+    if owner_merchant:
+        return owner_merchant == _merchant_id_for_user(user)
+    return False

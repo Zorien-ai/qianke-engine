@@ -94,6 +94,14 @@ router.beforeEach(async (to) => {
   // 未登录访问受保护页面：先看官网（登录入口在官网顶部/按钮里）
   if (!store.authenticated) return { name: "home" };
 
+  // B 端单入口：已绑定商户、且不是管理员的账号，只进 /v2/b.html。
+  // 管理员（系统管理员/企业管理员）仍保留工作台；商家手动改 hash 也进不来。
+  const merchant = store.account && store.account.merchant;
+  if (merchant && !isManager() && !(store.account && store.account.is_system_admin)) {
+    window.location.replace("/v2/b.html");
+    return false;
+  }
+
   // 无能力的页面手动敲 hash 也进不去：送回工作台并说明原因
   if (to.name === "staff" && !isManager()) {
     toast("当前账号不是管理员，无法访问员工管理", "error");

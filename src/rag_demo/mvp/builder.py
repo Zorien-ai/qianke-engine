@@ -87,12 +87,19 @@ BUILD_MODES = (MODE_INCREMENTAL, MODE_FULL)
 
 
 def is_buildable(dataset: str) -> bool:
-    """能否写入这个数据集：user / test，或已注册的企业库"""
+    """能否写入这个数据集：user / test，或已注册的企业库 / 商户库"""
     if dataset in BUILDABLE_DATASETS:
         return True
-    from rag_demo.config import DATASETS, ENTERPRISE_DATASET_PREFIX
+    from rag_demo.config import (
+        DATASETS,
+        ENTERPRISE_DATASET_PREFIX,
+        MERCHANT_DATASET_PREFIX,
+    )
 
-    return dataset.startswith(ENTERPRISE_DATASET_PREFIX) and dataset in DATASETS
+    return (
+        dataset.startswith(ENTERPRISE_DATASET_PREFIX)
+        or dataset.startswith(MERCHANT_DATASET_PREFIX)
+    ) and dataset in DATASETS
 
 
 EventFn = Callable[[dict], None]
@@ -140,9 +147,10 @@ def resolve_dataset(name: str | None, action: str = "构建") -> str:
     target = (name or "user").strip() or "user"
     if not is_buildable(target):
         raise ValueError(
-            f"向导只服务 {list(BUILDABLE_DATASETS)} 与企业库（ent_*），不能{action} {target!r}。"
+            f"向导只服务 {list(BUILDABLE_DATASETS)}、企业库（ent_*）与商户库（mch_*），"
+            f"不能{action} {target!r}。"
             f"demo 是演示底座与评测基线，它自己的问答在首页（/qa），不走向导；"
-            f"企业库在账号审核通过后自动注册，不能手写库名。"
+            f"企业库/商户库在运行时自动注册，不能手写库名。"
         )
     return target
 

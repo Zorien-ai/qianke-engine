@@ -6,6 +6,7 @@
 @Function: 全局配置（路径 / 数据库 / 检索参数 / 计算设备）
 """
 import os
+import re
 
 # 本地开发机安装 torch；云端 API 容器使用远程 BGE 服务，不安装 torch。
 # 这里必须做可选导入：否则删除 torch 依赖后连 config 都无法 import，
@@ -128,6 +129,36 @@ def enterprise_dataset_name(enterprise_id: int) -> str:
 
 def enterprise_db_name(enterprise_id: int) -> str:
     return f"{ENTERPRISE_DB_PREFIX}{int(enterprise_id)}"
+
+
+# ---------- 商户数据集（B 端画像查询：导入用户） ----------
+# 隔离单位是**商户**。商户号来自 c_merchant_tenant（如 m_gear_002），
+# 数据集名 mch_m_gear_002，库名 vec_db_mch_m_gear_002。
+# 与 ent_* 同一套运行时注册机制：启动时从控制面恢复，第一次构建才真正 CREATE DATABASE。
+# 为什么单独一套前缀而不是复用 ent_*：企业库装的是企业数据，商户库装的是
+# 商户自己导入的画像；两者权限来源不同（enterprise_id vs c_merchant_member），
+# 混用会把「企业员工」和「商户操作者」的边界搅在一起。
+MERCHANT_DATASET_PREFIX = "mch_"
+MERCHANT_DB_PREFIX = "vec_db_mch_"
+_MERCHANT_ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
+
+
+def is_valid_merchant_id(merchant_id: str | None) -> bool:
+    return bool(_MERCHANT_ID_RE.fullmatch(str(merchant_id or "").strip()))
+
+
+def merchant_dataset_name(merchant_id: str) -> str:
+    value = str(merchant_id or "").strip()
+    if not is_valid_merchant_id(value):
+        raise ValueError(f"非法商户号: {merchant_id!r}（只允许小写字母/数字/下划线，1-40 位）")
+    return f"{MERCHANT_DATASET_PREFIX}{value}"
+
+
+def merchant_db_name(merchant_id: str) -> str:
+    value = str(merchant_id or "").strip()
+    if not is_valid_merchant_id(value):
+        raise ValueError(f"非法商户号: {merchant_id!r}（只允许小写字母/数字/下划线，1-40 位）")
+    return f"{MERCHANT_DB_PREFIX}{value}"
 
 
 def register_dataset(name: str, dbname: str) -> dict:

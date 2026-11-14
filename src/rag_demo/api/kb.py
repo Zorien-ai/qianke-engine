@@ -31,7 +31,6 @@
 """
 import hashlib
 import logging
-import re
 
 from fastapi import APIRouter, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -271,20 +270,15 @@ def kb_overview() -> dict:
 
 
 # ==================== A2. 画像卡牌 / 文档切片预览 ====================
-_NAME_RE = re.compile(r"用户[^（(]*[（(]([^）)]{1,24})[）)]")
+# 画像脱敏与字段映射抽到 rag_demo.profile_view，B 端商家工作台复用同一套，
+# 避免两处各写一份「哪些字段能出、姓名怎么脱敏」。
+from rag_demo.profile_view import (  # noqa: E402
+    mask_profile_name,
+    profile_row as _profile_row,
+)
+
 _PROFILE_PAGE_SIZE = 20
 _DOC_CHUNK_LIMIT = 500
-
-
-def mask_profile_name(profile_text: str) -> str | None:
-    """从 profile_text 提取姓名并脱敏：张三 → 张**；不返回完整姓名。"""
-    match = _NAME_RE.search(profile_text or "")
-    if not match:
-        return None
-    name = match.group(1).strip()
-    if not name:
-        return None
-    return name[:1] + "**" if len(name) > 1 else name + "**"
 
 
 def doc_id_for(name: str) -> str:
@@ -294,22 +288,6 @@ def doc_id_for(name: str) -> str:
 
 def normalize_page(page: int, size: int) -> tuple[int, int]:
     return max(1, int(page or 1)), min(50, max(1, int(size or _PROFILE_PAGE_SIZE)))
-
-
-def _profile_row(row) -> dict:
-    user_id, profile_text, age, gender, city, member_level, order_count, avg_amount, top_category, days_since_last_buy = row
-    return {
-        "user_id": user_id,
-        "name": mask_profile_name(profile_text),
-        "age": age,
-        "gender": gender,
-        "city": city,
-        "member_level": member_level,
-        "order_count": int(order_count or 0),
-        "avg_amount": round(float(avg_amount), 2) if avg_amount is not None else None,
-        "top_category": top_category,
-        "days_since_last_buy": days_since_last_buy,
-    }
 
 
 @router.get("/api/kb/profiles")

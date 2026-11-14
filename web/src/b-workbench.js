@@ -14,12 +14,30 @@ const VIEWS = [
   { key: "orders", label: "订单", short: "订单", group: "交易" },
   { key: "after-sales", label: "售后", short: "售后", group: "交易" },
   { key: "products", label: "商品与 SKU", short: "商品", group: "商品与库存" },
-  { key: "chat-profiles", label: "用户画像", short: "画像", group: "客户" },
+  { key: "profile-query", label: "画像查询", short: "画像", group: "客户" },
   { key: "superagent", label: "调查与审批", short: "协作", group: "经营协作" },
   { key: "policy", label: "动作策略", short: "策略", group: "管理" },
   { key: "audit", label: "执行审计", short: "审计", group: "管理" },
 ];
 const NAV_GROUPS = ["工作台", "经营分析", "交易", "商品与库存", "客户", "经营协作", "管理"];
+
+/* 侧栏图标：18px 线性图标，颜色跟随 currentColor。 */
+const NAV_ICONS = {
+  overview: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-7h5v7"/>',
+  reports: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
+  orders: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6"/><path d="M9 12h6"/>',
+  "after-sales": '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/>',
+  products: '<path d="M12 3 3 8v8l9 5 9-5V8l-9-5Z"/><path d="M3 8l9 5 9-5"/><path d="M12 21v-8"/>',
+  "profile-query": '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.2 2.7-5.5 6-5.5s6 2.3 6 5.5"/><circle cx="17.5" cy="9" r="2.4"/><path d="M15 14.8c3.3-.5 5.5 1.6 5.5 4.2"/>',
+  superagent: '<path d="m12 3 7 3v5c0 4.4-2.8 7.7-7 10-4.2-2.3-7-5.6-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/>',
+  policy: '<path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h2"/><path d="M10 12h10"/><circle cx="8" cy="12" r="2"/><path d="M4 18h8"/><path d="M16 18h4"/><circle cx="14" cy="18" r="2"/>',
+  audit: '<path d="M5 4h14v16H5z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/>',
+};
+
+function navIcon(key) {
+  const path = NAV_ICONS[key];
+  return path ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>` : "";
+}
 
 const ORDER_STATUS_LABELS = {
   CREATED: "待支付",
@@ -126,8 +144,30 @@ const state = {
   afterSalesLoaded: false,
   products: [],
   productsLoaded: false,
-  chatProfiles: [],
-  chatProfilesLoaded: false,
+  /* 画像查询：千客用户 / 导入用户 / 全部用户 */
+  profileTab: "users",
+  profileSource: "all",
+  profileQuery: "",
+  profilePage: 1,
+  profileSize: 12,
+  profileData: null,
+  profileSources: null,
+  profileSourcesLoaded: false,
+  profileLoading: false,
+  profileQueryInput: "",
+  profileAskDraft: "",
+  profileAnswer: null,
+  profileAsking: false,
+  profileDetailKey: "",
+  profileImport: {
+    uploadId: "",
+    state: null,
+    fields: {},
+    mode: "full",
+    building: false,
+    task: null,
+    error: "",
+  },
   productFilter: "all",
   productQuery: "",
   productView: "products",
@@ -181,6 +221,7 @@ const state = {
 
 let toastTimer = null;
 let workPollTimer = null;
+let profileBuildTimer = null;
 const executionPollTimers = new Map();
 
 /* ---------------- 基础工具 ---------------- */
@@ -578,20 +619,203 @@ async function dispatchInventoryAlerts() {
   }
 }
 
-async function loadChatProfiles() {
-  state.loading = true;
+async function loadProfileSources() {
+  try {
+    const data = await api("/api/b/workbench/profile-sources");
+    state.profileSources = data;
+    state.profileSourcesLoaded = true;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+  }
+}
+
+async function loadProfiles() {
+  if (state.profileLoading) return;
+  state.profileLoading = true;
   state.error = "";
   render();
   try {
-    const data = await api("/api/b/workbench/chat-profiles?limit=100");
-    state.chatProfiles = collectionFrom(data, ["profiles"]);
-    state.chatProfilesLoaded = true;
+    const params = new URLSearchParams({
+      source: state.profileSource,
+      page: String(state.profilePage),
+      size: String(state.profileSize),
+    });
+    if (state.profileQuery) params.set("query", state.profileQuery);
+    state.profileData = await api(`/api/b/workbench/profiles?${params.toString()}`);
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    state.profileData = null;
+    showToast(state.error, "error");
+  } finally {
+    state.profileLoading = false;
+    render();
+  }
+}
+
+async function runProfileAsk() {
+  const question = String(state.profileAskDraft || "").trim();
+  if (!question || state.profileAsking) return;
+  state.profileAsking = true;
+  state.profileAnswer = null;
+  state.error = "";
+  render();
+  try {
+    state.profileAnswer = await api("/api/b/workbench/profile-query", {
+      method: "POST",
+      body: JSON.stringify({ question, source: state.profileSource }),
+    });
   } catch (error) {
     if (handleAuthFailure(error)) return;
     state.error = errorMessage(error);
     showToast(state.error, "error");
   } finally {
-    state.loading = false;
+    state.profileAsking = false;
+    render();
+  }
+}
+
+async function refreshProfilePool() {
+  if (state.busy === "profile-pool") return;
+  state.busy = "profile-pool";
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/b/workbench/profile-pool/refresh", { method: "POST" });
+    showToast(`千客用户池已刷新：${Number(data.upserted || 0)} 人`);
+    await loadProfileSources();
+    await loadProfiles();
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    showToast(state.error, "error");
+  } finally {
+    state.busy = "";
+    render();
+  }
+}
+
+function applyProfileImportState(payload) {
+  // 示例接口返回 {upload_id, dataset, state}；/api/wizard/upload 直接返回 state。
+  const wizard = payload?.state || payload || {};
+  const fields = {};
+  for (const field of wizard.fields || []) {
+    fields[field.key] = field.column || "";
+  }
+  state.profileImport = {
+    uploadId: payload?.upload_id || wizard.upload_id || "",
+    state: wizard,
+    fields,
+    // 新批次默认覆盖重建：增量模式要求「本批次含新增文件」，
+    // 载入示例数据后立刻点增量会被向导拒绝。用户仍可手动切增量。
+    mode: "full",
+    building: false,
+    task: null,
+    error: "",
+  };
+}
+
+async function loadProfileSample() {
+  if (state.busy === "profile-sample") return;
+  state.busy = "profile-sample";
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/b/workbench/profile-import/sample", { method: "POST" });
+    applyProfileImportState(data);
+    showToast("示例数据已就绪，确认字段后开始构建");
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    showToast(state.error, "error");
+  } finally {
+    state.busy = "";
+    render();
+  }
+}
+
+async function uploadProfileCsv(files) {
+  if (!files || !files.length) return;
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  state.busy = "profile-upload";
+  state.error = "";
+  render();
+  try {
+    const data = await api("/api/wizard/upload", { method: "POST", body: form });
+    applyProfileImportState(data);
+    showToast(`已上传 ${files.length} 个文件`);
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    showToast(state.error, "error");
+  } finally {
+    state.busy = "";
+    render();
+  }
+}
+
+function stopProfileBuildPolling() {
+  if (profileBuildTimer) {
+    clearTimeout(profileBuildTimer);
+    profileBuildTimer = null;
+  }
+}
+
+async function pollProfileBuild(taskId) {
+  try {
+    const task = await api(`/api/wizard/build/${encodeURIComponent(taskId)}`);
+    state.profileImport.task = task;
+    render();
+    const status = String(task?.status || "").toLowerCase();
+    if (status === "done") {
+      state.profileImport.building = false;
+      showToast("构建完成");
+      await loadProfileSources();
+      await loadProfiles();
+      render();
+      return;
+    }
+    if (status === "failed") {
+      state.profileImport.building = false;
+      state.profileImport.error = task?.error || task?.note || "构建失败";
+      render();
+      return;
+    }
+    profileBuildTimer = window.setTimeout(() => pollProfileBuild(taskId), 1200);
+  } catch (error) {
+    state.profileImport.building = false;
+    state.profileImport.error = errorMessage(error);
+    render();
+  }
+}
+
+async function buildProfileImport() {
+  const uploadId = state.profileImport.uploadId;
+  if (!uploadId || state.profileImport.building) return;
+  if (!String(state.profileImport.fields.user_id || "").trim()) {
+    showToast("请先选择「用户ID」对应的列", "error");
+    return;
+  }
+  state.profileImport.building = true;
+  state.profileImport.error = "";
+  render();
+  try {
+    const data = await api("/api/wizard/build", {
+      method: "POST",
+      body: JSON.stringify({
+        upload_id: uploadId,
+        fields: state.profileImport.fields,
+        mode: state.profileImport.mode,
+      }),
+    });
+    showToast("开始构建");
+    if (data?.task_id) await pollProfileBuild(data.task_id);
+  } catch (error) {
+    state.profileImport.building = false;
+    state.profileImport.error = errorMessage(error);
+    showToast(state.profileImport.error, "error");
     render();
   }
 }
@@ -740,16 +964,19 @@ async function ensureViewData(view = state.view) {
   if (view === "audit") {
     if (!state.auditLoaded) await loadAudit();
   }
-  if (view === "chat-profiles") {
-    if (!state.chatProfilesLoaded) await loadChatProfiles();
+  if (view === "profile-query") {
+    if (!state.profileSourcesLoaded) await loadProfileSources();
+    if (!state.profileData) await loadProfiles();
   }
 }
-
 async function switchView(view) {
   if (!VIEWS.some((item) => item.key === view) || state.view === view) return;
   if (state.view === "superagent" && view !== "superagent") {
     stopWorkPolling();
     stopAllExecutionPolling();
+  }
+  if (state.view === "profile-query" && view !== "profile-query") {
+    stopProfileBuildPolling();
   }
   state.view = view;
   state.error = "";
@@ -774,7 +1001,10 @@ async function refreshCurrent() {
   else if (state.view === "superagent") await loadWorkItems();
   else if (state.view === "policy") await loadPolicy();
   else if (state.view === "audit") await loadAudit();
-  else if (state.view === "chat-profiles") await loadChatProfiles();
+  else if (state.view === "profile-query") {
+    await loadProfileSources();
+    await loadProfiles();
+  }
   else await loadProducts();
 }
 
@@ -2310,74 +2540,248 @@ function profileSection(label, items, max = 3) {
   </section>`;
 }
 
-function profileCard(profile) {
-  const data = profile.profile && typeof profile.profile === "object" ? profile.profile : {};
-  const needs = profileArray(data.needs);
-  const preferences = profileArray(data.preferences);
-  const boundaries = profileArray(data.boundaries);
-  const questions = profileArray(data.open_questions);
-  const stage = String(data.purchase_stage || "").trim();
-  const budget = String(data.budget || "").trim();
-  const sizes = Object.entries(data.sizes && typeof data.sizes === "object" ? data.sizes : {})
-    .filter(([, value]) => String(value ?? "").trim())
-    .map(([key, value]) => `${key} ${value}`);
-  const tags = [...new Set([...needs, ...preferences])].slice(0, 5);
-  const sections = [
-    profileSection("目标与需求", needs),
-    profileSection("偏好", preferences),
-    profileSection("顾虑与边界", boundaries, 2),
-    stage ? `<section class="b-profile-section"><h4>当前阶段</h4><p class="b-profile-stage">${escapeHtml(profileShort(stage, 40))}</p></section>` : "",
-    profileSection("待确认问题", questions, 3),
-    (budget || sizes.length)
-      ? `<section class="b-profile-section"><h4>基本属性</h4><div class="b-profile-attrs">${budget ? `<span>预算 ${escapeHtml(profileShort(budget, 12))}</span>` : ""}${sizes.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div></section>`
-      : "",
-  ].join("");
-  const hasStructured = sections.length > 0;
-  const confidence = Number(profile.confidence || data.confidence || 0);
-  const fallback = profile.profile_text ? `<p class="b-profile-summary">${escapeHtml(profileShort(profile.profile_text, 140))}</p>` : "";
-  const json = JSON.stringify(data, null, 2);
-  return `<article class="b-card b-profile-card">
-    <header class="b-profile-head">
-      <div class="b-profile-identity">
-        <span class="b-profile-avatar">${escapeHtml(String(profile.buyer_id || "用").trim().slice(0, 1).toUpperCase())}</span>
-        <div>
-          <strong>${escapeHtml(text(profile.buyer_id, "未命名用户"))}</strong>
-          <small>${escapeHtml(text(profile.merchant_id, "当前商家"))} · 会话用户</small>
-        </div>
+function profileSourceLabel(source) {
+  if (source === "qianke") return "千客用户";
+  if (source === "imported") return "导入用户";
+  return "全部用户";
+}
+
+function profileCardKey(card) {
+  return `${card?.source || ""}:${card?.user_id || ""}`;
+}
+
+function profileInitial(card) {
+  const value = String(card?.display_name || card?.user_id || "用").trim();
+  return value.slice(0, 1).toUpperCase();
+}
+
+function profileCardHtml(card) {
+  const stats = card.stats || {};
+  const fields = card.fields || {};
+  const tags = Array.isArray(card.tags) ? card.tags.filter(Boolean).slice(0, 5) : [];
+  const meta = [
+    fields.gender,
+    fields.age ? `${fields.age} 岁` : "",
+    fields.city,
+    fields.member_level,
+    fields.top_category,
+  ].filter(Boolean);
+  const orderCount = Number(stats.order_count || 0);
+  const confidence = Number(card.confidence || 0);
+  const hasOrder = card.source === "qianke" ? Boolean(card.has_order) : orderCount > 0;
+  const hasChat = card.source === "qianke" ? Boolean(card.has_chat) : false;
+  const thirdLabel = card.source === "imported" ? "品类" : "累计";
+  const thirdValue = card.source === "imported" ? text(fields.top_category) : money(stats.total_amount);
+  const statCells = orderCount
+    ? `<dl class="b-profile-item-stats">
+        <div><dt>订单</dt><dd>${orderCount}</dd></div>
+        <div><dt>客单价</dt><dd>${money(stats.avg_amount)}</dd></div>
+        <div><dt>${thirdLabel}</dt><dd>${thirdValue}</dd></div>
+      </dl>`
+    : tags.length
+      ? `<p class="b-profile-item-meta">${tags.map((tag) => escapeHtml(tag)).join(" · ")}</p>`
+      : "";
+  return `<article class="b-card b-profile-item" data-profile-card="${escapeHtml(profileCardKey(card))}" tabindex="0" role="button">
+    <header class="b-profile-item-head">
+      <span class="b-profile-item-avatar">${escapeHtml(profileInitial(card))}</span>
+      <div class="b-profile-item-id">
+        <strong>${escapeHtml(text(card.user_id, "未命名用户"))}</strong>
+        <span class="b-profile-item-source">${escapeHtml(profileSourceLabel(card.source))}</span>
       </div>
-      ${confidence > 0 ? `<span class="b-badge is-info">置信度 ${Math.round(confidence * 100)}%</span>` : ""}
+      ${confidence > 0 ? `<span class="b-badge is-info">${Math.round(confidence * 100)}%</span>` : ""}
     </header>
-    ${tags.length ? `<div class="b-profile-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
-    ${hasStructured ? `<div class="b-profile-sections">${sections}</div>` : fallback || `<p class="b-profile-empty">暂无结构化画像字段，仅保留原始会话记录。</p>`}
-    <dl class="b-profile-meta">
-      <div><dt>版本</dt><dd>${escapeHtml(text(profile.version, "—"))}</dd></div>
-      <div><dt>来源消息</dt><dd>${escapeHtml(text(profile.source_message_count, "—"))}</dd></div>
-      <div><dt>更新时间</dt><dd>${escapeHtml(timeText(profile.extracted_at))}</dd></div>
-    </dl>
-    <details class="b-profile-json">
-      <summary>展开 JSON</summary>
-      <pre>${escapeHtml(json)}</pre>
-    </details>
+    ${(hasOrder || hasChat) ? `<div class="b-profile-item-tags">${hasOrder ? "<span>订单</span>" : ""}${hasChat ? "<span>会话</span>" : ""}${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : (tags.length ? `<div class="b-profile-item-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : "")}
+    ${statCells}
+    ${meta.length ? `<p class="b-profile-item-meta">${meta.map((item) => escapeHtml(String(item))).join(" · ")}</p>` : ""}
   </article>`;
 }
 
-function chatProfilesView() {
-  const body = state.loading && !state.chatProfiles.length
-    ? skeletonMarkup()
-    : state.chatProfiles.length
-      ? `<div class="b-profile-grid">${state.chatProfiles.map(profileCard).join("")}</div>`
-      : emptyMarkup("还没有会话画像。用户在店宠会话中聊过，且 30 分钟无新消息后会自动生成。");
-  return `<section class="b-view" aria-label="用户画像">
-    <div class="b-view-head">
-      <div>
-        <h1>用户画像</h1>
-        <p class="b-muted">只读 · 当前商家 ${state.chatProfiles.length} 个会话画像 · 摘要与 JSON 均来自明确对话</p>
-      </div>
-      <div class="b-view-tools">
-        <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
-      </div>
+function profileGroupHtml(sourceKey, group) {
+  if (!group || !group.ready) {
+    return `<section class="b-profile-group">
+      <div class="b-profile-group-head"><strong>${escapeHtml(profileSourceLabel(sourceKey))}</strong><span class="b-muted">未构建</span></div>
+      <p class="b-profile-empty">导入用户还没有数据。</p>
+    </section>`;
+  }
+  const items = Array.isArray(group.items) ? group.items : [];
+  const total = Number(group.total || items.length);
+  const pages = Number(group.total_pages || 0);
+  return `<section class="b-profile-group">
+    <div class="b-profile-group-head">
+      <strong>${escapeHtml(profileSourceLabel(sourceKey))}</strong>
+      <span class="b-muted">${total} 人${group.mode === "search" ? " · 按相关度" : ""}</span>
     </div>
-    ${body}
+    ${items.length ? `<div class="b-profile-grid">${items.map(profileCardHtml).join("")}</div>` : `<p class="b-profile-empty">没有匹配的用户。</p>`}
+    ${pages > 1 ? `<div class="b-profile-pager">
+      <button type="button" class="b-btn b-btn-ghost" data-profile-page="${state.profilePage - 1}" ${state.profilePage <= 1 || state.profileLoading ? "disabled" : ""}>上一页</button>
+      <span class="b-muted">${state.profilePage} / ${pages}</span>
+      <button type="button" class="b-btn b-btn-ghost" data-profile-page="${state.profilePage + 1}" ${state.profilePage >= pages || state.profileLoading ? "disabled" : ""}>下一页</button>
+    </div>` : ""}
+  </section>`;
+}
+
+function profileAnswerHtml() {
+  const answer = state.profileAnswer;
+  if (!answer) return "";
+  const route = String(answer.route || "");
+  const routeLabel = route === "chitchat" ? "闲聊" : route === "error" ? "检索不可用" : route === "llm_error" ? "模型不可用" : route === "empty" ? "无结果" : "已生成";
+  const sources = Array.isArray(answer.sources) ? answer.sources : [];
+  const cards = Array.isArray(answer.cards) ? answer.cards : [];
+  const coverage = answer.coverage?.note ? String(answer.coverage.note) : "";
+  return `<section class="b-card b-profile-answer" aria-live="polite">
+    <header class="b-profile-answer-head">
+      <span class="b-badge ${route === "rag" ? "is-success" : route === "llm_error" || route === "error" ? "is-danger" : "is-muted"}">${escapeHtml(routeLabel)}</span>
+      <span class="b-muted">${escapeHtml(profileSourceLabel(answer.source))}</span>
+    </header>
+    <div class="b-profile-answer-text">${renderSafeText(answer.answer || "")}</div>
+    ${coverage ? `<p class="b-profile-coverage">${escapeHtml(coverage)}</p>` : ""}
+    ${sources.length ? `<details class="b-profile-sources">
+      <summary>来源 ${sources.length}</summary>
+      <ul>${sources.map((source) => `<li><span>${escapeHtml(text(source.source, "资料"))}</span><p>${escapeHtml(profileShort(source.text, 220))}</p></li>`).join("")}</ul>
+    </details>` : ""}
+    ${answer.sql ? `<details class="b-profile-sources"><summary>SQL</summary><pre>${escapeHtml(answer.sql)}</pre></details>` : ""}
+    ${cards.length ? `<div class="b-profile-grid b-profile-answer-cards">${cards.map(profileCardHtml).join("")}</div>` : ""}
+  </section>`;
+}
+
+function profileDetailHtml() {
+  if (!state.profileDetailKey) return "";
+  const groups = state.profileData?.groups || null;
+  const list = groups
+    ? [...(groups.qianke?.items || []), ...(groups.imported?.items || [])]
+    : (state.profileData?.items || []);
+  const card = list.find((item) => profileCardKey(item) === state.profileDetailKey)
+    || (state.profileAnswer?.cards || []).find((item) => profileCardKey(item) === state.profileDetailKey);
+  if (!card) return "";
+  const chat = card.chat && typeof card.chat === "object" ? card.chat : {};
+  const sections = [
+    profileSection("目标与需求", profileArray(chat.needs)),
+    profileSection("偏好", profileArray(chat.preferences)),
+    profileSection("顾虑与边界", profileArray(chat.boundaries), 3),
+    chat.budget ? `<section class="b-profile-section"><h4>预算</h4><p>${escapeHtml(profileShort(chat.budget, 40))}</p></section>` : "",
+    chat.purchase_stage ? `<section class="b-profile-section"><h4>阶段</h4><p>${escapeHtml(profileShort(chat.purchase_stage, 40))}</p></section>` : "",
+    profileSection("待确认问题", profileArray(chat.open_questions), 5),
+  ].join("");
+  return `<section class="b-card b-profile-detail" aria-label="用户详情">
+    <header class="b-profile-detail-head">
+      <div><strong>${escapeHtml(text(card.user_id, "未命名用户"))}</strong><span class="b-muted">${escapeHtml(profileSourceLabel(card.source))}</span></div>
+      <button type="button" class="b-btn b-btn-ghost" data-profile-detail-close>关闭</button>
+    </header>
+    ${sections || `<p class="b-profile-empty">该用户暂无结构化会话画像。</p>`}
+    <dl class="b-profile-meta">
+      <div><dt>订单</dt><dd>${Number(card.stats?.order_count || 0)}</dd></div>
+      <div><dt>客单价</dt><dd>${money(card.stats?.avg_amount)}</dd></div>
+      <div><dt>最近下单</dt><dd>${escapeHtml(timeText(card.stats?.last_order_at))}</dd></div>
+      <div><dt>更新</dt><dd>${escapeHtml(timeText(card.updated_at))}</dd></div>
+    </dl>
+  </section>`;
+}
+
+function profileUsersView() {
+  const scopes = Array.isArray(state.profileSources?.scopes) && state.profileSources.scopes.length
+    ? state.profileSources.scopes
+    : [
+        { value: "qianke", label: "千客用户" },
+        { value: "imported", label: "导入用户" },
+        { value: "all", label: "全部用户" },
+      ];
+  const sourceTabs = scopes.map((scope) => `<button type="button" class="b-seg ${state.profileSource === scope.value ? "active" : ""}" data-profile-source="${escapeHtml(scope.value)}">${escapeHtml(scope.label)}</button>`).join("");
+  const data = state.profileData;
+  const groups = data?.source === "all" && data.groups
+    ? data.groups
+    : data
+      ? { [data.source]: data }
+      : {};
+  const body = state.profileLoading && !data
+    ? skeletonMarkup()
+    : Object.keys(groups).length
+      ? Object.entries(groups).map(([key, group]) => profileGroupHtml(key, group)).join("")
+      : `<p class="b-profile-empty">选择数据范围后开始查询。</p>`;
+  const canRefresh = state.profileSources?.qianke?.count >= 0 && state.profileSources?.can_manage;
+  return `
+    <div class="b-profile-toolbar">
+      <div class="b-segmented" role="tablist" aria-label="数据范围">${sourceTabs}</div>
+      ${canRefresh ? `<button type="button" class="b-btn b-btn-ghost" data-profile-pool-refresh ${state.busy === "profile-pool" ? "disabled" : ""}>${state.busy === "profile-pool" ? "刷新中…" : "刷新千客池"}</button>` : ""}
+    </div>
+    <form class="b-profile-search" data-profile-search-form>
+      <input id="b-profile-query" data-profile-query value="${escapeHtml(state.profileQueryInput)}" placeholder="搜索用户" autocomplete="off" />
+      <button type="submit" class="b-btn b-btn-primary" ${state.profileLoading ? "disabled" : ""}>搜索</button>
+      ${state.profileQuery ? `<button type="button" class="b-btn b-btn-ghost" data-profile-clear>清除</button>` : ""}
+    </form>
+    <form class="b-profile-ask" data-profile-ask-form>
+      <input id="b-profile-ask" data-profile-ask-input value="${escapeHtml(state.profileAskDraft)}" placeholder="问小千：最近想买跑鞋的客户有哪些" autocomplete="off" ${state.profileAsking ? "disabled" : ""} />
+      <button type="submit" class="b-btn b-btn-primary" ${state.profileAsking ? "disabled" : ""}>${state.profileAsking ? "分析中…" : "问小千"}</button>
+    </form>
+    ${profileAnswerHtml()}
+    ${profileDetailHtml()}
+    ${body}`;
+}
+
+function profileImportTaskHtml() {
+  const task = state.profileImport.task;
+  if (!task) return "";
+  const percent = Math.max(0, Math.min(99, Number(task.percent || 0)));
+  const steps = Array.isArray(task.steps) ? task.steps : [];
+  return `<div class="b-profile-build">
+    <div class="b-profile-build-head">
+      <strong>${task.status === "done" ? "构建完成" : task.status === "failed" ? "构建失败" : `构建中 ${percent}%`}</strong>
+      <span class="b-muted">${escapeHtml(task.note || "")}</span>
+    </div>
+    <div class="b-profile-progress"><span style="width:${task.status === "done" ? 100 : percent}%"></span></div>
+    ${steps.length ? `<ul class="b-profile-steps">${steps.map((step) => `<li class="${step.status === "done" ? "is-done" : step.status === "running" ? "is-running" : ""}">${escapeHtml(step.label)}${step.status === "skipped" ? "（跳过）" : ""}</li>`).join("")}</ul>` : ""}
+  </div>`;
+}
+
+function profileImportView() {
+  const sources = state.profileSources || {};
+  const imported = sources.imported || {};
+  const qianke = sources.qianke || {};
+  const canManage = Boolean(sources.can_manage);
+  const wizard = state.profileImport.state;
+  const fields = Array.isArray(wizard?.fields) ? wizard.fields : [];
+  const fieldRows = fields.map((field) => `<label class="b-profile-field">
+    <span>${escapeHtml(field.label)}${field.required ? " *" : ""}</span>
+    <select data-profile-field="${escapeHtml(field.key)}" ${canManage ? "" : "disabled"}>
+      <option value="">未选择</option>
+      ${(field.options || []).map((option) => `<option value="${escapeHtml(option)}" ${state.profileImport.fields[field.key] === option ? "selected" : ""}>${escapeHtml(option)}</option>`).join("")}
+    </select>
+  </label>`).join("");
+  return `
+    <p class="b-profile-status">导入用户 ${imported.ready ? Number(imported.profiles || 0) : "未构建"} · 千客用户 ${Number(qianke.count || 0)}</p>
+    <p class="b-profile-hint">${canManage ? "载入示例数据或上传 CSV，确认字段后构建。" : "当前角色只读。"}</p>
+    ${canManage ? `<div class="b-profile-import-actions">
+      <button type="button" class="b-btn b-btn-ghost" data-profile-sample ${state.busy === "profile-sample" ? "disabled" : ""}>${state.busy === "profile-sample" ? "载入中…" : "载入示例数据"}</button>
+      <label class="b-btn b-btn-ghost">上传 CSV<input type="file" id="b-profile-file" accept=".csv" multiple hidden /></label>
+    </div>` : ""}
+    ${wizard ? `<div class="b-card b-profile-import">
+      <div class="b-profile-group-head"><strong>${escapeHtml((wizard.csv_files || []).map((file) => file.name).join("、") || "待构建")}</strong><span class="b-muted">${escapeHtml(String(wizard.summary?.total_rows || 0))} 行</span></div>
+      ${fieldRows ? `<div class="b-profile-fields">${fieldRows}</div>` : ""}
+      <div class="b-profile-import-foot">
+        <label class="b-profile-field"><span>模式</span>
+          <select data-profile-import-mode ${canManage && !state.profileImport.building ? "" : "disabled"}>
+            <option value="full" ${state.profileImport.mode === "full" ? "selected" : ""}>覆盖重建</option>
+            <option value="incremental" ${state.profileImport.mode === "incremental" ? "selected" : ""}>增量更新</option>
+          </select>
+        </label>
+        <button type="button" class="b-btn b-btn-primary" data-profile-build ${canManage && !state.profileImport.building ? "" : "disabled"}>${state.profileImport.building ? "构建中…" : "开始构建"}</button>
+      </div>
+      ${state.profileImport.error ? `<p class="b-inline-error" role="alert">${escapeHtml(state.profileImport.error)}</p>` : ""}
+      ${profileImportTaskHtml()}
+    </div>` : ""}`;
+}
+
+function profileQueryView() {
+  const tabs = [
+    { value: "users", label: "用户查询" },
+    { value: "import", label: "数据接入" },
+  ];
+  const tabsHtml = tabs.map((tab) => `<button type="button" class="b-seg ${state.profileTab === tab.value ? "active" : ""}" data-profile-tab="${tab.value}">${tab.label}</button>`).join("");
+  return `<section class="b-view" aria-label="画像查询">
+    <div class="b-view-head">
+      <div><h1>画像查询</h1></div>
+      <div class="b-segmented" role="tablist" aria-label="画像查询子页">${tabsHtml}</div>
+    </div>
+    ${state.profileTab === "import" ? profileImportView() : profileUsersView()}
   </section>`;
 }
 
@@ -3114,11 +3518,10 @@ function shellMarkup() {
             ? policyView()
             : activeView.key === "audit"
               ? auditView()
-              : activeView.key === "chat-profiles"
-                ? chatProfilesView()
+              : activeView.key === "profile-query"
+                ? profileQueryView()
                 : productsView();
   const merchantName = state.me?.name || "商家";
-  const merchantId = state.me?.id || "";
   const role = String(state.me?.role || "").toLowerCase();
   const roleText = workspaceRoleLabel(workspaceRole());
   const navMarkup = NAV_GROUPS.map((group) => {
@@ -3126,29 +3529,29 @@ function shellMarkup() {
     if (!views.length) return "";
     return `<div class="b-nav-group">
       <p class="b-nav-group-label">${group}</p>
-      ${views.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" ${state.loading || state.busy ? 'aria-disabled="true"' : ""}><span class="b-nav-full">${view.label}</span><span class="b-nav-short">${view.short || view.label}</span></button>`).join("")}
+      ${views.map((view) => `<button type="button" class="b-nav-btn ${state.view === view.key ? "active" : ""}" data-view="${view.key}" aria-label="${escapeHtml(view.label)}" ${state.view === view.key ? 'aria-current="page"' : ""} ${state.loading || state.busy ? 'aria-disabled="true"' : ""}><span class="b-nav-icon">${navIcon(view.key)}</span><span class="b-nav-label">${escapeHtml(view.label)}</span></button>`).join("")}
     </div>`;
   }).join("");
+  const merchantInitial = String(merchantName).trim().slice(0, 1) || "商";
   return `<div class="b-shell">
     <header class="b-topbar">
       <div class="b-brand"><span class="b-brand-mark">千客</span><span class="b-brand-sub">商家工作台</span></div>
-      <div class="b-context">
-        <div class="b-merchant">
-          <strong>${escapeHtml(merchantName)}</strong>
-          ${merchantId ? `<code class="b-mono">${escapeHtml(merchantId)}</code>` : ""}
-        </div>
-        <span class="b-role">${escapeHtml(roleText)}</span>
-        <button type="button" class="b-store-switch" disabled title="多店成员关系接口尚未接入">切换店铺</button>
-        <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
-      </div>
       <div class="b-header-actions">
+        <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
         <a class="b-text-link b-c-home-link" href="/v2/#/c/home" target="_blank" rel="noopener">C 端首页</a>
         <a class="b-text-link" href="/v2/#/home">返回入口</a>
       </div>
     </header>
     <div class="b-body">
       <aside class="b-sidebar" aria-label="商家工作台导航">
-        ${navMarkup}
+        <div class="b-sidebar-scroll">${navMarkup}</div>
+        <div class="b-sidebar-foot">
+          <span class="b-sidebar-avatar" aria-hidden="true">${escapeHtml(merchantInitial)}</span>
+          <span class="b-sidebar-user">
+            <strong>${escapeHtml(merchantName)}</strong>
+            <small>${escapeHtml(roleText)}</small>
+          </span>
+        </div>
       </aside>
       <main class="b-main">
         ${state.error ? `<p class="b-inline-error" role="alert"><span>${escapeHtml(state.error)}</span><button type="button" class="b-inline-close" data-clear-error aria-label="关闭错误提示">×</button></p>` : ""}
@@ -3359,6 +3762,65 @@ function bindEvents() {
     }
     if (target.closest("[data-dismiss-toast]")) {
       clearToast();
+      render();
+      return;
+    }
+    const profileTabButton = target.closest("[data-profile-tab]");
+    if (profileTabButton) {
+      state.profileTab = profileTabButton.dataset.profileTab || "users";
+      state.profileDetailKey = "";
+      if (state.profileTab === "import" && !state.profileSourcesLoaded) await loadProfileSources();
+      render();
+      return;
+    }
+    const profileSourceButton = target.closest("[data-profile-source]");
+    if (profileSourceButton) {
+      state.profileSource = profileSourceButton.dataset.profileSource || "all";
+      state.profilePage = 1;
+      state.profileAnswer = null;
+      state.profileDetailKey = "";
+      state.profileData = null;
+      render();
+      await loadProfiles();
+      return;
+    }
+    if (target.closest("[data-profile-clear]")) {
+      state.profileQuery = "";
+      state.profileQueryInput = "";
+      state.profilePage = 1;
+      state.profileData = null;
+      render();
+      await loadProfiles();
+      return;
+    }
+    const profilePageButton = target.closest("[data-profile-page]");
+    if (profilePageButton) {
+      state.profilePage = Math.max(1, Number(profilePageButton.dataset.profilePage || 1));
+      state.profileData = null;
+      render();
+      await loadProfiles();
+      return;
+    }
+    if (target.closest("[data-profile-pool-refresh]")) {
+      await refreshProfilePool();
+      return;
+    }
+    if (target.closest("[data-profile-sample]")) {
+      await loadProfileSample();
+      return;
+    }
+    if (target.closest("[data-profile-build]")) {
+      await buildProfileImport();
+      return;
+    }
+    const profileDetailCard = target.closest("[data-profile-card]");
+    if (profileDetailCard) {
+      state.profileDetailKey = profileDetailCard.dataset.profileCard || "";
+      render();
+      return;
+    }
+    if (target.closest("[data-profile-detail-close]")) {
+      state.profileDetailKey = "";
       render();
       return;
     }
@@ -3603,8 +4065,30 @@ function bindEvents() {
     }
   });
 
+  root.addEventListener("submit", async (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (form.matches("[data-profile-search-form]")) {
+      event.preventDefault();
+      state.profileQuery = String(state.profileQueryInput || "").trim();
+      state.profilePage = 1;
+      state.profileData = null;
+      render();
+      await loadProfiles();
+      return;
+    }
+    if (form.matches("[data-profile-ask-form]")) {
+      event.preventDefault();
+      await runProfileAsk();
+    }
+  });
+
   root.addEventListener("change", async (event) => {
     const target = event.target;
+    if (target instanceof HTMLInputElement && target.matches("#b-profile-file")) {
+      if (target.files && target.files.length) await uploadProfileCsv(target.files);
+      return;
+    }
     if (target instanceof HTMLInputElement && target.matches("[data-param-sale-type]")) {
       const workItemId = target.dataset.paramSaleType;
       const item = state.workItems.find((candidate) => candidate.work_item_id === workItemId);
@@ -3616,6 +4100,14 @@ function bindEvents() {
       return;
     }
     if (!(target instanceof HTMLSelectElement)) return;
+    if (target.matches("[data-profile-field]")) {
+      state.profileImport.fields[target.dataset.profileField] = target.value;
+      return;
+    }
+    if (target.matches("[data-profile-import-mode]")) {
+      state.profileImport.mode = target.value;
+      return;
+    }
     if (target.matches("[data-order-limit]")) {
       const nextLimit = Number(target.value || 20);
       state.orderLimit = [10, 20, 50, 100].includes(nextLimit) ? nextLimit : 20;
@@ -3642,6 +4134,14 @@ function bindEvents() {
 
   root.addEventListener("input", (event) => {
     const target = event.target;
+    if (target instanceof HTMLInputElement && target.matches("[data-profile-query]")) {
+      state.profileQueryInput = target.value;
+      return;
+    }
+    if (target instanceof HTMLInputElement && target.matches("[data-profile-ask-input]")) {
+      state.profileAskDraft = target.value;
+      return;
+    }
     if (target instanceof HTMLTextAreaElement && target.matches("[data-event-input]")) {
       state.eventDraft = target.value;
       return;
@@ -3680,6 +4180,16 @@ function bindEvents() {
   root.addEventListener("keydown", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+    if (event.key === "Enter" && target.matches("[data-profile-card]")) {
+      state.profileDetailKey = target.dataset.profileCard || "";
+      render();
+      return;
+    }
+    if (event.key === "Escape" && state.profileDetailKey) {
+      state.profileDetailKey = "";
+      render();
+      return;
+    }
     if (event.key === "Escape" && (state.shipForm || state.cancelConfirmId || state.approveConfirm)) {
       state.shipForm = null;
       state.cancelConfirmId = "";
@@ -3722,6 +4232,29 @@ async function boot() {
   state.approveConfirm = null;
   state.actionParams = {};
   state.executionCache = {};
+  state.profileTab = "users";
+  state.profileSource = "all";
+  state.profileQuery = "";
+  state.profilePage = 1;
+  state.profileData = null;
+  state.profileSources = null;
+  state.profileSourcesLoaded = false;
+  state.profileLoading = false;
+  state.profileQueryInput = "";
+  state.profileAskDraft = "";
+  state.profileAnswer = null;
+  state.profileAsking = false;
+  state.profileDetailKey = "";
+  state.profileImport = {
+    uploadId: "",
+    state: null,
+    fields: {},
+    mode: "full",
+    building: false,
+    task: null,
+    error: "",
+  };
+  stopProfileBuildPolling();
   state.error = "";
   state.shipForm = null;
   state.cancelConfirmId = "";

@@ -269,9 +269,7 @@ async function copyReply() {
   padding: 26px 28px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background:
-    radial-gradient(520px 180px at 95% 0%, var(--primary-soft), transparent 70%),
-    var(--surface);
+  background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
 .hero-kicker {
@@ -467,9 +465,7 @@ textarea:disabled { opacity: 0.65; }
   position: relative; margin-top: 14px; padding: 18px 16px 30px;
   border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--border));
   border-radius: 14px;
-  background:
-    radial-gradient(300px 100px at 100% 0%, var(--primary-soft), transparent 70%),
-    var(--surface-2);
+  background: var(--surface-2);
 }
 .sms-label { font-family: var(--mono); font-size: 9px; color: var(--primary); letter-spacing: 0.08em; }
 .sms-preview p { margin-top: 11px; font-size: 15px; line-height: 1.8; white-space: pre-wrap; }

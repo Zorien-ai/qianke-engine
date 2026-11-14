@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, RouterLink, RouterView } from "vue-router";
 import { hasCap, isDemo, isManager, logout, store, toast } from "./store";
 import ToastHost from "./components/ToastHost.vue";
@@ -10,7 +10,7 @@ import CShell from "./components/CShell.vue";
 
 const route = useRoute();
 const drawerOpen = ref(false);
-const collapsed = ref(false);
+const menuBtn = ref(null);
 const demoMode = computed(() => isDemo());
 
 function demoSetupBlocked() {
@@ -74,6 +74,19 @@ const navItems = computed(() => {
 });
 
 const pageTitle = computed(() => (route.meta && route.meta.title) || "工作台");
+const navGroups = computed(() => {
+  const groups = [
+    { title: "工作台", keys: ["dashboard", "chat", "agent", "agentActions", "myAgent", "kb"] },
+    { title: "管理", keys: ["staff", "eval", "monitor", "billing", "settings"] },
+    { title: "平台", keys: ["adminMonitor", "adminCEnd", "adminChatProfiles", "adminMerchantStoreFriends"] },
+  ];
+  return groups
+    .map((group) => ({
+      title: group.title,
+      items: navItems.value.filter((item) => group.keys.includes(item.key)),
+    }))
+    .filter((group) => group.items.length);
+});
 // 登录后的工作台统一 Tab 标题；公开营销页 /home 由 Landing 自己设置更完整的标题
 watch(
   () => route.path,
@@ -113,24 +126,26 @@ function onResize() {
 }
 
 onMounted(() => {
-  try {
-    collapsed.value = localStorage.getItem("rag-v2-sidebar") === "1";
-  } catch {
-    /* 忽略 */
-  }
   window.addEventListener("resize", onResize);
+  window.addEventListener("keydown", onKeydown);
 });
 
-watch(collapsed, (v) => {
-  try {
-    localStorage.setItem("rag-v2-sidebar", v ? "1" : "0");
-  } catch {
-    /* 忽略 */
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", onResize);
+  window.removeEventListener("keydown", onKeydown);
+});
+
+function onKeydown(event) {
+  if (event.key === "Escape" && drawerOpen.value) {
+    closeDrawer(true);
   }
-});
+}
 
-function closeDrawer() {
+function closeDrawer(returnFocus = false) {
   drawerOpen.value = false;
+  if (returnFocus) {
+    nextTick(() => menuBtn.value?.focus());
+  }
 }
 </script>
 
@@ -172,8 +187,8 @@ function closeDrawer() {
   </template>
 
   <!-- 应用外壳（登录后的工作台） -->
-  <div v-else class="app-shell" :class="{ 'is-collapsed': collapsed, 'is-drawer-open': drawerOpen, 'is-chat-shell': route.name === 'chat' }">
-      <div class="nav-backdrop" :class="{ show: drawerOpen }" @click="closeDrawer" />
+  <div v-else class="app-shell" :class="{ 'is-drawer-open': drawerOpen, 'is-chat-shell': route.name === 'chat' }">
+      <div class="nav-backdrop" :class="{ show: drawerOpen }" @click="closeDrawer(true)" />
 
       <aside class="sidebar">
         <div class="brand">
@@ -185,20 +200,23 @@ function closeDrawer() {
         </div>
 
         <nav class="nav-list">
-          <RouterLink
-            v-for="item in navItems"
-            :key="item.key"
-            :to="item.to"
-            class="nav-item"
-            active-class=""
-            exact-active-class=""
-            :class="{ 'is-active': route.path === item.to || (item.to === '/kb' && route.path.startsWith('/kb/')) }"
-            :title="item.label"
-            @click="closeDrawer"
-          >
-            <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${item.icon}</svg>`" />
-            <span class="nav-label">{{ item.label }}</span>
-          </RouterLink>
+          <div v-for="group in navGroups" :key="group.title" class="nav-group">
+            <div class="nav-group-title">{{ group.title }}</div>
+            <RouterLink
+              v-for="item in group.items"
+              :key="item.key"
+              :to="item.to"
+              class="nav-item"
+              active-class=""
+              exact-active-class=""
+              :class="{ 'is-active': route.path === item.to || (item.to === '/kb' && route.path.startsWith('/kb/')) }"
+              :title="item.label"
+              @click="closeDrawer()"
+            >
+              <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${item.icon}</svg>`" />
+              <span class="nav-label">{{ item.label }}</span>
+            </RouterLink>
+          </div>
         </nav>
 
         <div class="sidebar-foot">
@@ -219,21 +237,24 @@ function closeDrawer() {
             class="nav-item"
             :class="{ 'is-active': route.path === '/setup' }"
             title="数据导入 · 四步向导"
-            @click="closeDrawer"
+            @click="closeDrawer()"
           >
             <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.wizard}</svg>`" />
             <span class="nav-label">数据导入</span>
           </RouterLink>
-          <button class="collapse-btn" type="button" @click="collapsed = !collapsed" :title="collapsed ? '展开侧边栏' : '折叠侧边栏'">
-            <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'>${ICONS.collapse}</svg>`" />
-            <span class="nav-label">收起侧边栏</span>
-          </button>
+          <div class="sidebar-user" :title="`${enterpriseName} · ${roleLine}`">
+            <span class="avatar">{{ avatarChar }}</span>
+            <span class="sidebar-user-meta">
+              <strong>{{ accountName }}</strong>
+              <small>{{ enterpriseName }}</small>
+            </span>
+          </div>
         </div>
       </aside>
 
       <div class="main-col">
         <header class="topbar">
-          <button class="icon-btn menu-btn" type="button" @click="drawerOpen = true" aria-label="打开菜单">
+          <button ref="menuBtn" class="icon-btn menu-btn" type="button" :aria-expanded="drawerOpen" aria-label="打开菜单" @click="drawerOpen = true">
             <span class="nav-icon" v-html="`<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'>${ICONS.menu}</svg>`" />
           </button>
           <h1

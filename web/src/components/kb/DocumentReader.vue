@@ -315,7 +315,7 @@ watch(() => props.dataset, loadDocs);
 .doc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 .doc-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .doc-bar { display: block; height: 4px; border-radius: 99px; background: var(--border); overflow: hidden; }
-.doc-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), #9b7bff); }
+.doc-bar i { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
 .doc-meta { flex: none; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .doc-open { flex: none; color: var(--primary); font-size: 11px; white-space: nowrap; }
 .doc-open i { font-style: normal; margin-left: 3px; }
