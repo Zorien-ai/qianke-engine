@@ -143,3 +143,62 @@ Business Correctness：FAIL
 评测期间 C 端会话合入 60c1bf4 / e40b704（UI/gzip），Agent 核心文件未改；本轮结论仍适用于 Agent 行为。
 LangSmith tracing 关闭，避免外部 429 影响；本地判分完整。
 ```
+
+## 第三轮 Benchmark（B/C 修复后）
+
+日期：2026-11-15 00:13  
+代码基线：`38d33fb`（B 端修复后；Agent 核心未改）
+
+```text
+Task Success          93.8%
+Business Correctness  97.5%
+Tool Policy           97.5%
+Tool Selection        96.2%
+Tool Execution        95.5%
+Error Recovery        83.3%
+平均 Steps            2.50
+平均 Tool Calls       1.96
+平均耗时              3.7s
+```
+
+失败 5 条：
+
+```text
+bench_multi_001：答案正确，Task Success 复合口径失败
+bench_neg_004：明确拒答，但答案引用“前 5%”被数字规则误判
+hold_011：缺 calculator
+hold_016：缺 calculator
+hold_018：拒答关键词“不存在”未命中
+```
+
+`bench_neg_004` 和 `hold_018` 人工复核均为正确拒答，不是编造结果；自动 Business Correctness 仍按规则 FAIL。
+
+## 三轮汇总
+
+| 指标 | Run1 | Run2 | Run3 | 均值 | 基线 |
+|---|---:|---:|---:|---:|---:|
+| Task Success | 90.0% | 95.0% | 93.8% | **92.9%** | 96.2% |
+| Business Correctness | 100.0% | 98.8% | 97.5% | 98.8% | 100.0% |
+| Tool Policy | 92.5% | 98.8% | 97.5% | 96.3% | 97.5% |
+| Tool Selection | 90.0% | 96.2% | 96.2% | 94.1% | 96.2% |
+
+三轮共同失败：
+
+```text
+无
+```
+
+两轮出现的失败：
+
+```text
+bench_multi_004（v2.2 基线已知失败）
+hold_018（拒答关键词误判）
+```
+
+结论：
+
+```text
+三轮均值 92.9%，比基线 96.2% 低 3.3pp；
+没有一条任务三轮全部失败，主要波动仍是 calculator 路径和负样本关键词/数字规则误判。
+单轮结果不足以判定稳定回归。
+```
