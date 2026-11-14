@@ -2718,26 +2718,32 @@ function productsView() {
         <h1>商品</h1>
         <p class="b-muted">商品图片可由 owner/admin 更换 · 当前 ${visibleProducts.length} 个商品 · ${Number(summary.low_stock_products || lowProducts.length)} 个低库存 · ${Number(summary.low_stock_skus || 0)} 个 SKU 低于安全库存${state.loading ? " · 刷新中…" : ""}</p>
       </div>
-      <div class="b-view-tools">
-        <label class="b-filter b-product-search">搜索
-          <input type="search" data-product-query value="${escapeHtml(state.productQuery)}" placeholder="商品名 / ID / SKU / 规格" maxlength="80" />
-        </label>
-        <button type="button" class="b-btn b-btn-ghost" data-product-search>查找</button>
-        <label class="b-filter">视图
-          <select data-product-view>
-            <option value="products" ${state.productView === "products" ? "selected" : ""}>商品</option>
-            <option value="skus" ${state.productView === "skus" ? "selected" : ""}>SKU</option>
-          </select>
-        </label>
-        ${can("operate_inventory") ? `<button type="button" class="b-btn b-btn-ghost" data-inventory-open>批量改库存</button>` : ""}
-        <label class="b-filter">库存
-          <select data-product-filter ${state.loading ? "disabled" : ""}>
-            <option value="all" ${state.productFilter === "all" ? "selected" : ""}>全部商品</option>
-            <option value="low" ${state.productFilter === "low" ? "selected" : ""}>仅低库存（${Number(summary.low_stock_products || lowProducts.length)}）</option>
-          </select>
-        </label>
-        ${can("operate_inventory") ? `<button type="button" class="b-btn b-btn-ghost" data-scan-inventory ${state.inventoryScanning ? "disabled" : ""}>${state.inventoryScanning ? "扫描中…" : "扫描低库存"}</button>` : ""}
-        <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
+      <div class="b-view-tools b-product-tools">
+        <div class="b-product-row b-product-search-row">
+          <label class="b-filter b-product-search">搜索
+            <input type="search" data-product-query value="${escapeHtml(state.productQuery)}" placeholder="商品名 / ID / SKU / 规格" maxlength="80" />
+          </label>
+          <button type="button" class="b-btn b-btn-ghost" data-product-search>查找</button>
+        </div>
+        <div class="b-product-row b-product-filter-row">
+          <label class="b-filter">视图
+            <select data-product-view>
+              <option value="products" ${state.productView === "products" ? "selected" : ""}>商品</option>
+              <option value="skus" ${state.productView === "skus" ? "selected" : ""}>SKU</option>
+            </select>
+          </label>
+          <label class="b-filter">库存
+            <select data-product-filter ${state.loading ? "disabled" : ""}>
+              <option value="all" ${state.productFilter === "all" ? "selected" : ""}>全部商品</option>
+              <option value="low" ${state.productFilter === "low" ? "selected" : ""}>仅低库存（${Number(summary.low_stock_products || lowProducts.length)}）</option>
+            </select>
+          </label>
+        </div>
+        <div class="b-product-row b-product-action-row">
+          ${can("operate_inventory") ? `<button type="button" class="b-btn b-btn-ghost" data-inventory-open>批量改库存</button>` : ""}
+          ${can("operate_inventory") ? `<button type="button" class="b-btn b-btn-ghost" data-scan-inventory ${state.inventoryScanning ? "disabled" : ""}>${state.inventoryScanning ? "扫描中…" : "扫描低库存"}</button>` : ""}
+          <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.loading || state.busy ? "disabled" : ""}>刷新</button>
+        </div>
       </div>
     </div>
     ${alert}
@@ -3087,7 +3093,7 @@ function shellMarkup() {
         <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
       </div>
       <div class="b-header-actions">
-        <a class="b-text-link" href="/v2/#/c/home" target="_blank" rel="noopener">C 端首页</a>
+        <a class="b-text-link b-c-home-link" href="/v2/#/c/home" target="_blank" rel="noopener">C 端首页</a>
         <a class="b-text-link" href="/v2/#/home">返回入口</a>
       </div>
     </header>
