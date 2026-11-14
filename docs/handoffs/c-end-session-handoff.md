@@ -113,6 +113,32 @@ C 端相关测试至少：
 ```text
 1. git status / git diff，确认未提交文件归属
 2. 先跑 pytest C 端子集 + web build
-3. 只接 C 端任务；#5 原生 IME 需要主人真实设备补证
-4. 改完删除的代码/截图放 docs/e2e 与 docs/design
+3. 先接性能任务 task-67（见下），修完再做其他 C 端任务
+4. #5 原生 IME 需要主人真实设备补证
+5. 改完删除的代码/截图放 docs/e2e 与 docs/design
 ```
+
+## 待接性能任务（task-67，P0）
+
+共享任务板 id：`task-67`  
+报告：`docs/e2e/c-end-performance-2026-11-14.md`
+
+```text
+1. CShop CLS
+   桌面 0.17-0.53 / 移动 0.576，阈值 0.1
+   原因：商品数据返回后插入今日手记/购物车到已有内容上方
+   要求：预留稳定高度或调整顺序；商品图固定尺寸
+   验收：1440/390 冷启动 CLS <= 0.1
+
+2. 首屏体积
+   main JS 1.20MB + CSS 309KB，首屏约 1.59MB，无 gzip/brotli
+   Fast 3G 冷启动 CApp LCP 约 8.0s
+   要求：路由级代码分割 + gzip/brotli
+   验收：构建通过；首屏显著下降；压缩生效；补测 1440/390
+
+3. 回传
+   commit hash、build/pytest、前后 CLS/transfer/FCP/LCP、截图
+```
+
+边界：只改 C 端；共享后端压缩中间件先与本会话确认；不要动 B/企业端文件。
+
