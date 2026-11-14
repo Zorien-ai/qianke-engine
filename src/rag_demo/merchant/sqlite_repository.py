@@ -1271,6 +1271,17 @@ class SqliteMerchantRepository:
         def result(row: sqlite3.Row) -> dict[str, Any]:
             return {key: row[key] for key in row.keys()}
 
+        def validate_existing(row: sqlite3.Row) -> dict[str, Any]:
+            if (
+                row["order_id"] != order
+                or row["action"] != action_value
+                or str(row["amount"]) != amount
+                or str(row["currency"]).upper() != currency
+                or row["reason"] != reason_value
+            ):
+                raise MerchantConflictError("同一 client_request_id 的订单动作参数不一致")
+            return result(row)
+
         with self._lock, self._transaction() as conn:
             existing = conn.execute(
                 "SELECT * FROM m_order_simulation_action "
@@ -1278,9 +1289,7 @@ class SqliteMerchantRepository:
                 (merchant, actor, request),
             ).fetchone()
             if existing is not None:
-                if existing["order_id"] != order or existing["action"] != action_value:
-                    raise MerchantConflictError("同一 client_request_id 的订单动作不一致")
-                return result(existing)
+                return validate_existing(existing)
             order_row = conn.execute(
                 "SELECT * FROM m_order WHERE order_id = ?", (order,)
             ).fetchone()
@@ -1289,9 +1298,28 @@ class SqliteMerchantRepository:
             current = str(order_row["status"]).upper()
             if current != source_status:
                 raise MerchantConflictError(f"订单当前状态为 {current}，不能执行 {action_value}")
-            if str(order_row["total_amount"]) != amount or str(order_row["currency"]).upper() != currency:
+            if _as_decimal(order_row["total_amount"]) != _as_decimal(amount) or str(order_row["currency"]).upper() != currency:
                 raise MerchantConflictError("订单金额或币种与确认不一致")
             now = _now()
+            action_id = f"oact_{uuid.uuid4().hex}"
+            inserted = conn.execute(
+                "INSERT INTO m_order_simulation_action "
+                "(action_id, merchant_id, order_id, actor_id, client_request_id, action, "
+                "before_status, after_status, transaction_mode, is_simulated, amount, currency, reason, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (merchant_id, actor_id, client_request_id) DO NOTHING",
+                (action_id, merchant, order, actor, request, action_value,
+                 source_status, target_status, "SIMULATED", 1, amount, currency, reason_value, now),
+            )
+            if inserted.rowcount != 1:
+                concurrent = conn.execute(
+                    "SELECT * FROM m_order_simulation_action "
+                    "WHERE merchant_id = ? AND actor_id = ? AND client_request_id = ?",
+                    (merchant, actor, request),
+                ).fetchone()
+                if concurrent is None:
+                    raise MerchantConflictError("订单动作并发冲突，请查回结果")
+                return validate_existing(concurrent)
             field = "paid_at" if target_status == "PAID" else "completed_at"
             updated = conn.execute(
                 f"UPDATE m_order SET status = ?, {field} = ? "
@@ -1300,15 +1328,6 @@ class SqliteMerchantRepository:
             )
             if updated.rowcount != 1:
                 raise MerchantConflictError("订单状态已变化，请刷新后重试")
-            action_id = f"oact_{uuid.uuid4().hex}"
-            conn.execute(
-                "INSERT INTO m_order_simulation_action "
-                "(action_id, merchant_id, order_id, actor_id, client_request_id, action, "
-                "before_status, after_status, transaction_mode, is_simulated, amount, currency, reason, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (action_id, merchant, order, actor, request, action_value,
-                 source_status, target_status, "SIMULATED", 1, amount, currency, reason_value, now),
-            )
             row = conn.execute(
                 "SELECT * FROM m_order_simulation_action WHERE action_id = ?", (action_id,)
             ).fetchone()

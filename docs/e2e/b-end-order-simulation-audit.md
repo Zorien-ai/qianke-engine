@@ -28,7 +28,8 @@ amount / currency / reason / created_at
 
 订单状态、时间字段、动作审计同一事务；按
 `(merchant_id, actor_id, client_request_id)` 幂等。
-同键同参数返回原动作，同键不同订单/动作返回冲突。
+同键同参数返回原动作；同键不同 order/action/amount/currency/reason 返回冲突。
+唯一键并发冲突用 INSERT ... ON CONFLICT DO NOTHING 回读原动作，不返回 500。
 
 ## 真实接口验收
 
@@ -63,6 +64,7 @@ toast：模拟支付已写入审计 · cadb99e6
   SHIPPED → COMPLETED 模拟动作 + 重放 + GET 查回
   旧 PATCH COMPLETED 409
   CREATED → PAID 模拟动作（种子有 CREATED 时）
+  同键不同金额冲突
   PG schema 表清单更新
 ```
 
