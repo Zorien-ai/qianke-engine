@@ -2356,8 +2356,11 @@ function openInventoryBatch() {
     status: "",
     error: "",
   })));
+  const warehouseIds = [...new Set(products.flatMap((product) => (Array.isArray(product.skus) ? product.skus : []).flatMap((sku) => (Array.isArray(sku.warehouses) ? sku.warehouses.map((warehouse) => warehouse.warehouse_id) : []))))].sort();
   state.inventoryDraft = {
     rows,
+    warehouse_id: warehouseIds[0] || "",
+    warehouses: warehouseIds,
     previewed: false,
     busy: false,
     error: "",
@@ -2388,9 +2391,12 @@ function inventoryModalMarkup() {
   return `<div class="b-modal-backdrop" role="dialog" aria-modal="true" aria-label="批量改库存">
     <section class="b-inventory-modal">
       <div class="b-inventory-head">
-        <div><strong>批量改库存</strong><p>仅调整可售量；预占/安全库存不变，提交后写入审计。</p></div>
+        <div><strong>批量改库存</strong><p>仅调整可售量；预占/安全库存不变，提交会写入当前商家库存与审计。</p></div>
         <button type="button" class="b-btn b-btn-ghost" data-inventory-close>关闭</button>
       </div>
+      <label class="b-inventory-warehouse">仓库
+        <select data-inv-warehouse ${draft.busy ? "disabled" : ""}>${draft.warehouses.map((warehouse) => `<option value="${escapeHtml(warehouse)}" ${draft.warehouse_id === warehouse ? "selected" : ""}>${escapeHtml(warehouse)}</option>`).join("")}</select>
+      </label>
       <div class="b-inventory-table-wrap">
         <table class="b-inventory-table">
           <thead><tr><th></th><th>商品 / SKU</th><th>当前可售</th><th>目标可售</th><th>预占</th><th>预览</th></tr></thead>
@@ -2425,6 +2431,16 @@ async function previewInventoryDraft() {
     render();
     return;
   }
+  if (!draft.warehouse_id) {
+    draft.error = "请选择仓库";
+    render();
+    return;
+  }
+  if (selected.length > 50) {
+    draft.error = "单次最多 50 个 SKU，请分批提交";
+    render();
+    return;
+  }
   if (selected.some((row) => row.target_available === "" || row.target_available === null || !Number.isFinite(Number(row.target_available)))) {
     draft.error = "请给所有已选 SKU 填写目标可售量";
     render();
@@ -2437,6 +2453,7 @@ async function previewInventoryDraft() {
     const result = await api("/api/b/workbench/inventory/preview", {
       method: "POST",
       body: JSON.stringify({
+        warehouse_id: draft.warehouse_id,
         reason_code: "MANUAL_RECONCILIATION",
         reason: "B 端批量可售量调整",
         items: selected.map((row) => ({ item_id: row.item_id, sku: row.sku, target_available: row.target_available })),
@@ -3036,8 +3053,23 @@ function bindEvents() {
     }
     if (target.matches("[data-inv-target]")) {
       const row = state.inventoryDraft?.rows.find((item) => item.item_id === target.dataset.invTarget);
-      if (row) row.target_available = Math.max(0, Number(target.value || 0));
+      if (row) {
+        const raw = String(target.value || "").trim();
+        row.target_available = raw === "" ? "" : Math.max(0, Number(raw));
+      }
       state.inventoryDraft && (state.inventoryDraft.previewed = false);
+      return;
+    }
+    if (target.matches("[data-inv-warehouse]")) {
+      if (state.inventoryDraft) {
+        state.inventoryDraft.warehouse_id = target.value;
+        state.inventoryDraft.previewed = false;
+        for (const row of state.inventoryDraft.rows) {
+          row.status = "";
+          row.error = "";
+          row.warehouse_id = "";
+        }
+      }
       return;
     }
     if (target.matches("[data-product-view]")) {

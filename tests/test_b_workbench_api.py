@@ -255,7 +255,7 @@ def test_inventory_preview_and_batch_adjust(c_store, monkeypatch):
     before = int(sku["available_qty"])
     target = before + 1
     preview = b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
-        warehouse_id=sku.get("warehouse_id"),
+        warehouse_id=sku["warehouses"][0]["warehouse_id"],
         items=[b_workbench.InventoryAdjustItemIn(item_id="i1", sku=sku["sku"], target_available=target)],
     ))
     item = preview["items"][0]
@@ -299,6 +299,7 @@ def test_inventory_batch_rejects_duplicate_sku(c_store, monkeypatch):
     _admin(monkeypatch)
     with pytest.raises(HTTPException) as exc:
         b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
+            warehouse_id="WH-HZ-01",
             items=[
                 b_workbench.InventoryAdjustItemIn(item_id="i1", sku="SKU-TEA-001-250G", target_available=1),
                 b_workbench.InventoryAdjustItemIn(item_id="i2", sku="SKU-TEA-001-250G", target_available=2),
@@ -312,6 +313,7 @@ def test_inventory_batch_partial_success(c_store, monkeypatch):
     product = b_workbench.workbench_products()["products"][0]
     skus = product["skus"][:2]
     preview = b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
+        warehouse_id=skus[0]["warehouses"][0]["warehouse_id"],
         items=[
             b_workbench.InventoryAdjustItemIn(item_id="a", sku=skus[0]["sku"], target_available=int(skus[0]["available_qty"]) + 1),
             b_workbench.InventoryAdjustItemIn(item_id="b", sku=skus[1]["sku"], target_available=int(skus[1]["available_qty"])),

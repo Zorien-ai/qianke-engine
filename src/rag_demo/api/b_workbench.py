@@ -92,7 +92,7 @@ class InventoryAdjustItemIn(BaseModel):
 class InventoryPreviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    warehouse_id: str | None = Field(default=None, max_length=80)
+    warehouse_id: str = Field(..., min_length=1, max_length=80)
     reason_code: str = Field(default="MANUAL_RECONCILIATION", max_length=64)
     reason: str = Field(default="批量可售量调整", max_length=300)
     items: list[InventoryAdjustItemIn] = Field(..., min_length=1, max_length=50)
@@ -368,7 +368,8 @@ def workbench_inventory_capabilities() -> dict[str, Any]:
         "mode": "SET_AVAILABLE",
         "max_items": 50,
         "physical_count_supported": False,
-        "simulation_mode": "SIMULATED",
+        "writes_inventory": True,
+        "transaction_mode": "INVENTORY_WRITE",
     }
 
 
@@ -392,7 +393,7 @@ def workbench_inventory_preview(req: InventoryPreviewIn) -> dict[str, Any]:
             })
             continue
         warehouses = inventory.warehouses
-        selected = next((w for w in warehouses if w.warehouse_id == req.warehouse_id), None) if req.warehouse_id else warehouses[0]
+        selected = next((w for w in warehouses if w.warehouse_id == req.warehouse_id), None)
         if selected is None:
             items.append({
                 "item_id": item.item_id, "sku": item.sku, "status": "INVALID",
@@ -415,7 +416,6 @@ def workbench_inventory_preview(req: InventoryPreviewIn) -> dict[str, Any]:
     return {
         "merchant_id": merchant_id,
         "mode": "SET_AVAILABLE",
-        "simulation_mode": "SIMULATED",
         "max_items": 50,
         "warehouse_id": req.warehouse_id,
         "valid_count": sum(1 for item in items if item["status"] == "READY"),
@@ -490,7 +490,7 @@ def workbench_inventory_batch(req: InventoryBatchIn) -> dict[str, Any]:
         "batch_id": batch_id,
         "client_request_id": req.client_request_id,
         "mode": "SET_AVAILABLE",
-        "simulation_mode": "SIMULATED",
+        "transaction_mode": "INVENTORY_WRITE",
         "status": status,
         "total": len(results),
         "succeeded": succeeded,
@@ -612,6 +612,14 @@ def _products_snapshot(merchant_id: str, *, limit: int = 100) -> dict[str, Any]:
                     "safety_stock": inventory.safety_stock,
                     "in_stock": inventory.in_stock,
                     "warehouse_count": len(inventory.warehouses),
+                    "warehouses": [
+                        {
+                            "warehouse_id": warehouse.warehouse_id,
+                            "available_qty": warehouse.available_qty,
+                            "reserved_qty": warehouse.reserved_qty,
+                        }
+                        for warehouse in inventory.warehouses
+                    ],
                     "low_stock": low,
                     "reorder_qty": reorder_qty,
                 })
