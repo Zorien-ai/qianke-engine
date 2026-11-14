@@ -2091,7 +2091,7 @@ function overviewView() {
         <h1>${roleTitle}</h1>
         <p class="b-muted">${roleSubtitle}</p>
       </div>
-      <div class="b-overview-date">${escapeHtml(timeText(new Date().toISOString()).slice(0, 10))}<small>当前会话 · 模拟交易</small></div>
+      <div class="b-overview-date"><a class="b-overview-c-link" href="/v2/#/c/home" target="_blank" rel="noopener">C 端首页 ↗</a>${escapeHtml(timeText(new Date().toISOString()).slice(0, 10))}<small>当前会话 · 模拟交易</small></div>
     </div>
     ${partialNote ? `<p class="b-overview-notice" role="status">${escapeHtml(partialNote)}</p>` : ""}
     <div class="b-overview-scope">${escapeHtml(scopeNote)} 数字只代表已加载范围，不是全店汇总。</div>
@@ -3087,6 +3087,7 @@ function shellMarkup() {
         <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
       </div>
       <div class="b-header-actions">
+        <a class="b-text-link" href="/v2/#/c/home" target="_blank" rel="noopener">C 端首页</a>
         <a class="b-text-link" href="/v2/#/home">返回入口</a>
       </div>
     </header>

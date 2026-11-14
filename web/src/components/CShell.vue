@@ -34,6 +34,7 @@ import { RouterLink, useRoute } from "vue-router";
 const route = useRoute();
 const title = computed(() => route.meta?.title || "千客");
 const tabs = [
+  { key: "home", label: "首页", to: "/c/home", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>' },
   { key: "chat", label: "聊", to: "/c/app", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>' },
   { key: "shop", label: "逛", to: "/c", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>' },
   { key: "orders", label: "订单", to: "/c/orders", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l4 4v16H6z"/><path d="M14 2v5h5"/><path d="M9 12h6M9 16h6"/></svg>' },
@@ -41,6 +42,7 @@ const tabs = [
 ];
 const activePath = computed(() => route.path);
 function isActive(tab) {
+  if (tab.key === "home") return activePath.value === "/c/home";
   if (tab.key === "shop") return activePath.value === "/c";
   return activePath.value === tab.to;
 }
