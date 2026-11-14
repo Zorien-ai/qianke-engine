@@ -1,6 +1,6 @@
 # Qianke Agent 项目级 AI Coding Agent 工作协议
 
-> **Version:** 3.27.0 · **Status:** Active · **Product:** Qianke Agent
+> **Version:** 3.28.0 · **Status:** Active · **Product:** Qianke Agent
 > 本文件约束 AI Coding Agent 的工作方式；产品需求、接口和模型以对应文档为准。
 
 ## 0. 十条硬规则
@@ -434,7 +434,7 @@ IM 社交载体
 
 | 项 | 当前值 |
 |---|---|
-| AGENTS.md | v3.27.0 |
+| AGENTS.md | v3.28.0 |
 | Product | Qianke Agent |
 | Positioning | Enterprise Analysis + C-end Commerce + IM Social Commerce Agent Platform |
 | Primary | B 端经营分析 / C 端导购与模拟订单 |
@@ -645,6 +645,7 @@ IM 社交载体
 | 3.26.0 | 2026-11-13 | CApp 语义商品检索、商家单聊自动唤醒、购物车/聊天商品图片；767 tests |
 | 3.26.1 | 2026-11-13 | 修复“我要看看”图片请求路由/提示/历史回退；公网 v22；768 tests |
 | 3.27.0 | 2026-11-13 | C 端问题 Router、四模式同会话切换、稳定 conversation_id 与草稿恢复；787 tests |
+| 3.28.0 | 2026-11-14 | B 端单入口：原画像查询并入 `/v2/b.html`；千客用户池（会话+交易）、导入用户数据集、全部用户；浮动侧栏；823 tests；Eval 87.9% |
 
 
 

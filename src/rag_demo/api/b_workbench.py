@@ -9,11 +9,13 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 import time
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -21,7 +23,9 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag_demo import auth, product_media as media
+from rag_demo import auth, config, product_media as media
+from rag_demo.b_end import insights as b_insights
+from rag_demo.b_end import user_pool as b_user_pool
 from rag_demo.c_end import alerts as alert_notifier
 from rag_demo.c_end import store
 from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
@@ -56,14 +60,17 @@ ROLE_PERMISSIONS = {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
         "operate_orders", "resolve_after_sale", "receive_return",
         "approve_superagent", "manage_members", "operate_inventory",
+        "view_profiles", "manage_profiles",
     },
     "admin": {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
         "operate_orders", "resolve_after_sale", "receive_return",
         "approve_superagent", "operate_inventory",
+        "view_profiles", "manage_profiles",
     },
     "staff": {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
+        "view_profiles",
     },
 }
 
@@ -153,6 +160,87 @@ def _require_permission(account: dict[str, Any], permission: str) -> dict[str, A
     if permission not in permissions_for(member["role"]):
         raise HTTPException(status_code=403, detail=f"当前角色 {member['role']} 没有 {permission} 权限")
     return member
+
+
+class ProfileQueryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(..., min_length=1, max_length=500)
+    source: str = Field(default="all", pattern="^(qianke|imported|all)$")
+
+
+PROFILE_SOURCES = {
+    "qianke": "千客用户",
+    "imported": "导入用户",
+    "all": "全部用户",
+}
+
+
+def _profile_scope(account: dict[str, Any], permission: str) -> tuple[dict[str, Any], str, str, dict[str, Any]]:
+    """权限 + 商户 + 商户数据集 + 数据空间状态，一次算清。"""
+    member = _require_permission(account, permission)
+    merchant_id = str(member["merchant_id"])
+    try:
+        dataset = config.merchant_dataset_name(merchant_id)
+        dbname = config.merchant_db_name(merchant_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "PROFILE_MERCHANT_INVALID", "message": str(exc)},
+        ) from exc
+    if dataset not in config.DATASETS:
+        # 启动时注册过；这里兜底覆盖「服务启动后新建的商户」。
+        config.register_dataset(dataset, dbname)
+    status = b_insights.dataset_status(dataset)
+    return member, merchant_id, dataset, status
+
+
+def _require_import_ready(status: dict[str, Any]) -> None:
+    if status.get("ready"):
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "PROFILE_DB_NOT_READY",
+            "message": "导入用户数据空间还没有构建，请先到「数据接入」导入 CSV 或载入示例数据",
+            "next_action": "IMPORT",
+        },
+    )
+
+
+def _profile_source(source: str) -> str:
+    value = str(source or "all").strip().lower()
+    if value not in PROFILE_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "PROFILE_SOURCE_INVALID",
+                "message": "数据范围只能是 qianke / imported / all",
+            },
+        )
+    return value
+
+
+def _merchant_sample_files() -> list[tuple[str, bytes]]:
+    """B 端演示画像：仓库自带的小样本，避免把平台 8110 条 demo 画像灌给商户。"""
+    base = Path(config.BASE_DIR) / "data" / "samples"
+    pairs = (
+        ("merchant_users.csv", base / "merchant_users.csv"),
+        ("merchant_rules.md", base / "merchant_rules.md"),
+    )
+    files: list[tuple[str, bytes]] = []
+    for name, path in pairs:
+        if not path.is_file():
+            raise HTTPException(
+                status_code=500,
+                detail=f"示例数据文件缺失：{path}",
+            )
+        files.append((name, path.read_bytes()))
+    return files
+
+
+def _can_see_sql(member: dict[str, Any]) -> bool:
+    return str(member.get("role") or "").lower() in {"owner", "admin"}
 
 
 def _merchant_error(exc: MerchantError) -> HTTPException:
@@ -802,6 +890,164 @@ def workbench_chat_profile(buyer_id: str) -> dict[str, Any]:
     if profile is None:
         raise HTTPException(status_code=404, detail="画像不存在或不属于当前商家")
     return {"merchant_id": merchant_id, "profile": profile}
+
+
+# ==================== 画像查询：千客用户 / 导入用户 / 全部用户 ====================
+
+@router.get("/profile-sources")
+def workbench_profile_sources() -> dict[str, Any]:
+    """两池状态：千客用户池 + 导入用户数据空间；前端据此决定空态与按钮。"""
+    account = _account()
+    member, merchant_id, dataset, status = _profile_scope(account, "view_profiles")
+    can_manage = "manage_profiles" in permissions_for(member["role"])
+    return {
+        "merchant_id": merchant_id,
+        "qianke": b_user_pool.pool_summary(merchant_id),
+        "imported": {
+            **status,
+            "can_manage": can_manage,
+        },
+        "scopes": [
+            {"value": key, "label": label} for key, label in PROFILE_SOURCES.items()
+        ],
+        "can_manage": can_manage,
+    }
+
+
+@router.get("/profiles")
+def workbench_profiles(
+    source: str = "all",
+    query: str = "",
+    page: int = 1,
+    size: int = 12,
+) -> dict[str, Any]:
+    """画像卡牌/搜索。imported 未构建时返回 409；all 返回两分组。"""
+    account = _account()
+    _member, merchant_id, dataset, status = _profile_scope(account, "view_profiles")
+    scope = _profile_source(source)
+    question = str(query or "").strip()
+    page = max(1, int(page or 1))
+    size = min(50, max(1, int(size or 12)))
+
+    def single_scope(target: str) -> dict[str, Any]:
+        if target == "imported":
+            _require_import_ready(status)
+            payload = (
+                b_insights.imported_profile_search(dataset, question, limit=size)
+                if question
+                else b_insights.imported_profile_page(dataset, page=page, size=size)
+            )
+        else:
+            payload = (
+                b_insights.qianke_profile_search(merchant_id, question, limit=size)
+                if question
+                else b_insights.qianke_profile_page(merchant_id, page=page, size=size)
+            )
+        return {"merchant_id": merchant_id, "ready": True, **payload}
+
+    if scope != "all":
+        return single_scope(scope)
+
+    imported_ready = bool(status.get("ready"))
+    if imported_ready:
+        imported_payload = (
+            b_insights.imported_profile_search(dataset, question, limit=size)
+            if question
+            else b_insights.imported_profile_page(dataset, page=page, size=size)
+        )
+    else:
+        imported_payload = {
+            "source": "imported",
+            "page": page,
+            "size": size,
+            "total": 0,
+            "total_pages": 0,
+            "items": [],
+            "mode": "search" if question else "list",
+        }
+    qianke_payload = (
+        b_insights.qianke_profile_search(merchant_id, question, limit=size)
+        if question
+        else b_insights.qianke_profile_page(merchant_id, page=page, size=size)
+    )
+    return {
+        "merchant_id": merchant_id,
+        "source": "all",
+        "ready": imported_ready or bool(qianke_payload.get("total")),
+        "groups": {
+            "qianke": {"ready": True, **qianke_payload},
+            "imported": {"ready": imported_ready, **imported_payload},
+        },
+    }
+
+
+@router.post("/profile-query")
+def workbench_profile_query(req: ProfileQueryIn) -> dict[str, Any]:
+    """问小千：按数据范围路由到导入画像 / 千客用户 / 两池合并。"""
+    account = _account()
+    member, merchant_id, dataset, status = _profile_scope(account, "view_profiles")
+    scope = _profile_source(req.source)
+    if scope == "imported":
+        _require_import_ready(status)
+    try:
+        result = b_insights.answer(
+            scope=scope,
+            question=req.question,
+            merchant_id=merchant_id,
+            account=account,
+            dataset=dataset,
+            imported_ready=bool(status.get("ready")),
+            imported_total=int(status.get("profiles") or 0),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "PROFILE_QUERY_INVALID", "message": str(exc)},
+        ) from exc
+    # 内部字段不出网：trace 只进日志/评测；SQL 原文仅 owner/admin 可见。
+    for internal in ("trace", "usage", "guard", "persona_guard"):
+        result.pop(internal, None)
+    if not _can_see_sql(member):
+        result.pop("sql", None)
+    return {
+        "merchant_id": merchant_id,
+        "source": scope,
+        "dataset": dataset if status.get("ready") else None,
+        **result,
+    }
+
+
+@router.post("/profile-pool/refresh")
+def workbench_profile_pool_refresh() -> dict[str, Any]:
+    """重建当前商户的千客用户池（会话 + 交易并集）。"""
+    account = _account()
+    _member, merchant_id, _dataset, _status = _profile_scope(account, "manage_profiles")
+    try:
+        return b_user_pool.refresh_merchant_pool(merchant_id)
+    except Exception as exc:  # noqa: BLE001 - 让前端看到可读失败，而不是裸栈
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "PROFILE_POOL_REFRESH_FAILED", "message": f"用户池刷新失败：{exc}"},
+        ) from exc
+
+
+@router.post("/profile-import/sample")
+def workbench_profile_import_sample() -> dict[str, Any]:
+    """把仓库自带的商户演示画像落盘成上传批次；构建仍走 /api/wizard/build。"""
+    account = _account()
+    _member, _merchant_id, dataset, _status = _profile_scope(account, "manage_profiles")
+    from rag_demo.mvp import uploads
+
+    try:
+        upload_id, rejected = uploads.save(None, _merchant_sample_files())
+    except uploads.UploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    auth.bind_upload(upload_id, account)
+    from rag_demo.mvp import app as wizard_app
+
+    state = wizard_app._state_payload(upload_id)
+    state["rejected"] = rejected
+    return {"upload_id": upload_id, "dataset": dataset, "state": state}
 
 
 @router.get("/orders")

@@ -432,14 +432,14 @@ function dotColor(session) {
   gap: 2px;
   padding-left: 10px;
   border-radius: 0 8px 8px 0;
-  background: linear-gradient(90deg, transparent, var(--surface-2) 28%);
+  background: var(--surface-2);
   opacity: 0;
   pointer-events: none;
   transform: translateY(-50%);
   transition: opacity .15s;
 }
 .history-item.is-active .history-actions {
-  background: linear-gradient(90deg, transparent, var(--primary-soft) 28%);
+  background: var(--primary-soft);
 }
 .history-item:hover .history-actions,
 .history-item:focus-within .history-actions { opacity: 1; pointer-events: auto; }

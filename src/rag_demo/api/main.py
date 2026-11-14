@@ -424,9 +424,28 @@ async def lifespan(app: FastAPI):
     enterprises = auth.list_enterprises()
     for ent in enterprises:
         config.register_dataset(ent["dataset"], config.enterprise_db_name(ent["id"]))
+    # B 端商户库同企业库一样必须在请求前注册：mch_* 不在 DATASETS 里，
+    # 第一次 get_conn 会抛 UnknownDataset。控制面暂时不可用时只告警——
+    # 商户画像查询会返回「数据空间未就绪」，但不能因此让整个服务起不来。
+    merchant_count = 0
+    try:
+        from rag_demo.c_end import store as c_store
+
+        for tenant in c_store.list_tenants():
+            merchant_id = str(tenant.get("merchant_id") or "")
+            if not config.is_valid_merchant_id(merchant_id):
+                logger.warning("跳过非法商户号: %r", merchant_id)
+                continue
+            config.register_dataset(
+                config.merchant_dataset_name(merchant_id),
+                config.merchant_db_name(merchant_id),
+            )
+            merchant_count += 1
+    except Exception:  # noqa: BLE001 - 控制面不可用不阻断服务启动
+        logger.warning("B 端商户数据集注册失败（不影响启动）", exc_info=True)
     logger.info(
-        "登录态：账号库 %s，企业 %d 家（AUTH_ENABLED=%s）",
-        auth.describe_backend(), len(enterprises), auth.AUTH_ENABLED,
+        "登录态：账号库 %s，企业 %d 家，商户 %d 家（AUTH_ENABLED=%s）",
+        auth.describe_backend(), len(enterprises), merchant_count, auth.AUTH_ENABLED,
     )
 
     # 老库补列（幂等）：父块 / 图片元数据。demo 库是仓库自带的、不会为重跑 ingest，
@@ -819,6 +838,21 @@ def whoami(
                 else None
             ),
         }
+        # B 端单入口：前端据此把商家账号从 SPA 路由送进 /v2/b.html。
+        # 控制面暂时不可用时宁可不返回该字段（退回旧行为），也不能让 /whoami 500。
+        try:
+            from rag_demo.c_end import store as c_store
+
+            member = c_store.get_merchant_member(int(account["id"]))
+            if member is not None:
+                tenant = c_store.get_tenant(str(member["merchant_id"])) or {}
+                info["account"]["merchant"] = {
+                    "merchant_id": member["merchant_id"],
+                    "name": tenant.get("name") or member["merchant_id"],
+                    "role": member.get("role") or "",
+                }
+        except Exception:  # noqa: BLE001
+            logger.warning("whoami 读取商户成员失败 account=%s", account.get("id"), exc_info=True)
     info["auth"] = {"enabled": auth.AUTH_ENABLED, "enforced": _auth_enforced()}
     info["note"] = (
         "已启用登录：身份来自账号，请求头不再生效。"

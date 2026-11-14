@@ -168,7 +168,7 @@ onMounted(load);
 .monitor-kicker { font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .14em; color: var(--primary); font-weight: 700; }
 .billing-title-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .billing-title-line h2 { margin: 0; font-size: 22px; }
-.wallet-card { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 22px; border: 1px solid var(--border); border-radius: 14px; background: radial-gradient(300px 120px at 100% 0%, var(--primary-soft), transparent 70%), var(--surface); }
+.wallet-card { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .wallet-main { min-width: 280px; flex: 1; }
 .wallet-label { display: block; color: var(--muted); font-size: 12px; }
 .wallet-main b { display: block; margin-top: 8px; font-size: 34px; letter-spacing: -.04em; }

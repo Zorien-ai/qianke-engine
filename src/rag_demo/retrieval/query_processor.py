@@ -494,6 +494,7 @@ def multi_query_search(
     dept: str | None = None,
     keyword_mode: str | None = None,
     top_k_profile: int = TOP_K_PROFILE,
+    force_rag: bool = False,
 ) -> QueryPlan:
     """
     多路并行检索 + 分池取舍（画像跨路统一精排 / 文档各路保名额）+ 合并去重
@@ -504,11 +505,21 @@ def multi_query_search(
 
     top_k_profile 是画像池的**全局**名额，透传给 search_variants；接口层的
     「返回多少个用户」就是它。
+
+    force_rag=True 时，即使 LLM 复核改道成 chitchat 也继续用原问题做一次
+    直接检索。B 端画像查询页已经明确用户在查画像，不能因为通用分类器
+    把「最近想买户外装备的客户有哪些」判成域外就返回空结果。
     """
     plan = plan_queries(question)
 
     if plan.route != ROUTE_RAG:
-        return plan  # 改道了，candidates 用不上，检索直接省掉
+        if not force_rag:
+            return plan  # 改道了，candidates 用不上，检索直接省掉
+        # 保留规划器的 need_sql 判定没有意义（它是在 chitchat 前提下给的）；
+        # 这里退化为单路直接检索，至少把画像证据带回来。
+        plan.route = ROUTE_RAG
+        plan.need_sql = False
+        plan.variants = [(STRATEGY_DIRECT, question)]
 
     per_variant: list[dict] = []
     plan.candidates = search_variants(

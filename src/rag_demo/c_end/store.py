@@ -1,4 +1,4 @@
-﻿"""C 端模拟商品/订单存储（SQLite，第一版 mock）。
+"""C 端模拟商品/订单存储（SQLite，第一版 mock）。
 
 设计约束：
 - 商品价格、库存、订单金额来自确定性存储，不由 LLM 生成。
@@ -518,6 +518,44 @@ CREATE TABLE IF NOT EXISTS b_chat_user_profile_vector (
 
 CREATE INDEX IF NOT EXISTS idx_b_chat_user_profile_vector_scope
     ON b_chat_user_profile_vector (merchant_id);
+
+-- B 端千客用户池：与本商户产生过会话或交易的 C 客户（两类的并集）。
+-- 与 b_chat_user_profile 分开：会话画像只覆盖聊过天的用户，订单买家可能
+-- 从未聊天；合并后才是「这家商户在千客体系里的全部客户」。
+CREATE TABLE IF NOT EXISTS b_qianke_user_profile (
+    profile_key         TEXT PRIMARY KEY,
+    merchant_id         TEXT NOT NULL,
+    buyer_id            TEXT NOT NULL,
+    profile_json        TEXT NOT NULL DEFAULT '{}',
+    profile_text        TEXT NOT NULL DEFAULT '',
+    order_count         INTEGER NOT NULL DEFAULT 0,
+    order_amount        REAL NOT NULL DEFAULT 0,
+    avg_order_amount    REAL NOT NULL DEFAULT 0,
+    last_order_at       TEXT,
+    top_category        TEXT,
+    has_order           INTEGER NOT NULL DEFAULT 0,
+    has_chat            INTEGER NOT NULL DEFAULT 0,
+    chat_profile_json   TEXT NOT NULL DEFAULT '{}',
+    confidence          REAL NOT NULL DEFAULT 0,
+    source_message_count INTEGER NOT NULL DEFAULT 0,
+    chat_extracted_at   TEXT,
+    updated_at          TEXT NOT NULL,
+    UNIQUE (merchant_id, buyer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_qianke_user_profile_scope
+    ON b_qianke_user_profile (merchant_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS b_qianke_user_profile_vector (
+    profile_key TEXT PRIMARY KEY,
+    merchant_id TEXT NOT NULL,
+    buyer_id    TEXT NOT NULL,
+    embedding   TEXT,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_qianke_user_profile_vector_scope
+    ON b_qianke_user_profile_vector (merchant_id);
 
 CREATE TABLE IF NOT EXISTS c_companion_rhythm (
     owner_id          TEXT PRIMARY KEY,
@@ -4866,6 +4904,261 @@ def search_chat_user_profiles(
         return result
     finally:
         conn.close()
+
+# ---------------------------------------------------------------------------
+# B 端千客用户池：会话 + 交易并集（按商户隔离）
+# ---------------------------------------------------------------------------
+
+def _qianke_profile_key(merchant_id: str, buyer_id: str) -> str:
+    return f"{str(merchant_id).strip()}:{str(buyer_id).strip()}"
+
+
+def _qianke_profile_payload(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    for field, fallback in (
+        ("profile", "profile_json"),
+        ("chat_profile", "chat_profile_json"),
+    ):
+        try:
+            data[field] = json.loads(data.get(fallback) or "{}")
+        except (TypeError, ValueError):
+            data[field] = {}
+        data.pop(fallback, None)
+    for field in ("has_order", "has_chat"):
+        data[field] = bool(data.get(field))
+    for field in ("order_amount", "avg_order_amount", "confidence"):
+        try:
+            data[field] = float(data.get(field) or 0)
+        except (TypeError, ValueError):
+            data[field] = 0.0
+    data["order_count"] = int(data.get("order_count") or 0)
+    data["source_message_count"] = int(data.get("source_message_count") or 0)
+    return data
+
+
+def upsert_qianke_user_profile(
+    merchant_id: str,
+    buyer_id: str,
+    *,
+    profile: dict[str, Any],
+    profile_text: str,
+    order_count: int = 0,
+    order_amount: float = 0,
+    avg_order_amount: float = 0,
+    last_order_at: str | None = None,
+    top_category: str | None = None,
+    has_order: bool = False,
+    has_chat: bool = False,
+    chat_profile: dict[str, Any] | None = None,
+    confidence: float = 0,
+    source_message_count: int = 0,
+    chat_extracted_at: str | None = None,
+    embedding: list[float] | None = None,
+) -> dict[str, Any]:
+    """按 merchant + buyer 幂等写千客用户池；向量与正文同一事务。"""
+    init()
+    now = _now()
+    key = _qianke_profile_key(merchant_id, buyer_id)
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO b_qianke_user_profile(profile_key, merchant_id, buyer_id, "
+            "profile_json, profile_text, order_count, order_amount, avg_order_amount, "
+            "last_order_at, top_category, has_order, has_chat, chat_profile_json, "
+            "confidence, source_message_count, chat_extracted_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(profile_key) DO UPDATE SET "
+            "profile_json = excluded.profile_json, profile_text = excluded.profile_text, "
+            "order_count = excluded.order_count, order_amount = excluded.order_amount, "
+            "avg_order_amount = excluded.avg_order_amount, last_order_at = excluded.last_order_at, "
+            "top_category = excluded.top_category, has_order = excluded.has_order, "
+            "has_chat = excluded.has_chat, chat_profile_json = excluded.chat_profile_json, "
+            "confidence = excluded.confidence, source_message_count = excluded.source_message_count, "
+            "chat_extracted_at = excluded.chat_extracted_at, updated_at = excluded.updated_at",
+            (
+                key, merchant_id, buyer_id,
+                json.dumps(profile or {}, ensure_ascii=False), profile_text[:2000],
+                int(order_count or 0), float(order_amount or 0), float(avg_order_amount or 0),
+                last_order_at, top_category, int(bool(has_order)), int(bool(has_chat)),
+                json.dumps(chat_profile or {}, ensure_ascii=False),
+                float(confidence or 0), int(source_message_count or 0), chat_extracted_at, now,
+            ),
+        )
+        if embedding is not None:
+            vector_text = json.dumps([float(x) for x in embedding])
+            if _cend_pg_enabled():
+                conn.execute(
+                    "INSERT INTO b_qianke_user_profile_vector(profile_key, merchant_id, buyer_id, embedding, updated_at) "
+                    "VALUES (?, ?, ?, ?::vector, ?) ON CONFLICT(profile_key) DO UPDATE SET "
+                    "embedding = excluded.embedding, merchant_id = excluded.merchant_id, "
+                    "buyer_id = excluded.buyer_id, updated_at = excluded.updated_at",
+                    (key, merchant_id, buyer_id, vector_text, now),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO b_qianke_user_profile_vector(profile_key, merchant_id, buyer_id, embedding, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT(profile_key) DO UPDATE SET "
+                    "embedding = excluded.embedding, updated_at = excluded.updated_at",
+                    (key, merchant_id, buyer_id, vector_text, now),
+                )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM b_qianke_user_profile WHERE profile_key = ?", (key,)
+        ).fetchone()
+        return _qianke_profile_payload(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_qianke_user_profile(merchant_id: str, buyer_id: str) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM b_qianke_user_profile WHERE merchant_id = ? AND buyer_id = ?",
+            (str(merchant_id), str(buyer_id)),
+        ).fetchone()
+        return _qianke_profile_payload(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def count_qianke_user_profiles(merchant_id: str) -> int:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM b_qianke_user_profile WHERE merchant_id = ?",
+            (str(merchant_id),),
+        ).fetchone()
+        return int(row["n"] or 0)
+    finally:
+        conn.close()
+
+
+def list_qianke_user_profiles(
+    merchant_id: str, *, limit: int = 100, offset: int = 0
+) -> list[dict[str, Any]]:
+    init()
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM b_qianke_user_profile WHERE merchant_id = ? "
+            "ORDER BY updated_at DESC, buyer_id ASC LIMIT ? OFFSET ?",
+            (str(merchant_id), limit, offset),
+        ).fetchall()
+        return [_qianke_profile_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def search_qianke_user_profiles(
+    merchant_id: str,
+    query_text: str,
+    query_embedding: list[float] | None,
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """当前商户内语义检索；SQLite 或 embedding 失败时退回文本匹配。"""
+    init()
+    limit = max(1, min(int(limit), 50))
+    conn = _connect()
+    try:
+        if _cend_pg_enabled() and query_embedding:
+            rows = conn.execute(
+                "SELECT p.*, (v.embedding <=> ?::vector) AS distance "
+                "FROM b_qianke_user_profile p "
+                "JOIN b_qianke_user_profile_vector v ON v.profile_key = p.profile_key "
+                "WHERE p.merchant_id = ? AND v.embedding IS NOT NULL "
+                "ORDER BY distance ASC LIMIT ?",
+                (json.dumps([float(x) for x in query_embedding]), str(merchant_id), limit),
+            ).fetchall()
+        else:
+            keyword = str(query_text or "").strip()
+            if keyword:
+                rows = conn.execute(
+                    "SELECT * FROM b_qianke_user_profile WHERE merchant_id = ? "
+                    "AND (profile_text LIKE ? OR buyer_id LIKE ?) "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (str(merchant_id), f"%{keyword[:80]}%", f"%{keyword[:80]}%", limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM b_qianke_user_profile WHERE merchant_id = ? "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (str(merchant_id), limit),
+                ).fetchall()
+        result = []
+        for row in rows:
+            item = _qianke_profile_payload(row)
+            if "distance" in item:
+                item["distance"] = float(item["distance"])
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+
+
+def list_merchant_order_rows(merchant_id: str) -> list[dict[str, Any]]:
+    """归属到该商户的订单行（merchant_id 为空时按订单明细商品商户兜底）。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT o.order_id, o.buyer_id, o.status, o.total_amount, o.created_at, "
+            "(SELECT p.category FROM c_order_item i "
+            " JOIN c_product p ON p.product_id = i.product_id "
+            " WHERE i.order_id = o.order_id AND p.merchant_id = ? LIMIT 1) AS category "
+            "FROM c_order o "
+            "WHERE o.merchant_id = ? OR (o.merchant_id IS NULL AND EXISTS ("
+            "  SELECT 1 FROM c_order_item i JOIN c_product p ON p.product_id = i.product_id "
+            "  WHERE i.order_id = o.order_id AND p.merchant_id = ?))",
+            (str(merchant_id), str(merchant_id), str(merchant_id)),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_merchant_chat_buyers(merchant_id: str) -> list[str]:
+    """通过店宠映射归属到该商户、发过消息的买家（哪怕还没抽取出画像）。"""
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT m.owner_id AS buyer_id FROM c_message m "
+            "JOIN c_merchant_store_friend f ON f.friend_id = m.friend_id "
+            "WHERE f.merchant_id = ?",
+            (str(merchant_id),),
+        ).fetchall()
+        return [str(row["buyer_id"]) for row in rows if row["buyer_id"]]
+    finally:
+        conn.close()
+
+
+def list_merchant_recent_messages(
+    merchant_id: str, *, limit: int = 200
+) -> list[dict[str, Any]]:
+    """该商户店宠会话里最近的消息（用于千客池的确定性证据，不替代结构化画像）。"""
+    init()
+    limit = max(1, min(int(limit), 500))
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT m.owner_id AS buyer_id, m.content, m.created_at FROM c_message m "
+            "JOIN c_merchant_store_friend f ON f.friend_id = m.friend_id "
+            "WHERE f.merchant_id = ? ORDER BY m.created_at DESC LIMIT ?",
+            (str(merchant_id), limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
 
 # ---------------------------------------------------------------------------
 # 商家店宠会话映射：一个商家可以有一个店宠 friend_id

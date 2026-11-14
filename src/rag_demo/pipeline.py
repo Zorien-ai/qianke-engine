@@ -74,6 +74,7 @@ def answer_question(
     history_key: str = "",
     persona_name: str | None = None,
     persona_key: str = "",
+    force_rag: bool = False,
 ) -> dict:
     """
     统一问答入口（带缓存）
@@ -92,6 +93,10 @@ def answer_question(
                        **只作用于生成这一次调用**——规划与 Text2SQL 恒不思考，
                        它们开思考只是白慢，答案质量并不因此提高。
                        它进缓存键：开与不开是两份不同的答案，不能互相命中。
+        force_rag:     跳过「闲聊/域外」前置路由，强制走检索。
+                       B 端画像查询页已经明确用户在查画像，不该被通用闲聊分类器
+                       拦住（例如「最近想买户外装备的客户有哪些」会被判成域外）。
+                       普通问答不传，保持原行为。
 
     注意：本函数返回的是**完整结果**，不做任何按角色的裁剪——裁剪统一在
     api 层的 permissions.render() 做。这样评测脚本直接调它拿到的仍是全量字段，
@@ -117,7 +122,8 @@ def answer_question(
 
     try:
         result = _answer_uncached(question, dept, keyword_mode, profile_limit, deep_thinking,
-                                  memory_context=memory_context, persona_name=persona_name)
+                                  memory_context=memory_context, persona_name=persona_name,
+                                  force_rag=force_rag)
     except APIError as e:
         # LLM 接口故障（超时 / 限流 / 5xx）：不写缓存（恢复后要能正常回答），
         # 返回固定文案 + 独立 route，让用户知道该重试、排查的人知道查 LLM 侧
@@ -245,6 +251,7 @@ def _plan_and_retrieve(
     dept: str | None = None,
     keyword_mode: str | None = None,
     profile_limit: int | None = None,
+    force_rag: bool = False,
 ) -> QueryPlan:
     """
     多路规划 + 检索路执行
@@ -276,8 +283,29 @@ def _plan_and_retrieve(
 
     return multi_query_search(
         question, top_k=TOP_K_RRF, dept=dept, keyword_mode=keyword_mode,
-        top_k_profile=top_k_profile,
+        top_k_profile=top_k_profile, force_rag=force_rag,
     )
+
+
+def apply_answer_guards(question: str, result: dict) -> dict:
+    """答案后置审查（事实）+ B 端人设守卫（形），原地修改 result 并返回。
+
+    抽成公共函数的原因：B 端画像查询的 qianke/all 范围不经过 `_answer_uncached`，
+    但也必须走同一套「先事实、后形态」的审查；两份复制迟早会漂移。
+    """
+    guard = answer_guard.inspect(question, result.get("answer", ""))
+    if guard:
+        logger.warning("答案被后置审查替换：%s", answer_guard.summarize(guard))
+        result["answer"] = PREDICTION_BLOCKED_REPLY
+        result["guard"] = guard
+    else:
+        # 事实安全之后再过一遍人设守卫（形）：命中禁词 / emoji / 感叹号整句换兜底。
+        persona_guard = b_persona.guard(result.get("answer", ""), tier="L2")
+        if persona_guard.violations:
+            logger.info("答案命中 B 端人设守卫: %s", persona_guard.violations)
+            result["answer"] = persona_guard.text
+            result["persona_guard"] = list(persona_guard.violations)
+    return result
 
 
 def _answer_uncached(
@@ -288,6 +316,7 @@ def _answer_uncached(
     deep_thinking: bool | None = None,
     memory_context: str | None = None,
     persona_name: str | None = None,
+    force_rag: bool = False,
 ) -> dict:
     """
     实际问答流程
@@ -297,17 +326,18 @@ def _answer_uncached(
         其余: {"answer", "sources", "route": "rag"}
               命中 SQL 路时额外带 "sql" / "rows_count"
     """
-    if route(question) == ROUTE_CHITCHAT:
+    if not force_rag and route(question) == ROUTE_CHITCHAT:
         return _chitchat_result(persona_name)
 
     try:
-        plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit)
+        plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit,
+                                  force_rag=force_rag)
     except RetrievalUnavailableError as e:
         # 数据库挂了不能伪装成「资料里没有」——明确报「服务不可用」
         logger.error("检索不可用: %s", e)
         return _unavailable_result()
 
-    if plan.route == ROUTE_CHITCHAT:
+    if not force_rag and plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
         return _chitchat_result(persona_name)
 
@@ -329,18 +359,7 @@ def _answer_uncached(
     # 生成后审查：提示词只是约束，模型仍可能替数据说话（「明年 GMV 将达到 1.2 亿」）。
     # 命中就把整段答案换成固定文案——为什么是「后置审查」而不是前置拦截，
     # 以及命中条件/开关的取舍，见 answer_guard.py 模块开头。
-    guard = answer_guard.inspect(question, result.get("answer", ""))
-    if guard:
-        logger.warning("答案被后置审查替换：%s", answer_guard.summarize(guard))
-        result["answer"] = PREDICTION_BLOCKED_REPLY
-        result["guard"] = guard
-    else:
-        # 事实安全之后再过一遍人设守卫（形）：命中禁词 / emoji / 感叹号整句换兜底。
-        persona_guard = b_persona.guard(result.get("answer", ""), tier="L2")
-        if persona_guard.violations:
-            logger.info("答案命中 B 端人设守卫: %s", persona_guard.violations)
-            result["answer"] = persona_guard.text
-            result["persona_guard"] = list(persona_guard.violations)
+    apply_answer_guards(question, result)
 
     if sql_result is not None:
         result["sql"] = sql_result.get("sql", "")
@@ -359,6 +378,7 @@ def prepare(
     keyword_mode: str | None = None,
     profile_limit: int | None = None,
     persona_name: str | None = None,
+    force_rag: bool = False,
 ) -> dict:
     """
     问答前置阶段：路由 + 多路检索 + 精排 + （按需）SQL（**不含生成**）
@@ -374,11 +394,12 @@ def prepare(
             trace 是检索过程留痕（每路的策略/检索式/命中数、融合后数量、
             LLM 的 SQL 判定结果），供前端把中间步骤展示出来
     """
-    if route(question) == ROUTE_CHITCHAT:
+    if not force_rag and route(question) == ROUTE_CHITCHAT:
         return {"route": ROUTE_CHITCHAT, "answer": build_reply(persona_name), "sources": []}
 
     try:
-        plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit)
+        plan = _plan_and_retrieve(question, dept, keyword_mode, profile_limit,
+                                  force_rag=force_rag)
     except RetrievalUnavailableError as e:
         logger.error("检索不可用: %s", e)
         return {
@@ -390,7 +411,7 @@ def prepare(
             "trace": {},
         }
 
-    if plan.route == ROUTE_CHITCHAT:
+    if not force_rag and plan.route == ROUTE_CHITCHAT:
         logger.info("路由复核改道 -> chitchat: %s", question)
         return {"route": ROUTE_CHITCHAT, "answer": build_reply(persona_name), "sources": []}
 

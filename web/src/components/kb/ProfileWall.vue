@@ -201,9 +201,7 @@ watch(() => props.dataset, () => load(1));
   padding: 14px 15px 13px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background:
-    radial-gradient(180px 120px at 100% 0%, var(--primary-soft), transparent 70%),
-    var(--surface);
+  background: var(--surface);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
   overflow: hidden;
 }
@@ -213,7 +211,7 @@ watch(() => props.dataset, () => load(1));
   inset: 0;
   pointer-events: none;
   opacity: 0;
-  background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.32) 48%, transparent 72%);
+  background: transparent;
   transition: opacity 0.2s ease;
 }
 .profile-card:hover {

@@ -131,8 +131,21 @@ def _account() -> dict | None:
     return auth.current_account()
 
 
+def _merchant_member(acct: dict | None) -> dict | None:
+    """账号 → 商户成员（B 端）。控制面异常时按「不是商户」处理，不阻断企业链路。"""
+    if not acct:
+        return None
+    try:
+        from rag_demo.c_end import store as c_store
+
+        return c_store.get_merchant_member(int(acct["id"]))
+    except Exception:  # noqa: BLE001 - 控制面不可用时不能把企业导入一起打挂
+        logger.warning("读取商户成员失败 account=%s", acct.get("id"), exc_info=True)
+        return None
+
+
 def _scope_dataset(requested: str) -> str:
-    """登录态下：企业账号 → 本企业库；系统管理员 → 调试库；未登录沿用请求值"""
+    """登录态下：系统管理员 → 调试库；企业管理员/企业员工 → 企业库；商户 → 商户库"""
     acct = _account()
     if not acct:
         return requested
@@ -140,6 +153,17 @@ def _scope_dataset(requested: str) -> str:
 
     if acct.get("is_system_admin"):
         return config.ADMIN_DEBUG_DATASET
+    # 商户运营者优先走商户库：他们登录后的唯一入口是 B 工作台，
+    # 若这里回落 account.dataset，会把商户导入的数据写进企业库。
+    if not acct.get("is_enterprise_admin"):
+        member = _merchant_member(acct)
+        if member is not None:
+            dataset = config.merchant_dataset_name(member["merchant_id"])
+            if dataset not in config.DATASETS:
+                config.register_dataset(
+                    dataset, config.merchant_db_name(member["merchant_id"])
+                )
+            return dataset
     dataset = acct.get("dataset")
     if not dataset:
         raise HTTPException(status_code=403, detail="该账号还没有可用数据空间，请联系管理员")
@@ -148,10 +172,11 @@ def _scope_dataset(requested: str) -> str:
 
 def _require_writer() -> dict | None:
     """
-    能改动本企业数据的人：系统管理员或企业管理员
+    能改动目标数据空间的人：系统管理员、企业管理员，或商户 owner/admin
 
     员工可以提问、可以看自己企业的知识库，但**不能导入 / 重建**：一次构建会
     先清空再重写整个企业库，普通分析师点一下就把全公司的画像重建了。
+    商户 staff 同理只读，只有 owner/admin 能覆盖本商户的导入画像。
     独立调试服务（无登录态）保持 M2 行为，不做限制。
     """
     acct = _account()
@@ -159,9 +184,12 @@ def _require_writer() -> dict | None:
         return None
     if acct.get("is_system_admin") or acct.get("is_enterprise_admin"):
         return acct
+    member = _merchant_member(acct)
+    if member is not None and str(member.get("role") or "").lower() in {"owner", "admin"}:
+        return acct
     raise HTTPException(
         status_code=403,
-        detail="只有企业管理员可以导入或重建数据，请联系本企业管理员",
+        detail="只有企业管理员或商户 owner/admin 可以导入或重建数据",
     )
 
 
@@ -997,15 +1025,15 @@ def build(req: BuildRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(e)) from e
     req.dataset = dataset
 
-    # 企业库在**第一次构建**时才真正 CREATE DATABASE（见 db/provision.py）：
+    # 企业库 / 商户库在**第一次构建**时才真正 CREATE DATABASE（见 db/provision.py）：
     # 审核通过只是登记数据集名，建库这种重操作不该挂在一次点击上。
-    from rag_demo.config import ENTERPRISE_DATASET_PREFIX
-    if dataset.startswith(ENTERPRISE_DATASET_PREFIX):
+    from rag_demo.config import ENTERPRISE_DATASET_PREFIX, MERCHANT_DATASET_PREFIX
+    if dataset.startswith((ENTERPRISE_DATASET_PREFIX, MERCHANT_DATASET_PREFIX)):
         from rag_demo.db.provision import ensure_dataset_ready
         try:
             ensure_dataset_ready(dataset)
         except Exception as e:  # noqa: BLE001 建库失败要说人话，而不是 500 裸栈
-            logger.exception("企业库准备失败: %s", dataset)
+            logger.exception("数据空间准备失败: %s", dataset)
             raise HTTPException(
                 status_code=500, detail=f"数据空间准备失败：{e}"
             ) from e

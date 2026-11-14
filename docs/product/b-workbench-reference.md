@@ -1,6 +1,8 @@
 # B 端独立商家工作台（/v2/b.html）
 
 > 独立静态入口，不经过 Vue SPA / `router.js` / `App.vue`；由 `web/src/b-workbench.js` + `web/src/b-workbench.css` 直接渲染。
+>
+> 2026-11-14：商家账号只保留 `/v2/b.html` 一个入口；新增「画像查询」（千客用户 / 导入用户 / 全部用户 + 数据接入），原「用户画像」视图并入其中。侧栏改为浮动面板（悬停 72 → 240px）。
 
 ## 入口与构建
 
@@ -23,6 +25,12 @@ PATCH /api/b/workbench/orders/{order_id}/status    {status: PAID|SHIPPED|COMPLET
 GET   /api/b/workbench/after-sales?status=&limit=100 → {tickets}
 PATCH /api/b/workbench/after-sales/{ticket_id}     {approved}
 POST  /api/b/workbench/after-sales/{ticket_id}/receive {accepted}
+GET   /api/b/workbench/profile-sources            → 千客池 / 导入池状态
+GET   /api/b/workbench/profiles?source=&query=&page=&size= → 卡片；all 返回两分组
+POST  /api/b/workbench/profile-query {question, source} → {answer,sources,cards,coverage}
+POST  /api/b/workbench/profile-pool/refresh       → 重建千客用户池
+POST  /api/b/workbench/profile-import/sample      → 商户演示数据落盘
+POST  /api/wizard/upload、/build、/build/{task_id} → 商户 CSV 导入与构建（owner/admin）
 ```
 
 ## UI 与状态
@@ -40,6 +48,22 @@ POST  /api/b/workbench/after-sales/{ticket_id}/receive {accepted}
 - 商品：只读列表（product_id / 标题 / 价格 / 库存 / 分类 / 更新时间）。
 - 所有写操作：`detail.message`（兼容字符串与 `{code,message}`）以 toast + 行内提示展示；操作中禁用按钮，成功后刷新当前视图。
 - 白色极简、移动端卡片式布局与单列表单，页面不横向溢出。
+- 侧栏为浮动面板：四边 16px 外距、20px 圆角、柔和投影；默认 72px，悬停/聚焦展开到 240px，文字延迟 80ms 淡入；分组标题 11px 灰色大写；底部固定商家/角色；移动端仍使用底部导航。
+
+## 画像查询（/v2/b.html → 客户 → 画像查询）
+
+```text
+用户查询
+  数据范围：千客用户 / 导入用户 / 全部用户
+  搜索框：无关键词 = 分页卡片；有关键词 = 语义/文本检索
+  问小千：按范围路由（导入 = RAG + Text2SQL；千客 = 池检索；全部 = 合并 + 覆盖说明）
+  卡片：来源徽标、标签、订单统计、字段摘要；点击展开详情（会话画像 / 订单）
+数据接入
+  载入示例数据 / 上传 CSV → 字段确认 → 构建 → 进度 → 状态刷新
+  仅 owner/admin 可操作；staff 只读
+```
+
+接口与边界见 [`b-profile-query.md`](b-profile-query.md)。
 
 ## Super-agent（事件调查 + 人工审批）
 

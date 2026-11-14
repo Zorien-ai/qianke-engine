@@ -464,13 +464,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.eval-page { display: flex; flex-direction: column; gap: 16px; }
+.eval-page { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .eval-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .eval-kicker { font-family: var(--of-mono, monospace); font-size: 11px; letter-spacing: 0.16em; color: var(--primary); font-weight: 650; }
 .eval-title-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 .eval-title-line h2 { font-size: 22px; }
 .eval-sub { margin-top: 8px; max-width: 820px; line-height: 1.65; }
-.eval-start-card { padding-bottom: 18px; }
+.eval-start-card { padding-bottom: 18px; min-width: 0; }
 .eval-start-row { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
 .eval-field { display: flex; flex-direction: column; gap: 6px; min-width: 280px; max-width: 440px; flex: 1; }
 .eval-field > span { font-size: 12px; color: var(--muted); font-weight: 600; }
@@ -482,7 +482,7 @@ onBeforeUnmount(() => {
 /* 用原生 label[for] 触发文件选择：比脚本 .click() 更稳定，也不会被浏览器当成非用户手势拦截 */
 .eval-upload-label { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none; }
 .eval-upload-label.is-disabled { pointer-events: none; opacity: 0.62; }
-.eval-template { max-width: 680px; margin: 16px auto 0; padding: 14px 16px; text-align: left; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; line-height: 1.6; overflow: auto; color: var(--text-2); }
+.eval-template { width: 100%; max-width: 100%; box-sizing: border-box; margin: 16px auto 0; padding: 14px 16px; text-align: left; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; line-height: 1.6; overflow: auto; color: var(--text-2); }
 .eval-failures { display: flex; flex-direction: column; gap: 12px; }
 .eval-failure { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
 .eval-failure-head { display: flex; align-items: center; gap: 8px; }
