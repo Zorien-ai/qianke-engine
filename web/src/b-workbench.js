@@ -2102,12 +2102,12 @@ function overviewView() {
         <div class="b-overview-tasks">${priorityRows.join("")}</div>
       </section>
       <section class="b-card b-overview-panel">
-        <div class="b-panel-head"><div><h2>${role === "support" ? "客服能力" : role === "warehouse" ? "库存口径" : "经营报告"}</h2><p>${role === "support" ? "明确当前能力边界" : role === "warehouse" ? "先对齐字段含义" : "先把统计口径说清楚"}</p></div><span class="b-chip">${role === "support" ? "待接入" : "待接入"}</span></div>
+        <div class="b-panel-head"><div><h2>${role === "support" ? "客服能力" : role === "warehouse" ? "库存口径" : "经营报告"}</h2><p>${role === "support" ? "明确当前能力边界" : role === "warehouse" ? "先对齐字段含义" : "按完成时间统计 · 模拟交易"}</p></div><span class="b-chip">${role === "support" ? "待接入" : "已接入"}</span></div>
         ${role === "support"
           ? `<div class="b-overview-placeholder"><strong>客服会话待接入</strong><p>当前 B 端有用户画像和售后数据，但没有完整的客服坐席收件箱。正式接入前不展示假会话、假在线状态。</p><button type="button" class="b-btn b-btn-ghost" disabled>进入客服会话</button></div>`
           : role === "warehouse"
             ? `<div class="b-overview-placeholder"><strong>库存字段待后端确认</strong><p>可用、锁定、安全库存目前来自商品快照；批量保存、并发版本和部分失败契约尚未接入。</p><button type="button" class="b-btn b-btn-ghost" data-view="products">查看商品与 SKU</button></div>`
-            : `<div class="b-overview-placeholder"><strong>暂不绘制经营趋势</strong><p>当前是模拟交易；按完成时间统计的口径已确认，但退款冲减、跨月归属和真实支付尚未接入。</p><button type="button" class="b-btn b-btn-ghost" disabled>查看经营报告</button></div>`}
+            : `<div class="b-overview-placeholder"><strong>查看经营报告</strong><p>按完成时间汇总 GMV、退款和净额；服务端全量聚合，支持今日/本周/本月和自定义日期。</p><button type="button" class="b-btn b-btn-ghost" data-view="reports">查看经营报告</button></div>`}
       </section>
     </div>
   </section>`;
@@ -2662,7 +2662,7 @@ function reportsView() {
       <button type="button" class="b-btn b-btn-ghost" data-report-refresh ${state.reportLoading ? "disabled" : ""}>刷新</button>
     </div>
     ${state.reportLoading && !report ? skeletonMarkup(2) : report ? `
-      <div class="b-metric-grid">${metrics.map(([label, value, note, tone]) => `<div class="b-metric ${tone || ""}"><span>${escapeHtml(label)}</span><strong>${value}</strong><small>${escapeHtml(note)}</small></div>`).join("")}</div>
+      <div class="b-report-metrics">${metrics.map(([label, value, note, tone]) => `<div class="b-metric ${tone || ""}"><span>${escapeHtml(label)}</span><strong>${value}</strong><small>${escapeHtml(note)}</small></div>`).join("")}</div>
       <div class="b-report-note">${escapeHtml(report.note || "")}</div>
       <div class="b-card">
         <h2 class="b-card-title">按日完成与退款</h2>
