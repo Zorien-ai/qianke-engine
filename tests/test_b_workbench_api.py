@@ -342,3 +342,18 @@ def test_inventory_batch_partial_success(c_store, monkeypatch):
     assert batch["status"] == "PARTIAL_SUCCESS"
     assert batch["succeeded"] == 1
     assert batch["failed"] == 1
+
+
+def test_inventory_preview_uses_explicit_warehouse(c_store, monkeypatch):
+    _admin(monkeypatch)
+    product = b_workbench.workbench_products()["products"][0]
+    sku = next(item for item in product["skus"] if len(item["warehouses"]) > 1)
+    warehouse = sku["warehouses"][1]
+    preview = b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
+        warehouse_id=warehouse["warehouse_id"],
+        items=[b_workbench.InventoryAdjustItemIn(
+            item_id="w1", sku=sku["sku"], target_available=int(warehouse["available_qty"])
+        )],
+    ))
+    assert preview["items"][0]["warehouse_id"] == warehouse["warehouse_id"]
+    assert preview["items"][0]["expected_available"] == int(warehouse["available_qty"])

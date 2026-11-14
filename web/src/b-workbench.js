@@ -2340,6 +2340,11 @@ function skuTableRows(products) {
   }).join("");
 }
 
+const INVENTORY_ERROR_LABELS = {
+  NOT_FOUND: "库存记录不存在",
+  VERSION_CONFLICT: "库存已变化，请重新预检",
+};
+
 function openInventoryBatch() {
   const products = filteredProducts();
   const rows = products.flatMap((product) => (Array.isArray(product.skus) ? product.skus : []).map((sku) => ({
@@ -2368,6 +2373,9 @@ function openInventoryBatch() {
     request_id: `b_inv_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`,
   };
   render();
+  requestAnimationFrame(() => {
+    root.querySelector(".b-inventory-modal [data-inv-select]")?.focus();
+  });
 }
 
 function syncInventoryDraftFromDom(root) {
@@ -2468,7 +2476,7 @@ async function previewInventoryDraft() {
       row.expected_available = item.expected_available;
       row.expected_reserved = item.expected_reserved;
       row.available_qty = item.expected_available ?? row.available_qty;
-      row.error = item.error?.message || item.error?.code || "";
+      row.error = item.error?.code ? (INVENTORY_ERROR_LABELS[item.error.code] || item.error.message || item.error.code) : "";
     }
     draft.previewed = draft.rows.some((row) => row.selected && ["READY", "UNCHANGED"].includes(row.status));
     if (!draft.previewed) draft.error = "没有可提交的有效行";
@@ -2516,7 +2524,7 @@ async function submitInventoryDraft() {
       const item = (result.items || []).find((entry) => entry.item_id === row.item_id);
       if (!item) continue;
       row.status = item.status;
-      row.error = item.error_code || "";
+      row.error = item.error_code ? (INVENTORY_ERROR_LABELS[item.error_code] || item.error_code) : "";
       row.available_qty = item.after_available ?? row.available_qty;
     }
     await loadProducts();
@@ -3126,6 +3134,7 @@ function bindEvents() {
     if (state.inventoryDraft) {
       state.inventoryDraft = null;
       render();
+      requestAnimationFrame(() => root.querySelector("[data-inventory-open]")?.focus());
       return;
     }
     if (state.orderDetailId || state.statusConfirm) {
@@ -3188,6 +3197,7 @@ function bindEvents() {
     if (target.closest("[data-inventory-close]")) {
       state.inventoryDraft = null;
       render();
+      requestAnimationFrame(() => root.querySelector("[data-inventory-open]")?.focus());
       return;
     }
     if (target.closest("[data-inventory-preview]")) {
