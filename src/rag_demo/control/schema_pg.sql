@@ -118,6 +118,13 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_friend (
   PRIMARY KEY ("owner_id", "friend_id")
 );
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_friend_removed (
+  "owner_id" TEXT NOT NULL,
+  "friend_id" TEXT NOT NULL,
+  "created_at" TEXT NOT NULL,
+  PRIMARY KEY ("owner_id", "friend_id")
+);
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_group (
   "group_id" TEXT NOT NULL,
   "owner_id" TEXT NOT NULL,
@@ -163,6 +170,41 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_thread_read (
   "owner_id" TEXT NOT NULL,
   "thread_id" TEXT NOT NULL,
   "last_read_at" TEXT NOT NULL,
+  PRIMARY KEY ("owner_id", "thread_id")
+);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_friend_request (
+  "request_id" TEXT PRIMARY KEY,
+  "owner_id" TEXT NOT NULL,
+  "requester_id" TEXT NOT NULL,
+  "requester_name" TEXT NOT NULL,
+  "requester_kind" TEXT NOT NULL DEFAULT 'user',
+  "message" TEXT NOT NULL DEFAULT '',
+  "note" TEXT NOT NULL DEFAULT '',
+  "status" TEXT NOT NULL DEFAULT 'PENDING',
+  "created_at" TEXT NOT NULL,
+  "resolved_at" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_group_notice (
+  "notice_id" TEXT PRIMARY KEY,
+  "owner_id" TEXT NOT NULL,
+  "group_id" TEXT NOT NULL DEFAULT '',
+  "kind" TEXT NOT NULL DEFAULT 'group',
+  "title" TEXT NOT NULL,
+  "content" TEXT NOT NULL DEFAULT '',
+  "status" TEXT NOT NULL DEFAULT 'UNREAD',
+  "created_at" TEXT NOT NULL,
+  "read_at" TEXT
+);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_conversation_pref (
+  "owner_id" TEXT NOT NULL,
+  "thread_id" TEXT NOT NULL,
+  "pinned" INTEGER NOT NULL DEFAULT 0,
+  "muted" INTEGER NOT NULL DEFAULT 0,
+  "hidden" INTEGER NOT NULL DEFAULT 0,
+  "updated_at" TEXT NOT NULL,
   PRIMARY KEY ("owner_id", "thread_id")
 );
 
@@ -282,6 +324,41 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.b_chat_user_profile_vector (
 
 CREATE INDEX IF NOT EXISTS idx_b_chat_user_profile_vector_scope
     ON __SCHEMA__.b_chat_user_profile_vector ("merchant_id");
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.b_qianke_user_profile (
+  "profile_key" TEXT PRIMARY KEY,
+  "merchant_id" TEXT NOT NULL,
+  "buyer_id" TEXT NOT NULL,
+  "profile_json" TEXT NOT NULL DEFAULT '{}',
+  "profile_text" TEXT NOT NULL DEFAULT '',
+  "order_count" INTEGER NOT NULL DEFAULT 0,
+  "order_amount" REAL NOT NULL DEFAULT 0,
+  "avg_order_amount" REAL NOT NULL DEFAULT 0,
+  "last_order_at" TEXT,
+  "top_category" TEXT,
+  "has_order" INTEGER NOT NULL DEFAULT 0,
+  "has_chat" INTEGER NOT NULL DEFAULT 0,
+  "chat_profile_json" TEXT NOT NULL DEFAULT '{}',
+  "confidence" REAL NOT NULL DEFAULT 0,
+  "source_message_count" INTEGER NOT NULL DEFAULT 0,
+  "chat_extracted_at" TEXT,
+  "updated_at" TEXT NOT NULL,
+  UNIQUE ("merchant_id", "buyer_id")
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_qianke_user_profile_scope
+    ON __SCHEMA__.b_qianke_user_profile ("merchant_id", "updated_at" DESC);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.b_qianke_user_profile_vector (
+  "profile_key" TEXT PRIMARY KEY,
+  "merchant_id" TEXT NOT NULL,
+  "buyer_id" TEXT NOT NULL,
+  "embedding" vector(1024),
+  "updated_at" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_b_qianke_user_profile_vector_scope
+    ON __SCHEMA__.b_qianke_user_profile_vector ("merchant_id");
 
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_rhythm (
   "owner_id" TEXT PRIMARY KEY,
@@ -531,6 +608,10 @@ CREATE INDEX IF NOT EXISTS idx_c_app_message_owner_thread
     ON __SCHEMA__.c_app_message (owner_id, thread_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_c_group_message_owner_group
     ON __SCHEMA__.c_group_message (owner_id, group_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_c_friend_request_owner_status
+    ON __SCHEMA__.c_friend_request (owner_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_c_group_notice_owner_status
+    ON __SCHEMA__.c_group_notice (owner_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_c_mention_owner_target
     ON __SCHEMA__.c_mention (owner_id, target_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_c_reconciliation_started

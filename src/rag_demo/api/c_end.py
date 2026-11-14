@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, express, group, idempotency, memory_daily, negotiation, persona as c_persona, social, store, store_agent
+from rag_demo.c_end import companion_agent, contacts, express, group, idempotency, memory_daily, negotiation, persona as c_persona, social, store, store_agent
 from rag_demo.merchant import MerchantConflictError, MerchantError, MerchantNotFoundError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
@@ -202,6 +202,12 @@ class GroupMessageIn(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
 
 
+class ConversationPrefIn(BaseModel):
+    pinned: bool | None = None
+    muted: bool | None = None
+    hidden: bool | None = None
+
+
 def _last_ai_text(messages: list) -> str:
     for msg in reversed(messages or []):
         if getattr(msg, "content", None) and getattr(msg, "type", "") == "ai":
@@ -212,9 +218,12 @@ def _last_ai_text(messages: list) -> str:
 def _http_error(exc: store.CStoreError) -> HTTPException:
     if exc.code == "AVATAR_TOO_LARGE":
         status = 413
-    elif exc.code in {"AVATAR_NOT_FOUND", "AFTER_SALE_NOT_FOUND", "ORDER_NOT_FOUND", "GROUP_NOT_FOUND"}:
+    elif exc.code in {
+        "AVATAR_NOT_FOUND", "AFTER_SALE_NOT_FOUND", "ORDER_NOT_FOUND", "GROUP_NOT_FOUND",
+        "FRIEND_REQUEST_NOT_FOUND", "GROUP_NOTICE_NOT_FOUND", "FRIEND_NOT_FOUND",
+    }:
         status = 404
-    elif exc.code in {"AFTER_SALE_FORBIDDEN", "ORDER_FORBIDDEN", "GROUP_FORBIDDEN"}:
+    elif exc.code in {"AFTER_SALE_FORBIDDEN", "ORDER_FORBIDDEN", "GROUP_FORBIDDEN", "FRIEND_REQUEST_FORBIDDEN"}:
         status = 403
     else:
         status = 409 if exc.code in {
@@ -1072,6 +1081,15 @@ def list_friends() -> dict:
     return {"friends": social.list_friends(buyer_id)}
 
 
+@router.delete("/friends/{friend_id}")
+def remove_friend(friend_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return social.remove_friend(buyer_id, friend_id)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.get("/merchants/available")
 def available_merchants() -> dict:
     """C 端可添加的店宠：来自已绑定的商家店宠映射。"""
@@ -1115,6 +1133,78 @@ def add_merchant_friend(req: MerchantFriendIn) -> dict:
         "店宠 · 售前 / 售后 / 砍价",
     )
     return {"friend": friend, "added": not existed}
+
+
+@router.get("/friend-requests")
+def list_friend_requests(status: str | None = "PENDING") -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return {"requests": contacts.list_friend_requests(buyer_id, status=status)}
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/friend-requests/{request_id}/accept")
+def accept_friend_request(request_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return contacts.resolve_friend_request(buyer_id, request_id, accepted=True)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/friend-requests/{request_id}/reject")
+def reject_friend_request(request_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return contacts.resolve_friend_request(buyer_id, request_id, accepted=False)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/group-notices")
+def list_group_notices(unread_only: bool = False, limit: int = 50) -> dict:
+    buyer_id, _ = _buyer()
+    return {
+        "notices": contacts.list_group_notices(
+            buyer_id, unread_only=unread_only, limit=limit
+        )
+    }
+
+
+@router.post("/group-notices/{notice_id}/read")
+def read_group_notice(notice_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return contacts.mark_group_notice_read(buyer_id, notice_id)
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/conversation-prefs")
+def list_conversation_prefs() -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return {"prefs": contacts.list_conversation_prefs(buyer_id)}
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.patch("/conversation-prefs/{thread_id}")
+def update_conversation_pref(thread_id: str, req: ConversationPrefIn) -> dict:
+    buyer_id, _ = _buyer()
+    if not _THREAD_RE.fullmatch(thread_id or ""):
+        raise HTTPException(status_code=400, detail="会话 ID 格式不合法")
+    try:
+        return contacts.update_conversation_pref(
+            buyer_id,
+            thread_id,
+            pinned=req.pinned,
+            muted=req.muted,
+            hidden=req.hidden,
+        )
+    except store.CStoreError as exc:
+        raise _http_error(exc) from exc
 
 
 @router.get("/friends/{friend_id}/messages")

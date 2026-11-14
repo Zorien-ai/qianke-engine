@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS c_message (
 
 CREATE INDEX IF NOT EXISTS idx_c_message_owner_friend
     ON c_message (owner_id, friend_id, created_at);
+
+CREATE TABLE IF NOT EXISTS c_friend_removed (
+    owner_id   TEXT NOT NULL,
+    friend_id  TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, friend_id)
+);
 """
 
 
@@ -72,6 +79,12 @@ def _ensure_friends(conn, owner_id: str) -> None:
         ("friend_demo", "小满", "user", "好友 · 周末徒步搭子"),
     ]
     for friend_id, name, kind, note in seeds:
+        removed = conn.execute(
+            "SELECT 1 FROM c_friend_removed WHERE owner_id = ? AND friend_id = ?",
+            (owner_id, friend_id),
+        ).fetchone()
+        if removed is not None:
+            continue
         conn.execute(
             "INSERT OR IGNORE INTO c_friend(owner_id, friend_id, name, kind, note, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -92,6 +105,41 @@ def list_friends(owner_id: str) -> list[dict[str, Any]]:
             (owner_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def remove_friend(owner_id: str, friend_id: str) -> dict[str, Any]:
+    """删除好友关系；保留历史消息用于审计，不删除消息本身。"""
+    owner = str(owner_id or "").strip()
+    target = str(friend_id or "").strip()
+    if not owner or not target:
+        raise store.CStoreError("FRIEND_INVALID", "好友 ID 不能为空")
+    init()
+    conn = store._connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT 1 FROM c_friend WHERE owner_id = ? AND friend_id = ?",
+            (owner, target),
+        ).fetchone()
+        if row is None:
+            conn.rollback()
+            raise store.CStoreError("FRIEND_NOT_FOUND", "好友不存在")
+        conn.execute(
+            "DELETE FROM c_friend WHERE owner_id = ? AND friend_id = ?",
+            (owner, target),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO c_friend_removed(owner_id, friend_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (owner, target, store._now()),
+        )
+        conn.commit()
+        return {"friend_id": target, "removed": True}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -251,6 +299,10 @@ def add_friend(
             "INSERT INTO c_friend(owner_id, friend_id, name, kind, note, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (owner_id, friend_id, name, kind, note, store._now()),
+        )
+        conn.execute(
+            "DELETE FROM c_friend_removed WHERE owner_id = ? AND friend_id = ?",
+            (owner_id, friend_id),
         )
         conn.commit()
         return _friend(conn, owner_id, friend_id) or {}
