@@ -23,7 +23,7 @@
 | CMe | Hero radial-gradient → 纯色；骨架 shimmer linear-gradient → 透明度 pulse |
 | CSocial | 无渐变；删除“消息”重复标题，搜索框内移入添加按钮 |
 | CLogin | 背景双 radial-gradient → 纯色 paper |
-| Landing 官方站 | Hero/玻璃卡/按钮/遮罩/星空渐变全部改纯色（CSS 渐变 = 0） |
+| Landing 官方站 | Hero/玻璃卡/按钮/遮罩改纯色；HeroNebula Canvas 径向渐变改为纯色同心圆（CSS/Canvas 渐变均 = 0） |
 
 ## 浏览器实测
 
@@ -38,6 +38,7 @@
 /c/me      gradients = 0
 /c/login   gradients = 0
 /v2/#/home gradients = 0（含切主题/移动端）
+Landing Canvas 仪表：createRadialGradient/createLinearGradient 调用 = 0
 ```
 
 商品详情弹层额外扫描：gradients = 0。

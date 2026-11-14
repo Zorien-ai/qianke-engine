@@ -113,17 +113,21 @@ const easeOut = (p) => 1 - Math.pow(1 - clamp(p, 0, 1), 3);
 
 /* ---------------- 工具：纹理 ---------------- */
 function makeGlowTexture(inner = "rgba(255,255,255,1)", mid = "rgba(255,214,150,0.5)") {
+  // 不使用 Canvas 渐变：用两层纯色圆模拟柔光。
   const size = 256;
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const g = c.getContext("2d");
-  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, inner);
-  grad.addColorStop(0.25, mid);
-  grad.addColorStop(0.55, "rgba(245,179,90,0.18)");
-  grad.addColorStop(1, "rgba(245,179,90,0)");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, size, size);
+  g.clearRect(0, 0, size, size);
+  // 只保留小范围纯色核心，避免 Sprite 放大后出现整圈硬边。
+  g.fillStyle = mid;
+  g.beginPath();
+  g.arc(size / 2, size / 2, size * 0.12, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = inner;
+  g.beginPath();
+  g.arc(size / 2, size / 2, size * 0.05, 0, Math.PI * 2);
+  g.fill();
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
@@ -131,17 +135,24 @@ function makeGlowTexture(inner = "rgba(255,255,255,1)", mid = "rgba(255,214,150,
 }
 
 function makePointTexture() {
+  // 纯色圆点：外圈淡金 + 内圈白，不使用 Canvas 渐变。
   const size = 128;
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const g = c.getContext("2d");
-  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, "rgba(255,255,255,1)");
-  grad.addColorStop(0.35, "rgba(255,246,230,0.9)");
-  grad.addColorStop(0.7, "rgba(255,220,175,0.25)");
-  grad.addColorStop(1, "rgba(255,220,175,0)");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, size, size);
+  g.clearRect(0, 0, size, size);
+  g.fillStyle = "rgba(255,220,175,0.30)";
+  g.beginPath();
+  g.arc(size / 2, size / 2, size * 0.46, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "rgba(255,246,230,0.9)";
+  g.beginPath();
+  g.arc(size / 2, size / 2, size * 0.22, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "rgba(255,255,255,1)";
+  g.beginPath();
+  g.arc(size / 2, size / 2, size * 0.10, 0, Math.PI * 2);
+  g.fill();
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -848,14 +859,18 @@ function renderFallback(ts) {
   const cx = w * 0.5;
   const cy = h * 0.5;
   const glowR = Math.min(w, h) * (0.34 + absorbPulse * 0.1);
-  const g = ctx2d.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-  g.addColorStop(0, `rgba(255,248,232,${0.9 + absorbPulse * 0.1})`);
-  g.addColorStop(0.2, "rgba(255,226,180,0.5)");
-  g.addColorStop(0.5, "rgba(245,179,90,0.14)");
-  g.addColorStop(1, "rgba(245,179,90,0)");
-  ctx2d.fillStyle = g;
+  // 纯色同心圆替代径向渐变：保留中心光感，不调用 Canvas gradient API。
+  ctx2d.fillStyle = "rgba(245,179,90,0.08)";
   ctx2d.beginPath();
   ctx2d.arc(cx, cy, glowR, 0, TAU);
+  ctx2d.fill();
+  ctx2d.fillStyle = `rgba(255,226,180,${0.12 + absorbPulse * 0.04})`;
+  ctx2d.beginPath();
+  ctx2d.arc(cx, cy, glowR * 0.46, 0, TAU);
+  ctx2d.fill();
+  ctx2d.fillStyle = `rgba(255,248,232,${0.16 + absorbPulse * 0.05})`;
+  ctx2d.beginPath();
+  ctx2d.arc(cx, cy, glowR * 0.16, 0, TAU);
   ctx2d.fill();
 
   ctx2d.strokeStyle = `rgba(245,192,122,${0.14 + absorbPulse * 0.1})`;
