@@ -245,6 +245,17 @@ def test_after_sales_only_for_bound_merchant(c_store, monkeypatch):
     for ticket in data["tickets"]:
         order = c_store.get_order(ticket["order_id"])
         assert order is not None
+        assert order["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+    # 查询层按商家过滤：结果不能包含其他商家的售后工单。
+    scoped = c_store.list_after_sales(
+        merchant_id=b_workbench.DEFAULT_MERCHANT_ID,
+        limit=200,
+    )
+    assert all(
+        c_store.get_order(ticket["order_id"])["merchant_id"]
+        == b_workbench.DEFAULT_MERCHANT_ID
+        for ticket in scoped
+    )
 
 
 def test_orders_search_pagination_and_total(c_store, monkeypatch):
