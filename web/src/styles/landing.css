@@ -1121,11 +1121,11 @@
   }
   .l-hero-copy {
     order: 2;
-    text-align: center;
+    text-align: left;
     padding: 0 20px 8px;
   }
   .l-hero-actions {
-    justify-content: center;
+    justify-content: flex-start;
   }
   .l-hero-title {
     font-size: clamp(36px, 8.2vw, 52px);
@@ -2471,5 +2471,54 @@ button.l-btn {
 
   .l-nav-b {
     display: none;
+  }
+}
+
+
+/* 手机端导航：登录按钮优先，隐藏主题/语言，避免右侧被裁切 */
+@media (max-width: 720px) {
+  .l-nav-inner {
+    gap: 8px;
+  }
+
+  .l-nav-actions {
+    gap: 8px;
+  }
+
+  .l-nav .l-nav-theme,
+  .l-nav .l-nav-lang {
+    display: none !important;
+  }
+
+  .l-nav-login {
+    padding: 6px 10px;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+
+  .l-brand-text b {
+    font-size: 15px;
+  }
+}
+
+
+/* 手机端首屏：旧分镜在窄屏会溢出，直接收成纯文案首屏 */
+@media (max-width: 720px) {
+  .l-hero-stage {
+    display: none;
+  }
+
+  .l-hero-split {
+    min-height: auto;
+    padding: calc(62px + 56px) 0 56px;
+  }
+
+  .l-hero-copy {
+    order: 1;
+    padding: 0 20px;
+  }
+
+  .l-hero-copy.is-shifted .l-hero-title {
+    transform: none;
   }
 }

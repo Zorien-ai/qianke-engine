@@ -34,6 +34,8 @@ section 顺序：
   hero → b-workbench → product → pain → security
 1440 视口无横向溢出
 390 视口：scrollWidth = clientWidth = 380
+手机端旧分镜隐藏，首屏只保留标题/副标题/CTA
+手机端导航隐藏主题/语言，只保留登录/进入工作台；无右侧裁切
 控制台无新增错误
 ```
 
