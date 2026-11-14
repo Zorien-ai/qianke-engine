@@ -2825,3 +2825,23 @@ code,
     width: 100%;
   }
 }
+
+
+/* 经营报告：5 张指标卡桌面一行，窄屏自动折行 */
+.b-report-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1180px) {
+  .b-report-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .b-report-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

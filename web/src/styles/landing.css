@@ -2522,3 +2522,25 @@ button.l-btn {
     transform: none;
   }
 }
+
+
+/* 手机端不要强行撑满 100vh；否则 CTA 下方会留一大块空黑 */
+@media (max-width: 720px) {
+  .l-hero {
+    min-height: auto;
+  }
+
+  .l-hero-split {
+    padding-bottom: 36px;
+  }
+}
+
+
+/* 手机端 B 端标题：避免把“报告”拆成两行 */
+@media (max-width: 720px) {
+  .l-bw-title {
+    font-size: clamp(28px, 8vw, 36px);
+    word-break: keep-all;
+    line-height: 1.3;
+  }
+}
