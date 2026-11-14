@@ -81,6 +81,17 @@ class WorkbenchAfterSaleReceiveIn(BaseModel):
     accepted: bool
 
 
+class OrderSimulationActionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_request_id: str = Field(..., min_length=1, max_length=80)
+    action: str = Field(..., pattern="^(SIMULATE_PAYMENT|SIMULATE_COMPLETION)$")
+    expected_status: str = Field(..., min_length=1, max_length=32)
+    expected_amount: str = Field(..., min_length=1, max_length=64)
+    expected_currency: str = Field(default="CNY", min_length=1, max_length=8)
+    reason: str = Field(..., min_length=1, max_length=300)
+
+
 class InventoryAdjustItemIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -715,10 +726,53 @@ def workbench_orders(
     }
 
 
+@router.post("/orders/{order_id}/simulation-actions")
+def workbench_order_simulation_action(order_id: str, req: OrderSimulationActionIn) -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "operate_orders")
+    repo = get_merchant_write_repository()
+    try:
+        action = repo.apply_order_simulation_action(
+            member["merchant_id"],
+            order_id=order_id,
+            actor_id=str(account["id"]),
+            client_request_id=req.client_request_id,
+            action=req.action,
+            expected_status=req.expected_status,
+            expected_amount=req.expected_amount,
+            expected_currency=req.expected_currency,
+            reason=req.reason,
+        )
+    except MerchantError as exc:
+        raise _merchant_error(exc) from exc
+    return {"merchant_id": member["merchant_id"], "action": action}
+
+
+@router.get("/orders/{order_id}/simulation-actions/{client_request_id}")
+def workbench_order_simulation_action_lookup(order_id: str, client_request_id: str) -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "view_orders")
+    repo = get_merchant_repository()
+    action = repo.get_order_simulation_action(
+        member["merchant_id"],
+        order_id=order_id,
+        actor_id=str(account["id"]),
+        client_request_id=client_request_id,
+    )
+    if action is None:
+        raise HTTPException(status_code=404, detail="模拟动作不存在或不属于当前账号")
+    return {"merchant_id": member["merchant_id"], "action": action}
+
+
 @router.patch("/orders/{order_id}/status")
 def workbench_update_order(order_id: str, req: WorkbenchOrderStatusIn) -> dict[str, Any]:
     account = _account()
     merchant_id = _require_permission(account, "operate_orders")["merchant_id"]
+    if req.status in {"PAID", "COMPLETED"}:
+        raise HTTPException(
+            status_code=409,
+            detail="PAID/COMPLETED 必须走 /orders/{id}/simulation-actions 独立模拟动作接口",
+        )
     repo = get_merchant_write_repository()
     try:
         order = repo.update_order_status(

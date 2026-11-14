@@ -74,18 +74,53 @@ def test_orders_are_scoped_to_bound_merchant(c_store, monkeypatch):
     assert all(order["merchant_id"] == "m_tea_001" for order in tea["orders"])
 
 
-def test_update_order_status_is_scoped(c_store, monkeypatch):
+def test_simulation_completion_is_scoped_and_idempotent(c_store, monkeypatch):
     _admin(monkeypatch)
     data = b_workbench.workbench_orders(status="SHIPPED")
     if not data["orders"]:
         pytest.skip("种子中没有 SHIPPED 订单")
-    order_id = data["orders"][0]["order_id"]
-    result = b_workbench.workbench_update_order(
-        order_id,
-        b_workbench.WorkbenchOrderStatusIn(status="COMPLETED"),
+    order = data["orders"][0]
+    request_id = "test-complete-1"
+    body = b_workbench.OrderSimulationActionIn(
+        client_request_id=request_id,
+        action="SIMULATE_COMPLETION",
+        expected_status="SHIPPED",
+        expected_amount=str(order["total_amount"]),
+        expected_currency=str(order["currency"]),
+        reason="pytest",
     )
-    assert result["order"]["status"] == "COMPLETED"
-    assert result["order"]["merchant_id"] == b_workbench.DEFAULT_MERCHANT_ID
+    result = b_workbench.workbench_order_simulation_action(order["order_id"], body)
+    assert result["action"]["after_status"] == "COMPLETED"
+    assert result["action"]["is_simulated"] == 1
+    assert result["action"]["transaction_mode"] == "SIMULATED"
+    replay = b_workbench.workbench_order_simulation_action(order["order_id"], body)
+    assert replay["action"]["action_id"] == result["action"]["action_id"]
+    lookup = b_workbench.workbench_order_simulation_action_lookup(order["order_id"], request_id)
+    assert lookup["action"]["action_id"] == result["action"]["action_id"]
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_update_order(
+            order["order_id"], b_workbench.WorkbenchOrderStatusIn(status="COMPLETED")
+        )
+    assert exc.value.status_code == 409
+
+
+def test_simulation_payment_requires_created_status(c_store, monkeypatch):
+    _admin(monkeypatch)
+    data = b_workbench.workbench_orders(status="CREATED")
+    if not data["orders"]:
+        pytest.skip("种子中没有 CREATED 订单")
+    order = data["orders"][0]
+    body = b_workbench.OrderSimulationActionIn(
+        client_request_id="test-payment-1",
+        action="SIMULATE_PAYMENT",
+        expected_status="CREATED",
+        expected_amount=str(order["total_amount"]),
+        expected_currency=str(order["currency"]),
+        reason="pytest",
+    )
+    result = b_workbench.workbench_order_simulation_action(order["order_id"], body)
+    assert result["action"]["after_status"] == "PAID"
+    assert result["action"]["is_simulated"] == 1
 
 
 def test_staff_is_read_only(c_store, monkeypatch):

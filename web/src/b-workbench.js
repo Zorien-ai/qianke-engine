@@ -1528,6 +1528,40 @@ async function patchOrderStatus(orderId, status, extra = {}) {
   }
 }
 
+async function simulateOrderAction(orderId, action, requestId) {
+  const order = findOrder(orderId);
+  if (!order || state.busy) return;
+  const isComplete = action === "complete";
+  state.busy = `order:${orderId}`;
+  state.error = "";
+  render();
+  try {
+    const result = await api(`/api/b/workbench/orders/${encodeURIComponent(orderId)}/simulation-actions`, {
+      method: "POST",
+      body: JSON.stringify({
+        client_request_id: requestId,
+        action: isComplete ? "SIMULATE_COMPLETION" : "SIMULATE_PAYMENT",
+        expected_status: isComplete ? "SHIPPED" : "CREATED",
+        expected_amount: String(order.total_amount ?? ""),
+        expected_currency: String(order.currency || "CNY"),
+        reason: "B端模拟状态推进",
+      }),
+    });
+    const eventId = result?.action?.action_id || "";
+    showToast(`${isComplete ? "模拟完成" : "模拟支付"}已写入审计${eventId ? ` · ${eventId.slice(-8)}` : ""}`, "success");
+    await loadOrders();
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.error = errorMessage(error);
+    // 保留同一个 request_id，超时/断网重试不会生成第二个模拟动作。
+    state.statusConfirm = { orderId, action, requestId };
+    showToast(`${state.error} · 可重试同一请求`, "error");
+  } finally {
+    state.busy = "";
+    render();
+  }
+}
+
 function openShipForm(orderId) {
   state.shipForm = { orderId, tracking: "", carrier: "", error: "" };
   state.cancelConfirmId = "";
@@ -1570,14 +1604,19 @@ async function onOrderAction(action, orderId) {
   const order = findOrder(orderId);
   if (!order) return;
   if (action === "paid" || action === "complete") {
-    state.statusConfirm = { orderId, action };
+    state.statusConfirm = {
+      orderId,
+      action,
+      requestId: `b_sim_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    };
     render();
     return;
   } else if (action === "status-confirm") {
-    const statusAction = state.statusConfirm?.action;
-    if (!["paid", "complete"].includes(statusAction) || state.statusConfirm?.orderId !== orderId) return;
+    const confirm = state.statusConfirm;
+    const statusAction = confirm?.action;
+    if (!["paid", "complete"].includes(statusAction) || confirm?.orderId !== orderId || !confirm?.requestId) return;
     state.statusConfirm = null;
-    await patchOrderStatus(orderId, statusAction === "complete" ? "COMPLETED" : "PAID");
+    await simulateOrderAction(orderId, statusAction, confirm.requestId);
     return;
   } else if (action === "status-dismiss") {
     state.statusConfirm = null;

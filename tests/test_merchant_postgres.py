@@ -173,6 +173,7 @@ def test_postgres_schema_isolation(repo, seed):
         "m_meta",
         "m_order",
         "m_order_item",
+        "m_order_simulation_action",
         "m_product",
         "m_reservation",
         "m_sku",
