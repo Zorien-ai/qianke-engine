@@ -18,6 +18,8 @@ class SQLiteControlRepository:
         sa_store.init()
         social.init()
         group.init()
+        from rag_demo.c_end import contacts
+        contacts.init()
         idempotency.init()
 
     def list_tables(self) -> list[str]:
