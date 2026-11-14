@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
+import time
 import uuid
 from typing import Any, Callable
 
@@ -11,6 +12,7 @@ from rag_demo.agent.context import dataset_scope
 from rag_demo.agent.actions import action_scope
 from rag_demo.agent.execution_store import ClaimResult, ExecutionStore, get_execution_store
 from rag_demo.agent.loop import run_agent_with_retry
+from rag_demo import ai_monitor
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
@@ -82,6 +84,46 @@ def agent_scope(dataset: str, account: dict[str, Any] | None) -> str:
     return f"{dataset}:{principal}"
 
 
+def _record_agent_monitor(
+    trace_id: str,
+    *,
+    query: str,
+    request_id: str,
+    result: dict[str, Any],
+    elapsed_ms: int,
+) -> None:
+    """把一次 Agent 执行写入本地 ai_traces，失败不影响主链路。"""
+    status = str(result.get("status") or "")
+    trace_status = "success" if status == "COMPLETED" else "error"
+    meta = {
+        "question": query,
+        "request_id": request_id,
+        "execution_id": str(result.get("execution_id") or ""),
+        "status": status,
+        "steps": int(result.get("steps") or 0),
+        "tool_call_count": int(result.get("tool_call_count") or 0),
+        "tool_calls": result.get("tool_calls") or [],
+        "total_tokens": int(result.get("total_tokens") or 0),
+        "error": str(result.get("error") or ""),
+        "final_answer": str(result.get("final_answer") or ""),
+        "agent_events": result.get("event_trace") or [],
+        "attempts": result.get("attempts") or [],
+        "retried": bool(result.get("retried")),
+    }
+    ai_monitor.record_trace_usage(
+        trace_id,
+        total_tokens=int(result.get("total_tokens") or 0),
+        prompt_tokens=0,
+        completion_tokens=0,
+    )
+    ai_monitor.finish_trace(
+        trace_id=trace_id,
+        status=trace_status,
+        total_ms=elapsed_ms,
+        meta=meta,
+    )
+
+
 def execute_agent(
     *,
     query: str,
@@ -126,12 +168,48 @@ def execute_agent(
 
     def invoke() -> dict[str, Any]:
         with dataset_scope(dataset), action_scope(dataset, account, request_id):
-            return runner(
-                query,
-                request_id=request_id,
-                parent_execution_id=parent_execution_id,
-                **runner_kwargs,
-            )
+            trace_id = ai_monitor.begin_trace("agent.execute", account)
+            started = time.perf_counter()
+            try:
+                result = runner(
+                    query,
+                    request_id=request_id,
+                    parent_execution_id=parent_execution_id,
+                    **runner_kwargs,
+                )
+            except Exception as exc:
+                ai_monitor.finish_trace(
+                    trace_id=trace_id,
+                    status="error",
+                    total_ms=round((time.perf_counter() - started) * 1000),
+                    meta={
+                        "question": query,
+                        "request_id": request_id,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    },
+                )
+                raise
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            if isinstance(result, dict):
+                _record_agent_monitor(
+                    trace_id,
+                    query=query,
+                    request_id=request_id,
+                    result=result,
+                    elapsed_ms=elapsed_ms,
+                )
+            else:
+                ai_monitor.finish_trace(
+                    trace_id=trace_id,
+                    status="error",
+                    total_ms=elapsed_ms,
+                    meta={
+                        "question": query,
+                        "request_id": request_id,
+                        "error": "Agent 返回结果不是 dict",
+                    },
+                )
+            return result
 
     try:
         if wall_timeout_seconds is None:

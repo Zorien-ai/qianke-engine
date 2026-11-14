@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from contextvars import ContextVar
@@ -304,6 +305,41 @@ def _finish_trace(tid, status, cache_hit, guard_hit, total_ms, first_token_ms, m
                    first_token_ms=%s, finished_at=now(), meta=COALESCE(meta, '{}'::jsonb) || %s
                WHERE trace_id=%s""",
             (status, cache_hit, guard_hit, total_ms, first_token_ms, Json(meta), tid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_trace_usage(
+    trace_id: str,
+    *,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int | None = None,
+    cost_amount: float = 0.0,
+) -> None:
+    """补齐 Agent 运行产生的 Token；失败不阻断主链路。"""
+    _safe(
+        _record_trace_usage,
+        trace_id,
+        int(prompt_tokens or 0),
+        int(completion_tokens or 0),
+        int(total_tokens if total_tokens is not None else prompt_tokens + completion_tokens),
+        float(cost_amount or 0),
+    )
+
+
+def _record_trace_usage(trace_id: str, prompt_tokens: int, completion_tokens: int, total_tokens: int, cost_amount: float) -> None:
+    conn = _connect()
+    ensure_schema(conn)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE ai_traces
+               SET prompt_tokens=%s, completion_tokens=%s, total_tokens=%s, cost_amount=%s
+               WHERE trace_id=%s""",
+            (prompt_tokens, completion_tokens, total_tokens, cost_amount, trace_id),
         )
         conn.commit()
     finally:
@@ -630,6 +666,120 @@ def trace_detail(tenant: str, trace_id: str, admin: bool = False) -> dict | None
         return result
     finally:
         conn.close()
+
+
+def _as_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _trace_meta(row: dict) -> dict:
+    raw = row.get("meta") or {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(str(raw))
+        return value if isinstance(value, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def agent_traces(
+    range_key: str = "24h",
+    *,
+    status: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """管理员端 Agent 调用列表；复用 ai_traces，不暴露给普通租户。"""
+    since = datetime.now(timezone.utc) - _range_delta(range_key)
+    conn = _connect()
+    ensure_schema(conn)
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """SELECT trace_id, tenant_id, entrypoint, account_id, status,
+                      started_at, finished_at, total_ms, total_tokens, cost_amount, meta
+               FROM ai_traces
+               WHERE entrypoint LIKE 'agent.%'
+               ORDER BY started_at DESC LIMIT 500"""
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+    wanted_status = str(status or "").strip().lower()
+    wanted_q = str(q or "").strip().lower()
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        started = _as_utc(row.get("started_at"))
+        if started is not None and started < since:
+            continue
+        meta = _trace_meta(row)
+        row_status = str(row.get("status") or "").lower()
+        if wanted_status and row_status != wanted_status:
+            continue
+        haystack = " ".join([
+            str(row.get("trace_id") or ""),
+            str(row.get("entrypoint") or ""),
+            str(row.get("account_id") or ""),
+            str(meta.get("question") or ""),
+            str(meta.get("request_id") or ""),
+            str(meta.get("execution_id") or ""),
+        ]).lower()
+        if wanted_q and wanted_q not in haystack:
+            continue
+        filtered.append({
+            "trace_id": row.get("trace_id"),
+            "tenant_id": row.get("tenant_id"),
+            "entrypoint": row.get("entrypoint"),
+            "account_id": row.get("account_id"),
+            "status": row.get("status"),
+            "started_at": started.isoformat() if started else None,
+            "finished_at": (
+                dt.isoformat() if (dt := _as_utc(row.get("finished_at"))) else None
+            ),
+            "total_ms": int(row.get("total_ms") or 0),
+            "total_tokens": int(row.get("total_tokens") or 0),
+            "cost_amount": float(row.get("cost_amount") or 0),
+            "question": str(meta.get("question") or ""),
+            "request_id": str(meta.get("request_id") or ""),
+            "execution_id": str(meta.get("execution_id") or ""),
+            "steps": int(meta.get("steps") or 0),
+            "tool_call_count": int(meta.get("tool_call_count") or 0),
+            "error": str(meta.get("error") or ""),
+        })
+
+    total = len(filtered)
+    success = sum(1 for x in filtered if str(x["status"]).lower() in {"success", "completed"})
+    errors = sum(1 for x in filtered if str(x["status"]).lower() in {"error", "failed", "timeout", "cancelled"})
+    latencies = sorted(int(x["total_ms"] or 0) for x in filtered if int(x["total_ms"] or 0) > 0)
+    p95 = latencies[int((len(latencies) - 1) * 0.95)] if latencies else 0
+    page_size = max(1, min(int(limit or 50), 200))
+    page_offset = max(0, int(offset or 0))
+    summary = {
+        "requests": total,
+        "success": success,
+        "errors": errors,
+        "success_rate": round(success / total, 4) if total else 0,
+        "p95_latency_ms": p95,
+        "total_tokens": sum(int(x["total_tokens"] or 0) for x in filtered),
+        "tool_calls": sum(int(x["tool_call_count"] or 0) for x in filtered),
+    }
+    return {
+        "range": range_key,
+        "summary": summary,
+        "total": total,
+        "items": filtered[page_offset: page_offset + page_size],
+    }
 
 
 # ==================== 钱包 / 充值 / 发票 ====================
