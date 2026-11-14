@@ -23,6 +23,7 @@
 | CMe | Hero radial-gradient → 纯色；骨架 shimmer linear-gradient → 透明度 pulse |
 | CSocial | 无渐变；删除“消息”重复标题，搜索框内移入添加按钮 |
 | CLogin | 背景双 radial-gradient → 纯色 paper |
+| Landing 官方站 | Hero/玻璃卡/按钮/遮罩/星空渐变全部改纯色（CSS 渐变 = 0） |
 
 ## 浏览器实测
 
@@ -36,6 +37,7 @@
 /c/social  gradients = 0
 /c/me      gradients = 0
 /c/login   gradients = 0
+/v2/#/home gradients = 0（含切主题/移动端）
 ```
 
 商品详情弹层额外扫描：gradients = 0。
@@ -79,7 +81,7 @@ CMe：昵称保存 toast、偏好开关即时反馈、加载骨架/错误态/空
 ```text
 60:30:10 按“色彩角色”验收；截图像素面积仍以浅色背景为主，
 若按像素面积严格量化，需要再做一轮产品级视觉调色。
-官方 Landing 页面不在 C 端范围，未纳入本轮去渐变。
+官方 Landing 已同步去渐变（桌面/移动端均 0 渐变），但不做 60:30:10 像素比例承诺。
 C 端仍有 9-11px 辅助标签，后续可统一提升到 11-12px 下限。
 ```
 
@@ -93,4 +95,6 @@ docs/design/c-end-audit-orders.png
 docs/design/c-end-audit-social.png
 docs/design/c-end-audit-me.png
 docs/design/c-end-audit-login.png
+docs/design/landing-no-gradient-desktop.png
+docs/design/landing-no-gradient-mobile.png
 ```
