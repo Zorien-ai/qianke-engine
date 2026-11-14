@@ -2197,23 +2197,30 @@ def list_after_sales(
     buyer_id: str | None = None,
     *,
     order_id: str | None = None,
+    merchant_id: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     init()
     where = ["1 = 1"]
     params: list[Any] = []
+    join = ""
     if buyer_id is not None:
-        where.append("buyer_id = ?")
+        where.append("a.buyer_id = ?")
         params.append(buyer_id)
     if order_id is not None:
-        where.append("order_id = ?")
+        where.append("a.order_id = ?")
         params.append(order_id)
+    if merchant_id is not None:
+        # B 端按商家查询售后时在 DB 层联表过滤，避免“全量工单 + 逐条查单”的 N+1。
+        join = " JOIN c_order o ON o.order_id = a.order_id"
+        where.append("o.merchant_id = ?")
+        params.append(merchant_id)
     params.append(max(1, min(int(limit), 200)))
     conn = _connect()
     try:
         rows = conn.execute(
-            f"SELECT * FROM c_after_sale WHERE {' AND '.join(where)} "
-            "ORDER BY created_at DESC LIMIT ?",
+            f"SELECT a.* FROM c_after_sale a{join} WHERE {' AND '.join(where)} "
+            "ORDER BY a.created_at DESC LIMIT ?",
             params,
         ).fetchall()
         return [_after_sale_payload(row) for row in rows]

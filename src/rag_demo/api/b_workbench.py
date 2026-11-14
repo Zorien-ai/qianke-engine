@@ -1156,18 +1156,15 @@ def workbench_update_order(order_id: str, req: WorkbenchOrderStatusIn) -> dict[s
 def workbench_after_sales(status: str | None = None, limit: int = 100) -> dict[str, Any]:
     account = _account()
     merchant_id = _membership(account)["merchant_id"]
-    repo = get_merchant_repository()
-    tickets = store.list_after_sales(limit=min(max(int(limit), 1), 200))
-    scoped = []
-    for ticket in tickets:
-        if status and ticket["status"] != status.upper():
-            continue
-        order = store.get_order(ticket["order_id"])
-        if order is None:
-            continue
-        if repo.get_order(order["order_id"], merchant_id=merchant_id) is None:
-            continue
-        scoped.append(ticket)
+    tickets = store.list_after_sales(
+        merchant_id=merchant_id,
+        limit=min(max(int(limit), 1), 200),
+    )
+    scoped = [
+        ticket
+        for ticket in tickets
+        if not status or ticket["status"] == status.upper()
+    ]
     return {"merchant_id": merchant_id, "tickets": scoped}
 
 

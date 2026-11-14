@@ -33,12 +33,13 @@ def _confirmed_order() -> dict:
     return store.confirm_order("buyer_1", draft["order_id"], draft["confirmation_token"])
 
 
-def _set_due_past(owner_id: str, order_id: str) -> None:
+def _set_due_past(owner_id: str, order_id: str, *, now: datetime | None = None) -> None:
+    base = now or datetime.now(timezone.utc)
     conn = store._connect()
     try:
         conn.execute(
             "UPDATE c_companion_checkin SET due_at = ? WHERE owner_id = ? AND ref_id = ?",
-            ((datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(), owner_id, order_id),
+            ((base - timedelta(hours=1)).isoformat(), owner_id, order_id),
         )
         conn.commit()
     finally:
@@ -60,12 +61,21 @@ def test_disabled_rhythm_does_not_deliver_order_followup(c_store):
     assert store.claim_due_checkin("buyer_1", now=datetime.now(timezone.utc) + timedelta(days=3)) is None
 
 
-def test_enabled_rhythm_delivers_order_followup_once(c_store):
-    order = _confirmed_order()
-    _set_due_past("buyer_1", order["order_id"])
-    store.update_rhythm("buyer_1", enabled=True)
-    # 固定在白天，避免测试运行时刚好落在 22:00–09:00 免打扰时段。
+def test_enabled_rhythm_delivers_order_followup_once(c_store, monkeypatch):
+    # 固定在白天，避免测试运行时刚好落在 22:00–09:00 免打扰时段；
+    # 签收时间也相对这个固定 now，避免测试跨越 UTC 日期边界后失效。
     now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        store,
+        "_merchant_order_state",
+        lambda owner_id, order_id, merchant_id=None: (
+            "COMPLETED",
+            (now - timedelta(hours=25)).isoformat(),
+        ),
+    )
+    order = _confirmed_order()
+    _set_due_past("buyer_1", order["order_id"], now=now)
+    store.update_rhythm("buyer_1", enabled=True)
     first = store.claim_due_checkin("buyer_1", now=now)
     assert first is not None
     assert first["kind"] == "order_followup"
@@ -77,10 +87,10 @@ def test_enabled_rhythm_delivers_order_followup_once(c_store):
 
 def test_quiet_hours_block_delivery(c_store):
     order = _confirmed_order()
-    _set_due_past("buyer_1", order["order_id"])
-    store.update_rhythm("buyer_1", enabled=True)
     # 15:00 UTC = 23:00 Asia/Shanghai，落在 22:00-09:00 免打扰
     now = datetime(2026, 11, 9, 15, 0, tzinfo=timezone.utc)
+    _set_due_past("buyer_1", order["order_id"], now=now)
+    store.update_rhythm("buyer_1", enabled=True)
     assert store.claim_due_checkin("buyer_1", now=now) is None
 
 
