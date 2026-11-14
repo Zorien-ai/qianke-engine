@@ -124,6 +124,7 @@ const state = {
   productQuery: "",
   productView: "products",
   productSummary: null,
+  inventoryDraft: null,
   inventoryAlerts: [],
   inventoryAlertsLoaded: false,
   inventoryScanning: false,
@@ -2339,6 +2340,202 @@ function skuTableRows(products) {
   }).join("");
 }
 
+const INVENTORY_ERROR_LABELS = {
+  NOT_FOUND: "库存记录不存在",
+  VERSION_CONFLICT: "库存已变化，请重新预检",
+};
+
+function openInventoryBatch() {
+  const products = filteredProducts();
+  const rows = products.flatMap((product) => (Array.isArray(product.skus) ? product.skus : []).map((sku) => ({
+    item_id: `inv_${product.product_id}_${sku.sku}`,
+    product_id: product.product_id,
+    title: product.title || product.name || "商品",
+    sku: sku.sku,
+    spec: sku.spec || "",
+    available_qty: Number(sku.available_qty ?? 0),
+    reserved_qty: Number(sku.reserved_qty ?? 0),
+    target_available: "",
+    warehouse_id: "",
+    selected: false,
+    status: "",
+    error: "",
+  })));
+  const warehouseIds = [...new Set(products.flatMap((product) => (Array.isArray(product.skus) ? product.skus : []).flatMap((sku) => (Array.isArray(sku.warehouses) ? sku.warehouses.map((warehouse) => warehouse.warehouse_id) : []))))].sort();
+  state.inventoryDraft = {
+    rows,
+    warehouse_id: warehouseIds[0] || "",
+    warehouses: warehouseIds,
+    previewed: false,
+    busy: false,
+    error: "",
+    result: null,
+    request_id: `b_inv_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`,
+  };
+  render();
+  requestAnimationFrame(() => {
+    root.querySelector(".b-inventory-modal [data-inv-select]")?.focus();
+  });
+}
+
+function syncInventoryDraftFromDom(root) {
+  if (!state.inventoryDraft) return;
+  for (const row of state.inventoryDraft.rows) {
+    const checked = root.querySelector(`[data-inv-select="${CSS.escape(row.item_id)}"]`);
+    const target = root.querySelector(`[data-inv-target="${CSS.escape(row.item_id)}"]`);
+    if (checked) row.selected = Boolean(checked.checked);
+    if (target) {
+      const raw = String(target.value || "").trim();
+      row.target_available = raw === "" ? "" : Math.max(0, Number(raw));
+    }
+  }
+  state.inventoryDraft.previewed = false;
+}
+
+function inventoryModalMarkup() {
+  const draft = state.inventoryDraft;
+  if (!draft) return "";
+  const selectedRows = draft.rows.filter((row) => row.selected);
+  return `<div class="b-modal-backdrop" role="dialog" aria-modal="true" aria-label="批量改库存">
+    <section class="b-inventory-modal">
+      <div class="b-inventory-head">
+        <div><strong>批量改库存</strong><p>仅调整可售量；预占/安全库存不变，提交会写入当前商家库存与审计。</p></div>
+        <button type="button" class="b-btn b-btn-ghost" data-inventory-close>关闭</button>
+      </div>
+      <label class="b-inventory-warehouse">仓库
+        <select data-inv-warehouse ${draft.busy ? "disabled" : ""}>${draft.warehouses.map((warehouse) => `<option value="${escapeHtml(warehouse)}" ${draft.warehouse_id === warehouse ? "selected" : ""}>${escapeHtml(warehouse)}</option>`).join("")}</select>
+      </label>
+      <div class="b-inventory-table-wrap">
+        <table class="b-inventory-table">
+          <thead><tr><th></th><th>商品 / SKU</th><th>当前可售</th><th>目标可售</th><th>预占</th><th>预览</th></tr></thead>
+          <tbody>${draft.rows.map((row) => `<tr>
+            <td><input type="checkbox" data-inv-select="${escapeHtml(row.item_id)}" ${row.selected ? "checked" : ""} aria-label="选择 ${escapeHtml(row.sku)}" /></td>
+            <td><strong>${escapeHtml(row.title)}</strong><br /><small>${escapeHtml(row.sku)} · ${escapeHtml(row.spec)}</small></td>
+            <td class="b-num">${escapeHtml(String(row.available_qty))}</td>
+            <td><input type="number" min="0" step="1" inputmode="numeric" data-inv-target="${escapeHtml(row.item_id)}" value="${escapeHtml(row.target_available === "" || row.target_available === null ? "" : String(row.target_available))}" placeholder="目标" ${row.selected ? "" : "disabled"} /></td>
+            <td class="b-num">${escapeHtml(String(row.reserved_qty))}</td>
+            <td>${row.status ? `<span class="b-badge ${row.status === "READY" ? "is-ok" : row.status === "INVALID" || row.status === "FAILED" ? "is-warn" : ""}">${escapeHtml(row.status)}</span>${row.error ? `<br /><small>${escapeHtml(row.error)}</small>` : ""}` : "—"}</td>
+          </tr>`).join("")}</tbody>
+        </table>
+      </div>
+      ${draft.error ? `<p class="b-inline-error">${escapeHtml(draft.error)}</p>` : ""}
+      ${draft.result ? `<div class="b-inventory-result"><strong>${escapeHtml(draft.result.status)}</strong> · 成功 ${draft.result.succeeded} / 失败 ${draft.result.failed} / 未变 ${draft.result.unchanged}</div>` : ""}
+      <div class="b-inventory-actions">
+        <span>已选 ${selectedRows.length} 个 SKU · 最多 50 个</span>
+        <button type="button" class="b-btn b-btn-ghost" data-inventory-preview ${draft.busy || !selectedRows.length ? "disabled" : ""}>预检</button>
+        <button type="button" class="b-btn b-btn-primary" data-inventory-submit ${draft.busy || !draft.previewed ? "disabled" : ""}>确认提交</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+async function previewInventoryDraft() {
+  const draft = state.inventoryDraft;
+  if (!draft) return;
+  syncInventoryDraftFromDom(document);
+  const selected = draft.rows.filter((row) => row.selected);
+  if (!selected.length) {
+    draft.error = "请至少选择一个 SKU";
+    render();
+    return;
+  }
+  if (!draft.warehouse_id) {
+    draft.error = "请选择仓库";
+    render();
+    return;
+  }
+  if (selected.length > 50) {
+    draft.error = "单次最多 50 个 SKU，请分批提交";
+    render();
+    return;
+  }
+  if (selected.some((row) => row.target_available === "" || row.target_available === null || !Number.isFinite(Number(row.target_available)))) {
+    draft.error = "请给所有已选 SKU 填写目标可售量";
+    render();
+    return;
+  }
+  draft.busy = true;
+  draft.error = "";
+  render();
+  try {
+    const result = await api("/api/b/workbench/inventory/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        warehouse_id: draft.warehouse_id,
+        reason_code: "MANUAL_RECONCILIATION",
+        reason: "B 端批量可售量调整",
+        items: selected.map((row) => ({ item_id: row.item_id, sku: row.sku, target_available: row.target_available })),
+      }),
+    });
+    const byId = new Map((result.items || []).map((item) => [item.item_id, item]));
+    for (const row of draft.rows) {
+      const item = byId.get(row.item_id);
+      if (!item) continue;
+      row.status = item.status || "";
+      row.warehouse_id = item.warehouse_id || "";
+      row.expected_available = item.expected_available;
+      row.expected_reserved = item.expected_reserved;
+      row.available_qty = item.expected_available ?? row.available_qty;
+      row.error = item.error?.code ? (INVENTORY_ERROR_LABELS[item.error.code] || item.error.message || item.error.code) : "";
+    }
+    draft.previewed = draft.rows.some((row) => row.selected && ["READY", "UNCHANGED"].includes(row.status));
+    if (!draft.previewed) draft.error = "没有可提交的有效行";
+  } catch (error) {
+    draft.error = error.message || "预检失败";
+  } finally {
+    draft.busy = false;
+    render();
+  }
+}
+
+async function submitInventoryDraft() {
+  const draft = state.inventoryDraft;
+  if (!draft || !draft.previewed) return;
+  syncInventoryDraftFromDom(document);
+  const selected = draft.rows.filter((row) => row.selected && ["READY", "UNCHANGED"].includes(row.status) && row.warehouse_id && row.target_available !== "" && row.target_available !== null);
+  if (!selected.length) {
+    draft.error = "没有可提交的有效行";
+    render();
+    return;
+  }
+  draft.busy = true;
+  draft.error = "";
+  render();
+  try {
+    const result = await api("/api/b/workbench/inventory/batch", {
+      method: "POST",
+      body: JSON.stringify({
+        client_request_id: draft.request_id,
+        reason_code: "MANUAL_RECONCILIATION",
+        reason: "B 端批量可售量调整",
+        items: selected.map((row) => ({
+          item_id: row.item_id,
+          sku: row.sku,
+          warehouse_id: row.warehouse_id,
+          target_available: row.target_available,
+          expected_available: Number(row.expected_available ?? row.available_qty ?? 0),
+          expected_reserved: Number(row.expected_reserved ?? row.reserved_qty ?? 0),
+        })),
+      }),
+    });
+    draft.result = result;
+    draft.previewed = false;
+    for (const row of draft.rows) {
+      const item = (result.items || []).find((entry) => entry.item_id === row.item_id);
+      if (!item) continue;
+      row.status = item.status;
+      row.error = item.error_code ? (INVENTORY_ERROR_LABELS[item.error_code] || item.error_code) : "";
+      row.available_qty = item.after_available ?? row.available_qty;
+    }
+    await loadProducts();
+  } catch (error) {
+    draft.error = error.message || "提交失败";
+  } finally {
+    draft.busy = false;
+    render();
+  }
+}
+
 function productsView() {
   const summary = state.productSummary || {};
   const lowProducts = state.products.filter((product) => product.low_stock);
@@ -2395,6 +2592,7 @@ function productsView() {
             <option value="skus" ${state.productView === "skus" ? "selected" : ""}>SKU</option>
           </select>
         </label>
+        ${can("operate_inventory") ? `<button type="button" class="b-btn b-btn-ghost" data-inventory-open>批量改库存</button>` : ""}
         <label class="b-filter">库存
           <select data-product-filter ${state.loading ? "disabled" : ""}>
             <option value="all" ${state.productFilter === "all" ? "selected" : ""}>全部商品</option>
@@ -2408,6 +2606,7 @@ function productsView() {
     ${alert}
     ${queue}
     ${body}
+    ${inventoryModalMarkup()}
   </section>`;
 }
 
@@ -2853,6 +3052,34 @@ function bindEvents() {
       render();
       return;
     }
+    if (target.matches("[data-inv-select]")) {
+      const row = state.inventoryDraft?.rows.find((item) => item.item_id === target.dataset.invSelect);
+      if (row) row.selected = target.checked;
+      state.inventoryDraft && (state.inventoryDraft.previewed = false);
+      render();
+      return;
+    }
+    if (target.matches("[data-inv-target]")) {
+      const row = state.inventoryDraft?.rows.find((item) => item.item_id === target.dataset.invTarget);
+      if (row) {
+        const raw = String(target.value || "").trim();
+        row.target_available = raw === "" ? "" : Math.max(0, Number(raw));
+      }
+      state.inventoryDraft && (state.inventoryDraft.previewed = false);
+      return;
+    }
+    if (target.matches("[data-inv-warehouse]")) {
+      if (state.inventoryDraft) {
+        state.inventoryDraft.warehouse_id = target.value;
+        state.inventoryDraft.previewed = false;
+        for (const row of state.inventoryDraft.rows) {
+          row.status = "";
+          row.error = "";
+          row.warehouse_id = "";
+        }
+      }
+      return;
+    }
     if (target.matches("[data-product-view]")) {
       state.productView = target.value === "skus" ? "skus" : "products";
       render();
@@ -2904,6 +3131,12 @@ function bindEvents() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    if (state.inventoryDraft) {
+      state.inventoryDraft = null;
+      render();
+      requestAnimationFrame(() => root.querySelector("[data-inventory-open]")?.focus());
+      return;
+    }
     if (state.orderDetailId || state.statusConfirm) {
       state.orderDetailId = "";
       state.statusConfirm = null;
@@ -2955,6 +3188,24 @@ function bindEvents() {
     const imageDeleteButton = target.closest("[data-product-image-delete]");
     if (imageDeleteButton) {
       await deleteProductImage(imageDeleteButton.dataset.productId, imageDeleteButton.dataset.productImageDelete);
+      return;
+    }
+    if (target.closest("[data-inventory-open]")) {
+      openInventoryBatch();
+      return;
+    }
+    if (target.closest("[data-inventory-close]")) {
+      state.inventoryDraft = null;
+      render();
+      requestAnimationFrame(() => root.querySelector("[data-inventory-open]")?.focus());
+      return;
+    }
+    if (target.closest("[data-inventory-preview]")) {
+      await previewInventoryDraft();
+      return;
+    }
+    if (target.closest("[data-inventory-submit]")) {
+      await submitInventoryDraft();
       return;
     }
     if (target.closest("[data-product-search]")) {

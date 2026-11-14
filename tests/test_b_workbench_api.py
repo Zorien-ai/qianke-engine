@@ -246,3 +246,114 @@ def test_orders_date_filter_uses_shanghai_business_day(c_store, monkeypatch):
     local_date = datetime.fromisoformat(sample["created_at"]).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
     data = b_workbench.workbench_orders(date_from=local_date, date_to=local_date, limit=100)
     assert any(order["order_id"] == sample["order_id"] for order in data["orders"])
+
+
+def test_inventory_preview_and_batch_adjust(c_store, monkeypatch):
+    _admin(monkeypatch)
+    product = b_workbench.workbench_products()["products"][0]
+    sku = product["skus"][0]
+    before = int(sku["available_qty"])
+    target = before + 1
+    preview = b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
+        warehouse_id=sku["warehouses"][0]["warehouse_id"],
+        items=[b_workbench.InventoryAdjustItemIn(item_id="i1", sku=sku["sku"], target_available=target)],
+    ))
+    item = preview["items"][0]
+    assert item["status"] == "READY"
+    assert item["warehouse_id"]
+    assert item["expected_available"] == before
+    batch = b_workbench.workbench_inventory_batch(b_workbench.InventoryBatchIn(
+        client_request_id="test-adjust-1",
+        reason_code="MANUAL_RECONCILIATION",
+        reason="pytest",
+        items=[b_workbench.InventoryBatchItemIn(
+            item_id="i1",
+            sku=sku["sku"],
+            warehouse_id=item["warehouse_id"],
+            target_available=target,
+            expected_available=item["expected_available"],
+            expected_reserved=item["expected_reserved"],
+        )],
+    ))
+    assert batch["status"] == "SUCCEEDED"
+    assert batch["succeeded"] == 1
+    after = b_workbench.workbench_products()["products"][0]["skus"][0]["available_qty"]
+    assert int(after) == target
+    replay = b_workbench.workbench_inventory_batch(b_workbench.InventoryBatchIn(
+        client_request_id="test-adjust-1",
+        reason_code="MANUAL_RECONCILIATION",
+        reason="pytest",
+        items=[b_workbench.InventoryBatchItemIn(
+            item_id="i1",
+            sku=sku["sku"],
+            warehouse_id=item["warehouse_id"],
+            target_available=target,
+            expected_available=item["expected_available"],
+            expected_reserved=item["expected_reserved"],
+        )],
+    ))
+    assert replay["items"][0]["audit_event_id"] == batch["items"][0]["audit_event_id"]
+
+
+def test_inventory_batch_rejects_duplicate_sku(c_store, monkeypatch):
+    _admin(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
+            warehouse_id="WH-HZ-01",
+            items=[
+                b_workbench.InventoryAdjustItemIn(item_id="i1", sku="SKU-TEA-001-250G", target_available=1),
+                b_workbench.InventoryAdjustItemIn(item_id="i2", sku="SKU-TEA-001-250G", target_available=2),
+            ],
+        ))
+    assert exc.value.status_code == 422
+
+
+def test_inventory_batch_partial_success(c_store, monkeypatch):
+    _admin(monkeypatch)
+    product = b_workbench.workbench_products()["products"][0]
+    skus = product["skus"][:2]
+    preview = b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
+        warehouse_id=skus[0]["warehouses"][0]["warehouse_id"],
+        items=[
+            b_workbench.InventoryAdjustItemIn(item_id="a", sku=skus[0]["sku"], target_available=int(skus[0]["available_qty"]) + 1),
+            b_workbench.InventoryAdjustItemIn(item_id="b", sku=skus[1]["sku"], target_available=int(skus[1]["available_qty"])),
+        ],
+    ))
+    rows = {item["item_id"]: item for item in preview["items"]}
+    batch = b_workbench.workbench_inventory_batch(b_workbench.InventoryBatchIn(
+        client_request_id="test-adjust-partial",
+        reason_code="MANUAL_RECONCILIATION",
+        reason="pytest partial",
+        items=[
+            b_workbench.InventoryBatchItemIn(
+                item_id="a", sku=skus[0]["sku"], warehouse_id=rows["a"]["warehouse_id"],
+                target_available=int(skus[0]["available_qty"]) + 1,
+                expected_available=rows["a"]["expected_available"],
+                expected_reserved=rows["a"]["expected_reserved"],
+            ),
+            b_workbench.InventoryBatchItemIn(
+                item_id="b", sku=skus[1]["sku"], warehouse_id=rows["b"]["warehouse_id"],
+                target_available=int(skus[1]["available_qty"]),
+                expected_available=rows["b"]["expected_available"] + 999,
+                expected_reserved=rows["b"]["expected_reserved"],
+            ),
+        ],
+    ))
+    assert batch["status"] == "PARTIAL_SUCCESS"
+    assert batch["succeeded"] == 1
+    assert batch["failed"] == 1
+
+
+def test_inventory_preview_uses_explicit_warehouse(c_store, monkeypatch):
+    _admin(monkeypatch)
+    product = b_workbench.workbench_products()["products"][0]
+    sku = next(item for item in product["skus"] if len(item["warehouses"]) > 1)
+    warehouse = sku["warehouses"][1]
+    preview = b_workbench.workbench_inventory_preview(b_workbench.InventoryPreviewIn(
+        warehouse_id=warehouse["warehouse_id"],
+        items=[b_workbench.InventoryAdjustItemIn(
+            item_id="w1", sku=sku["sku"], target_available=int(warehouse["available_qty"])
+        )],
+    ))
+    assert preview["items"][0]["warehouse_id"] == warehouse["warehouse_id"]
+    assert preview["items"][0]["expected_available"] == int(warehouse["available_qty"])
