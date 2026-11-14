@@ -2355,3 +2355,121 @@ button.l-btn {
   .landing .l-mac-url,
   .landing .l-mac-body { transition: none; }
 }
+
+
+/* ---------- B 端商家工作台 ---------- */
+.l-bw {
+  padding: clamp(96px, 12vw, 168px) 0;
+  background: var(--l-bg-soft);
+  border-top: 1px solid var(--l-line);
+}
+
+.l-bw-head {
+  max-width: 840px;
+}
+
+.l-bw-kicker {
+  margin: 0 0 18px;
+  color: var(--l-accent);
+  font-family: var(--l-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.l-bw-title {
+  margin: 0;
+  color: var(--l-ink);
+  font-family: var(--l-serif);
+  font-size: clamp(34px, 4.8vw, 62px);
+  font-weight: 600;
+  line-height: 1.28;
+}
+
+.l-bw-lead {
+  max-width: 700px;
+  margin: 24px 0 0;
+  color: var(--l-body);
+  font-size: clamp(16px, 1.4vw, 18px);
+  line-height: 1.85;
+}
+
+.l-bw-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: clamp(48px, 6vw, 76px);
+}
+
+.l-bw-card {
+  min-height: 220px;
+  padding: 24px 22px 26px;
+  border: 1px solid var(--l-line);
+  border-radius: 14px;
+  background: var(--l-card);
+}
+
+.l-bw-index {
+  display: block;
+  margin-bottom: 30px;
+  color: var(--l-accent);
+  font-family: var(--l-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.l-bw-card h3 {
+  margin: 0 0 12px;
+  color: var(--l-ink);
+  font-family: var(--l-serif);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.l-bw-card p {
+  margin: 0;
+  color: var(--l-body);
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.l-bw-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 34px;
+  padding-top: 24px;
+  border-top: 1px solid var(--l-line);
+  color: var(--l-muted);
+  font-size: 13px;
+}
+
+.l-nav-b {
+  display: inline-flex;
+}
+
+@media (max-width: 1040px) {
+  .l-bw-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .l-bw-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .l-bw-card {
+    min-height: 0;
+  }
+
+  .l-bw-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .l-nav-b {
+    display: none;
+  }
+}

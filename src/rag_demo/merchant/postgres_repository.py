@@ -985,6 +985,29 @@ CREATE INDEX IF NOT EXISTS idx_m_reservation_merchant
                 return insert_row(cur, status="FAILED", before=before, after=before, reserved=reserved, error_code="VERSION_CONFLICT")
             return insert_row(cur, status="SUCCEEDED", before=before, after=target, reserved=reserved, error_code=None)
 
+    def list_orders_for_completion_report(
+        self,
+        merchant_id: str,
+        *,
+        start_at: str,
+        end_at: str,
+    ) -> list[Order]:
+        self._ensure_open()
+        merchant = self._require_merchant(merchant_id)
+        sql = (
+            "SELECT order_id, merchant_id, buyer_id, status, total_amount, currency, "
+            "channel, created_at, paid_at, source_ref, tracking_no, carrier, "
+            "shipped_at, completed_at, cancelled_at, refund_amount, refunded_at, "
+            "returned_at FROM m_order WHERE merchant_id = %s AND ("
+            "(completed_at IS NOT NULL AND completed_at::timestamptz >= %s::timestamptz AND completed_at::timestamptz < %s::timestamptz) "
+            "OR (refunded_at IS NOT NULL AND refunded_at::timestamptz >= %s::timestamptz AND refunded_at::timestamptz < %s::timestamptz)"
+            ") ORDER BY completed_at DESC, order_id DESC"
+        )
+        with self._lock, self._read() as cur:
+            cur.execute(sql, (merchant, str(start_at), str(end_at), str(start_at), str(end_at)))
+            rows = cur.fetchall()
+            return self._hydrate_orders(cur, rows)
+
     def list_orders(
         self,
         merchant_id: str,

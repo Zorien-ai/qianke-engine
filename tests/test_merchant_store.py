@@ -375,6 +375,9 @@ class _FakeMemoryRepository:
     def list_orders(self, merchant_id, buyer_id=None, status=None, limit=DEFAULT_LIST_LIMIT):
         return []
 
+    def list_orders_for_completion_report(self, merchant_id, *, start_at, end_at):
+        return []
+
     def search_orders(
         self,
         merchant_id,

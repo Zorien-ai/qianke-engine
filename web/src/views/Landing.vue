@@ -165,7 +165,7 @@ function prefersReducedMotion() {
 const reducedMotion = ref(prefersReducedMotion());
 const stage = ref("typing");
 const typed = ref("");
-const copyVisible = ref(false);
+const copyVisible = ref(true);
 
 /* ==================== demo 用户数据（匿名只读接口，失败静默降级） ==================== */
 const DEFAULT_LABELS = ["女 / 28 岁", "客单价 1200", "偏好美妆"];
@@ -378,7 +378,7 @@ function replayStory() {
   pausedTotal = 0;
   pausedAt = 0;
   typed.value = "";
-  copyVisible.value = false;
+  copyVisible.value = true;
   storyDone.value = false;
   stage.value = "typing";
   timelineEvents = BASE_EVENTS.slice();
@@ -469,7 +469,7 @@ function startStory() {
   pausedAt = 0;
   stage.value = "typing";
   typed.value = "";
-  copyVisible.value = false;
+  copyVisible.value = true;
   storyDone.value = false;
   timelineEvents = BASE_EVENTS.slice();
 
@@ -635,7 +635,7 @@ onMounted(() => {
   updateNavState();
   window.__heroFreeze = freezeStoryForQa;
   window.__heroResume = resumeStoryForQa;
-  document.title = "千客引擎 · 让你的电商数据，听懂中国话";
+  document.title = "千客引擎 · 把店铺经营交给听得懂人话的工作台";
 });
 
 onBeforeUnmount(() => {
@@ -694,6 +694,7 @@ onBeforeUnmount(() => {
           >
             {{ link.label }}
           </button>
+          <a href="/v2/b.html" class="l-nav-link l-nav-b">商家工作台</a>
         </nav>
 
         <div class="l-nav-actions">
@@ -719,22 +720,23 @@ onBeforeUnmount(() => {
             }"
           >
             <h1 class="l-hero-title">
-              让你的电商数据，<br />
-              <span>听懂中国话。</span>
+              把店铺经营，<br />
+              <span>交给听得懂人话的工作台。</span>
             </h1>
-            <p class="l-hero-sub">无需 SQL 的 AI 用户画像助理</p>
+            <p class="l-hero-sub">订单、库存、经营报告 · 一个 B 端工作台，先把每天该做的事做完。</p>
             <div class="l-hero-actions">
-              <RouterLink v-if="isAuthed" to="/" class="l-btn l-btn-primary l-btn-lg">
-                进入工作台
+              <a href="/v2/b.html" class="l-btn l-btn-primary l-btn-lg">进入商家工作台</a>
+              <RouterLink v-if="isAuthed" to="/chat" class="l-btn l-btn-ghost l-btn-lg">
+                进入 C 端
               </RouterLink>
               <button
                 v-else
                 type="button"
-                class="l-btn l-btn-primary l-btn-lg"
+                class="l-btn l-btn-ghost l-btn-lg"
                 :disabled="demoStarting"
                 @click="startDemo"
               >
-                {{ demoStarting ? "正在进入体验…" : "免费体验 Demo" }}
+                {{ demoStarting ? "正在进入体验…" : "体验 C 端 Demo" }}
               </button>
               <button type="button" class="l-btn l-btn-ghost l-btn-lg" @click="docsOpen = true">
                 查看文档
@@ -848,6 +850,45 @@ onBeforeUnmount(() => {
               {{ legendText }}
               <span class="l-hero-legend-hint">悬停 / 点击查看画像</span>
             </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ B 端商家工作台 ============ -->
+      <section id="b-workbench" class="l-bw">
+        <div class="l-shell">
+          <div class="l-bw-head" v-reveal>
+            <p class="l-bw-kicker">B 端 · 商家工作台 2.0</p>
+            <h2 class="l-bw-title">订单、库存、经营报告，<br />放进同一个工作台。</h2>
+            <p class="l-bw-lead">
+              店主看流水，仓库改库存，客服处理售后。把每天的店务动作收进一个明确、可审计的界面，而不是来回切十几个后台。
+            </p>
+          </div>
+          <div class="l-bw-grid">
+            <article class="l-bw-card" v-reveal>
+              <span class="l-bw-index">01</span>
+              <h3>订单与履约</h3>
+              <p>服务端搜索、日期筛选、分页和订单详情；发货、取消与模拟支付/完成动作。</p>
+            </article>
+            <article class="l-bw-card" v-reveal :style="{ '--reveal-delay': '80ms' }">
+              <span class="l-bw-index">02</span>
+              <h3>商品与 SKU</h3>
+              <p>商品、规格、库存一屏看清；支持 SKU 视图和低库存筛选。</p>
+            </article>
+            <article class="l-bw-card" v-reveal :style="{ '--reveal-delay': '160ms' }">
+              <span class="l-bw-index">03</span>
+              <h3>批量改库存</h3>
+              <p>选仓、预检、逐 SKU 提交；写入当前商家库存与审计，不碰预占。</p>
+            </article>
+            <article class="l-bw-card" v-reveal :style="{ '--reveal-delay': '240ms' }">
+              <span class="l-bw-index">04</span>
+              <h3>经营报告</h3>
+              <p>按完成时间统计 GMV、退款和净额，服务端全量聚合，不再用前端列表求和。</p>
+            </article>
+          </div>
+          <div class="l-bw-foot" v-reveal>
+            <span>当前为模拟交易，不接真实支付 · 经营报告按完成口径</span>
+            <a href="/v2/b.html" class="l-btn l-btn-primary l-btn-lg">进入商家工作台</a>
           </div>
         </div>
       </section>

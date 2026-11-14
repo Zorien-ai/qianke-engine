@@ -13,6 +13,7 @@ import re
 import time
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -367,6 +368,124 @@ def product_image_audit(product_id: str, limit: int = 20) -> dict[str, Any]:
         "merchant_id": member["merchant_id"],
         "product_id": product_id,
         "events": media.list_image_audit(member["merchant_id"], product_id, limit=limit),
+    }
+
+
+@router.get("/reports/completion")
+def workbench_completion_report(date_from: str, date_to: str) -> dict[str, Any]:
+    account = _account()
+    member = _require_permission(account, "view_orders")
+    if member["role"] not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="只有店主/管理员可以查看经营报告")
+    merchant_id = member["merchant_id"]
+    start, end = _business_day_utc_range(date_from, date_to)
+    repo = get_merchant_repository()
+    orders = repo.list_orders_for_completion_report(merchant_id, start_at=start, end_at=end)
+
+    def money(value: Any) -> Decimal:
+        try:
+            return Decimal(str(value or "0"))
+        except (InvalidOperation, ValueError):
+            return Decimal("0")
+
+    start_dt = datetime.fromisoformat(start)
+    end_dt = datetime.fromisoformat(end)
+
+    def parsed_at(value: str) -> datetime:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    def in_range(value: str) -> bool:
+        return bool(value) and start_dt <= parsed_at(value) < end_dt
+
+    def local_day(value: str) -> str:
+        return parsed_at(value).astimezone(BUSINESS_TIMEZONE).date().isoformat()
+
+    completed_gmv = Decimal("0")
+    completed_count = 0
+    refund_amount = Decimal("0")
+    refund_orders = 0
+    cohort_refund = Decimal("0")
+    currencies: dict[str, dict[str, Any]] = {}
+    daily: dict[str, dict[str, Any]] = {}
+
+    def bucket(code: str) -> dict[str, Any]:
+        return currencies.setdefault(code, {
+            "currency": code,
+            "completed_orders": 0,
+            "completed_gmv": Decimal("0"),
+            "refund_amount": Decimal("0"),
+            "refund_orders": 0,
+            "net_amount": Decimal("0"),
+        })
+
+    def day_row(day: str) -> dict[str, Any]:
+        return daily.setdefault(day, {
+            "date": day,
+            "completed_orders": 0,
+            "completed_gmv": Decimal("0"),
+            "refund_amount": Decimal("0"),
+            "refund_orders": 0,
+            "net_amount": Decimal("0"),
+        })
+
+    for order in orders:
+        code = str(order.currency or "CNY").upper()
+        total = money(order.total_amount)
+        refund = money(order.refund_amount)
+        completed_at = str(order.completed_at or "")
+        refunded_at = str(order.refunded_at or "")
+        completed_in_range = in_range(completed_at)
+        refund_in_range = in_range(refunded_at)
+        if completed_in_range:
+            completed_count += 1
+            completed_gmv += total
+            cohort_refund += refund
+            c = bucket(code)
+            c["completed_orders"] += 1
+            c["completed_gmv"] += total
+            d = day_row(local_day(completed_at))
+            d["completed_orders"] += 1
+            d["completed_gmv"] += total
+        if refund_in_range:
+            refund_orders += 1
+            refund_amount += refund
+            c = bucket(code)
+            c["refund_orders"] += 1
+            c["refund_amount"] += refund
+            d = day_row(local_day(refunded_at))
+            d["refund_orders"] += 1
+            d["refund_amount"] += refund
+
+    def text(value: Decimal) -> str:
+        return format(value.quantize(Decimal("0.01")), "f")
+
+    for c in currencies.values():
+        c["completed_gmv"] = text(c["completed_gmv"])
+        c["refund_amount"] = text(c["refund_amount"])
+        c["net_amount"] = text(money(c["completed_gmv"]) - money(c["refund_amount"]))
+    for d in daily.values():
+        d["completed_gmv"] = text(d["completed_gmv"])
+        d["refund_amount"] = text(d["refund_amount"])
+        d["net_amount"] = text(money(d["completed_gmv"]) - money(d["refund_amount"]))
+    currency_values = sorted(currencies)
+    return {
+        "merchant_id": merchant_id,
+        "period": {"date_from": date_from, "date_to": date_to, "timezone": "Asia/Shanghai"},
+        "simulation_mode": "SIMULATED",
+        "currency": currency_values[0] if len(currency_values) == 1 else ("MIXED" if currency_values else "CNY"),
+        "currencies": [currencies[code] for code in currency_values],
+        "completed_orders": completed_count,
+        "completed_gmv": text(completed_gmv),
+        "refund_orders": refund_orders,
+        "refund_amount": text(refund_amount),
+        "net_amount": text(completed_gmv - refund_amount),
+        "cohort_refund_amount": text(cohort_refund),
+        "cohort_net_amount": text(completed_gmv - cohort_refund),
+        "daily": [daily[key] for key in sorted(daily)],
+        "note": "完成口径按 completed_at；退款按 refunded_at 发生期冲减；金额为模拟交易，不是真实收款。",
     }
 
 
