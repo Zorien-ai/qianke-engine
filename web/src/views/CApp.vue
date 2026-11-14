@@ -3135,6 +3135,10 @@ onBeforeUnmount(() => {
             </svg>
             <span>消息</span>
           </RouterLink>
+          <RouterLink class="c-nav-item" to="/c/me">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+            <span>我的</span>
+          </RouterLink>
         </nav>
 
         <section class="c-thread-list" aria-label="会话列表">
@@ -3967,6 +3971,10 @@ onBeforeUnmount(() => {
           <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9 9 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" />
         </svg>
         <span>消息</span>
+      </RouterLink>
+      <RouterLink to="/c/me">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+        <span>我的</span>
       </RouterLink>
     </nav>
 

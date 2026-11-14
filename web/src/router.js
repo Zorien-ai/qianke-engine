@@ -23,6 +23,7 @@ import CShop from "./views/CShop.vue";
 import CSocial from "./views/CSocial.vue";
 import COrders from "./views/COrders.vue";
 import CApp from "./views/CApp.vue";
+import CMe from "./views/CMe.vue";
 import CAdminAudit from "./views/CAdminAudit.vue";
 import ChatProfiles from "./views/ChatProfiles.vue";
 import MerchantStoreFriends from "./views/MerchantStoreFriends.vue";
@@ -53,6 +54,7 @@ const routes = [
   { path: "/c/social", name: "c-social", component: CSocial, meta: { title: "消息", cShell: true } },
   { path: "/c/orders", name: "c-orders", component: COrders, meta: { title: "订单", cShell: true } },
   { path: "/c/app", name: "c-app", component: CApp, meta: { title: "千客 · C 端", standalone: true } },
+  { path: "/c/me", name: "c-me", component: CMe, meta: { title: "我的", cShell: true } },
   { path: "/admin/c-end", name: "admin-c-end", component: CAdminAudit, meta: { title: "C 端交易审计" } },
   { path: "/admin/chat-profiles", name: "admin-chat-profiles", component: ChatProfiles, meta: { title: "会话用户画像" } },
   { path: "/admin/merchant-store-friends", name: "admin-merchant-store-friends", component: MerchantStoreFriends, meta: { title: "店宠映射" } },
