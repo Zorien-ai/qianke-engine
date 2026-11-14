@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -153,6 +153,35 @@ td,th{{border-bottom:1px solid #e5e7eb;padding:12px;text-align:left}}
 
 
 # ==================== 管理端 ====================
+
+@router.get("/api/admin/agent-traces")
+def admin_agent_traces(
+    range_key: str = Query("24h", alias="range"),
+    status: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    api = _main()
+    api._require_system_admin()
+    return ai_monitor.agent_traces(
+        range_key,
+        status=status,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/api/admin/agent-traces/{trace_id}")
+def admin_agent_trace_detail(trace_id: str) -> dict:
+    api = _main()
+    api._require_system_admin()
+    data = ai_monitor.trace_detail("", trace_id, admin=True)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Agent Trace 不存在")
+    return data
+
 
 @router.get("/api/admin/monitor/tenants")
 def admin_monitor_tenants() -> dict:

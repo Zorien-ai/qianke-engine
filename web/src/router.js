@@ -17,6 +17,7 @@ const Eval = () => import("./views/Eval.vue");
 const Monitor = () => import("./views/Monitor.vue");
 const Billing = () => import("./views/Billing.vue");
 const MonitorAdmin = () => import("./views/MonitorAdmin.vue");
+const AdminAgentMonitor = () => import("./views/AdminAgentMonitor.vue");
 const AgentDemo = () => import("./views/AgentDemo.vue");
 const AgentActions = () => import("./views/AgentActions.vue");
 const MyAgent = () => import("./views/MyAgent.vue");
@@ -72,6 +73,7 @@ const routes = [
   { path: "/monitor", name: "monitor", component: Monitor, meta: { title: "实时监控" } },
   { path: "/billing", name: "billing", component: Billing, meta: { title: "Token 账单" } },
   { path: "/admin/monitor", name: "monitor-admin", component: MonitorAdmin, meta: { title: "平台监控" } },
+  { path: "/admin/agent-monitor", name: "admin-agent-monitor", component: AdminAgentMonitor, meta: { title: "Agent 调用监控" } },
   // 未知路径 → 工作台；未登录时守卫会再把人送回 /home
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
@@ -133,6 +135,10 @@ router.beforeEach(async (to) => {
   }
   if (to.name === "monitor-admin" && !(store.account && store.account.is_system_admin)) {
     toast("只有系统管理员可以访问平台监控", "error");
+    return { name: "dashboard" };
+  }
+  if (to.name === "admin-agent-monitor" && !(store.account && store.account.is_system_admin)) {
+    toast("只有系统管理员可以访问 Agent 调用监控", "error");
     return { name: "dashboard" };
   }
   if (to.name === "admin-chat-profiles" && !(store.account && store.account.is_system_admin)) {
