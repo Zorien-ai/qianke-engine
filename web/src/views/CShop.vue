@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { getJson, postJson } from "../api";
+import { toast } from "../store";
 import { productMatchesQuery } from "../catalogSearch";
 import ShoppingCart from "../components/ShoppingCart.vue";
 import { cart } from "../cart";
@@ -317,8 +318,15 @@ async function loadProducts() {
   try {
     const endpoint = merchantFriendId.value
       ? `/api/c/merchant/products?friend_id=${encodeURIComponent(merchantFriendId.value)}&limit=12`
-      : "/api/c/products?limit=12";
-    const data = await getJson(endpoint);
+      : "/api/c/merchant/products?friend_id=store_demo&limit=12";
+    let data;
+    try {
+      data = await getJson(endpoint);
+    } catch (error) {
+      // 没有默认店宠好友时退回 C 商品种子；此时商品卡只读，购买入口会提示先建立商家会话。
+      if (merchantFriendId.value) throw error;
+      data = await getJson("/api/c/products?limit=12");
+    }
     products.value = (data?.products || []).map((product) => ({
       ...product,
       category: product.category || "精选",
@@ -464,16 +472,53 @@ function checkoutCart(checkout) {
   runMerchantNegotiation("购物车合并报价", "", 1, checkout);
 }
 
-function addProductToCart() {
+async function ensureProductFriend(product) {
+  const direct = String(merchantFriendId.value || "").trim();
+  if (direct) return direct;
+  const merchant = String(product?.merchant_id || merchantId.value || "").trim();
+  if (!merchant) throw new Error("商品缺少商家信息，暂时无法加入购物车");
+  const data = await postJson("/api/c/friends/merchants", { merchant_id: merchant });
+  const friendId = String(data?.friend?.friend_id || "").trim();
+  if (!friendId) throw new Error("无法建立商家会话，请稍后重试");
+  return friendId;
+}
+
+function addLineToCart(product, sku, quantity, friendId) {
+  if (!product || !sku || !sku.in_stock) throw new Error("这个规格暂时缺货");
+  cart.add({
+    friend_id: friendId,
+    merchant_name: String(product.merchant_name || shopScopeLabel.value),
+    product_id: product.product_id,
+    title: product.title,
+    image_url: product.image_url,
+    ...sku,
+    quantity,
+  });
+}
+
+async function addProductToCart() {
   const product = selectedProduct.value;
   const sku = activeSku.value;
-  if (!product || !sku || !isMerchantShop.value) return;
+  if (!product || !sku) return;
   try {
-    cart.add({ friend_id: merchantFriendId.value, merchant_name: shopScopeLabel.value,
-      product_id: product.product_id, title: product.title, image_url: product.image_url,
-      ...sku, quantity: detailQuantity.value });
+    const friendId = await ensureProductFriend(product);
+    addLineToCart(product, sku, detailQuantity.value, friendId);
     cartHint.value = `已加入购物车：${product.title} ${sku.spec}`;
-  } catch (e) { cartHint.value = e.message; }
+    toast("已加入购物车", "success");
+  } catch (e) {
+    cartHint.value = e?.message || "加入购物车失败";
+  }
+}
+
+async function quickAddProduct(product) {
+  const sku = defaultSku(product);
+  try {
+    const friendId = await ensureProductFriend(product);
+    addLineToCart(product, sku, 1, friendId);
+    toast(`已加入购物车：${product.title}`, "success");
+  } catch (e) {
+    toast(e?.message || "加入购物车失败", "error");
+  }
 }
 
 function rememberProduct(product, sku = null, quantity = 1) {
@@ -676,6 +721,14 @@ onMounted(() => {
               <div class="product-side">
                 <strong>¥{{ money(productPrice(product)) }}</strong>
                 <div class="product-actions">
+                  <button
+                    v-if="productStock(product) > 0"
+                    class="primary-btn product-buy-btn"
+                    type="button"
+                    @click.stop="quickAddProduct(product)"
+                  >
+                    加入购物车
+                  </button>
                   <button class="ghost-btn" type="button" @click.stop="useProduct(product)">
                     {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
                   </button>
@@ -934,7 +987,7 @@ onMounted(() => {
             <p>现货 48 小时内发出 · 支持 7 天无理由 · 成交前需逐单确认</p>
           </div>
           <div class="product-detail-actions">
-            <button v-if="isMerchantShop" type="button" class="ghost-btn" :disabled="!activeSku?.in_stock || quoteBusy || !!quoteDraft" @click="addProductToCart">加入购物车</button>
+            <button type="button" class="ghost-btn" :disabled="!activeSku?.in_stock || quoteBusy || !!quoteDraft" @click="addProductToCart">加入购物车</button>
             <button type="button" class="primary-btn" @click="askProduct(selectedProduct, activeSku)" :disabled="activeSku && !activeSku.in_stock">
               {{ isMerchantShop ? "问店宠" : "问问小鱼" }}
             </button>

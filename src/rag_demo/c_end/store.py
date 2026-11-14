@@ -878,6 +878,12 @@ def init() -> None:
                     "VALUES (?, ?, ?)",
                     ("m_gear_002", "store_demo", _now()),
                 )
+            # 老库或单商家种子可能只有 m_gear_002；补齐茶商家店宠映射。
+            conn.execute(
+                "INSERT OR IGNORE INTO c_merchant_store_friend(merchant_id, friend_id, created_at) "
+                "VALUES (?, ?, ?)",
+                ("m_tea_001", "store_tea", _now()),
+            )
             sop_count = conn.execute("SELECT COUNT(*) AS n FROM c_merchant_sop").fetchone()["n"]
             if sop_count == 0:
                 conn.executemany(
