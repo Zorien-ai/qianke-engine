@@ -363,6 +363,8 @@ const lastStoreSend = ref(null);
 const copyTip = ref("");
 const showJumpBottom = ref(false);
 const composerFocused = ref(false);
+let composerComposing = false;
+let composerCompositionEndAt = 0;
 const avatarFileInput = ref(null);
 const avatarTarget = ref("companion");
 const avatarBusy = ref("");
@@ -1179,7 +1181,26 @@ function selectMention(option) {
   });
 }
 
+function onComposerCompositionStart() {
+  composerComposing = true;
+}
+
+function onComposerCompositionEnd() {
+  composerComposing = false;
+  composerCompositionEndAt = Date.now();
+}
+
+function isComposerComposing(event) {
+  return Boolean(
+    composerComposing ||
+      event?.isComposing ||
+      (composerCompositionEndAt && Date.now() - composerCompositionEndAt < 100)
+  );
+}
+
 function onComposerKeydown(event) {
+  // 拼音/日文输入法选字阶段不发送，也不消费候选框的 Enter。
+  if (isComposerComposing(event)) return;
   if (mentionOpen.value && mentionOptions.value.length) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -3541,6 +3562,8 @@ onBeforeUnmount(() => {
                 :placeholder="activeThread.kind === 'group' ? `在${activeThread.name}里发消息，可 @ 成员` : (activeId === 'companion' ? '想聊什么，或者要买什么' : '问商品、活动或售后')"
                 @focus="onComposerFocus"
                 @blur="onComposerBlur"
+                @compositionstart="onComposerCompositionStart"
+                @compositionend="onComposerCompositionEnd"
                 @input="onComposerInput"
                 @keydown="onComposerKeydown"
               />

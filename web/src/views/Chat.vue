@@ -680,7 +680,22 @@ function useExample(q) {
   question.value = q;
 }
 
+let chatComposing = false;
+let chatCompositionEndAt = 0;
+
+function onChatCompositionStart() {
+  chatComposing = true;
+}
+
+function onChatCompositionEnd() {
+  chatComposing = false;
+  chatCompositionEndAt = Date.now();
+}
+
 function onKeydown(e) {
+  if (chatComposing || e.isComposing || (chatCompositionEndAt && Date.now() - chatCompositionEndAt < 100)) {
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
     submit();
@@ -773,7 +788,9 @@ onBeforeUnmount(() => {
           :disabled="sending || !canAsk"
           :maxlength="demoMode ? DEMO_MAX_QUESTION : undefined"
           :placeholder="canAsk ? '输入你的问题…' : '当前账号没有提问能力'"
-          @keydown="onKeydown"
+          @compositionstart="onChatCompositionStart"
+        @compositionend="onChatCompositionEnd"
+        @keydown="onKeydown"
         ></textarea>
         <span class="composer-shortcut">Ctrl / ⌘ + Enter 发送</span>
       </div>
