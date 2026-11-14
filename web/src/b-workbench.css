@@ -2937,3 +2937,216 @@ code,
     display: none;
   }
 }
+
+
+/* 用户画像卡片网格 */
+.b-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.b-profile-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+
+.b-profile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.b-profile-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.b-profile-avatar {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--b-accent-soft);
+  color: var(--b-accent-strong);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.b-profile-identity strong,
+.b-profile-identity small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-profile-identity strong {
+  color: var(--b-text);
+  font-size: 18px;
+}
+
+.b-profile-identity small {
+  margin-top: 2px;
+  color: var(--b-muted);
+  font-size: 13px;
+}
+
+.b-profile-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.b-profile-tags span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--b-bg-soft);
+  color: var(--b-text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-profile-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.b-profile-section {
+  min-width: 0;
+}
+
+.b-profile-section h4 {
+  margin: 0 0 4px;
+  color: var(--b-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.b-profile-section ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--b-text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.b-profile-section li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-profile-section small {
+  color: var(--b-muted);
+  font-size: 11px;
+}
+
+.b-profile-stage,
+.b-profile-summary,
+.b-profile-empty {
+  margin: 0;
+  color: var(--b-text-2);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.b-profile-stage {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.b-profile-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--b-muted);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.b-profile-attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.b-profile-attrs span {
+  overflow: hidden;
+  color: var(--b-text-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.b-profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--b-line);
+  color: var(--b-muted);
+  font-size: 12px;
+}
+
+.b-profile-meta div {
+  display: flex;
+  gap: 4px;
+}
+
+.b-profile-meta dt,
+.b-profile-meta dd {
+  margin: 0;
+}
+
+.b-profile-meta dd {
+  color: var(--b-text-2);
+}
+
+.b-profile-json summary {
+  color: var(--b-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.b-profile-json pre {
+  max-height: 260px;
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--b-bg-soft);
+  color: var(--b-text-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 700px) {
+  .b-profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .b-profile-card {
+    padding: 15px;
+  }
+
+  .b-profile-sections {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

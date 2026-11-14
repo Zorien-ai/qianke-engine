@@ -2290,33 +2290,82 @@ function afterSalesView() {
   </section>`;
 }
 
+function profileArray(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+  if (typeof value === "string") return value.split(/[、,，;；\n]/).map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+
+function profileShort(value, max = 28) {
+  const content = String(value ?? "").trim();
+  return content.length > max ? `${content.slice(0, max)}…` : content;
+}
+
+function profileSection(label, items, max = 3) {
+  if (!items.length) return "";
+  return `<section class="b-profile-section">
+    <h4>${escapeHtml(label)}</h4>
+    <ul>${items.slice(0, max).map((item) => `<li title="${escapeHtml(item)}">${escapeHtml(profileShort(item))}</li>`).join("")}</ul>
+    ${items.length > max ? `<small>+${items.length - max} 项</small>` : ""}
+  </section>`;
+}
+
+function profileCard(profile) {
+  const data = profile.profile && typeof profile.profile === "object" ? profile.profile : {};
+  const needs = profileArray(data.needs);
+  const preferences = profileArray(data.preferences);
+  const boundaries = profileArray(data.boundaries);
+  const questions = profileArray(data.open_questions);
+  const stage = String(data.purchase_stage || "").trim();
+  const budget = String(data.budget || "").trim();
+  const sizes = Object.entries(data.sizes && typeof data.sizes === "object" ? data.sizes : {})
+    .filter(([, value]) => String(value ?? "").trim())
+    .map(([key, value]) => `${key} ${value}`);
+  const tags = [...new Set([...needs, ...preferences])].slice(0, 5);
+  const sections = [
+    profileSection("目标与需求", needs),
+    profileSection("偏好", preferences),
+    profileSection("顾虑与边界", boundaries, 2),
+    stage ? `<section class="b-profile-section"><h4>当前阶段</h4><p class="b-profile-stage">${escapeHtml(profileShort(stage, 40))}</p></section>` : "",
+    profileSection("待确认问题", questions, 3),
+    (budget || sizes.length)
+      ? `<section class="b-profile-section"><h4>基本属性</h4><div class="b-profile-attrs">${budget ? `<span>预算 ${escapeHtml(profileShort(budget, 12))}</span>` : ""}${sizes.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div></section>`
+      : "",
+  ].join("");
+  const hasStructured = sections.length > 0;
+  const confidence = Number(profile.confidence || data.confidence || 0);
+  const fallback = profile.profile_text ? `<p class="b-profile-summary">${escapeHtml(profileShort(profile.profile_text, 140))}</p>` : "";
+  const json = JSON.stringify(data, null, 2);
+  return `<article class="b-card b-profile-card">
+    <header class="b-profile-head">
+      <div class="b-profile-identity">
+        <span class="b-profile-avatar">${escapeHtml(String(profile.buyer_id || "用").trim().slice(0, 1).toUpperCase())}</span>
+        <div>
+          <strong>${escapeHtml(text(profile.buyer_id, "未命名用户"))}</strong>
+          <small>${escapeHtml(text(profile.merchant_id, "当前商家"))} · 会话用户</small>
+        </div>
+      </div>
+      ${confidence > 0 ? `<span class="b-badge is-info">置信度 ${Math.round(confidence * 100)}%</span>` : ""}
+    </header>
+    ${tags.length ? `<div class="b-profile-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+    ${hasStructured ? `<div class="b-profile-sections">${sections}</div>` : fallback || `<p class="b-profile-empty">暂无结构化画像字段，仅保留原始会话记录。</p>`}
+    <dl class="b-profile-meta">
+      <div><dt>版本</dt><dd>${escapeHtml(text(profile.version, "—"))}</dd></div>
+      <div><dt>来源消息</dt><dd>${escapeHtml(text(profile.source_message_count, "—"))}</dd></div>
+      <div><dt>更新时间</dt><dd>${escapeHtml(timeText(profile.extracted_at))}</dd></div>
+    </dl>
+    <details class="b-profile-json">
+      <summary>展开 JSON</summary>
+      <pre>${escapeHtml(json)}</pre>
+    </details>
+  </article>`;
+}
+
 function chatProfilesView() {
   const body = state.loading && !state.chatProfiles.length
     ? skeletonMarkup()
     : state.chatProfiles.length
-      ? `<div class="b-list">${state.chatProfiles.map((profile) => {
-          const summary = profile.profile_text || "暂无摘要";
-          const json = JSON.stringify(profile.profile || {}, null, 2);
-          return `<article class="b-card b-chat-profile-card">
-            <div class="b-card-head">
-              <div class="b-card-title">
-                <strong>${escapeHtml(text(profile.buyer_id, "买家"))}</strong>
-                <code class="b-mono">${escapeHtml(text(profile.merchant_id))}</code>
-              </div>
-              <span class="b-badge is-info">置信度 ${Math.round(Number(profile.confidence || 0) * 100)}%</span>
-            </div>
-            <p class="b-chat-profile-summary">${escapeHtml(summary)}</p>
-            <dl class="b-meta">
-              <div><dt>版本</dt><dd>${escapeHtml(profile.version)}</dd></div>
-              <div><dt>来源消息</dt><dd>${escapeHtml(profile.source_message_count)}</dd></div>
-              <div><dt>更新时间</dt><dd>${escapeHtml(timeText(profile.extracted_at))}</dd></div>
-            </dl>
-            <details class="b-chat-profile-json">
-              <summary>展开 JSON</summary>
-              <pre>${escapeHtml(json)}</pre>
-            </details>
-          </article>`;
-        }).join("")}</div>`
+      ? `<div class="b-profile-grid">${state.chatProfiles.map(profileCard).join("")}</div>`
       : emptyMarkup("还没有会话画像。用户在店宠会话中聊过，且 30 分钟无新消息后会自动生成。");
   return `<section class="b-view" aria-label="用户画像">
     <div class="b-view-head">
