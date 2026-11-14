@@ -95,6 +95,19 @@ def test_simulation_completion_is_scoped_and_idempotent(c_store, monkeypatch):
     assert result["action"]["transaction_mode"] == "SIMULATED"
     replay = b_workbench.workbench_order_simulation_action(order["order_id"], body)
     assert replay["action"]["action_id"] == result["action"]["action_id"]
+    with pytest.raises(HTTPException) as exc:
+        b_workbench.workbench_order_simulation_action(
+            order["order_id"],
+            b_workbench.OrderSimulationActionIn(
+                client_request_id=request_id,
+                action="SIMULATE_COMPLETION",
+                expected_status="SHIPPED",
+                expected_amount="1.00",
+                expected_currency=str(order["currency"]),
+                reason="pytest",
+            ),
+        )
+    assert exc.value.status_code == 409
     lookup = b_workbench.workbench_order_simulation_action_lookup(order["order_id"], request_id)
     assert lookup["action"]["action_id"] == result["action"]["action_id"]
     with pytest.raises(HTTPException) as exc:

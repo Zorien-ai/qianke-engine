@@ -2164,7 +2164,7 @@ function orderDrawerMarkup() {
         ${statusConfirm}
         ${cancelConfirm}
         ${shipForm}
-        <p class="b-drawer-note">演示操作会写入当前商家订单状态和时间，但不会创建真实支付、结算、物流或库存变更；正式接入前仍需补服务端审计、模拟标记和权限。</p>
+        <p class="b-drawer-note">演示操作会写入当前商家订单状态/时间，并写入模拟动作审计（is_simulated、操作者、前后状态）；不会创建真实支付、结算、物流或库存变更。</p>
       </div>
     </aside>`;
 }
