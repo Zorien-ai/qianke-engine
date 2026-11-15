@@ -205,6 +205,7 @@ def _record_agent_monitor(
         total_ms=elapsed_ms,
         meta=meta,
     )
+    result["monitor_trace_id"] = trace_id
 
 
 def execute_agent(

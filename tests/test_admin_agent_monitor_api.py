@@ -7,12 +7,15 @@ import pytest
 from fastapi import HTTPException
 
 from rag_demo.api import monitor
-from rag_demo import ai_monitor
+from rag_demo import agent_eval_store, ai_monitor
 
 
 class _AdminMain:
     def _require_system_admin(self):
         return {"id": 1, "username": "admin", "is_system_admin": True}
+
+    def _agent_dataset(self, account=None):
+        return "test"
 
 
 class _RejectedMain:
@@ -137,3 +140,54 @@ def test_admin_agent_trace_feedback_not_found(monkeypatch):
             monitor.AgentTraceFeedbackIn(score=5),
         )
     assert exc.value.status_code == 404
+
+
+def test_admin_agent_datasets_requires_system_admin(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _RejectedMain())
+    with pytest.raises(HTTPException) as exc:
+        monitor.admin_agent_datasets()
+    assert exc.value.status_code == 403
+
+
+def test_admin_agent_dataset_create(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(
+        agent_eval_store,
+        "create_dataset",
+        lambda *args, **kwargs: {"dataset_id": "ds_1", "name": "回归集", "cases": []},
+    )
+    data = monitor.admin_agent_dataset_create(
+        monitor.AgentDatasetIn(name="回归集", trace_ids=["trace_1"])
+    )
+    assert data["dataset_id"] == "ds_1"
+
+
+def test_admin_agent_experiment_create_starts_background(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(
+        agent_eval_store,
+        "create_experiment",
+        lambda *args, **kwargs: {"experiment_id": "exp_1", "status": "QUEUED"},
+    )
+    started = {}
+
+    class _Thread:
+        def __init__(self, target, args, daemon, name):
+            started["target"] = target
+            started["args"] = args
+
+        def start(self):
+            started["started"] = True
+
+    monkeypatch.setattr(monitor.threading, "Thread", _Thread)
+    data = monitor.admin_agent_experiment_create(monitor.AgentExperimentIn(dataset_id="ds_1"))
+    assert data["experiment_id"] == "exp_1"
+    assert started["started"] is True
+    assert started["args"][0] == "exp_1"
+
+
+def test_admin_agent_experiments_requires_system_admin(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _RejectedMain())
+    with pytest.raises(HTTPException) as exc:
+        monitor.admin_agent_experiments()
+    assert exc.value.status_code == 403
