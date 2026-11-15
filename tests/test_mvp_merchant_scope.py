@@ -43,11 +43,16 @@ def test_scope_dataset_priority_for_merchant(monkeypatch):
     monkeypatch.setattr(wizard_app, "_account", lambda: {"id": 1, "is_system_admin": True})
     assert wizard_app._scope_dataset("user") == config.ADMIN_DEBUG_DATASET
 
+    # 商家 owner 同时是企业管理员时，仍必须优先写商户库，否则 B 端导入池永远为空。
     monkeypatch.setattr(
         wizard_app,
         "_account",
         lambda: {"id": 113, "dataset": "ent_32", "is_enterprise_admin": True},
     )
+    assert wizard_app._scope_dataset("user") == "mch_m_gear_002"
+
+    # 纯企业管理员（无商户绑定）才回落到企业库。
+    monkeypatch.setattr(wizard_app, "_merchant_member", lambda acct: None)
     assert wizard_app._scope_dataset("user") == "ent_32"
 
 

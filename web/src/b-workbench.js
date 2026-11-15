@@ -2851,9 +2851,11 @@ function profileImportView() {
     ${canManage ? `<div class="b-profile-import-actions">
       <button type="button" class="b-btn b-btn-ghost" data-profile-sample ${state.busy === "profile-sample" ? "disabled" : ""}>${state.busy === "profile-sample" ? "载入中…" : "载入示例数据"}</button>
       <label class="b-btn b-btn-ghost">上传 CSV<input type="file" id="b-profile-file" accept=".csv" multiple hidden /></label>
+      <label class="b-btn b-btn-ghost">上传规则文档<input type="file" id="b-profile-doc-file" accept=".md,.markdown,.txt" multiple hidden /></label>
     </div>` : ""}
     ${wizard ? `<div class="b-card b-profile-import">
-      <div class="b-profile-group-head"><strong>${escapeHtml((wizard.csv_files || []).map((file) => file.name).join("、") || "待构建")}</strong><span class="b-muted">${escapeHtml(String(wizard.summary?.total_rows || 0))} 行</span></div>
+      <div class="b-profile-group-head"><strong>${escapeHtml((wizard.csv_files || []).map((file) => file.name).join("、") || "待构建")}</strong><span class="b-muted">${escapeHtml(String(wizard.summary?.total_rows || 0))} 行 · ${Number(wizard.summary?.md_count || (wizard.md_files || []).length)} 篇规则文档</span></div>
+      ${(wizard.md_files || []).length ? `<p class="b-profile-hint">规则文档：${(wizard.md_files || []).map((file) => escapeHtml(file.name)).join("、")} · ${Number(wizard.summary?.total_chunks || 0)} 个切片</p>` : ""}
       ${fieldRows ? `<div class="b-profile-fields">${fieldRows}</div>` : ""}
       <div class="b-profile-import-foot">
         <label class="b-profile-field"><span>模式</span>
@@ -4192,6 +4194,11 @@ function bindEvents() {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.matches("#b-profile-file")) {
       if (target.files && target.files.length) await uploadProfileCsv(target.files);
+      return;
+    }
+    if (target instanceof HTMLInputElement && target.matches("#b-profile-doc-file")) {
+      if (target.files && target.files.length) await uploadProfileCsv(target.files);
+      target.value = "";
       return;
     }
     if (target instanceof HTMLInputElement && target.matches("[data-param-sale-type]")) {
