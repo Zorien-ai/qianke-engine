@@ -1,0 +1,116 @@
+{
+  "name": "b-profile-golden-v1",
+  "description": "B 端用户画像查询黄金集：千客池、导入池、双池合并、SOP/商品文档与边界拒绝。",
+  "merchant_id": "m_sim_tea",
+  "cases": [
+    {
+      "id": "qianke-exact-buyer-no-space",
+      "question": "buyer_217你怎么看",
+      "source": "qianke",
+      "expect": {
+        "route": "rag",
+        "cards_all": ["buyer_217"],
+        "answer_groups": [["男"], ["18-24"], ["杭州"], ["银卡"], ["会话", "咨询"]],
+        "sources_any": ["qianke_user"]
+      }
+    },
+    {
+      "id": "qianke-order-and-chat-profile",
+      "question": "buyer_193 值得跟进吗",
+      "source": "qianke",
+      "expect": {
+        "route": "rag",
+        "cards_all": ["buyer_193"],
+        "answer_groups": [["2 笔", "两笔"], ["396"], ["198"], ["绿茶"]],
+        "sources_any": ["qianke_user"]
+      }
+    },
+    {
+      "id": "qianke-green-tea-buyers",
+      "question": "哪些客户买过绿茶？",
+      "source": "qianke",
+      "expect": {
+        "route": "rag",
+        "cards_all": ["buyer_193", "buyer_195", "buyer_215", "buyer_218"],
+        "answer_groups": [["绿茶"], ["4", "四"]],
+        "sources_any": ["qianke_user"]
+      }
+    },
+    {
+      "id": "all-outdoor-preference",
+      "question": "最近想买户外装备的客户有哪些？",
+      "source": "all",
+      "expect": {
+        "route": "rag",
+        "cards_all": ["qk_u005", "qk_u010", "qk_u001"],
+        "answer_groups": [["户外装备"]],
+        "sources_any": ["user_profile"],
+        "min_cards": 3
+      }
+    },
+    {
+      "id": "imported-high-aov-female",
+      "question": "高客单女性用户有哪些？",
+      "source": "imported",
+      "expect": {
+        "route": "rag",
+        "cards_all": ["qk_u007", "qk_u001"],
+        "answer_groups": [["qk_u007"], ["2060"]],
+        "sources_any": ["user_profile"]
+      }
+    },
+    {
+      "id": "imported-aov-definition",
+      "question": "客单价怎么定义？",
+      "source": "imported",
+      "expect": {
+        "route": "rag",
+        "answer_groups": [["客单价"], ["订单金额", "总消费"], ["订单数"]],
+        "sources_any": ["m_sim_tea_sop.md", "merchant_rules.md"]
+      }
+    },
+    {
+      "id": "all-shipping-return-sop",
+      "question": "山岚茶事发货时效和退货政策是什么？",
+      "source": "all",
+      "expect": {
+        "route": "rag",
+        "cards_any": ["qk_", "buyer_"],
+        "answer_groups": [["48 小时", "48小时"], ["7 天", "7天"], ["退"]],
+        "sources_any": ["m_sim_tea_sop.md"]
+      }
+    },
+    {
+      "id": "imported-tea-preference",
+      "question": "导入用户里谁偏好茶叶？",
+      "source": "imported",
+      "expect": {
+        "route": "rag",
+        "cards_all": ["qk_u002", "qk_u006", "qk_u009"],
+        "answer_groups": [["qk_u002"], ["qk_u006"], ["qk_u009"], ["茶叶"]],
+        "sources_any": ["user_profile"]
+      }
+    },
+    {
+      "id": "all-product-manual",
+      "question": "山岚茶事有哪些商品，价格多少？",
+      "source": "all",
+      "expect": {
+        "route": "rag",
+        "answer_groups": [["明前龙井"], ["白毫银针"], ["桂花乌龙"], ["198"], ["268"], ["168"]],
+        "sources_any": ["m_sim_tea_products.md"]
+      }
+    },
+    {
+      "id": "qianke-unknown-buyer",
+      "question": "buyer_999你怎么看",
+      "source": "qianke",
+      "expect": {
+        "route": "empty",
+        "cards_all": [],
+        "max_cards": 0,
+        "answer_groups": [["没有检索到", "无法确定", "没有"]]
+      }
+    }
+  ]
+}
