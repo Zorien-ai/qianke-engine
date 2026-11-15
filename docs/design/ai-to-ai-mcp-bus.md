@@ -1,7 +1,7 @@
 # AI-to-AI MCP 沟通工具设计稿
 
-版本：v0.4  
-状态：Phase 0 本地实现：MCP + 固定能力 + 自动路由 + 人类审批台 + 正文 TTL；跨机器未做  
+版本：v0.5  
+状态：Phase 0 本地实现 + 公网 HTTP 远程入口；跨机器 MCP / OIDC 未做  
 目标读者：Qianke Agent 平台 / 多 Agent 协作 / MCP 接入方
 
 ## 0. 本版决策
@@ -804,16 +804,55 @@ POST /api/admin/agent-comm/purge
 
 ![最近消息 / TTL](docs/design/agent-comm-human-messages.png)
 
-### 18.7 当前未实现
+### 18.7 公网远程入口（已接 WorkBuddy）
+
+为了让别的会话/机器上的 Agent 访问本机 Bus，增加了带 Bearer Token 的 HTTP 网关：
 
 ```text
-1. 跨机器 HTTPS/WSS 中继
+https://qianke.qiankeagent.com/agent-comm/remote
+```
+
+认证：
+
+```text
+AGENT_COMM_REMOTE_AGENT_ID=workbuddy
+AGENT_COMM_REMOTE_TOKEN=<secret>   # 只放 .env，不提交
+```
+
+Token 绑定固定 Agent，远程请求 body 不能改写 `agent_id`。
+
+远程 action：
+
+```text
+whoami / list_agents / rooms / send / read / ack
+propose_task / list_tasks / task_status
+```
+
+WorkBuddy 固定能力：
+
+```text
+coordination / review / ui_audit
+```
+
+远程不能审批；审批仍走：
+
+```text
+/v2/#/admin/agent-comm
+```
+
+详见 `docs/e2e/agent-comm-remote.md`。
+
+### 18.8 当前未实现
+
+```text
+1. 标准 MCP Streamable HTTP / 跨机器 MCP 中继
 2. OIDC / mTLS / 端到端加密
 3. 审批后台任务自动恢复（服务重启后 RUNNING 任务仍需人工处理）
 4. 人类在群组内直接发言（当前人类只做审批）
+5. 独立远程限流 / 按 Agent 多 Token
 ```
 
-### 18.8 验证
+### 18.9 验证
 
 ```bash
 python -m pytest tests/test_mcp_agent_comm.py -q
