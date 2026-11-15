@@ -135,3 +135,55 @@ pytest
 3. 当前只支持单张主图，没有多图轮播；详情页先展示主图。
 4. 上传只允许 owner/admin；staff 看不到「更换图片」入口。
 5. 全量 pytest：756 passed / 5 skipped。
+## 全量演示商品封面（2026-11-16）
+
+CShop 默认市集之前只显示字母占位，因为大部分商品没有图片。
+
+本次补齐所有商品：
+
+```text
+m_gear_002       10 个商品
+m_sim_outdoor     3 个
+m_sim_home        3 个
+m_sim_coffee      3 个
+m_sim_stationery  3 个
+m_sim_fresh       3 个
+----------------------
+新增 25 张封面
+```
+
+已有图片保持不动：
+
+```text
+m_tea_001   8 张茶图
+m_sim_tea   3 张茶图
+```
+
+生成脚本：
+
+```text
+scripts/fill_product_images.py
+```
+
+封面为确定性演示图（品牌 + 商品名 + 类目 + 商品编号），落盘：
+
+```text
+src/rag_demo/api/static/products/generated/*.png
+```
+
+并通过 `MerchantRepository.set_product_images` 写回：
+
+```text
+m_product.image_url
+m_product.images_json
+```
+
+验证结果：
+
+```text
+全部商家商品缺图：0
+CShop 默认 10 个商品缩略图：全部 900×900 正常加载
+B 端商品表格同图显示
+```
+
+![CShop 全量商品图](docs/design/c-shop-all-images.png)
