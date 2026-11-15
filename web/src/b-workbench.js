@@ -402,6 +402,15 @@ function collectionFrom(data, keys) {
   return [];
 }
 
+async function switchBAccount() {
+  try {
+    await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+  } catch {
+    // 服务端会话可能已失效；仍然回登录页，避免把用户卡在工作台。
+  }
+  window.location.assign("/login");
+}
+
 function handleAuthFailure(error) {
   if (!isAuthError(error)) return false;
   if (error.status === 401) {
@@ -3592,6 +3601,7 @@ function shellMarkup() {
       <div class="b-header-actions">
         <span class="b-env" title="当前订单与收款均为演示数据">模拟交易</span>
         <a class="b-text-link b-c-home-link" href="/v2/#/c/home" target="_blank" rel="noopener">C 端首页</a>
+        <button type="button" class="b-text-link b-switch-account" data-b-switch-account title="退出当前商家账号，返回登录页">切换账号</button>
         <a class="b-text-link" href="/v2/#/home">返回入口</a>
       </div>
     </header>
@@ -3803,6 +3813,11 @@ function bindEvents() {
   root.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+
+    if (target.closest("[data-b-switch-account]")) {
+      await switchBAccount();
+      return;
+    }
 
     if (target.closest("[data-retry]")) {
       boot();
