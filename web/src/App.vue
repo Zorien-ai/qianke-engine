@@ -67,6 +67,8 @@ const navItems = computed(() => {
   if (store.account && store.account.is_system_admin)
     items.push({ to: "/admin/agent-evals", key: "adminAgentEvals", label: "Agent 数据集与评测", icon: ICONS.eval });
   if (store.account && store.account.is_system_admin)
+    items.push({ to: "/admin/agent-workspace", key: "adminAgentWorkspace", label: "Agent 协作工作台", icon: ICONS.agent });
+  if (store.account && store.account.is_system_admin)
     items.push({ to: "/admin/agent-comm", key: "adminAgentComm", label: "Agent 协作审批", icon: ICONS.agent });
   if (store.account && store.account.is_system_admin)
     items.push({ to: "/admin/c-end", key: "adminCEnd", label: "C 端审计", icon: ICONS.orders });
@@ -84,7 +86,7 @@ const navGroups = computed(() => {
   const groups = [
     { title: "工作台", keys: ["dashboard", "chat", "agent", "agentActions", "myAgent", "kb"] },
     { title: "管理", keys: ["staff", "eval", "monitor", "billing", "settings"] },
-    { title: "平台", keys: ["adminMonitor", "adminAgentMonitor", "adminAgentEvals", "adminAgentComm", "adminCEnd", "adminChatProfiles", "adminMerchantStoreFriends"] },
+    { title: "平台", keys: ["adminMonitor", "adminAgentMonitor", "adminAgentEvals", "adminAgentWorkspace", "adminAgentComm", "adminCEnd", "adminChatProfiles", "adminMerchantStoreFriends"] },
   ];
   return groups
     .map((group) => ({

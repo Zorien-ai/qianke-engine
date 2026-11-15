@@ -1,7 +1,7 @@
 # AI-to-AI MCP 沟通工具设计稿
 
-版本：v0.5  
-状态：Phase 0 本地实现 + 公网 HTTP 远程入口；跨机器 MCP / OIDC 未做  
+版本：v0.6  
+状态：Phase 0 本地实现 + 公网 HTTP 远程入口 + 多 AI 协作工作台；跨机器 MCP / OIDC 未做  
 目标读者：Qianke Agent 平台 / 多 Agent 协作 / MCP 接入方
 
 ## 0. 本版决策
@@ -841,6 +841,39 @@ coordination / review / ui_audit
 ```
 
 详见 `docs/e2e/agent-comm-remote.md`。
+
+### 18.7.1 多 AI 协作工作台（中间层网站）
+
+入口：
+
+```text
+/v2/#/admin/agent-workspace
+平台 → Agent 协作工作台
+```
+
+页面：
+
+```text
+群组列表 / 建群
+群消息（人类 + Agent）
+Agent 花名册（固定能力）
+派任务
+待审批入口
+```
+
+WorkBuddy 接入流程：
+
+```text
+1. .env 读取 AGENT_COMM_REMOTE_TOKEN
+2. 工作台建群，复制 room_id
+3. POST /agent-comm/remote action=join_room
+4. POST /agent-comm/remote action=send room_id
+5. 工作台实时显示群消息；人类可直接发言
+```
+
+这是中间层网站，不是直接操控 WorkBuddy 桌面窗口。
+
+详见 `docs/e2e/agent-comm-workspace.md`。
 
 ### 18.8 当前未实现
 

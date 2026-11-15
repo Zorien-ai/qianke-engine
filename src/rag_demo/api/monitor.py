@@ -90,6 +90,22 @@ class RemoteCommIn(BaseModel):
     params: dict = {}
 
 
+class AgentCommRoomIn(BaseModel):
+    name: str
+
+
+class AgentCommHumanMessageIn(BaseModel):
+    text: str
+
+
+class AgentCommHumanTaskIn(BaseModel):
+    title: str
+    instruction: str = ""
+    required_capabilities: list[str] = []
+    risk: str = "low"
+    mode: str = "auto"
+
+
 # ==================== 监控 ====================
 
 @router.get("/api/monitor/overview")
@@ -344,6 +360,126 @@ def admin_agent_experiment_detail(experiment_id: str) -> dict:
     if data is None:
         raise HTTPException(status_code=404, detail="实验不存在")
     return data
+
+
+@router.get("/api/admin/agent-comm/workspace")
+def admin_agent_comm_workspace() -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    store = open_admin_store()
+    try:
+        return {
+            "agents": store.list_agents(),
+            "rooms": store.list_all_rooms(),
+            "tasks": store.list_all_tasks(limit=50),
+            "pending_approvals": store.list_approvals(status="PENDING", limit=20),
+            "ttl_days": store.ttl_days,
+        }
+    finally:
+        store.close()
+
+
+@router.get("/api/admin/agent-comm/rooms")
+def admin_agent_comm_rooms() -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    store = open_admin_store()
+    try:
+        return {"items": store.list_all_rooms()}
+    finally:
+        store.close()
+
+
+@router.post("/api/admin/agent-comm/rooms")
+def admin_agent_comm_room_create(payload: AgentCommRoomIn) -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import CommError, open_admin_store
+
+    store = open_admin_store()
+    try:
+        try:
+            return store.create_room(payload.name)
+        except CommError as exc:
+            raise HTTPException(status_code=400, detail=exc.message) from exc
+    finally:
+        store.close()
+
+
+@router.get("/api/admin/agent-comm/rooms/{room_id}/messages")
+def admin_agent_comm_room_messages(room_id: str, limit: int = 80) -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import CommError, open_admin_store
+
+    store = open_admin_store()
+    try:
+        try:
+            return {"items": store.room_messages(room_id, limit=limit)}
+        except CommError as exc:
+            raise HTTPException(status_code=404, detail=exc.message) from exc
+    finally:
+        store.close()
+
+
+@router.post("/api/admin/agent-comm/rooms/{room_id}/messages")
+def admin_agent_comm_room_message(room_id: str, payload: AgentCommHumanMessageIn) -> dict:
+    api = _main()
+    account = api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import CommError, open_admin_store
+
+    store = open_admin_store()
+    try:
+        try:
+            return store.post_human_message(
+                room_id,
+                {"text": payload.text},
+                actor=str((account or {}).get("username") or "admin"),
+            )
+        except CommError as exc:
+            raise HTTPException(status_code=404, detail=exc.message) from exc
+    finally:
+        store.close()
+
+
+@router.get("/api/admin/agent-comm/tasks")
+def admin_agent_comm_tasks() -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    store = open_admin_store()
+    try:
+        return {"items": store.list_all_tasks(limit=50)}
+    finally:
+        store.close()
+
+
+@router.post("/api/admin/agent-comm/tasks")
+def admin_agent_comm_task_create(payload: AgentCommHumanTaskIn) -> dict:
+    api = _main()
+    account = api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import CommError, open_admin_store
+
+    store = open_admin_store()
+    try:
+        try:
+            return store.propose_task(
+                title=payload.title,
+                instruction=payload.instruction,
+                required_capabilities=payload.required_capabilities,
+                risk=payload.risk,
+                mode=payload.mode,
+                sender_id=f"human:{(account or {}).get('username') or 'admin'}",
+            )
+        except CommError as exc:
+            raise HTTPException(status_code=400, detail=exc.message) from exc
+    finally:
+        store.close()
 
 
 @router.get("/api/admin/agent-comm/approvals")

@@ -266,3 +266,32 @@ def test_agent_comm_remote_rejects_bad_action(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         monitor.agent_comm_remote(_Req(), monitor.RemoteCommIn(action="drop_database"))
     assert exc.value.status_code == 400
+
+
+def test_admin_agent_comm_workspace(monkeypatch):
+    from rag_demo.mcp_agent_comm import store as comm_store
+
+    class _FakeStore:
+        ttl_days = 30
+
+        def list_agents(self):
+            return [{"agent_id": "workbuddy", "capabilities": ["coordination"]}]
+
+        def list_all_rooms(self):
+            return [{"room_id": "room_1", "name": "联调群", "member_count": 2, "members": []}]
+
+        def list_all_tasks(self, limit=50):
+            return [{"task_id": "task_1", "title": "回归", "status": "ASSIGNED"}]
+
+        def list_approvals(self, status="PENDING", limit=20):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(comm_store, "open_admin_store", lambda: _FakeStore())
+    data = monitor.admin_agent_comm_workspace()
+    assert data["agents"][0]["agent_id"] == "workbuddy"
+    assert data["rooms"][0]["room_id"] == "room_1"
+    assert data["tasks"][0]["task_id"] == "task_1"
