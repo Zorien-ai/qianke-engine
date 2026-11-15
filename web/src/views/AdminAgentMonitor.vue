@@ -65,6 +65,84 @@ const events = computed(() => {
   const list = traceMeta.value?.agent_events;
   return Array.isArray(list) ? list : [];
 });
+const spans = computed(() => {
+  const list = detail.value?.spans;
+  return Array.isArray(list) ? list : [];
+});
+const selectedSpanId = ref("");
+const detailTab = ref("input");
+const collapsedSpans = ref(new Set());
+
+const treeRows = computed(() => {
+  const list = spans.value;
+  if (!list.length) return [];
+  const nodes = new Map(list.map((span) => [span.span_id, { ...span, children: [] }]));
+  const roots = [];
+  for (const node of nodes.values()) {
+    const parent = node.parent_span_id ? nodes.get(node.parent_span_id) : null;
+    if (parent && parent !== node) parent.children.push(node);
+    else roots.push(node);
+  }
+  const byStart = (a, b) => new Date(a.started_at || 0) - new Date(b.started_at || 0);
+  roots.sort(byStart);
+  const rows = [];
+  function walk(node, depth) {
+    const collapsed = collapsedSpans.value.has(node.span_id);
+    rows.push({ span: node, depth, hasChildren: node.children.length > 0, collapsed });
+    if (!collapsed) {
+      node.children.sort(byStart);
+      for (const child of node.children) walk(child, depth + 1);
+    }
+  }
+  roots.forEach((root) => walk(root, 0));
+  return rows;
+});
+const selectedSpan = computed(() => spans.value.find((span) => span.span_id === selectedSpanId.value) || null);
+const nodeContent = computed(() => {
+  const span = selectedSpan.value;
+  if (!span) return "";
+  if (detailTab.value === "input") return pretty(span.input_json);
+  if (detailTab.value === "output") return pretty(span.output_json);
+  return pretty({
+    kind: span.kind,
+    run_type: span.run_type,
+    status: span.status,
+    model: span.model,
+    latency_ms: span.latency_ms,
+    prompt_tokens: span.prompt_tokens,
+    completion_tokens: span.completion_tokens,
+    total_tokens: span.total_tokens,
+    started_at: span.started_at,
+    ended_at: span.ended_at,
+    error_text: span.error_text,
+    meta: span.meta,
+  });
+});
+
+function pretty(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+function spanKindLabel(span) {
+  const kind = String(span?.kind || span?.run_type || "node");
+  return kind;
+}
+function spanDuration(span) {
+  return ms(span?.latency_ms);
+}
+function spanMatches(span) {
+  return span?.span_id === selectedSpanId.value;
+}
+function selectSpan(span) {
+  selectedSpanId.value = span.span_id;
+}
+function toggleSpan(span) {
+  const next = new Set(collapsedSpans.value);
+  if (next.has(span.span_id)) next.delete(span.span_id);
+  else next.add(span.span_id);
+  collapsedSpans.value = next;
+}
 
 function eventLabel(event) {
   const name = String(event?.event || "");
@@ -132,6 +210,9 @@ async function openTrace(item) {
   detailLoading.value = true;
   try {
     detail.value = await getJson(`/api/admin/agent-traces/${encodeURIComponent(traceId)}`);
+    selectedSpanId.value = detail.value?.spans?.[0]?.span_id || "";
+    detailTab.value = "input";
+    collapsedSpans.value = new Set();
   } catch (e) {
     detailError.value = e?.detail || e?.message || "Trace 详情加载失败";
   } finally {
@@ -141,6 +222,8 @@ async function openTrace(item) {
 function closeDetail() {
   detail.value = null;
   detailError.value = "";
+  selectedSpanId.value = "";
+  collapsedSpans.value = new Set();
 }
 function onKeydown(e) {
   if (e.key === "Escape" && detail.value) closeDetail();
@@ -259,20 +342,66 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           <p class="obs-trace-id">trace_id：{{ detail.trace_id }}</p>
           <p v-if="traceMeta.request_id" class="obs-trace-id">request_id：{{ traceMeta.request_id }} · execution_id：{{ traceMeta.execution_id }}</p>
 
-          <h4 class="obs-section-title">执行时间线</h4>
-          <ol class="obs-timeline">
-            <li v-for="(event, idx) in events" :key="idx" class="obs-timeline-item" :class="eventClass(event)">
-              <span class="obs-dot" aria-hidden="true" />
-              <div class="obs-event-body">
-                <div class="obs-event-head">
-                  <b>{{ eventLabel(event) }}</b>
-                  <span v-if="eventDuration(event)" class="obs-event-duration">{{ eventDuration(event) }}</span>
-                </div>
-                <p v-if="eventDetail(event)" class="obs-event-detail">{{ eventDetail(event) }}</p>
+          <template v-if="spans.length">
+            <h4 class="obs-section-title">Trace Tree</h4>
+            <div class="obs-tree">
+              <div
+                v-for="row in treeRows"
+                :key="row.span.span_id"
+                class="obs-tree-row"
+                :class="{ 'is-selected': spanMatches(row.span) }"
+                :style="{ paddingLeft: `${12 + row.depth * 18}px` }"
+                tabindex="0"
+                @click="selectSpan(row.span)"
+                @keyup.enter="selectSpan(row.span)"
+              >
+                <button
+                  v-if="row.hasChildren"
+                  type="button"
+                  class="obs-tree-toggle"
+                  :aria-label="row.collapsed ? '展开节点' : '收起节点'"
+                  @click.stop="toggleSpan(row.span)"
+                >{{ row.collapsed ? "▸" : "▾" }}</button>
+                <span v-else class="obs-tree-toggle is-empty" aria-hidden="true" />
+                <span class="obs-node-kind" :class="`is-${row.span.kind}`">{{ spanKindLabel(row.span) }}</span>
+                <span class="obs-node-name">{{ row.span.name }}</span>
+                <span class="obs-node-meta">{{ spanDuration(row.span) }}<template v-if="row.span.total_tokens"> · {{ num(row.span.total_tokens) }} tok</template></span>
               </div>
-            </li>
-            <li v-if="!events.length" class="field-hint">暂无事件记录（旧版本 trace 可能只有汇总）</li>
-          </ol>
+            </div>
+
+            <div v-if="selectedSpan" class="obs-node-card">
+              <div class="obs-node-card-head">
+                <div>
+                  <b>{{ selectedSpan.name }}</b>
+                  <span class="obs-status" :class="statusClass(selectedSpan.status)">{{ statusText(selectedSpan.status) }}</span>
+                </div>
+                <span class="obs-node-meta">{{ spanDuration(selectedSpan) }}</span>
+              </div>
+              <div class="obs-tabs" role="tablist">
+                <button type="button" role="tab" :class="{ 'is-active': detailTab === 'input' }" @click="detailTab = 'input'">Input</button>
+                <button type="button" role="tab" :class="{ 'is-active': detailTab === 'output' }" @click="detailTab = 'output'">Output</button>
+                <button type="button" role="tab" :class="{ 'is-active': detailTab === 'metadata' }" @click="detailTab = 'metadata'">Metadata</button>
+              </div>
+              <pre class="obs-pre obs-node-content">{{ nodeContent || "—" }}</pre>
+            </div>
+          </template>
+
+          <template v-else>
+            <h4 class="obs-section-title">执行时间线</h4>
+            <ol class="obs-timeline">
+              <li v-for="(event, idx) in events" :key="idx" class="obs-timeline-item" :class="eventClass(event)">
+                <span class="obs-dot" aria-hidden="true" />
+                <div class="obs-event-body">
+                  <div class="obs-event-head">
+                    <b>{{ eventLabel(event) }}</b>
+                    <span v-if="eventDuration(event)" class="obs-event-duration">{{ eventDuration(event) }}</span>
+                  </div>
+                  <p v-if="eventDetail(event)" class="obs-event-detail">{{ eventDetail(event) }}</p>
+                </div>
+              </li>
+              <li v-if="!events.length" class="field-hint">暂无事件记录（旧版本 trace 可能只有汇总）</li>
+            </ol>
+          </template>
 
           <template v-if="traceMeta.error">
             <h4 class="obs-section-title">错误</h4>
@@ -339,6 +468,28 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 .obs-event-detail { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; word-break: break-word; }
 .obs-pre { margin: 0; padding: 12px; max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .obs-error { border-color: #fecaca; background: #fff7f7; color: #991b1b; }
+.obs-tree { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.obs-tree-row { display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 6px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; }
+.obs-tree-row:last-child { border-bottom: 0; }
+.obs-tree-row:hover { background: var(--surface-2); }
+.obs-tree-row.is-selected { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); }
+.obs-tree-toggle { flex: 0 0 20px; width: 20px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.obs-tree-toggle.is-empty { display: inline-block; }
+.obs-node-kind { flex: 0 0 auto; padding: 1px 6px; border-radius: 5px; background: var(--surface-3); color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.obs-node-kind.is-llm { background: #eef2ff; color: #4338ca; }
+.obs-node-kind.is-tool { background: #ecfdf3; color: #166534; }
+.obs-node-kind.is-chain { background: #f1f5f9; color: #475569; }
+.obs-node-kind.is-agent { background: #fff7ed; color: #9a3412; }
+.obs-node-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.obs-node-meta { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.obs-node-card { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.obs-node-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.obs-node-card-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.obs-node-card-head b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.obs-tabs { display: flex; gap: 4px; margin: 10px 0 8px; border-bottom: 1px solid var(--border); }
+.obs-tabs button { padding: 5px 9px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+.obs-tabs button.is-active { border-bottom-color: var(--primary); color: var(--text); }
+.obs-node-content { max-height: 300px; background: var(--surface); }
 @media (max-width: 900px) {
   .obs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .obs-detail-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -84,6 +84,85 @@ def agent_scope(dataset: str, account: dict[str, Any] | None) -> str:
     return f"{dataset}:{principal}"
 
 
+def _build_agent_spans(
+    trace_id: str,
+    *,
+    query: str,
+    result: dict[str, Any],
+    elapsed_ms: int,
+) -> list[dict[str, Any]]:
+    """把 event_trace 转成 LangSmith 风格的层级 span。"""
+    events = result.get("event_trace") or []
+    root_id = f"{trace_id}:root"
+    now = time.time()
+    root_started = next(
+        (float(e["timestamp"]) for e in events if e.get("event") == "run_started" and e.get("timestamp")),
+        now - max(0, elapsed_ms) / 1000,
+    )
+    final_status = str(result.get("status") or "")
+    root_status = "success" if final_status == "COMPLETED" else "error"
+    spans: list[dict[str, Any]] = [{
+        "span_id": root_id,
+        "parent_span_id": None,
+        "kind": "agent",
+        "run_type": "agent",
+        "name": "agent.execute",
+        "status": root_status,
+        "latency_ms": elapsed_ms,
+        "started_at": root_started,
+        "ended_at": root_started + max(0, elapsed_ms) / 1000,
+        "total_tokens": int(result.get("total_tokens") or 0),
+        "input_json": {"question": query},
+        "output_json": {"final_answer": str(result.get("final_answer") or "")},
+        "meta": {"status": final_status, "error": str(result.get("error") or "")},
+    }]
+    starts: dict[str, dict[str, Any]] = {}
+    for event in events:
+        event_name = str(event.get("event") or "")
+        run_id = str(event.get("run_id") or "")
+        if not run_id:
+            continue
+        if event_name.endswith("_started"):
+            starts[run_id] = event
+            continue
+        if not (event_name.endswith("_finished") or event_name.endswith("_failed")):
+            continue
+        start = starts.pop(run_id, {})
+        kind = event_name.split("_", 1)[0]
+        parent = str(start.get("parent_run_id") or "")
+        parent_span_id = f"{trace_id}:{parent}" if parent and parent != "None" else root_id
+        started_ts = float(start.get("timestamp") or (now - elapsed_ms / 1000))
+        ended_ts = float(event.get("timestamp") or now)
+        status = "error" if event_name.endswith("_failed") else "success"
+        input_text = start.get("input_text") or start.get("input_preview") or ""
+        output_text = event.get("output_text") or event.get("output_preview") or ""
+        input_json: dict[str, Any] = {"text": str(input_text)}
+        output_json: dict[str, Any] = {"text": str(output_text)}
+        if kind == "llm" and start.get("prompt_chars") is not None:
+            input_json["prompt_chars"] = int(start.get("prompt_chars") or 0)
+        if event.get("error"):
+            output_json["error"] = str(event.get("error"))
+        spans.append({
+            "span_id": f"{trace_id}:{run_id}",
+            "parent_span_id": parent_span_id,
+            "kind": kind,
+            "run_type": kind,
+            "name": str(event.get("name") or start.get("name") or kind),
+            "model": start.get("model") or event.get("model"),
+            "prompt_tokens": int(event.get("prompt_tokens") or 0),
+            "completion_tokens": int(event.get("completion_tokens") or 0),
+            "total_tokens": int(event.get("total_tokens") or 0),
+            "latency_ms": int(round(float(event.get("duration_ms") or (ended_ts - started_ts) * 1000))),
+            "status": status,
+            "error_text": str(event.get("error") or ""),
+            "started_at": started_ts,
+            "ended_at": ended_ts,
+            "input_json": input_json,
+            "output_json": output_json,
+        })
+    return spans
+
+
 def _record_agent_monitor(
     trace_id: str,
     *,
@@ -110,6 +189,10 @@ def _record_agent_monitor(
         "attempts": result.get("attempts") or [],
         "retried": bool(result.get("retried")),
     }
+    ai_monitor.record_agent_spans(
+        trace_id,
+        _build_agent_spans(trace_id, query=query, result=result, elapsed_ms=elapsed_ms),
+    )
     ai_monitor.record_trace_usage(
         trace_id,
         total_tokens=int(result.get("total_tokens") or 0),
