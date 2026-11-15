@@ -78,3 +78,22 @@ web build
 ![评测中心](docs/design/eval-center-rag.png)
 
 ![Agent 实验](docs/design/eval-center-agent.png)
+## 业务 Trace → Agent 输入/输出
+
+`业务请求` 里的 Agent Trace 抽屉新增：
+
+```text
+查看 Agent 输入/输出
+```
+
+点击后跳到：
+
+```text
+/monitor-center?tab=agent&trace=<trace_id>
+```
+
+自动打开同一 Trace 的 Agent 节点树，可查看 Input / Output / Metadata。
+
+截图：
+
+![业务 Trace 跳 Agent 输入输出](docs/design/agent-trace-io-from-monitor.png)
