@@ -220,3 +220,49 @@ def test_admin_agent_comm_approval_decision(monkeypatch):
     )
     assert data["status"] == "APPROVED"
     assert data["note"] == "同意"
+
+
+def test_agent_comm_remote_health_public():
+    data = monitor.agent_comm_remote_health()
+    assert data["ok"] is True
+    assert "whoami" in data["actions"]
+
+
+def test_agent_comm_remote_requires_token(monkeypatch):
+    class _Req:
+        headers = {}
+
+    monkeypatch.setenv("AGENT_COMM_REMOTE_TOKEN", "secret")
+    with pytest.raises(HTTPException) as exc:
+        monitor.agent_comm_remote(_Req(), monitor.RemoteCommIn(action="whoami"))
+    assert exc.value.status_code == 401
+
+
+def test_agent_comm_remote_whoami(monkeypatch):
+    class _Req:
+        headers = {"authorization": "Bearer secret"}
+
+    class _Store:
+        def whoami(self):
+            return {"agent_id": "workbuddy", "capabilities": ["coordination"]}
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("AGENT_COMM_REMOTE_TOKEN", "secret")
+    monkeypatch.setenv("AGENT_COMM_REMOTE_AGENT_ID", "workbuddy")
+    monkeypatch.setattr(monitor, "_remote_store", lambda agent_id: _Store())
+    data = monitor.agent_comm_remote(_Req(), monitor.RemoteCommIn(action="whoami"))
+    assert data["agent_id"] == "workbuddy"
+    assert data["data"]["agent_id"] == "workbuddy"
+
+
+def test_agent_comm_remote_rejects_bad_action(monkeypatch):
+    class _Req:
+        headers = {"authorization": "Bearer secret"}
+
+    monkeypatch.setenv("AGENT_COMM_REMOTE_TOKEN", "secret")
+    monkeypatch.setenv("AGENT_COMM_REMOTE_AGENT_ID", "workbuddy")
+    with pytest.raises(HTTPException) as exc:
+        monitor.agent_comm_remote(_Req(), monitor.RemoteCommIn(action="drop_database"))
+    assert exc.value.status_code == 400

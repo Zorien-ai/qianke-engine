@@ -2,10 +2,13 @@
 """AI 实时监控 / Token 账单 / 管理端接口。"""
 from __future__ import annotations
 
+import hmac
+import json
 import logging
+import os
 import threading
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -80,6 +83,11 @@ class AgentExperimentIn(BaseModel):
 class AgentCommApprovalIn(BaseModel):
     action: str
     note: str = ""
+
+
+class RemoteCommIn(BaseModel):
+    action: str
+    params: dict = {}
 
 
 # ==================== 监控 ====================
@@ -405,6 +413,126 @@ def admin_agent_comm_purge() -> dict:
     store = open_admin_store()
     try:
         return store.purge_expired()
+    finally:
+        store.close()
+
+
+REMOTE_ACTIONS = {
+    "whoami": "当前身份和固定能力",
+    "list_agents": "列出全部 Agent 与能力",
+    "create_room": "创建群组，params.name",
+    "join_room": "加入群组，params.room_id",
+    "list_rooms": "列出已加入群组",
+    "send": "发消息，params.to 或 room_id，content",
+    "read": "读取未读消息，params.cursor/limit 可选",
+    "ack": "确认消息，params.message_ids",
+    "propose_task": "按能力提出任务，params.title/required_capabilities/risk/mode",
+    "list_tasks": "列出任务，params.limit 可选",
+    "task_status": "查看任务，params.task_id",
+}
+
+
+def _remote_agent(request: Request) -> str:
+    expected = os.environ.get("AGENT_COMM_REMOTE_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="远端 Agent Comm 未配置 Token")
+    auth = request.headers.get("authorization", "")
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="需要 Bearer Token")
+    if not hmac.compare_digest(token.strip(), expected):
+        raise HTTPException(status_code=401, detail="Token 无效")
+    return os.environ.get("AGENT_COMM_REMOTE_AGENT_ID", "workbuddy").strip() or "workbuddy"
+
+
+def _remote_store(agent_id: str):
+    from rag_demo.mcp_agent_comm.store import AgentCommStore
+
+    return AgentCommStore(agent_id=agent_id)
+
+
+@router.get("/agent-comm/remote/health")
+def agent_comm_remote_health() -> dict:
+    return {
+        "ok": True,
+        "service": "qianke-agent-comm-remote",
+        "auth": "bearer",
+        "actions": list(REMOTE_ACTIONS.keys()),
+    }
+
+
+@router.get("/agent-comm/remote/tools")
+def agent_comm_remote_tools(request: Request) -> dict:
+    agent_id = _remote_agent(request)
+    return {"ok": True, "agent_id": agent_id, "actions": REMOTE_ACTIONS}
+
+
+@router.post("/agent-comm/remote")
+def agent_comm_remote(request: Request, payload: RemoteCommIn) -> dict:
+    agent_id = _remote_agent(request)
+    from rag_demo.mcp_agent_comm.store import CommError
+
+    action = str(payload.action or "").strip()
+    params = payload.params if isinstance(payload.params, dict) else {}
+    if action not in REMOTE_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"未知 action: {action}")
+    store = _remote_store(agent_id)
+    try:
+        if action == "whoami":
+            data = store.whoami()
+        elif action == "list_agents":
+            data = store.list_agents()
+        elif action == "create_room":
+            data = store.create_room(str(params.get("name") or ""))
+        elif action == "join_room":
+            data = store.join_room(str(params.get("room_id") or ""))
+        elif action == "list_rooms":
+            data = store.list_rooms()
+        elif action == "send":
+            content = params.get("content")
+            blob = json.dumps(content, ensure_ascii=False) if isinstance(content, (dict, list)) else str(content or "")
+            if len(blob) > 20000:
+                raise CommError("CONTENT_TOO_LARGE", "单条消息正文超过 20000 字符")
+            data = store.send(
+                to=params.get("to"),
+                room_id=params.get("room_id"),
+                kind=str(params.get("kind") or "chat"),
+                content=content if isinstance(content, dict) else {"text": str(content or "")},
+                correlation_id=params.get("correlation_id"),
+                reply_to=params.get("reply_to"),
+            )
+        elif action == "read":
+            cursor = params.get("cursor")
+            data = store.read(
+                cursor=int(cursor) if cursor is not None else None,
+                limit=int(params.get("limit") or 20),
+            )
+        elif action == "ack":
+            ids = params.get("message_ids") or []
+            if not isinstance(ids, list):
+                raise CommError("INVALID_ARGUMENT", "message_ids 必须是数组")
+            data = store.ack([str(item) for item in ids])
+        elif action == "propose_task":
+            caps = params.get("required_capabilities") or []
+            if not isinstance(caps, list):
+                raise CommError("INVALID_ARGUMENT", "required_capabilities 必须是数组")
+            data = store.propose_task(
+                title=str(params.get("title") or ""),
+                instruction=str(params.get("instruction") or ""),
+                required_capabilities=[str(item) for item in caps],
+                risk=str(params.get("risk") or "low"),
+                mode=str(params.get("mode") or "auto"),
+            )
+        elif action == "list_tasks":
+            data = store.list_tasks(limit=int(params.get("limit") or 20))
+        else:  # task_status
+            data = store.task_status(str(params.get("task_id") or ""))
+        logger.info("remote agent comm action=%s agent=%s", action, agent_id)
+        return {"ok": True, "agent_id": agent_id, "data": data}
+    except CommError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         store.close()
 

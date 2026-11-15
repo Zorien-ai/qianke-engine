@@ -25,6 +25,14 @@
       "auto_accept": true
     },
     {
+      "agent_id": "workbuddy",
+      "display_name": "WorkBuddy 外部协作助手",
+      "capabilities": ["coordination", "review", "ui_audit"],
+      "max_risk": "low",
+      "owner": "owner",
+      "auto_accept": true
+    },
+    {
       "agent_id": "codex",
       "display_name": "Codex UI 验收 Agent",
       "capabilities": ["review", "ui_audit"],
