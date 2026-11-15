@@ -1339,29 +1339,82 @@ function workItemSummary(item) {
   return String(result);
 }
 
-/** 安全渲染 Markdown 风格结论：先整体转义 HTML，再按行还原换行/简单列表，不注入原文 HTML */
+/** 安全渲染 Markdown 风格结论：先整体转义 HTML，再还原简单表格/加粗/列表，不注入原文 HTML */
+function splitTableRow(line) {
+  const text = String(line || "").trim().replace(/^\|/, "").replace(/\|$/, "");
+  return text.split("|").map((cell) => cell.trim());
+}
+
+function isTableSeparator(line) {
+  const cells = splitTableRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function renderInlineMarkdown(value) {
+  return String(value || "")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+}
+
 function renderSafeText(value) {
-  const escapedLines = escapeHtml(value).split(/\r?\n/);
+  const lines = escapeHtml(value).split(/\r?\n/);
   const blocks = [];
-  for (const line of escapedLines) {
-    const trimmed = line.trim();
+  let index = 0;
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
     if (!trimmed) {
       blocks.push('<p class="b-md-gap"></p>');
+      index += 1;
       continue;
     }
+    if (trimmed.includes("|")) {
+      // 模型常把表格行之间插空行；Markdown 标准会断开表格，这里容忍空行继续识别。
+      let cursor = index + 1;
+      while (cursor < lines.length && !lines[cursor].trim()) cursor += 1;
+      if (cursor < lines.length && isTableSeparator(lines[cursor])) {
+        const headers = splitTableRow(trimmed);
+        cursor += 1;
+        const rows = [];
+        while (cursor < lines.length) {
+          if (!lines[cursor].trim()) {
+            let next = cursor + 1;
+            while (next < lines.length && !lines[next].trim()) next += 1;
+            if (next < lines.length && lines[next].includes("|")) {
+              cursor = next;
+              continue;
+            }
+            break;
+          }
+          if (!lines[cursor].includes("|")) break;
+          rows.push(splitTableRow(lines[cursor]));
+          cursor += 1;
+        }
+        const head = headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join("");
+        const body = rows.map((cells) => `<tr>${headers.map((_, cellIndex) => `<td>${renderInlineMarkdown(cells[cellIndex] || "")}</td>`).join("")}</tr>`).join("");
+        blocks.push(`<div class="b-md-table-wrap"><table class="b-md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
+        index = cursor;
+        continue;
+      }
+    }
     if (/^[-*]\s+/.test(trimmed)) {
-      blocks.push(`<p class="b-md-li">• ${trimmed.replace(/^[-*]\s+/, "")}</p>`);
+      blocks.push(`<p class="b-md-li">• ${renderInlineMarkdown(trimmed.replace(/^[-*]\s+/, ""))}</p>`);
+      index += 1;
       continue;
     }
     if (/^\d+\.\s+/.test(trimmed)) {
-      blocks.push(`<p class="b-md-li">${trimmed}</p>`);
+      blocks.push(`<p class="b-md-li">${renderInlineMarkdown(trimmed)}</p>`);
+      index += 1;
       continue;
     }
     if (/^#{1,6}\s+/.test(trimmed)) {
-      blocks.push(`<p class="b-md-h">${trimmed.replace(/^#{1,6}\s+/, "")}</p>`);
+      blocks.push(`<p class="b-md-h">${renderInlineMarkdown(trimmed.replace(/^#{1,6}\s+/, ""))}</p>`);
+      index += 1;
       continue;
     }
-    blocks.push(`<p class="b-md-p">${trimmed}</p>`);
+    blocks.push(`<p class="b-md-p">${renderInlineMarkdown(trimmed)}</p>`);
+    index += 1;
   }
   return blocks.join("");
 }
