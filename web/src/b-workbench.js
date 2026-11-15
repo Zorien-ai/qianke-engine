@@ -2886,6 +2886,14 @@ function profileQueryView() {
   </section>`;
 }
 
+function productCoverUrl(product) {
+  const direct = String(product?.image_url || "").trim();
+  if (direct) return direct;
+  const images = Array.isArray(product?.images) ? product.images : [];
+  const first = images[0];
+  return String(first?.thumb_url || first?.url || "").trim();
+}
+
 function productTableRow(product) {
   const skus = Array.isArray(product.skus) ? product.skus : [];
   const prices = skus.map((sku) => Number(sku.price)).filter((value) => Number.isFinite(value));
@@ -2899,8 +2907,13 @@ function productTableRow(product) {
     return safety > 0 && Number(sku.available_qty ?? 0) <= safety;
   }).length;
   const status = String(product.status || "").toUpperCase();
+  const cover = productCoverUrl(product);
+  const initial = escapeHtml(text(product.title || product.name, "商品").slice(0, 1));
   return `<tr>
-    <td><strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong><br /><small><code class="b-mono">${escapeHtml(text(product.product_id))}</code> · ${escapeHtml(text(product.category))}</small></td>
+    <td><div class="b-product-cell">
+      <span class="b-product-cell-thumb">${cover ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(text(product.title || product.name))}" loading="lazy" />` : `<span>${initial}</span>`}</span>
+      <span><strong>${escapeHtml(text(product.title || product.name, "商品"))}</strong><br /><small><code class="b-mono">${escapeHtml(text(product.product_id))}</code> · ${escapeHtml(text(product.category))}</small></span>
+    </div></td>
     <td>${status === "ACTIVE" ? "在售" : escapeHtml(status || "—")}</td>
     <td class="b-num">${skus.length}</td>
     <td class="b-num">${escapeHtml(priceText)}</td>
