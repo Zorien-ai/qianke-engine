@@ -184,6 +184,12 @@ const modeLabel = computed(() => {
 });
 
 onMounted(async () => {
+  // 商家账号统一进 B 端工作台：即使登录页脚本/缓存把用户送到 A 端，
+  // 也不要把商家留在管理控制台。
+  if (merchant.value && !store.account?.is_system_admin) {
+    window.location.replace("/v2/b.html");
+    return;
+  }
   if (hasCap("stats")) {
     statsLoading.value = true;
     try {
