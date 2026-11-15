@@ -2632,6 +2632,7 @@ function profileCardHtml(card) {
   const confidence = Number(card.confidence || 0);
   const hasOrder = card.source === "qianke" ? Boolean(card.has_order) : orderCount > 0;
   const hasChat = card.source === "qianke" ? Boolean(card.has_chat) : false;
+  const hasBase = Boolean(card.has_base || fields.gender || fields.age || fields.city || fields.member_level);
   const thirdLabel = card.source === "imported" ? "品类" : "累计";
   const thirdValue = card.source === "imported" ? text(fields.top_category) : money(stats.total_amount);
   const statCells = orderCount
@@ -2652,7 +2653,7 @@ function profileCardHtml(card) {
       </div>
       ${confidence > 0 ? `<span class="b-badge is-info">${Math.round(confidence * 100)}%</span>` : ""}
     </header>
-    ${(hasOrder || hasChat) ? `<div class="b-profile-item-tags">${hasOrder ? "<span>订单</span>" : ""}${hasChat ? "<span>会话</span>" : ""}${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : (tags.length ? `<div class="b-profile-item-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : "")}
+    ${(hasBase || hasOrder || hasChat) ? `<div class="b-profile-item-tags">${hasBase ? "<span>基础</span>" : ""}${hasOrder ? "<span>消费</span>" : ""}${hasChat ? "<span>会话</span>" : ""}${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : (tags.length ? `<div class="b-profile-item-tags">${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}</div>` : "")}
     ${statCells}
     ${meta.length ? `<p class="b-profile-item-meta">${meta.map((item) => escapeHtml(String(item))).join(" · ")}</p>` : ""}
   </article>`;
@@ -2716,7 +2717,26 @@ function profileDetailHtml() {
     || (state.profileAnswer?.cards || []).find((item) => profileCardKey(item) === state.profileDetailKey);
   if (!card) return "";
   const chat = card.chat && typeof card.chat === "object" ? card.chat : {};
-  const sections = [
+  const attributes = card.attributes && typeof card.attributes === "object" ? card.attributes : {};
+  const fields = card.fields || {};
+  const stats = card.stats || {};
+  const orderCount = Number(stats.order_count || 0);
+  const baseRows = [
+    ["性别", attributes.gender || fields.gender],
+    ["年龄段", attributes.age_range || fields.age],
+    ["城市", attributes.city || fields.city],
+    ["会员等级", attributes.member_level || fields.member_level],
+    ["注册时间", attributes.registered_at],
+    ["属性来源", attributes.source],
+  ].filter(([, value]) => value !== null && value !== undefined && String(value).trim());
+  const consumptionRows = [
+    ["订单数", orderCount ? `${orderCount} 笔` : "0 笔"],
+    ["累计消费", money(stats.total_amount)],
+    ["客单价", money(stats.avg_amount)],
+    ["最近下单", stats.last_order_at ? timeText(stats.last_order_at) : "—"],
+    ["偏好品类", fields.top_category || "—"],
+  ];
+  const conversationSections = [
     profileSection("目标与需求", profileArray(chat.needs)),
     profileSection("偏好", profileArray(chat.preferences)),
     profileSection("顾虑与边界", profileArray(chat.boundaries), 3),
@@ -2724,18 +2744,35 @@ function profileDetailHtml() {
     chat.purchase_stage ? `<section class="b-profile-section"><h4>阶段</h4><p>${escapeHtml(profileShort(chat.purchase_stage, 40))}</p></section>` : "",
     profileSection("待确认问题", profileArray(chat.open_questions), 5),
   ].join("");
+  const recentMessages = profileArray(chat.recent_messages);
+  const recentMarkup = recentMessages.length
+    ? `<section class="b-profile-section"><h4>最近会话</h4><ul>${recentMessages.slice(0, 5).map((item) => `<li title="${escapeHtml(item)}">${escapeHtml(profileShort(item, 90))}</li>`).join("")}</ul></section>`
+    : "";
+  const baseMarkup = baseRows.length
+    ? `<dl class="b-profile-meta b-profile-base">${baseRows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd></div>`).join("")}</dl>`
+    : `<p class="b-profile-empty">暂无冷启动属性。</p>`;
+  const consumptionMarkup = `<dl class="b-profile-meta b-profile-consumption">${consumptionRows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd></div>`).join("")}</dl>`;
+  const sessionMarkup = (conversationSections || recentMarkup)
+    ? `${conversationSections}${recentMarkup}`
+    : `<p class="b-profile-empty">暂无会话记录。</p>`;
   return `<section class="b-card b-profile-detail" aria-label="用户详情">
     <header class="b-profile-detail-head">
       <div><strong>${escapeHtml(text(card.user_id, "未命名用户"))}</strong><span class="b-muted">${escapeHtml(profileSourceLabel(card.source))}</span></div>
       <button type="button" class="b-btn b-btn-ghost" data-profile-detail-close>关闭</button>
     </header>
-    ${sections || `<p class="b-profile-empty">该用户暂无结构化会话画像。</p>`}
-    <dl class="b-profile-meta">
-      <div><dt>订单</dt><dd>${Number(card.stats?.order_count || 0)}</dd></div>
-      <div><dt>客单价</dt><dd>${money(card.stats?.avg_amount)}</dd></div>
-      <div><dt>最近下单</dt><dd>${escapeHtml(timeText(card.stats?.last_order_at))}</dd></div>
-      <div><dt>更新</dt><dd>${escapeHtml(timeText(card.updated_at))}</dd></div>
-    </dl>
+    <section class="b-profile-layer" data-profile-layer="cold">
+      <h3><span>1</span>冷启动属性</h3>
+      ${baseMarkup}
+    </section>
+    <section class="b-profile-layer" data-profile-layer="order">
+      <h3><span>2</span>消费记录</h3>
+      ${consumptionMarkup}
+    </section>
+    <section class="b-profile-layer" data-profile-layer="chat">
+      <h3><span>3</span>会话记录</h3>
+      ${sessionMarkup}
+    </section>
+    <p class="b-profile-updated">更新：${escapeHtml(timeText(card.updated_at))}</p>
   </section>`;
 }
 

@@ -324,12 +324,25 @@ def qianke_profile_search(merchant_id: str, question: str, *, limit: int = 10) -
 
 
 def _card_from_qianke(row: dict[str, Any]) -> dict[str, Any]:
-    chat = row.get("chat_profile") or {}
+    chat = dict(row.get("chat_profile") or {})
+    profile = row.get("profile") or {}
+    # 会话层：结构化画像不存在时，千客池仍保留最近会话摘要作为确定性证据。
+    if isinstance(profile, dict):
+        profile_chat = profile.get("chat")
+        if isinstance(profile_chat, dict) and profile_chat.get("recent_messages") and not chat.get("recent_messages"):
+            chat["recent_messages"] = profile_chat["recent_messages"]
+    attributes = profile.get("attributes") if isinstance(profile, dict) else {}
+    if not isinstance(attributes, dict):
+        attributes = {}
     tags: list[str] = []
     for value in (chat.get("needs") or []) + (chat.get("preferences") or []):
         text = str(value or "").strip()
         if text and text not in tags:
             tags.append(text)
+    for value in (attributes.get("member_level"), attributes.get("city")):
+        value = str(value or "").strip()
+        if value and value not in tags:
+            tags.append(value)
     if row.get("top_category"):
         tags.append(str(row["top_category"]))
     return {
@@ -344,18 +357,22 @@ def _card_from_qianke(row: dict[str, Any]) -> dict[str, Any]:
             "last_order_at": row.get("last_order_at"),
         },
         "fields": {
-            "age": None,
-            "gender": None,
-            "city": None,
-            "member_level": None,
+            "age": attributes.get("age_range") or None,
+            "gender": attributes.get("gender") or None,
+            "city": attributes.get("city") or None,
+            "member_level": attributes.get("member_level") or None,
             "top_category": row.get("top_category"),
             "days_since_last_buy": None,
+            "registered_at": attributes.get("registered_at") or None,
+            "source": attributes.get("source") or None,
         },
         "chat": chat,
+        "attributes": attributes,
         "confidence": row.get("confidence"),
         "updated_at": row.get("updated_at"),
         "has_order": bool(row.get("has_order")),
         "has_chat": bool(row.get("has_chat")),
+        "has_base": bool(attributes),
     }
 
 

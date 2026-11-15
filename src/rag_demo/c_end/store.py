@@ -701,6 +701,17 @@ CREATE TABLE IF NOT EXISTS c_merchant_member (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_user_attribute (
+    owner_id     TEXT PRIMARY KEY,
+    gender       TEXT NOT NULL DEFAULT '',
+    age_range    TEXT NOT NULL DEFAULT '',
+    city         TEXT NOT NULL DEFAULT '',
+    member_level TEXT NOT NULL DEFAULT '',
+    registered_at TEXT,
+    source       TEXT NOT NULL DEFAULT 'seed',
+    updated_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS c_merchant_store_friend (
     merchant_id TEXT NOT NULL,
     friend_id   TEXT NOT NULL UNIQUE,
@@ -4915,6 +4926,50 @@ def search_chat_user_profiles(
 # ---------------------------------------------------------------------------
 # B 端千客用户池：会话 + 交易并集（按商户隔离）
 # ---------------------------------------------------------------------------
+
+def get_user_attributes(owner_id: str) -> dict[str, Any] | None:
+    """读取 C 端冷启动属性；buyer 未补属性时返回 None。"""
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_user_attribute WHERE owner_id = ?", (str(owner_id),)
+        ).fetchone()
+        return dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def upsert_user_attributes(
+    owner_id: str,
+    *,
+    gender: str = "",
+    age_range: str = "",
+    city: str = "",
+    member_level: str = "",
+    registered_at: str | None = None,
+    source: str = "seed",
+) -> dict[str, Any]:
+    """写入冷启动属性；用于注册补全、导入或演示种子。"""
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_user_attribute(owner_id, gender, age_range, city, member_level, "
+            "registered_at, source, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(owner_id) DO UPDATE SET gender = excluded.gender, "
+            "age_range = excluded.age_range, city = excluded.city, "
+            "member_level = excluded.member_level, registered_at = excluded.registered_at, "
+            "source = excluded.source, updated_at = excluded.updated_at",
+            (str(owner_id), str(gender or ""), str(age_range or ""), str(city or ""),
+             str(member_level or ""), registered_at, str(source or "seed"), now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_user_attributes(owner_id) or {}
+
 
 def _qianke_profile_key(merchant_id: str, buyer_id: str) -> str:
     return f"{str(merchant_id).strip()}:{str(buyer_id).strip()}"

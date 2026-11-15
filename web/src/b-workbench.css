@@ -3847,3 +3847,42 @@ button.b-text-link {
     flex-direction: column;
   }
 }
+
+.b-profile-layer {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--b-line);
+  border-radius: 10px;
+  background: var(--b-soft);
+}
+.b-profile-layer h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 9px;
+  font-size: 14px;
+}
+.b-profile-layer h3 span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--b-accent);
+  color: #fff;
+  font-size: 11px;
+}
+.b-profile-layer .b-profile-meta {
+  margin: 0;
+  padding: 0;
+}
+.b-profile-layer .b-profile-empty {
+  margin: 0;
+}
+.b-profile-updated {
+  margin: 0;
+  color: var(--b-muted);
+  font-size: 11px;
+  text-align: right;
+}
