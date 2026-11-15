@@ -51,6 +51,11 @@ DDL = [
         reasoning_tokens BIGINT NOT NULL DEFAULT 0,
         total_tokens BIGINT NOT NULL DEFAULT 0,
         cost_amount NUMERIC(14, 6) NOT NULL DEFAULT 0,
+        tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+        feedback_score INTEGER,
+        feedback_comment TEXT,
+        feedback_by TEXT,
+        feedback_at TIMESTAMPTZ,
         meta JSONB NOT NULL DEFAULT '{}'::jsonb
     )
     """,
@@ -191,6 +196,11 @@ MIGRATIONS = [
     "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS input_json JSONB",
     "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS output_json JSONB",
     "CREATE INDEX IF NOT EXISTS ai_spans_parent ON ai_spans (trace_id, parent_span_id)",
+    "ALTER TABLE ai_traces ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "ALTER TABLE ai_traces ADD COLUMN IF NOT EXISTS feedback_score INTEGER",
+    "ALTER TABLE ai_traces ADD COLUMN IF NOT EXISTS feedback_comment TEXT",
+    "ALTER TABLE ai_traces ADD COLUMN IF NOT EXISTS feedback_by TEXT",
+    "ALTER TABLE ai_traces ADD COLUMN IF NOT EXISTS feedback_at TIMESTAMPTZ",
 ]
 
 SEED_PRICES = [
@@ -744,9 +754,11 @@ def trace_detail(tenant: str, trace_id: str, admin: bool = False) -> dict | None
             d["total_tokens"] = int(d["total_tokens"] or 0)
             spans.append(d)
         result = dict(trace)
-        result["started_at"] = result["started_at"].isoformat() if result["started_at"] else None
-        result["finished_at"] = result["finished_at"].isoformat() if result["finished_at"] else None
+        result["started_at"] = result["started_at"].isoformat() if result.get("started_at") else None
+        result["finished_at"] = result["finished_at"].isoformat() if result.get("finished_at") else None
+        result["feedback_at"] = result["feedback_at"].isoformat() if result.get("feedback_at") else None
         result["cost_amount"] = float(result["cost_amount"] or 0)
+        result["tags"] = _parse_tags(result.get("tags"))
         result["spans"] = spans
         return result
     finally:
@@ -776,11 +788,27 @@ def _trace_meta(row: dict) -> dict:
         return {}
 
 
+def _parse_tags(value: Any) -> list[str]:
+    raw = value
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (TypeError, ValueError):
+            raw = []
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip()[:32] for item in raw if str(item).strip()][:10]
+
+
 def agent_traces(
     range_key: str = "24h",
     *,
     status: str | None = None,
     q: str | None = None,
+    tag: str | None = None,
+    feedback: str | None = None,
+    min_latency_ms: int | None = None,
+    max_latency_ms: int | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
@@ -792,7 +820,9 @@ def agent_traces(
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(
             """SELECT trace_id, tenant_id, entrypoint, account_id, status,
-                      started_at, finished_at, total_ms, total_tokens, cost_amount, meta
+                      started_at, finished_at, total_ms, total_tokens, cost_amount,
+                      tags, feedback_score, feedback_comment, feedback_by, feedback_at,
+                      meta
                FROM ai_traces
                WHERE entrypoint LIKE 'agent.%'
                ORDER BY started_at DESC LIMIT 500"""
@@ -803,6 +833,8 @@ def agent_traces(
 
     wanted_status = str(status or "").strip().lower()
     wanted_q = str(q or "").strip().lower()
+    wanted_tag = str(tag or "").strip().lower()
+    wanted_feedback = str(feedback or "").strip().lower()
     filtered: list[dict[str, Any]] = []
     for row in rows:
         started = _as_utc(row.get("started_at"))
@@ -812,6 +844,24 @@ def agent_traces(
         row_status = str(row.get("status") or "").lower()
         if wanted_status and row_status != wanted_status:
             continue
+        tags = _parse_tags(row.get("tags"))
+        if wanted_tag and wanted_tag not in [item.lower() for item in tags]:
+            continue
+        score = row.get("feedback_score")
+        score_int = int(score) if score is not None else None
+        if wanted_feedback == "rated" and score_int is None:
+            continue
+        if wanted_feedback == "unrated" and score_int is not None:
+            continue
+        if wanted_feedback == "positive" and (score_int is None or score_int < 4):
+            continue
+        if wanted_feedback == "negative" and (score_int is None or score_int > 2):
+            continue
+        total_ms = int(row.get("total_ms") or 0)
+        if min_latency_ms is not None and total_ms < int(min_latency_ms):
+            continue
+        if max_latency_ms is not None and total_ms > int(max_latency_ms):
+            continue
         haystack = " ".join([
             str(row.get("trace_id") or ""),
             str(row.get("entrypoint") or ""),
@@ -819,6 +869,7 @@ def agent_traces(
             str(meta.get("question") or ""),
             str(meta.get("request_id") or ""),
             str(meta.get("execution_id") or ""),
+            " ".join(tags),
         ]).lower()
         if wanted_q and wanted_q not in haystack:
             continue
@@ -832,7 +883,7 @@ def agent_traces(
             "finished_at": (
                 dt.isoformat() if (dt := _as_utc(row.get("finished_at"))) else None
             ),
-            "total_ms": int(row.get("total_ms") or 0),
+            "total_ms": total_ms,
             "total_tokens": int(row.get("total_tokens") or 0),
             "cost_amount": float(row.get("cost_amount") or 0),
             "question": str(meta.get("question") or ""),
@@ -841,11 +892,21 @@ def agent_traces(
             "steps": int(meta.get("steps") or 0),
             "tool_call_count": int(meta.get("tool_call_count") or 0),
             "error": str(meta.get("error") or ""),
+            "tags": tags,
+            "feedback_score": score_int,
+            "feedback_comment": str(row.get("feedback_comment") or ""),
+            "feedback_by": str(row.get("feedback_by") or ""),
+            "feedback_at": (
+                dt.isoformat() if (dt := _as_utc(row.get("feedback_at"))) else None
+            ),
         })
 
     total = len(filtered)
     success = sum(1 for x in filtered if str(x["status"]).lower() in {"success", "completed"})
     errors = sum(1 for x in filtered if str(x["status"]).lower() in {"error", "failed", "timeout", "cancelled"})
+    rated = sum(1 for x in filtered if x["feedback_score"] is not None)
+    positive = sum(1 for x in filtered if x["feedback_score"] is not None and x["feedback_score"] >= 4)
+    negative = sum(1 for x in filtered if x["feedback_score"] is not None and x["feedback_score"] <= 2)
     latencies = sorted(int(x["total_ms"] or 0) for x in filtered if int(x["total_ms"] or 0) > 0)
     p95 = latencies[int((len(latencies) - 1) * 0.95)] if latencies else 0
     page_size = max(1, min(int(limit or 50), 200))
@@ -858,6 +919,9 @@ def agent_traces(
         "p95_latency_ms": p95,
         "total_tokens": sum(int(x["total_tokens"] or 0) for x in filtered),
         "tool_calls": sum(int(x["tool_call_count"] or 0) for x in filtered),
+        "rated": rated,
+        "positive": positive,
+        "negative": negative,
     }
     return {
         "range": range_key,
@@ -865,6 +929,77 @@ def agent_traces(
         "total": total,
         "items": filtered[page_offset: page_offset + page_size],
     }
+
+
+def set_agent_trace_tags(
+    trace_id: str,
+    tags: list[str],
+    *,
+    actor: str = "",
+) -> list[str] | None:
+    """给 Agent trace 打标签；返回新标签，trace 不存在返回 None。"""
+    clean: list[str] = []
+    for item in tags or []:
+        value = str(item or "").strip()[:32]
+        if value and value.lower() not in [x.lower() for x in clean]:
+            clean.append(value)
+        if len(clean) >= 10:
+            break
+    conn = _connect()
+    ensure_schema(conn)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE ai_traces
+               SET tags=%s, meta=COALESCE(meta, '{}'::jsonb) || %s
+               WHERE trace_id=%s AND entrypoint LIKE %s""",
+            (Json(clean), Json({"tagged_by": actor, "tagged_at": datetime.now(timezone.utc).isoformat()}), trace_id, "agent.%"),
+        )
+        changed = cur.rowcount
+        conn.commit()
+        return clean if changed else None
+    finally:
+        conn.close()
+
+
+def set_agent_trace_feedback(
+    trace_id: str,
+    *,
+    score: int | None,
+    comment: str = "",
+    actor: str = "",
+) -> int | None:
+    """人工评分 1-5；score=None 表示清除评分。返回新分数，trace 不存在返回 None。"""
+    if score is not None and not 1 <= int(score) <= 5:
+        raise ValueError("评分必须在 1-5 之间")
+    comment = str(comment or "").strip()[:1000]
+    conn = _connect()
+    ensure_schema(conn)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE ai_traces
+               SET feedback_score=%s, feedback_comment=%s, feedback_by=%s,
+                   feedback_at=%s,
+                   meta=COALESCE(meta, '{}'::jsonb) || %s
+               WHERE trace_id=%s AND entrypoint LIKE %s""",
+            (
+                int(score) if score is not None else None,
+                comment,
+                actor,
+                datetime.now(timezone.utc) if score is not None else None,
+                Json({"feedback_by": actor, "feedback_at": datetime.now(timezone.utc).isoformat()}),
+                trace_id,
+                "agent.%",
+            ),
+        )
+        changed = cur.rowcount
+        conn.commit()
+        if not changed:
+            return None
+        return int(score) if score is not None else 0
+    finally:
+        conn.close()
 
 
 # ==================== 钱包 / 充值 / 发票 ====================

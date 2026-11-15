@@ -73,3 +73,67 @@ def test_admin_agent_trace_detail_not_found(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         monitor.admin_agent_trace_detail("missing")
     assert exc.value.status_code == 404
+
+
+def test_admin_agent_trace_tags_updates(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(
+        ai_monitor,
+        "set_agent_trace_tags",
+        lambda trace_id, tags, actor="": ["回归", "慢查询"],
+    )
+    data = monitor.admin_agent_trace_tags(
+        "trace_1",
+        monitor.AgentTraceTagsIn(tags=["回归", "慢查询"]),
+    )
+    assert data["trace_id"] == "trace_1"
+    assert data["tags"] == ["回归", "慢查询"]
+
+
+def test_admin_agent_trace_tags_not_found(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(ai_monitor, "set_agent_trace_tags", lambda *args, **kwargs: None)
+    with pytest.raises(HTTPException) as exc:
+        monitor.admin_agent_trace_tags("missing", monitor.AgentTraceTagsIn(tags=["x"]))
+    assert exc.value.status_code == 404
+
+
+def test_admin_agent_trace_feedback_updates(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(
+        ai_monitor,
+        "set_agent_trace_feedback",
+        lambda trace_id, **kwargs: 5,
+    )
+    data = monitor.admin_agent_trace_feedback(
+        "trace_1",
+        monitor.AgentTraceFeedbackIn(score=5, comment="口径清楚"),
+    )
+    assert data["feedback_score"] == 5
+    assert data["comment"] == "口径清楚"
+
+
+def test_admin_agent_trace_feedback_validation_error(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+
+    def _raise(*args, **kwargs):
+        raise ValueError("评分必须在 1-5 之间")
+
+    monkeypatch.setattr(ai_monitor, "set_agent_trace_feedback", _raise)
+    with pytest.raises(HTTPException) as exc:
+        monitor.admin_agent_trace_feedback(
+            "trace_1",
+            monitor.AgentTraceFeedbackIn(score=9),
+        )
+    assert exc.value.status_code == 400
+
+
+def test_admin_agent_trace_feedback_not_found(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(ai_monitor, "set_agent_trace_feedback", lambda *args, **kwargs: None)
+    with pytest.raises(HTTPException) as exc:
+        monitor.admin_agent_trace_feedback(
+            "missing",
+            monitor.AgentTraceFeedbackIn(score=5),
+        )
+    assert exc.value.status_code == 404

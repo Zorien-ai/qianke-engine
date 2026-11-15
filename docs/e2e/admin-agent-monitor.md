@@ -249,3 +249,106 @@ Phase C：
   Eval / 实验管理
   trace 回流评测
 ```
+
+## Phase B：对比、标签、人工评分
+
+日期：2026-11-15  
+目标：在 Phase A Trace Tree 上补齐 LangSmith 常用的质量协作能力。
+
+### 1. 标签
+
+管理员可给单条 trace 打标签：
+
+```text
+PATCH /api/admin/agent-traces/{trace_id}/tags
+body: {"tags": ["回归", "慢查询"]}
+```
+
+规则：
+
+```text
+最多 10 个标签
+单个标签最多 32 字符
+列表展示标签芯片
+支持按标签筛选
+```
+
+### 2. 人工评分
+
+```text
+POST /api/admin/agent-traces/{trace_id}/feedback
+body: {"score": 1-5, "comment": "可选反馈"}
+```
+
+支持：
+
+```text
+1-5 星
+可选评论
+清除评分
+按好评 / 差评 / 已评分 / 未评分筛选
+列表展示星级
+```
+
+截图：
+
+![标签与评分](docs/design/admin-agent-trace-feedback-tags.png)
+
+### 3. Trace 对比
+
+列表勾选两条 trace 后点击“对比 Trace”：
+
+```text
+状态
+耗时
+Tokens
+Steps
+Tools
+评分
+标签
+最耗时节点 Top 6
+```
+
+对比视图：
+
+![Trace 对比](docs/design/admin-agent-trace-compare.png)
+
+移动端：
+
+![对比移动端](docs/design/admin-agent-trace-compare-mobile.png)
+
+### 4. 增强筛选
+
+列表支持：
+
+```text
+时间范围
+状态
+评分：好评 / 差评 / 已评分 / 未评分
+标签
+关键词：问题 / request_id / trace_id / 标签
+```
+
+### 5. 验证
+
+```text
+pytest tests/ -q
+  → 836 passed, 6 skipped
+
+web build
+  → PASS
+
+真实 admin 页面验证：
+  标签保存成功
+  1-5 星评分保存成功
+  两条 trace 对比打开
+  390 宽度无整页横向溢出
+```
+
+## Phase C（未做）
+
+```text
+数据集
+Eval / 实验管理
+trace 回流评测
+```
