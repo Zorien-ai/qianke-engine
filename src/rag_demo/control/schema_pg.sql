@@ -293,6 +293,17 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_diary (
 CREATE INDEX IF NOT EXISTS idx_c_companion_diary_owner
     ON __SCHEMA__.c_companion_diary ("owner_id", "diary_date" DESC);
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_user_attribute (
+    "owner_id"       TEXT PRIMARY KEY,
+    "gender"         TEXT NOT NULL DEFAULT '',
+    "age_range"      TEXT NOT NULL DEFAULT '',
+    "city"           TEXT NOT NULL DEFAULT '',
+    "member_level"   TEXT NOT NULL DEFAULT '',
+    "registered_at"  TEXT,
+    "source"         TEXT NOT NULL DEFAULT 'seed',
+    "updated_at"     TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.b_chat_user_profile (
   "profile_id" TEXT PRIMARY KEY,
   "merchant_id" TEXT NOT NULL,

@@ -103,6 +103,10 @@ def collect_merchant_buyers(merchant_id: str) -> list[dict[str, Any]]:
             if content:
                 snippets.append(content[:120])
 
+    # 3 层画像：冷启动属性单独从 C 端属性表补齐；消费/会话事实已在上面聚合。
+    for buyer_id, record in records.items():
+        record["attributes"] = store.get_user_attributes(buyer_id) or {}
+
     result = []
     for record in records.values():
         categories = record.pop("_categories", Counter())
@@ -113,9 +117,14 @@ def collect_merchant_buyers(merchant_id: str) -> list[dict[str, Any]]:
         if record["order_count"]:
             record["avg_order_amount"] = round(record["order_amount"] / record["order_count"], 2)
         record["order_amount"] = round(float(record["order_amount"]), 2)
+        recent_messages = list(record.get("_messages") or [])
         record["profile_text"] = build_profile_text(record)
         record.pop("_messages", None)
+        chat_payload = dict(record["chat_profile"] or {})
+        if recent_messages:
+            chat_payload["recent_messages"] = recent_messages
         record["profile_json"] = {
+            "attributes": record.get("attributes") or {},
             "order": {
                 "order_count": record["order_count"],
                 "order_amount": record["order_amount"],
@@ -123,7 +132,7 @@ def collect_merchant_buyers(merchant_id: str) -> list[dict[str, Any]]:
                 "last_order_at": record["last_order_at"],
                 "top_category": record["top_category"],
             },
-            "chat": record["chat_profile"],
+            "chat": chat_payload,
         }
         result.append(record)
     return result
@@ -139,6 +148,7 @@ def _empty_buyer(buyer_id: str) -> dict[str, Any]:
         "top_category": None,
         "has_order": False,
         "has_chat": False,
+        "attributes": {},
         "chat_profile": {},
         "chat_profile_text": "",
         "confidence": 0.0,
@@ -153,6 +163,18 @@ def build_profile_text(record: dict[str, Any]) -> str:
     """把订单事实与会话事实拼成可检索的中文文本；不写姓名/手机号/地址。"""
     buyer_id = str(record.get("buyer_id") or "").strip()
     parts: list[str] = [f"千客用户 {buyer_id}"]
+    attributes = record.get("attributes") or {}
+    cold = []
+    if attributes.get("gender"):
+        cold.append(f"性别 {attributes['gender']}")
+    if attributes.get("age_range"):
+        cold.append(f"年龄段 {attributes['age_range']}")
+    if attributes.get("city"):
+        cold.append(f"城市 {attributes['city']}")
+    if attributes.get("member_level"):
+        cold.append(f"会员等级 {attributes['member_level']}")
+    if cold:
+        parts.append("冷启动属性：" + "，".join(cold))
     if record.get("has_order"):
         order_count = int(record.get("order_count") or 0)
         if order_count:

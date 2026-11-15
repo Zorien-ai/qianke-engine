@@ -72,6 +72,27 @@ def _buyer_id(user: dict[str, Any]) -> str:
     return f"buyer_{int(user['id'])}"
 
 
+def _seed_cold_start(users: list[dict[str, Any]]) -> int:
+    genders = ("女", "男")
+    ages = ("18-24", "25-30", "31-35", "36-40", "41-45")
+    cities = ("上海", "杭州", "深圳", "成都", "北京", "苏州")
+    levels = ("普通", "银卡", "金卡", "黑卡")
+    count = 0
+    for index, user in enumerate(users, start=1):
+        buyer_id = _buyer_id(user)
+        cstore.upsert_user_attributes(
+            buyer_id,
+            gender=genders[index % len(genders)],
+            age_range=ages[index % len(ages)],
+            city=cities[index % len(cities)],
+            member_level=levels[index % len(levels)],
+            registered_at=user.get("created_at"),
+            source="simulation_seed",
+        )
+        count += 1
+    return count
+
+
 def _count_orders(buyer_ids: list[str]) -> int:
     conn = cstore._connect()  # noqa: SLF001
     try:
@@ -156,18 +177,20 @@ def _ensure_messages(buyer_ids: list[str]) -> int:
             continue
         current = _count_messages(buyer_ids)
         created = current
-    return created
+    return _count_messages(buyer_ids)
 
 
 def run(*, apply: bool) -> dict[str, Any]:
     users = _ensure_users()
     buyer_ids = [_buyer_id(user) for user in users]
+    attributes = _seed_cold_start(users) if apply else 0
     orders_before = _count_orders(buyer_ids)
     messages_before = _count_messages(buyer_ids)
     if not apply:
         return {
             "dry_run": True,
             "users": len(users),
+            "attributes": attributes,
             "orders_before": orders_before,
             "messages_before": messages_before,
         }
@@ -200,6 +223,7 @@ def run(*, apply: bool) -> dict[str, Any]:
     return {
         "dry_run": False,
         "users": len(users),
+        "attributes": attributes,
         "orders_before": orders_before,
         "orders_after": _count_orders(buyer_ids),
         "orders_created": orders_created,
