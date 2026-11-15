@@ -153,17 +153,16 @@ def _scope_dataset(requested: str) -> str:
 
     if acct.get("is_system_admin"):
         return config.ADMIN_DEBUG_DATASET
-    # 商户运营者优先走商户库：他们登录后的唯一入口是 B 工作台，
-    # 若这里回落 account.dataset，会把商户导入的数据写进企业库。
-    if not acct.get("is_enterprise_admin"):
-        member = _merchant_member(acct)
-        if member is not None:
-            dataset = config.merchant_dataset_name(member["merchant_id"])
-            if dataset not in config.DATASETS:
-                config.register_dataset(
-                    dataset, config.merchant_db_name(member["merchant_id"])
-                )
-            return dataset
+    # 商户运营者优先走商户库，即使这个 owner 同时是企业管理员：
+    # 商家 owner 的导入入口在 B 工作台，若回落 account.dataset 会把商户数据写进企业库。
+    member = _merchant_member(acct)
+    if member is not None:
+        dataset = config.merchant_dataset_name(member["merchant_id"])
+        if dataset not in config.DATASETS:
+            config.register_dataset(
+                dataset, config.merchant_db_name(member["merchant_id"])
+            )
+        return dataset
     dataset = acct.get("dataset")
     if not dataset:
         raise HTTPException(status_code=403, detail="该账号还没有可用数据空间，请联系管理员")

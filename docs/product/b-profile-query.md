@@ -64,10 +64,11 @@ b_qianke_user_profile_vector
 
 - 数据集命名：`mch_<merchant_id>`，库名 `vec_db_mch_<merchant_id>`。
 - 启动时从 `c_merchant_tenant` 恢复注册；第一次构建才真正建库。
-- wizard 作用域：系统管理员 → `test`；企业管理员 → 企业库；其他商户成员 → 商户库；都没有则 403。
+- wizard 作用域：系统管理员 → `test`；**有商户绑定的 owner/admin → 商户库（即使同时是企业管理员）**；纯企业管理员 → 企业库；都没有则 403。
 - 只有 owner/admin 能导入/构建；staff 只读。
 - 上传批次归属：`upload_owner.merchant_id`，同商户 owner/admin 可构建，跨商户 403。
 - 示例数据：`data/samples/merchant_users.csv`（30 行 / 10 位用户）+ `merchant_rules.md`，走与真实上传相同的落盘/字段识别/构建链路。
+- SOP/规则文档进入导入数据空间的 **文档池**（`wiki_vectors` / `search_index`），不是单独一张 SOP 用户表；数据接入页同时展示规则文档和切片数，并支持上传 `.md`。
 
 ## 问小千
 
