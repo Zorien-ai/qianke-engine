@@ -3,8 +3,10 @@
  * A 端 Agent 数据集与评测实验（Phase C MVP）。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { getJson, postJson } from "../api";
 
+const router = useRouter();
 const loading = ref(true);
 const error = ref("");
 const datasets = ref([]);
@@ -159,6 +161,11 @@ async function openExperiment(experimentId) {
 
 function closeDataset() { activeDataset.value = null; }
 function closeExperiment() { activeExperiment.value = null; }
+function openTraceInMonitor(traceId) {
+  if (!traceId) return;
+  activeExperiment.value = null;
+  router.push({ name: "monitor-center", query: { tab: "agent", trace: traceId } });
+}
 
 onMounted(loadAll);
 onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer); });
@@ -299,7 +306,7 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer); });
           <p v-if="activeExperiment.error" class="field-hint">{{ activeExperiment.error }}</p>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>用例</th><th>状态</th><th>通过</th><th>耗时</th><th>Tokens</th><th>回答</th></tr></thead>
+              <thead><tr><th>用例</th><th>状态</th><th>通过</th><th>耗时</th><th>Tokens</th><th>回答</th><th>Trace</th></tr></thead>
               <tbody>
                 <tr v-for="r in activeExperiment.results || []" :key="r.result_id">
                   <td class="obs-question">{{ r.question || r.case_id }}</td>
@@ -308,8 +315,12 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer); });
                   <td class="obs-nowrap">{{ ms(r.latency_ms) }}</td>
                   <td>{{ num(r.total_tokens) }}</td>
                   <td class="eval-answer">{{ r.answer || r.error || "—" }}</td>
+                  <td>
+                    <button v-if="r.trace_id" type="button" class="btn btn-ghost btn-sm" @click="openTraceInMonitor(r.trace_id)">查看 Trace</button>
+                    <span v-else class="field-hint">—</span>
+                  </td>
                 </tr>
-                <tr v-if="!(activeExperiment.results || []).length"><td colspan="6" class="field-hint">暂无结果</td></tr>
+                <tr v-if="!(activeExperiment.results || []).length"><td colspan="7" class="field-hint">暂无结果</td></tr>
               </tbody>
             </table>
           </div>
