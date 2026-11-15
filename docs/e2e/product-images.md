@@ -187,3 +187,16 @@ B 端商品表格同图显示
 ```
 
 ![CShop 全量商品图](docs/design/c-shop-all-images.png)
+## 真实商品照片替换（2026-11-16）
+
+商品封面已从程序生成图替换为 Pexels 真实照片：
+
+- 25 个商品：m_gear_002 10 个、m_sim_outdoor / home / coffee / stationery / fresh 各 3 个
+- 图片落盘：`src/rag_demo/api/static/products/real/*.jpg`
+- 来源与许可：`docs/licenses/pexels-product-images.md`
+- CShop 默认 10 个商品：全部加载真实照片
+- B 端商品表格：显示同一张真实缩略图
+
+![CShop 真实商品图](docs/design/c-shop-real-images.png)
+
+图片是真实商品/场景照片，不是每个 SKU 的官方产品图；生产环境应替换为品牌授权素材。
