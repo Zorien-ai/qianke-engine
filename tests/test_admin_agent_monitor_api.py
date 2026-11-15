@@ -191,3 +191,32 @@ def test_admin_agent_experiments_requires_system_admin(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         monitor.admin_agent_experiments()
     assert exc.value.status_code == 403
+
+
+def test_admin_agent_comm_approvals_requires_system_admin(monkeypatch):
+    monkeypatch.setattr(monitor, "_main", lambda: _RejectedMain())
+    with pytest.raises(HTTPException) as exc:
+        monitor.admin_agent_comm_approvals()
+    assert exc.value.status_code == 403
+
+
+def test_admin_agent_comm_approval_decision(monkeypatch):
+    from rag_demo.mcp_agent_comm import store as comm_store
+
+    class _FakeStore:
+        ttl_days = 30
+
+        def decide_approval(self, approval_id, *, action, note, actor):
+            return {"approval_id": approval_id, "status": "APPROVED", "action": action, "note": note, "actor": actor}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(monitor, "_main", lambda: _AdminMain())
+    monkeypatch.setattr(comm_store, "open_admin_store", lambda: _FakeStore())
+    data = monitor.admin_agent_comm_approval_decision(
+        "appr_1",
+        monitor.AgentCommApprovalIn(action="approve", note="同意"),
+    )
+    assert data["status"] == "APPROVED"
+    assert data["note"] == "同意"

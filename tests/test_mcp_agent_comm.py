@@ -50,11 +50,12 @@ def config_path(tmp_path: Path) -> Path:
     return path
 
 
-def _store(tmp_path: Path, config_path: Path, agent_id: str) -> AgentCommStore:
+def _store(tmp_path: Path, config_path: Path, agent_id: str, ttl_days=None) -> AgentCommStore:
     return AgentCommStore(
         agent_id=agent_id,
         config_path=str(config_path),
         db_path=str(tmp_path / "bus.sqlite3"),
+        ttl_days=ttl_days,
     )
 
 
@@ -172,5 +173,63 @@ def test_task_requires_capability_list(tmp_path, config_path):
         with pytest.raises(CommError) as exc:
             store.propose_task(title="无能力任务", required_capabilities=[])
         assert exc.value.code == "INVALID_TASK"
+    finally:
+        store.close()
+
+
+def test_human_approval_releases_task(tmp_path, config_path):
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    system = _store(tmp_path, config_path, "system")
+    admin = open_admin_store(config_path=str(config_path), db_path=str(tmp_path / "bus.sqlite3"))
+    b_end = _store(tmp_path, config_path, "b_end")
+    try:
+        task = system.propose_task(
+            title="高风险退款",
+            instruction="需要人工确认",
+            required_capabilities=["b_end"],
+            risk="high",
+            mode="auto",
+        )
+        pending = admin.list_approvals(status="PENDING")
+        assert len(pending) == 1
+        result = admin.decide_approval(task["approval_id"], action="approve", note="同意", actor="admin")
+        assert result["status"] == "APPROVED"
+        assert result["task_status"] == "ASSIGNED"
+        inbox = b_end.read()["messages"]
+        assert any(item["kind"] == "task" and item["content"].get("status") == "ASSIGNED" for item in inbox)
+    finally:
+        system.close(); admin.close(); b_end.close()
+
+
+def test_human_rejects_task(tmp_path, config_path):
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    system = _store(tmp_path, config_path, "system")
+    admin = open_admin_store(config_path=str(config_path), db_path=str(tmp_path / "bus.sqlite3"))
+    try:
+        task = system.propose_task(
+            title="高风险操作",
+            required_capabilities=["b_end"],
+            risk="high",
+            mode="auto",
+        )
+        result = admin.decide_approval(task["approval_id"], action="reject", note="不做", actor="admin")
+        assert result["status"] == "REJECTED"
+        assert result["task_status"] == "REJECTED"
+    finally:
+        system.close(); admin.close()
+
+
+def test_expired_payload_is_purged_and_hash_kept(tmp_path, config_path):
+    store = _store(tmp_path, config_path, "system", ttl_days=0)
+    try:
+        store.send(to="c_end", content={"text": "短期正文"})
+        purge = store.purge_expired()
+        assert purge["purged"] == 1
+        assert store.recent_messages() == []
+        row = store.conn.execute("SELECT content_hash FROM message_audit").fetchone()
+        assert row is not None
+        assert len(row["content_hash"]) == 64
     finally:
         store.close()
