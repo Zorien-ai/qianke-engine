@@ -31,6 +31,7 @@ const dataset = computed(() => {
   if (ent && ent.dataset) return ent.dataset;
   return account.value.is_system_admin ? "demo（演示数据集）" : "（未开通）";
 });
+const merchant = computed(() => account.value.merchant || null);
 
 const capKeys = [
   ["ask", "回答"],
@@ -89,7 +90,16 @@ const levelRows = computed(() => {
 });
 
 const quickLinks = computed(() => {
-  const links = [
+  const links = [];
+  if (merchant.value) {
+    links.push({
+      title: "商家工作台",
+      desc: `${merchant.value.name || merchant.value.merchant_id} · 商品 / 订单 / 画像`,
+      icon: "🏪",
+      href: "/v2/b.html",
+    });
+  }
+  links.push(
     {
       title: "开始提问",
       desc: "基于企业知识库与用户画像问答",
@@ -102,7 +112,7 @@ const quickLinks = computed(() => {
       icon: "📚",
       to: "/kb",
     },
-  ];
+  );
   if (isManager()) {
     links.push({
       title: "数据导入",
@@ -212,7 +222,8 @@ onMounted(async () => {
           </div>
         </div>
         <div class="row-actions">
-          <RouterLink v-if="hasCap('ask')" to="/chat" class="btn btn-primary">开始提问</RouterLink>
+          <a v-if="merchant" href="/v2/b.html" class="btn btn-primary">进入商家工作台</a>
+          <RouterLink v-if="hasCap('ask')" :to="{ path: '/chat' }" class="btn" :class="merchant ? 'btn-ghost' : 'btn-primary'">开始提问</RouterLink>
           <RouterLink v-if="isManager()" to="/setup" class="btn btn-ghost">数据导入</RouterLink>
         </div>
       </div>
