@@ -57,15 +57,9 @@ const navItems = computed(() => {
     { to: "/kb", key: "kb", label: "知识库", icon: ICONS.kb },
   ];
   if (isManager()) items.push({ to: "/staff", key: "staff", label: "员工管理", icon: ICONS.staff });
-  if (isManager() || demoMode.value) items.push({ to: "/eval", key: "eval", label: "离线评测", icon: ICONS.eval });
-  if (isManager()) items.push({ to: "/monitor", key: "monitor", label: "实时监控", icon: ICONS.monitor });
+  if (isManager() || demoMode.value) items.push({ to: "/eval-center", key: "evalCenter", label: "评测中心", icon: ICONS.eval });
+  if (isManager()) items.push({ to: "/monitor-center", key: "monitorCenter", label: "监控中心", icon: ICONS.monitor });
   if (isManager()) items.push({ to: "/billing", key: "billing", label: "Token 账单", icon: ICONS.billing });
-  if (store.account && store.account.is_system_admin)
-    items.push({ to: "/admin/monitor", key: "adminMonitor", label: "平台监控", icon: ICONS.monitor });
-  if (store.account && store.account.is_system_admin)
-    items.push({ to: "/admin/agent-monitor", key: "adminAgentMonitor", label: "Agent 调用监控", icon: ICONS.agent });
-  if (store.account && store.account.is_system_admin)
-    items.push({ to: "/admin/agent-evals", key: "adminAgentEvals", label: "Agent 数据集与评测", icon: ICONS.eval });
   if (store.account && store.account.is_system_admin)
     items.push({ to: "/admin/c-end", key: "adminCEnd", label: "C 端审计", icon: ICONS.orders });
   if (store.account && store.account.is_system_admin)
