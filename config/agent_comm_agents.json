@@ -1,0 +1,36 @@
+{
+  "agents": [
+    {
+      "agent_id": "c_end",
+      "display_name": "C 端 Agent",
+      "capabilities": ["c_end", "commerce", "ui"],
+      "max_risk": "low",
+      "owner": "owner",
+      "auto_accept": true
+    },
+    {
+      "agent_id": "b_end",
+      "display_name": "B 端 Agent",
+      "capabilities": ["b_end", "merchant", "ui"],
+      "max_risk": "low",
+      "owner": "owner",
+      "auto_accept": true
+    },
+    {
+      "agent_id": "system",
+      "display_name": "系统 / 测评 Agent",
+      "capabilities": ["system", "eval", "monitor", "release"],
+      "max_risk": "medium",
+      "owner": "owner",
+      "auto_accept": true
+    },
+    {
+      "agent_id": "codex",
+      "display_name": "Codex UI 验收 Agent",
+      "capabilities": ["review", "ui_audit"],
+      "max_risk": "low",
+      "owner": "owner",
+      "auto_accept": true
+    }
+  ]
+}
