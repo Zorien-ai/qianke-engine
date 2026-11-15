@@ -56,6 +56,15 @@ class PriceIn(BaseModel):
     items: list[PriceItem]
 
 
+class AgentTraceTagsIn(BaseModel):
+    tags: list[str] = []
+
+
+class AgentTraceFeedbackIn(BaseModel):
+    score: int | None = None
+    comment: str = ""
+
+
 # ==================== 监控 ====================
 
 @router.get("/api/monitor/overview")
@@ -159,6 +168,10 @@ def admin_agent_traces(
     range_key: str = Query("24h", alias="range"),
     status: str | None = None,
     q: str | None = None,
+    tag: str | None = None,
+    feedback: str | None = None,
+    min_latency_ms: int | None = None,
+    max_latency_ms: int | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
@@ -168,9 +181,49 @@ def admin_agent_traces(
         range_key,
         status=status,
         q=q,
+        tag=tag,
+        feedback=feedback,
+        min_latency_ms=min_latency_ms,
+        max_latency_ms=max_latency_ms,
         limit=limit,
         offset=offset,
     )
+
+
+@router.patch("/api/admin/agent-traces/{trace_id}/tags")
+def admin_agent_trace_tags(trace_id: str, payload: AgentTraceTagsIn) -> dict:
+    api = _main()
+    account = api._require_system_admin()
+    tags = ai_monitor.set_agent_trace_tags(
+        trace_id,
+        payload.tags,
+        actor=str((account or {}).get("username") or ""),
+    )
+    if tags is None:
+        raise HTTPException(status_code=404, detail="Agent Trace 不存在")
+    return {"trace_id": trace_id, "tags": tags}
+
+
+@router.post("/api/admin/agent-traces/{trace_id}/feedback")
+def admin_agent_trace_feedback(trace_id: str, payload: AgentTraceFeedbackIn) -> dict:
+    api = _main()
+    account = api._require_system_admin()
+    try:
+        score = ai_monitor.set_agent_trace_feedback(
+            trace_id,
+            score=payload.score,
+            comment=payload.comment,
+            actor=str((account or {}).get("username") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if score is None:
+        raise HTTPException(status_code=404, detail="Agent Trace 不存在")
+    return {
+        "trace_id": trace_id,
+        "feedback_score": payload.score,
+        "comment": payload.comment[:1000],
+    }
 
 
 @router.get("/api/admin/agent-traces/{trace_id}")
