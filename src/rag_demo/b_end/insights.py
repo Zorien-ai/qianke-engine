@@ -292,9 +292,31 @@ def _keyword_tokens(text: str) -> list[str]:
     return result[:3]
 
 
+_BUYER_ID_RE = re.compile(r"\bbuyer_[A-Za-z0-9_]+", re.IGNORECASE)
+
+
+def _requested_buyer_ids(question: str) -> list[str]:
+    """从自然语言里提取明确的买家 ID；buyer_217 这类查询不能被语义检索淹没。"""
+    result: list[str] = []
+    for match in _BUYER_ID_RE.findall(str(question or "")):
+        value = str(match).strip()
+        if value and value not in result:
+            result.append(value)
+    return result
+
+
 def _search_qianke_rows(
     merchant_id: str, question: str, *, limit: int
 ) -> list[dict[str, Any]]:
+    requested = _requested_buyer_ids(question)
+    if requested:
+        exact: list[dict[str, Any]] = []
+        for buyer_id in requested:
+            row = store.get_qianke_user_profile(merchant_id, buyer_id)
+            if row is not None:
+                exact.append(row)
+        # 明确 ID 查询只返回精确命中，避免拿相似用户回答“这个客户怎么样”。
+        return exact[:limit]
     rows = store.search_qianke_user_profiles(
         merchant_id, question, _qianke_embedding(question), limit=limit
     )
