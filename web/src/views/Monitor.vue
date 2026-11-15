@@ -3,8 +3,10 @@
  * AI 实时监控：请求、Token、成本、延迟、错误、缓存与 Trace 下钻。
  */
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import { getJson } from "../api";
 
+const router = useRouter();
 const RANGES = [
   { key: "1h", label: "近 1 小时" },
   { key: "24h", label: "近 24 小时" },
@@ -80,6 +82,16 @@ async function load() {
 function changeRange(key) {
   range.value = key;
   load();
+}
+
+function isAgentTrace() {
+  return String(activeTrace.value?.entrypoint || "").startsWith("agent.");
+}
+function openAgentTrace() {
+  const traceId = activeTrace.value?.trace_id;
+  if (!traceId) return;
+  traceOpen.value = false;
+  router.push({ name: "monitor-center", query: { tab: "agent", trace: traceId } });
 }
 
 async function openTrace(trace) {
@@ -254,7 +266,12 @@ onMounted(load);
               <h3>{{ activeTrace?.entrypoint || "Trace" }}</h3>
               <p class="field-hint">{{ activeTrace?.trace_id }} · {{ shortTime(activeTrace?.started_at) }}</p>
             </div>
-            <button type="button" class="icon-btn" @click="traceOpen = false">×</button>
+            <div class="trace-head-actions">
+              <button v-if="isAgentTrace()" type="button" class="btn btn-primary btn-sm" @click="openAgentTrace">
+                查看 Agent 输入/输出
+              </button>
+              <button type="button" class="icon-btn" @click="traceOpen = false">×</button>
+            </div>
           </header>
           <div v-if="traceLoading" class="doc-state"><span class="spinner" /><p>加载链路…</p></div>
           <template v-else-if="activeTrace">
@@ -311,6 +328,7 @@ onMounted(load);
 .monitor-table td { font-size: 12px; }
 .trace-overlay { position: fixed; inset: 0; z-index: 2100; display: flex; justify-content: flex-end; background: rgba(8,8,12,.42); backdrop-filter: blur(3px); }
 .trace-drawer { width: min(620px, 95vw); height: 100%; overflow: auto; padding: 24px; background: var(--surface); border-left: 1px solid var(--border); }
+.trace-head-actions { display: flex; align-items: center; gap: 8px; }
 .trace-drawer-head { display: flex; justify-content: space-between; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .trace-drawer-head h3 { margin: 5px 0 4px; font-size: 20px; }
 .trace-summary { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; font-size: 12px; color: var(--muted); }

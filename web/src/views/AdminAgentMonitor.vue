@@ -4,8 +4,11 @@
  * 数据来自 ai_traces / ai_spans，不依赖外部 LangSmith。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { getJson, patchJson, postJson } from "../api";
 
+const route = useRoute();
+const router = useRouter();
 const ranges = [
   { value: "1h", label: "1 小时" },
   { value: "24h", label: "24 小时" },
@@ -241,6 +244,11 @@ function closeDetail() {
   detailError.value = "";
   selectedSpanId.value = "";
   collapsedSpans.value = new Set();
+  if (route.query.trace) {
+    const query = { ...route.query };
+    delete query.trace;
+    router.replace({ name: "monitor-center", query });
+  }
 }
 function onKeydown(e) {
   if (e.key === "Escape" && compareOpen.value) {
@@ -344,9 +352,11 @@ async function saveFeedback() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener("keydown", onKeydown);
-  load();
+  await load();
+  const traceId = String(route.query.trace || "");
+  if (traceId) openTrace({ trace_id: traceId });
 });
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
