@@ -68,29 +68,72 @@ class TraceCallbackHandler(BaseCallbackHandler):
         return "unknown"
 
     def on_llm_start(self, serialized: dict, prompts: list[str], **kwargs: Any) -> None:
+        prompt_text = "\n".join(str(p) for p in prompts)[:12000]
+        model = ""
+        if isinstance(serialized, dict):
+            model = str(serialized.get("name") or serialized.get("id") or "")
         self._start("llm", kwargs.get("run_id"), "chat_model",
-                    prompt_chars=sum(len(str(p)) for p in prompts))
+                    parent_run_id=str(kwargs.get("parent_run_id") or ""),
+                    prompt_chars=sum(len(str(p)) for p in prompts),
+                    input_text=prompt_text,
+                    model=model)
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         usage = getattr(response, "llm_output", None) or {}
         token_usage = usage.get("token_usage") if isinstance(usage, dict) else None
+        prompt_tokens = completion_tokens = total_tokens = 0
         if isinstance(token_usage, dict):
-            self.total_tokens += int(token_usage.get("total_tokens") or 0)
-        self._finish("llm", kwargs.get("run_id"), "chat_model", total_tokens=self.total_tokens)
+            prompt_tokens = int(token_usage.get("prompt_tokens") or 0)
+            completion_tokens = int(token_usage.get("completion_tokens") or 0)
+            total_tokens = int(token_usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+            self.total_tokens += total_tokens
+        output_text = ""
+        try:
+            generations = getattr(response, "generations", None) or []
+            if generations and generations[0]:
+                output_text = str(getattr(generations[0][0], "text", "") or "")[:12000]
+        except Exception:
+            output_text = ""
+        self._finish("llm", kwargs.get("run_id"), "chat_model",
+                     parent_run_id=str(kwargs.get("parent_run_id") or ""),
+                     prompt_tokens=prompt_tokens,
+                     completion_tokens=completion_tokens,
+                     total_tokens=total_tokens,
+                     output_text=output_text)
 
     def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
         self._error("llm", kwargs.get("run_id"), "chat_model", error)
 
     def on_tool_start(self, serialized: dict, input_str: str, **kwargs: Any) -> None:
         self._start("tool", kwargs.get("run_id"), self._tool_name(serialized),
-                    input_preview=str(input_str)[:300])
+                    parent_run_id=str(kwargs.get("parent_run_id") or ""),
+                    input_preview=str(input_str)[:300],
+                    input_text=str(input_str)[:12000])
 
     def on_tool_end(self, output: Any, **kwargs: Any) -> None:
         self._finish("tool", kwargs.get("run_id"), kwargs.get("name") or "tool",
-                     output_preview=str(output)[:300])
+                     parent_run_id=str(kwargs.get("parent_run_id") or ""),
+                     output_preview=str(output)[:300],
+                     output_text=str(output)[:12000])
 
     def on_tool_error(self, error: BaseException, **kwargs: Any) -> None:
         self._error("tool", kwargs.get("run_id"), kwargs.get("name") or "tool", error)
+
+    def on_chain_start(self, serialized: dict, inputs: Any, **kwargs: Any) -> None:
+        name = "chain"
+        if isinstance(serialized, dict):
+            name = str(serialized.get("name") or serialized.get("id") or "chain")
+        self._start("chain", kwargs.get("run_id"), name,
+                    parent_run_id=str(kwargs.get("parent_run_id") or ""),
+                    input_text=str(inputs)[:12000])
+
+    def on_chain_end(self, outputs: Any, **kwargs: Any) -> None:
+        self._finish("chain", kwargs.get("run_id"), kwargs.get("name") or "chain",
+                     parent_run_id=str(kwargs.get("parent_run_id") or ""),
+                     output_text=str(outputs)[:12000])
+
+    def on_chain_error(self, error: BaseException, **kwargs: Any) -> None:
+        self._error("chain", kwargs.get("run_id"), kwargs.get("name") or "chain", error)
 
 MAX_STEPS = AgentConfig().max_steps
 _TERMINAL_STATUSES = {

@@ -62,6 +62,8 @@ DDL = [
         tenant_id TEXT NOT NULL,
         kind TEXT NOT NULL,
         name TEXT NOT NULL,
+        parent_span_id TEXT,
+        run_type TEXT,
         model TEXT,
         prompt_tokens BIGINT NOT NULL DEFAULT 0,
         completion_tokens BIGINT NOT NULL DEFAULT 0,
@@ -71,7 +73,11 @@ DDL = [
         latency_ms INTEGER,
         status TEXT NOT NULL DEFAULT 'success',
         error_code TEXT,
+        error_text TEXT,
         started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        ended_at TIMESTAMPTZ,
+        input_json JSONB,
+        output_json JSONB,
         meta JSONB NOT NULL DEFAULT '{}'::jsonb
     )
     """,
@@ -177,6 +183,16 @@ DDL = [
     "CREATE INDEX IF NOT EXISTS billing_invoices_tenant ON billing_invoices (tenant_id, created_at DESC)",
 ]
 
+MIGRATIONS = [
+    "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS parent_span_id TEXT",
+    "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS run_type TEXT",
+    "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS error_text TEXT",
+    "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ",
+    "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS input_json JSONB",
+    "ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS output_json JSONB",
+    "CREATE INDEX IF NOT EXISTS ai_spans_parent ON ai_spans (trace_id, parent_span_id)",
+]
+
 SEED_PRICES = [
     # 内部成本价（元 / 1K tokens）；销售价留空，后续由管理端配置。
     ("deepseek-flash", 0.0005, 0.0010),
@@ -192,7 +208,11 @@ SEED_PACKS = [
 
 
 def _connect():
-    return psycopg2.connect(**auth.current_pg_config())
+    cfg = dict(auth.current_pg_config())
+    # Windows 下 localhost 可能先走 IPv6，连接会卡 5 秒；监控是只读控制面，固定 IPv4。
+    if str(cfg.get("host") or "") == "localhost":
+        cfg["host"] = "127.0.0.1"
+    return psycopg2.connect(**cfg)
 
 
 def ensure_schema(conn=None) -> None:
@@ -205,6 +225,8 @@ def ensure_schema(conn=None) -> None:
     cur = conn.cursor()
     try:
         for sql in DDL:
+            cur.execute(sql)
+        for sql in MIGRATIONS:
             cur.execute(sql)
         for model, cost_in, cost_out in SEED_PRICES:
             cur.execute(
@@ -341,6 +363,68 @@ def _record_trace_usage(trace_id: str, prompt_tokens: int, completion_tokens: in
                WHERE trace_id=%s""",
             (prompt_tokens, completion_tokens, total_tokens, cost_amount, trace_id),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_agent_spans(
+    trace_id: str,
+    spans: list[dict[str, Any]],
+    *,
+    tenant_id: str | None = None,
+) -> None:
+    """写入 Agent trace 的层级 span；一次批量写入，失败不阻断主链路。"""
+    if not spans:
+        return
+    _safe(_record_agent_spans, trace_id, spans, tenant_id or tenant_of())
+
+
+def _record_agent_spans(trace_id: str, spans: list[dict[str, Any]], tenant_id: str) -> None:
+    conn = _connect()
+    ensure_schema(conn)
+    try:
+        cur = conn.cursor()
+        for span in spans:
+            started_at = span.get("started_at")
+            ended_at = span.get("ended_at")
+            if isinstance(started_at, (int, float)):
+                started_at = datetime.fromtimestamp(float(started_at), timezone.utc)
+            if isinstance(ended_at, (int, float)):
+                ended_at = datetime.fromtimestamp(float(ended_at), timezone.utc)
+            cur.execute(
+                """INSERT INTO ai_spans
+                   (span_id, trace_id, tenant_id, kind, name, parent_span_id, run_type,
+                    model, prompt_tokens, completion_tokens, reasoning_tokens, total_tokens,
+                    cost_amount, latency_ms, status, error_code, error_text,
+                    started_at, ended_at, input_json, output_json, meta)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (span_id) DO NOTHING""",
+                (
+                    str(span.get("span_id")),
+                    trace_id,
+                    tenant_id,
+                    str(span.get("kind") or "node"),
+                    str(span.get("name") or "node"),
+                    span.get("parent_span_id"),
+                    str(span.get("run_type") or span.get("kind") or "node"),
+                    span.get("model"),
+                    int(span.get("prompt_tokens") or 0),
+                    int(span.get("completion_tokens") or 0),
+                    int(span.get("reasoning_tokens") or 0),
+                    int(span.get("total_tokens") or 0),
+                    float(span.get("cost_amount") or 0),
+                    int(span.get("latency_ms") or 0),
+                    str(span.get("status") or "success"),
+                    span.get("error_code"),
+                    span.get("error_text"),
+                    started_at or datetime.now(timezone.utc),
+                    ended_at,
+                    Json(span.get("input_json") or {}),
+                    Json(span.get("output_json") or {}),
+                    Json(span.get("meta") or {}),
+                ),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -654,7 +738,8 @@ def trace_detail(tenant: str, trace_id: str, admin: bool = False) -> dict | None
         spans = []
         for row in cur.fetchall():
             d = dict(row)
-            d["started_at"] = d["started_at"].isoformat() if d["started_at"] else None
+            d["started_at"] = d["started_at"].isoformat() if d.get("started_at") else None
+            d["ended_at"] = d["ended_at"].isoformat() if d.get("ended_at") else None
             d["cost_amount"] = float(d["cost_amount"] or 0)
             d["total_tokens"] = int(d["total_tokens"] or 0)
             spans.append(d)
