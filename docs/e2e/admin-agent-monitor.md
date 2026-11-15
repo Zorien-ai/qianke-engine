@@ -352,3 +352,110 @@ web build
 Eval / 实验管理
 trace 回流评测
 ```
+
+## Phase C：数据集与评测实验
+
+日期：2026-11-15  
+入口：`/v2/#/admin/agent-evals`（平台 → Agent 数据集与评测）
+
+### 1. 从 Trace 建数据集
+
+```text
+GET  /api/admin/agent-traces?range=7d&limit=30
+POST /api/admin/agent-datasets
+  {name, description, trace_ids[]}
+```
+
+行为：
+
+```text
+读取选中 trace 的 meta.question / meta.final_answer
+为每条 trace 生成一个 case
+单次最多 50 条 trace
+```
+
+### 2. 运行评测实验
+
+```text
+POST /api/admin/agent-experiments
+  {dataset_id, name}
+GET  /api/admin/agent-experiments
+GET  /api/admin/agent-experiments/{experiment_id}
+```
+
+执行：
+
+```text
+后台线程逐条调用真实 Agent
+request_id = experiment_id + case 序号
+记录：状态 / 通过 / 耗时 / Tokens / 工具 / 回答 / 监控 trace_id
+```
+
+判定（当前 deterministic）：
+
+```text
+Agent status == COMPLETED
+expected_keywords 全部命中（若配置）
+expected_tools 是实际调用子集（若配置）
+```
+
+不通过或异常都落结果，实验最终状态为 COMPLETED。
+
+### 3. 页面
+
+```text
+数据集：
+  最近 7 天 Trace 勾选
+  创建数据集
+  查看用例列表
+
+评测实验：
+  选择数据集
+  启动评测
+  运行中每 2 秒轮询
+  查看通过数 / 成功率 / 平均耗时
+  逐条结果表
+```
+
+截图：
+
+![数据集](docs/design/admin-agent-evals-datasets.png)
+
+![数据集详情](docs/design/admin-agent-evals-dataset-detail.png)
+
+![实验详情](docs/design/admin-agent-evals-experiment.png)
+
+### 4. 真实验证
+
+```text
+创建数据集 Phase C Smoke（1 条 Trace）
+运行 smoke experiment
+结果：
+  status COMPLETED
+  1/1 通过
+  success_rate 100%
+  avg latency 3.11s
+  avg tokens 2,294
+```
+
+### 5. 当前限制
+
+```text
+1. 评测判定是确定性的，没有 LLM Judge
+2. 用例目前只由 Trace 自动生成，尚未做手工增改/期望关键词编辑
+3. 实验在前台 API 进程的后台线程执行，服务重启会中断 RUNNING 实验
+4. 数据集/实验暂时只在系统管理员范围内使用
+```
+
+## Phase C 验证
+
+```text
+pytest tests/ -q
+  → 844 passed, 6 skipped
+
+web build
+  → PASS
+
+移动 390：
+  数据集/实验详情无整页横向溢出
+```

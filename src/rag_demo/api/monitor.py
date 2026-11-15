@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from rag_demo import ai_monitor
+from rag_demo import ai_monitor, agent_eval_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["monitor"])
@@ -63,6 +64,17 @@ class AgentTraceTagsIn(BaseModel):
 class AgentTraceFeedbackIn(BaseModel):
     score: int | None = None
     comment: str = ""
+
+
+class AgentDatasetIn(BaseModel):
+    name: str
+    description: str = ""
+    trace_ids: list[str] = []
+
+
+class AgentExperimentIn(BaseModel):
+    dataset_id: str
+    name: str = ""
 
 
 # ==================== 监控 ====================
@@ -233,6 +245,91 @@ def admin_agent_trace_detail(trace_id: str) -> dict:
     data = ai_monitor.trace_detail("", trace_id, admin=True)
     if data is None:
         raise HTTPException(status_code=404, detail="Agent Trace 不存在")
+    return data
+
+
+@router.get("/api/admin/agent-datasets")
+def admin_agent_datasets() -> dict:
+    api = _main()
+    api._require_system_admin()
+    return {"items": agent_eval_store.list_datasets()}
+
+
+@router.post("/api/admin/agent-datasets")
+def admin_agent_dataset_create(payload: AgentDatasetIn) -> dict:
+    api = _main()
+    account = api._require_system_admin()
+    try:
+        data = agent_eval_store.create_dataset(
+            payload.name,
+            payload.description,
+            payload.trace_ids,
+            actor=str((account or {}).get("username") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return data
+
+
+@router.get("/api/admin/agent-datasets/{dataset_id}")
+def admin_agent_dataset_detail(dataset_id: str) -> dict:
+    api = _main()
+    api._require_system_admin()
+    data = agent_eval_store.get_dataset(dataset_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="数据集不存在")
+    return data
+
+
+def _run_eval_experiment(experiment_id: str, account: dict, target_dataset: str) -> None:
+    try:
+        agent_eval_store.run_experiment(
+            experiment_id,
+            account=account,
+            target_dataset=target_dataset,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Agent 评测实验执行失败: %s", experiment_id)
+
+
+@router.post("/api/admin/agent-experiments")
+def admin_agent_experiment_create(payload: AgentExperimentIn) -> dict:
+    api = _main()
+    account = api._require_system_admin()
+    target_dataset = api._agent_dataset(account)
+    try:
+        experiment = agent_eval_store.create_experiment(
+            payload.dataset_id,
+            payload.name,
+            target_dataset=target_dataset,
+            actor=str((account or {}).get("username") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    thread = threading.Thread(
+        target=_run_eval_experiment,
+        args=(experiment["experiment_id"], dict(account or {}), target_dataset),
+        daemon=True,
+        name=f"agent-eval-{experiment['experiment_id'][:8]}",
+    )
+    thread.start()
+    return experiment
+
+
+@router.get("/api/admin/agent-experiments")
+def admin_agent_experiments(dataset_id: str | None = None) -> dict:
+    api = _main()
+    api._require_system_admin()
+    return {"items": agent_eval_store.list_experiments(dataset_id)}
+
+
+@router.get("/api/admin/agent-experiments/{experiment_id}")
+def admin_agent_experiment_detail(experiment_id: str) -> dict:
+    api = _main()
+    api._require_system_admin()
+    data = agent_eval_store.get_experiment(experiment_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="实验不存在")
     return data
 
 
