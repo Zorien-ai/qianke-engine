@@ -126,7 +126,7 @@
         return response.ok ? response.json() : null;
       });
       var account = (who && who.account) || {};
-      if (account.is_system_admin || account.is_enterprise_admin) {
+      if (account.is_system_admin) {
         window.location.href = "/v2/#/";
         return;
       }
@@ -140,6 +140,10 @@
         } catch (error) {
           /* 不是商家，继续走 C 端 */
         }
+      }
+      if (account.is_enterprise_admin) {
+        window.location.href = "/v2/#/";
+        return;
       }
       if (account.account_type === "consumer" || (!account.enterprise_id && !account.is_system_admin && !account.is_enterprise_admin)) {
         window.location.href = "/v2/#/c/app";
