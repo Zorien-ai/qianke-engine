@@ -102,3 +102,23 @@ web build：PASS
 - SQLite/PG 控制面新增 `c_user_attribute`，`CREATE TABLE IF NOT EXISTS`，无破坏性迁移。
 - 旧图像刷新千客池后自动补齐冷启动层。
 - 没有冷启动数据的用户显示「暂无冷启动属性」，不伪造。
+## 明确买家 ID 查询
+
+问小千输入：
+
+```text
+buyer_217你怎么看
+```
+
+现在会先识别 `buyer_217`，直接按 `merchant_id + buyer_id` 精确取画像，不再走语义检索。
+
+返回：
+
+```text
+buyer_217 是冷启动期的新客
+冷启动：男 / 18-24 / 杭州 / 银卡
+最近会话：发货时间 / 库存 / 售后政策
+本次检索到千客用户池 14 人中的 1 人
+```
+
+![buyer_217 精确查询](docs/design/b-profile-buyer217-exact.png)
