@@ -443,13 +443,15 @@
       const who = await fetch("/whoami", { credentials: "same-origin" }).then((r) => r.json());
       const account = who && who.account ? who.account : {};
       if (account.account_type === "consumer") return "/v2/#/c/app";
-      if (account.is_system_admin || account.is_enterprise_admin) return "/v2/#/";
+      if (account.is_system_admin) return "/v2/#/";
+      // 商家 owner 也常是企业管理员；先看是否有商家绑定，命中则进 B 工作台。
       try {
         const me = await fetch("/api/b/workbench/me", { credentials: "same-origin" });
         if (me.ok) return "/v2/b.html";
       } catch (e) {
         /* 不是商家账号，继续判断买家 */
       }
+      if (account.is_enterprise_admin) return "/v2/#/";
       if (!account.enterprise_id && !account.is_system_admin && !account.is_enterprise_admin) {
         return "/v2/#/c/app";
       }
