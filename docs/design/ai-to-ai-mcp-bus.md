@@ -1,7 +1,7 @@
 # AI-to-AI MCP 沟通工具设计稿
 
-版本：v0.3  
-状态：Phase 0 本地实现已跑通；跨机器 / 人类 Web / TTL 未实现  
+版本：v0.4  
+状态：Phase 0 本地实现：MCP + 固定能力 + 自动路由 + 人类审批台 + 正文 TTL；跨机器未做  
 目标读者：Qianke Agent 平台 / 多 Agent 协作 / MCP 接入方
 
 ## 0. 本版决策
@@ -745,7 +745,7 @@ comm_task_status
 8. 没有能力匹配 → NO_ELIGIBLE_AGENT
 ```
 
-### 18.5 本地存储
+### 18.5 本地存储 + 正文 TTL
 
 SQLite 默认：
 
@@ -757,22 +757,63 @@ var/agent_comm.sqlite3
 
 ```text
 agents / rooms / room_members / messages / receipts
-cursors / tasks / approvals
+cursors / tasks / approvals / message_audit
 ```
 
-消息、任务、群组当前是本地短链路，正文 TTL 和长期审计元数据尚未实现。
+正文 TTL：
 
-### 18.6 当前未实现
+```text
+默认 30 天，AGENT_COMM_MESSAGE_TTL_DAYS 可覆盖
+每条消息写 expires_at
+每次 Bus 读写 / 审批台访问 / 进程启动时清理过期正文
+删除正文前把 content_hash 写入 message_audit
+长期保留元数据 + hash，不保留正文
+```
+
+### 18.6 人类审批台
+
+入口：
+
+```text
+/v2/#/admin/agent-comm
+平台 → Agent 协作审批
+```
+
+人类 API：
+
+```text
+GET  /api/admin/agent-comm/approvals?status=PENDING
+POST /api/admin/agent-comm/approvals/{approval_id}/decision
+     {"action": "approve" | "reject", "note": "..."}
+GET  /api/admin/agent-comm/messages
+POST /api/admin/agent-comm/purge
+```
+
+行为：
+
+```text
+审批全部要求系统管理员
+同意：approval=APPROVED，task=ASSIGNED，给目标 Agent 补发 task 消息（human:xxx 发送）
+驳回：approval=REJECTED，task=REJECTED，给发起 Agent 发 task_rejected
+重复点击：按已处理返回，幂等
+```
+
+截图：
+
+![人类审批台](docs/design/agent-comm-human-approval.png)
+
+![最近消息 / TTL](docs/design/agent-comm-human-messages.png)
+
+### 18.7 当前未实现
 
 ```text
 1. 跨机器 HTTPS/WSS 中继
-2. 人类 Web 控制台与审批操作
-3. 正文 30 天 TTL、长期审计元数据
-4. OIDC / mTLS / 端到端加密
-5. 审批通过后继续执行
+2. OIDC / mTLS / 端到端加密
+3. 审批后台任务自动恢复（服务重启后 RUNNING 任务仍需人工处理）
+4. 人类在群组内直接发言（当前人类只做审批）
 ```
 
-### 18.7 验证
+### 18.8 验证
 
 ```bash
 python -m pytest tests/test_mcp_agent_comm.py -q
