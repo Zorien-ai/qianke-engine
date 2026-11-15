@@ -122,3 +122,130 @@ web build：PASS
 3. 暂未做 prompt/response 全文回放、导出、采样与告警；
    属于下一阶段，不影响本次只读监控 MVP。
 ```
+
+## Phase A：Trace Tree + 节点级 I/O
+
+日期：2026-11-15  
+目标：从“事件时间线”升级到 LangSmith 核心的层级 trace 视图。
+
+### 1. 数据模型
+
+`ai_spans` 扩展：
+
+```text
+parent_span_id
+run_type
+started_at / ended_at
+input_json / output_json
+prompt_tokens / completion_tokens / total_tokens
+latency_ms / status / error_text
+```
+
+迁移兼容旧库：
+
+```text
+ALTER TABLE ai_spans ADD COLUMN IF NOT EXISTS ...
+```
+
+### 2. 采集
+
+`TraceCallbackHandler` 现在记录：
+
+```text
+LLM：
+  prompt 全文（上限 12KB）
+  response 全文（上限 12KB）
+  prompt/completion/total tokens
+  parent_run_id
+
+Tool：
+  args 全文（上限 12KB）
+  result 全文（上限 12KB）
+  parent_run_id
+
+Chain：
+  on_chain_start / end / error
+  用来还原 LangGraph 的父子层级
+```
+
+根节点：
+
+```text
+agent.execute
+  input: question
+  output: final_answer
+  status / duration / total_tokens
+```
+
+### 3. 详情页
+
+```text
+Trace Tree
+  agent.execute
+    chain
+      llm chat_model
+      chain
+        tool search_chat_user_profiles
+      ...
+
+点击任意节点：
+  Input / Output / Metadata 三个 tab
+  显示该节点的真实输入、输出、token、耗时、错误
+```
+
+真实 trace 验证：
+
+```text
+trace：统计用户总数
+节点数：10
+agent.execute → chain → chain → LLM / TOOL
+tool：search_chat_user_profiles
+input：所有买家用户画像...
+tool 耗时：7.81s
+root 总耗时：15.42s
+root tokens：5,661
+```
+
+截图：
+
+![Trace Tree](docs/design/admin-agent-trace-tree.png)
+
+![Tool 节点](docs/design/admin-agent-trace-tree-tool.png)
+
+### 4. 性能修复
+
+发现 `ai_monitor._connect()` 在 Windows 下走 `localhost` 会先尝试 IPv6，单次连接约 **5 秒**，导致 Trace 详情很慢。
+
+已固定监控连接使用 `127.0.0.1`：
+
+```text
+Trace 详情：约 5,000ms → 22-64ms
+```
+
+### 5. 验证
+
+```text
+pytest tests/ -q
+  → 831 passed, 6 skipped
+
+web build
+  → PASS
+
+真实 Agent 调用
+  → trace tree 10 个节点
+  → LLM / Tool 的 input/output/token 可查看
+```
+
+## Phase B / C（未做）
+
+```text
+Phase B：
+  trace 对比
+  标签 / 搜索增强
+  人工评分 / feedback
+
+Phase C：
+  数据集
+  Eval / 实验管理
+  trace 回流评测
+```
