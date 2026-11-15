@@ -233,3 +233,31 @@ def test_expired_payload_is_purged_and_hash_kept(tmp_path, config_path):
         assert len(row["content_hash"]) == 64
     finally:
         store.close()
+
+
+def test_workspace_human_room_and_task(tmp_path, config_path):
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    admin = open_admin_store(config_path=str(config_path), db_path=str(tmp_path / "bus.sqlite3"))
+    try:
+        room = admin.create_room("工作台联调群")
+        admin.post_human_message(room["room_id"], {"text": "人类工作台消息"}, actor="admin")
+        messages = admin.room_messages(room["room_id"])
+        assert messages[-1]["sender"] == "human:admin"
+        assert messages[-1]["content"]["text"] == "人类工作台消息"
+
+        task = admin.propose_task(
+            title="C 端回归",
+            required_capabilities=["c_end"],
+            risk="low",
+            mode="auto",
+            sender_id="human:admin",
+        )
+        assert task["status"] == "ASSIGNED"
+        assert task["assignee"] == "c_end"
+        all_tasks = admin.list_all_tasks()
+        assert any(item["task_id"] == task["task_id"] and item["sender_id"] == "human:admin" for item in all_tasks)
+        rooms = admin.list_all_rooms()
+        assert any(item["room_id"] == room["room_id"] and item["member_count"] >= 1 for item in rooms)
+    finally:
+        admin.close()

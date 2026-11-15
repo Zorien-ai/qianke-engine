@@ -523,7 +523,9 @@ class AgentCommStore:
         required_capabilities: list[str] | None = None,
         risk: str = "low",
         mode: str = "auto",
+        sender_id: str | None = None,
     ) -> dict:
+        sender = str(sender_id or self.agent_id).strip()
         title = str(title or "").strip()[:120]
         if not title:
             raise CommError("INVALID_TASK", "任务标题不能为空")
@@ -539,7 +541,7 @@ class AgentCommStore:
             raise CommError("INVALID_MODE", "模式只能是 auto / approval")
         candidates = []
         for card in self.list_agents():
-            if card["agent_id"] == self.agent_id:
+            if card["agent_id"] == sender:
                 continue
             if set(caps).issubset(set(card["capabilities"])):
                 candidates.append(card)
@@ -575,7 +577,7 @@ class AgentCommStore:
                 risk,
                 mode,
                 status,
-                self.agent_id,
+                sender,
                 target["agent_id"],
                 approval_id,
                 now,
@@ -583,8 +585,10 @@ class AgentCommStore:
             ),
         )
         self.conn.commit()
-        message = self.send(
-            to=target["agent_id"],
+        message = self._insert_message(
+            sender_id=sender,
+            recipient_id=target["agent_id"],
+            room_id=None,
             kind="task",
             content={
                 "task_id": task_id,
@@ -714,6 +718,77 @@ class AgentCommStore:
                WHERE sender_id=? OR assignee_id=?
                ORDER BY created_at DESC LIMIT ?""",
             (self.agent_id, self.agent_id, max(1, min(int(limit or 20), 100))),
+        ).fetchall()
+        result = []
+        for row in rows:
+            data = dict(row)
+            data["required_capabilities"] = _json(data.pop("required_capabilities_json"), [])
+            result.append(data)
+        return result
+
+    def list_all_rooms(self) -> list[dict]:
+        self.purge_expired()
+        rows = self.conn.execute(
+            """SELECT r.*, COUNT(m.agent_id) AS member_count
+               FROM rooms r LEFT JOIN room_members m ON m.room_id=r.room_id
+               GROUP BY r.room_id ORDER BY r.created_at DESC"""
+        ).fetchall()
+        result = []
+        for row in rows:
+            data = dict(row)
+            members = self.conn.execute(
+                "SELECT agent_id, role FROM room_members WHERE room_id=? ORDER BY joined_at",
+                (data["room_id"],),
+            ).fetchall()
+            data["members"] = [dict(item) for item in members]
+            result.append(data)
+        return result
+
+    def room_messages(self, room_id: str, *, limit: int = 80) -> list[dict]:
+        self.purge_expired()
+        room = self.conn.execute("SELECT 1 FROM rooms WHERE room_id=?", (room_id,)).fetchone()
+        if room is None:
+            raise CommError("ROOM_NOT_FOUND", "群不存在")
+        rows = self.conn.execute(
+            """SELECT * FROM messages WHERE room_id=?
+               ORDER BY seq DESC LIMIT ?""",
+            (room_id, max(1, min(int(limit or 80), 200))),
+        ).fetchall()
+        messages = []
+        for row in reversed(rows):
+            messages.append(
+                {
+                    "message_id": row["message_id"],
+                    "seq": row["seq"],
+                    "sender": row["sender_id"],
+                    "room_id": row["room_id"],
+                    "kind": row["kind"],
+                    "content": _json(row["content_json"], {}),
+                    "task_id": row["task_id"],
+                    "created_at": row["created_at"],
+                    "expires_at": row["expires_at"],
+                }
+            )
+        return messages
+
+    def post_human_message(self, room_id: str, content: Any, *, actor: str = "admin") -> dict:
+        self.purge_expired()
+        room = self.conn.execute("SELECT name FROM rooms WHERE room_id=?", (room_id,)).fetchone()
+        if room is None:
+            raise CommError("ROOM_NOT_FOUND", "群不存在")
+        payload = content if isinstance(content, dict) else {"text": str(content or "")}
+        return self._insert_message(
+            sender_id=f"human:{actor or 'admin'}",
+            recipient_id=None,
+            room_id=room_id,
+            kind="chat",
+            content=payload,
+        )
+
+    def list_all_tasks(self, *, limit: int = 80) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(int(limit or 80), 200)),),
         ).fetchall()
         result = []
         for row in rows:
