@@ -75,8 +75,8 @@ const pageTitle = computed(() => (route.meta && route.meta.title) || "工作台"
 const navGroups = computed(() => {
   const groups = [
     { title: "工作台", keys: ["dashboard", "chat", "agent", "agentActions", "myAgent", "kb"] },
-    { title: "管理", keys: ["staff", "eval", "monitor", "billing", "settings"] },
-    { title: "平台", keys: ["adminMonitor", "adminAgentMonitor", "adminAgentEvals", "adminCEnd", "adminChatProfiles", "adminMerchantStoreFriends"] },
+    { title: "管理", keys: ["staff", "evalCenter", "monitorCenter", "billing", "settings"] },
+    { title: "平台", keys: ["adminCEnd", "adminChatProfiles", "adminMerchantStoreFriends"] },
   ];
   return groups
     .map((group) => ({
