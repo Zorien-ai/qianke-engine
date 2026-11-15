@@ -97,3 +97,16 @@ web build
 截图：
 
 ![业务 Trace 跳 Agent 输入输出](docs/design/agent-trace-io-from-monitor.png)
+## 评测实验 → Trace 输入输出
+
+Agent 实验的逐条结果表新增「查看 Trace」：
+
+```text
+点击后关闭实验弹层 → 跳到 Agent 调用 tab → 自动打开同一 Trace
+```
+
+修复点：早期直接在弹层里用 RouterLink 跳转，页面过渡会卡在离场状态；现在先关闭弹层再 router.push。
+
+截图：
+
+![评测结果跳 Trace](docs/design/eval-trace-link.png)
