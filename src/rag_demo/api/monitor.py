@@ -77,6 +77,11 @@ class AgentExperimentIn(BaseModel):
     name: str = ""
 
 
+class AgentCommApprovalIn(BaseModel):
+    action: str
+    note: str = ""
+
+
 # ==================== 监控 ====================
 
 @router.get("/api/monitor/overview")
@@ -331,6 +336,77 @@ def admin_agent_experiment_detail(experiment_id: str) -> dict:
     if data is None:
         raise HTTPException(status_code=404, detail="实验不存在")
     return data
+
+
+@router.get("/api/admin/agent-comm/approvals")
+def admin_agent_comm_approvals(status: str | None = "PENDING") -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import CommError, open_admin_store
+
+    store = open_admin_store()
+    try:
+        all_items = store.list_approvals(status=None)
+        items = [item for item in all_items if not status or item["status"] == status.upper()]
+        return {
+            "items": items,
+            "stats": {
+                "pending": sum(1 for item in all_items if item["status"] == "PENDING"),
+                "approved": sum(1 for item in all_items if item["status"] == "APPROVED"),
+                "rejected": sum(1 for item in all_items if item["status"] == "REJECTED"),
+            },
+            "ttl_days": store.ttl_days,
+        }
+    finally:
+        store.close()
+
+
+@router.post("/api/admin/agent-comm/approvals/{approval_id}/decision")
+def admin_agent_comm_approval_decision(approval_id: str, payload: AgentCommApprovalIn) -> dict:
+    api = _main()
+    account = api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import CommError, open_admin_store
+
+    store = open_admin_store()
+    try:
+        try:
+            result = store.decide_approval(
+                approval_id,
+                action=payload.action,
+                note=payload.note,
+                actor=str((account or {}).get("username") or "admin"),
+            )
+        except CommError as exc:
+            raise HTTPException(status_code=404 if exc.code == "APPROVAL_NOT_FOUND" else 400, detail=exc.message) from exc
+        return result
+    finally:
+        store.close()
+
+
+@router.get("/api/admin/agent-comm/messages")
+def admin_agent_comm_messages(limit: int = 30) -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    store = open_admin_store()
+    try:
+        return {"items": store.recent_messages(limit=limit), "ttl_days": store.ttl_days}
+    finally:
+        store.close()
+
+
+@router.post("/api/admin/agent-comm/purge")
+def admin_agent_comm_purge() -> dict:
+    api = _main()
+    api._require_system_admin()
+    from rag_demo.mcp_agent_comm.store import open_admin_store
+
+    store = open_admin_store()
+    try:
+        return store.purge_expired()
+    finally:
+        store.close()
 
 
 @router.get("/api/admin/monitor/tenants")
