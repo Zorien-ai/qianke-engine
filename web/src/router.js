@@ -13,12 +13,9 @@ const KbHistory = () => import("./views/KbHistory.vue");
 const Staff = () => import("./views/Staff.vue");
 const Settings = () => import("./views/Settings.vue");
 const Setup = () => import("./views/Setup.vue");
-const Eval = () => import("./views/Eval.vue");
-const Monitor = () => import("./views/Monitor.vue");
 const Billing = () => import("./views/Billing.vue");
-const MonitorAdmin = () => import("./views/MonitorAdmin.vue");
-const AdminAgentMonitor = () => import("./views/AdminAgentMonitor.vue");
-const AdminAgentEvals = () => import("./views/AdminAgentEvals.vue");
+const MonitorCenter = () => import("./views/MonitorCenter.vue");
+const EvalCenter = () => import("./views/EvalCenter.vue");
 const AgentDemo = () => import("./views/AgentDemo.vue");
 const AgentActions = () => import("./views/AgentActions.vue");
 const MyAgent = () => import("./views/MyAgent.vue");
@@ -70,12 +67,15 @@ const routes = [
   { path: "/settings", name: "settings", component: Settings, meta: { title: "权限配置" } },
   // 四步导入向导（替代老 /wizard 页面；老路径由后端 302 到 /v2/#/setup）
   { path: "/setup", name: "setup", component: Setup, meta: { title: "数据导入" } },
-  { path: "/eval", name: "eval", component: Eval, meta: { title: "离线评测" } },
-  { path: "/monitor", name: "monitor", component: Monitor, meta: { title: "实时监控" } },
   { path: "/billing", name: "billing", component: Billing, meta: { title: "Token 账单" } },
-  { path: "/admin/monitor", name: "monitor-admin", component: MonitorAdmin, meta: { title: "平台监控" } },
-  { path: "/admin/agent-monitor", name: "admin-agent-monitor", component: AdminAgentMonitor, meta: { title: "Agent 调用监控" } },
-  { path: "/admin/agent-evals", name: "admin-agent-evals", component: AdminAgentEvals, meta: { title: "Agent 数据集与评测" } },
+  { path: "/monitor-center", name: "monitor-center", component: MonitorCenter, meta: { title: "监控中心" } },
+  { path: "/eval-center", name: "eval-center", component: EvalCenter, meta: { title: "评测中心" } },
+  // 兼容旧入口；旧书签仍然可用
+  { path: "/monitor", redirect: { name: "monitor-center", query: { tab: "request" } } },
+  { path: "/admin/monitor", redirect: { name: "monitor-center", query: { tab: "platform" } } },
+  { path: "/admin/agent-monitor", redirect: { name: "monitor-center", query: { tab: "agent" } } },
+  { path: "/eval", redirect: { name: "eval-center", query: { tab: "rag" } } },
+  { path: "/admin/agent-evals", redirect: { name: "eval-center", query: { tab: "agent" } } },
   // 未知路径 → 工作台；未登录时守卫会再把人送回 /home
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
@@ -126,25 +126,18 @@ router.beforeEach(async (to) => {
     toast("只有企业管理员可以导入或重建数据", "error");
     return { name: "dashboard" };
   }
-  // 离线评测只读看板对演示账号开放；写接口由后端只读中间件拦截
-  if (to.name === "eval" && !isManager() && !isDemo()) {
-    toast("只有管理员可以访问离线评测", "error");
+  // 监控中心：业务请求开放给管理员；Agent/租户 tab 由页面内角色控制
+  if (to.name === "monitor-center" && !isManager() && !(store.account && store.account.is_system_admin)) {
+    toast("只有管理员可以访问监控中心", "error");
     return { name: "dashboard" };
   }
-  if ((to.name === "monitor" || to.name === "billing") && !isManager()) {
-    toast("只有管理员可以访问监控与 Token 账单", "error");
+  // 评测中心：RAG 评测对演示只读开放；Agent 实验由页面内角色控制
+  if (to.name === "eval-center" && !isManager() && !isDemo() && !(store.account && store.account.is_system_admin)) {
+    toast("只有管理员可以访问评测中心", "error");
     return { name: "dashboard" };
   }
-  if (to.name === "monitor-admin" && !(store.account && store.account.is_system_admin)) {
-    toast("只有系统管理员可以访问平台监控", "error");
-    return { name: "dashboard" };
-  }
-  if (to.name === "admin-agent-monitor" && !(store.account && store.account.is_system_admin)) {
-    toast("只有系统管理员可以访问 Agent 调用监控", "error");
-    return { name: "dashboard" };
-  }
-  if (to.name === "admin-agent-evals" && !(store.account && store.account.is_system_admin)) {
-    toast("只有系统管理员可以访问 Agent 数据集与评测", "error");
+  if (to.name === "billing" && !isManager()) {
+    toast("只有管理员可以访问 Token 账单", "error");
     return { name: "dashboard" };
   }
   if (to.name === "admin-chat-profiles" && !(store.account && store.account.is_system_admin)) {
