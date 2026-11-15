@@ -4,7 +4,7 @@
  * 数据来自 ai_traces / ai_spans，不依赖外部 LangSmith。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { getJson } from "../api";
+import { getJson, patchJson, postJson } from "../api";
 
 const ranges = [
   { value: "1h", label: "1 小时" },
@@ -20,6 +20,8 @@ const statuses = [
 const range = ref("24h");
 const status = ref("");
 const q = ref("");
+const tagFilter = ref("");
+const feedbackFilter = ref("");
 const items = ref([]);
 const summary = ref(null);
 const total = ref(0);
@@ -28,6 +30,16 @@ const error = ref("");
 const detail = ref(null);
 const detailLoading = ref(false);
 const detailError = ref("");
+const selectedTraceIds = ref([]);
+const compareOpen = ref(false);
+const compareLoading = ref(false);
+const compareError = ref("");
+const compareTraces = ref([]);
+const feedbackScore = ref(0);
+const feedbackComment = ref("");
+const feedbackSaving = ref(false);
+const tagDraft = ref("");
+const tagsSaving = ref(false);
 
 function num(value) {
   return Number(value || 0).toLocaleString();
@@ -191,6 +203,8 @@ async function load() {
     const params = new URLSearchParams({ range: range.value, limit: "100" });
     if (status.value) params.set("status", status.value);
     if (q.value.trim()) params.set("q", q.value.trim());
+    if (tagFilter.value.trim()) params.set("tag", tagFilter.value.trim());
+    if (feedbackFilter.value) params.set("feedback", feedbackFilter.value);
     const data = await getJson(`/api/admin/agent-traces?${params.toString()}`);
     items.value = data.items || [];
     summary.value = data.summary || null;
@@ -213,6 +227,9 @@ async function openTrace(item) {
     selectedSpanId.value = detail.value?.spans?.[0]?.span_id || "";
     detailTab.value = "input";
     collapsedSpans.value = new Set();
+    feedbackScore.value = Number(detail.value?.feedback_score || 0);
+    feedbackComment.value = String(detail.value?.feedback_comment || "");
+    tagDraft.value = "";
   } catch (e) {
     detailError.value = e?.detail || e?.message || "Trace 详情加载失败";
   } finally {
@@ -226,7 +243,105 @@ function closeDetail() {
   collapsedSpans.value = new Set();
 }
 function onKeydown(e) {
+  if (e.key === "Escape" && compareOpen.value) {
+    compareOpen.value = false;
+    return;
+  }
   if (e.key === "Escape" && detail.value) closeDetail();
+}
+
+function toggleSelect(item) {
+  const id = item?.trace_id;
+  if (!id) return;
+  const current = selectedTraceIds.value;
+  if (current.includes(id)) selectedTraceIds.value = current.filter((x) => x !== id);
+  else if (current.length < 2) selectedTraceIds.value = [...current, id];
+}
+function isSelected(item) {
+  return selectedTraceIds.value.includes(item?.trace_id);
+}
+async function openCompare() {
+  const ids = selectedTraceIds.value;
+  if (ids.length !== 2) return;
+  compareOpen.value = true;
+  compareLoading.value = true;
+  compareError.value = "";
+  compareTraces.value = [];
+  try {
+    compareTraces.value = await Promise.all(
+      ids.map((id) => getJson(`/api/admin/agent-traces/${encodeURIComponent(id)}`))
+    );
+  } catch (e) {
+    compareError.value = e?.detail || e?.message || "Trace 对比加载失败";
+  } finally {
+    compareLoading.value = false;
+  }
+}
+function closeCompare() {
+  compareOpen.value = false;
+  compareTraces.value = [];
+  compareError.value = "";
+}
+function compareSpans(trace) {
+  const list = Array.isArray(trace?.spans) ? trace.spans : [];
+  return [...list].sort((a, b) => Number(b.latency_ms || 0) - Number(a.latency_ms || 0)).slice(0, 6);
+}
+function feedbackLabel(score) {
+  const n = Number(score || 0);
+  if (!n) return "未评分";
+  return "★".repeat(n) + "☆".repeat(5 - n);
+}
+async function saveTags() {
+  if (!detail.value || tagsSaving.value) return;
+  const raw = tagDraft.value.trim();
+  if (!raw) return;
+  tagsSaving.value = true;
+  try {
+    const tags = [...(detail.value.tags || []), raw];
+    const resp = await patchJson(`/api/admin/agent-traces/${encodeURIComponent(detail.value.trace_id)}/tags`, { tags });
+    detail.value = { ...detail.value, tags: resp.tags || [] };
+    const row = items.value.find((x) => x.trace_id === detail.value.trace_id);
+    if (row) row.tags = resp.tags || [];
+    tagDraft.value = "";
+  } catch (e) {
+    window.alert(e?.detail || e?.message || "标签保存失败");
+  } finally {
+    tagsSaving.value = false;
+  }
+}
+async function removeTag(tag) {
+  if (!detail.value) return;
+  const tags = (detail.value.tags || []).filter((x) => x !== tag);
+  try {
+    const resp = await patchJson(`/api/admin/agent-traces/${encodeURIComponent(detail.value.trace_id)}/tags`, { tags });
+    detail.value = { ...detail.value, tags: resp.tags || [] };
+    const row = items.value.find((x) => x.trace_id === detail.value.trace_id);
+    if (row) row.tags = resp.tags || [];
+  } catch (e) {
+    window.alert(e?.detail || e?.message || "标签保存失败");
+  }
+}
+async function saveFeedback() {
+  if (!detail.value || feedbackSaving.value) return;
+  feedbackSaving.value = true;
+  try {
+    const payload = { score: feedbackScore.value || null, comment: feedbackComment.value };
+    const resp = await postJson(`/api/admin/agent-traces/${encodeURIComponent(detail.value.trace_id)}/feedback`, payload);
+    detail.value = {
+      ...detail.value,
+      feedback_score: resp.feedback_score,
+      feedback_comment: resp.comment,
+    };
+    const row = items.value.find((x) => x.trace_id === detail.value.trace_id);
+    if (row) {
+      row.feedback_score = resp.feedback_score;
+      row.feedback_comment = resp.comment;
+    }
+  } catch (e) {
+    window.alert(e?.detail || e?.message || "评分保存失败");
+  } finally {
+    feedbackSaving.value = false;
+  }
 }
 
 onMounted(() => {
@@ -269,6 +384,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <option v-for="s in statuses" :key="s.value" :value="s.value">{{ s.label }}</option>
           </select>
         </label>
+        <label class="obs-field">
+          <span>评分</span>
+          <select v-model="feedbackFilter" @change="load">
+            <option value="">全部</option>
+            <option value="positive">好评</option>
+            <option value="negative">差评</option>
+            <option value="rated">已评分</option>
+            <option value="unrated">未评分</option>
+          </select>
+        </label>
+        <label class="obs-tag-filter">
+          <input v-model="tagFilter" type="search" placeholder="标签筛选" @keyup.enter="load" />
+        </label>
         <label class="obs-search">
           <span class="obs-search-icon" aria-hidden="true">⌕</span>
           <input v-model="q" type="search" placeholder="搜索问题 / request_id / trace_id" @keyup.enter="load" />
@@ -291,28 +419,40 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       <section class="card obs-table-card">
         <div class="admin-section-head">
           <strong>最近调用</strong>
-          <span class="field-hint">共 {{ num(total) }} 条 · 点击行查看 Trace</span>
+          <div class="obs-head-actions">
+            <span v-if="selectedTraceIds.length" class="field-hint">已选 {{ selectedTraceIds.length }} / 2</span>
+            <button type="button" class="btn btn-primary btn-sm" :disabled="selectedTraceIds.length !== 2" @click="openCompare">对比 Trace</button>
+            <span class="field-hint">点击行查看 Trace</span>
+          </div>
         </div>
         <div class="table-wrap">
           <table class="table obs-table">
             <thead>
               <tr>
-                <th>时间</th><th>入口</th><th>问题</th><th>状态</th>
+                <th class="obs-check-col" aria-label="选择"></th>
+                <th>时间</th><th>入口</th><th>问题</th><th>标签 / 评分</th><th>状态</th>
                 <th>耗时</th><th>Steps</th><th>Tools</th><th>Tokens</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="item in items" :key="item.trace_id" class="obs-row" tabindex="0" @click="openTrace(item)" @keyup.enter="openTrace(item)">
+                <td class="obs-check-col" @click.stop>
+                  <input type="checkbox" :checked="isSelected(item)" :aria-label="`选择 Trace ${item.trace_id}`" @change="toggleSelect(item)" />
+                </td>
                 <td class="obs-nowrap">{{ date(item.started_at) }}</td>
                 <td><span class="obs-entry">{{ item.entrypoint }}</span></td>
                 <td class="obs-question">{{ item.question || "—" }}</td>
+                <td class="obs-tags-cell">
+                  <span v-for="tag in item.tags || []" :key="tag" class="obs-tag">{{ tag }}</span>
+                  <span class="obs-rating">{{ feedbackLabel(item.feedback_score) }}</span>
+                </td>
                 <td><span class="obs-status" :class="statusClass(item.status)">{{ statusText(item.status) }}</span></td>
                 <td class="obs-nowrap">{{ ms(item.total_ms) }}</td>
                 <td>{{ num(item.steps) }}</td>
                 <td>{{ num(item.tool_call_count) }}</td>
                 <td>{{ num(item.total_tokens) }}</td>
               </tr>
-              <tr v-if="!items.length"><td colspan="8" class="field-hint">暂无 Agent 调用</td></tr>
+              <tr v-if="!items.length"><td colspan="10" class="field-hint">暂无 Agent 调用</td></tr>
             </tbody>
           </table>
         </div>
@@ -403,6 +543,28 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             </ol>
           </template>
 
+          <div class="obs-review">
+            <div class="obs-review-block">
+              <div class="obs-review-head"><b>标签</b><span class="field-hint">用于筛选和对比</span></div>
+              <div class="obs-tag-editor">
+                <span v-for="tag in detail.tags || []" :key="tag" class="obs-tag is-editable">
+                  {{ tag }}<button type="button" aria-label="移除标签" @click="removeTag(tag)">×</button>
+                </span>
+                <input v-model="tagDraft" type="text" placeholder="输入标签后回车" maxlength="32" @keyup.enter="saveTags" />
+                <button type="button" class="btn btn-ghost btn-sm" :disabled="tagsSaving || !tagDraft.trim()" @click="saveTags">{{ tagsSaving ? "保存中" : "添加" }}</button>
+              </div>
+            </div>
+            <div class="obs-review-block">
+              <div class="obs-review-head"><b>人工评分</b><span class="field-hint">{{ feedbackLabel(feedbackScore) }}</span></div>
+              <div class="obs-rating-editor">
+                <button v-for="star in 5" :key="star" type="button" class="obs-star" :class="{ 'is-active': star <= feedbackScore }" :aria-label="`${star} 分`" @click="feedbackScore = star">★</button>
+                <button type="button" class="obs-clear-rating" @click="feedbackScore = 0">清除</button>
+                <input v-model="feedbackComment" type="text" maxlength="1000" placeholder="可选：写一句反馈" />
+                <button type="button" class="btn btn-primary btn-sm" :disabled="feedbackSaving" @click="saveFeedback">{{ feedbackSaving ? "保存中" : "保存评分" }}</button>
+              </div>
+            </div>
+          </div>
+
           <template v-if="traceMeta.error">
             <h4 class="obs-section-title">错误</h4>
             <pre class="obs-pre obs-error">{{ traceMeta.error }}</pre>
@@ -412,6 +574,45 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <pre class="obs-pre">{{ traceMeta.final_answer }}</pre>
           </template>
         </template>
+      </aside>
+    </div>
+
+    <div v-if="compareOpen" class="obs-detail-mask" @click.self="closeCompare">
+      <aside class="obs-compare" role="dialog" aria-modal="true" aria-labelledby="agent-compare-title">
+        <header class="obs-detail-head">
+          <div>
+            <div class="monitor-kicker">TRACE COMPARE</div>
+            <h3 id="agent-compare-title">Agent Trace 对比</h3>
+          </div>
+          <button type="button" class="obs-close" aria-label="关闭对比" @click="closeCompare">×</button>
+        </header>
+        <div v-if="compareLoading" class="skeleton" style="height:160px"></div>
+        <div v-else-if="compareError" class="empty-state"><div class="empty-title">对比失败</div><div class="empty-desc">{{ compareError }}</div></div>
+        <div v-else class="obs-compare-grid">
+          <article v-for="trace in compareTraces" :key="trace.trace_id" class="obs-compare-card">
+            <h4>{{ trace.meta?.question || trace.question || "Agent 调用" }}</h4>
+            <p class="obs-trace-id">{{ trace.trace_id }}</p>
+            <div class="obs-compare-metrics">
+              <div><span>状态</span><b>{{ statusText(trace.status) }}</b></div>
+              <div><span>耗时</span><b>{{ ms(trace.total_ms) }}</b></div>
+              <div><span>Tokens</span><b>{{ num(trace.total_tokens) }}</b></div>
+              <div><span>Steps</span><b>{{ num(trace.meta?.steps) }}</b></div>
+              <div><span>Tools</span><b>{{ num(trace.meta?.tool_call_count) }}</b></div>
+              <div><span>评分</span><b>{{ feedbackLabel(trace.feedback_score) }}</b></div>
+            </div>
+            <div class="obs-tags-cell">
+              <span v-for="tag in trace.tags || []" :key="tag" class="obs-tag">{{ tag }}</span>
+            </div>
+            <h5>最耗时节点</h5>
+            <div class="obs-compare-spans">
+              <div v-for="span in compareSpans(trace)" :key="span.span_id" class="obs-compare-span">
+                <span class="obs-node-kind" :class="`is-${span.kind}`">{{ span.kind }}</span>
+                <span class="obs-compare-span-name">{{ span.name }}</span>
+                <b>{{ ms(span.latency_ms) }}</b>
+              </div>
+            </div>
+          </article>
+        </div>
       </aside>
     </div>
   </div>
@@ -468,6 +669,39 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 .obs-event-detail { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; word-break: break-word; }
 .obs-pre { margin: 0; padding: 12px; max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .obs-error { border-color: #fecaca; background: #fff7f7; color: #991b1b; }
+.obs-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.obs-check-col { width: 32px; text-align: center; }
+.obs-check-col input { width: 14px; height: 14px; accent-color: var(--primary); }
+.obs-tag-filter { display: flex; align-items: center; height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.obs-tag-filter input { width: 110px; border: 0; outline: none; background: transparent; color: var(--text); font-size: 12px; }
+.obs-tags-cell { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; max-width: 240px; }
+.obs-tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 5px; background: var(--surface-3); color: var(--text-2); font-size: 10px; white-space: nowrap; }
+.obs-tag button { padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 12px; line-height: 1; cursor: pointer; }
+.obs-rating { color: #b45309; font-size: 10.5px; white-space: nowrap; }
+.obs-review { margin-top: 16px; display: grid; gap: 10px; }
+.obs-review-block { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.obs-review-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.obs-review-head b { font-size: 12.5px; }
+.obs-tag-editor { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.obs-tag-editor input { min-width: 140px; flex: 1; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 12px; }
+.obs-rating-editor { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.obs-star { padding: 0 2px; border: 0; background: transparent; color: var(--border); font-size: 20px; line-height: 1; cursor: pointer; }
+.obs-star.is-active { color: #d97706; }
+.obs-clear-rating { padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 10.5px; cursor: pointer; }
+.obs-rating-editor input { flex: 1; min-width: 150px; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 12px; }
+.obs-compare { width: min(940px, 96vw); height: 100vh; overflow-y: auto; padding: 22px; background: var(--surface); box-shadow: -12px 0 36px rgba(15, 23, 42, .14); }
+.obs-compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.obs-compare-card { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.obs-compare-card h4 { margin: 0; font-size: 13px; line-height: 1.5; }
+.obs-compare-card h5 { margin: 16px 0 7px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.obs-compare-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.obs-compare-metrics > div { padding: 7px; border-radius: 7px; background: var(--surface); }
+.obs-compare-metrics span { display: block; color: var(--muted); font-size: 9.5px; }
+.obs-compare-metrics b { display: block; margin-top: 3px; font-size: 12px; }
+.obs-compare-spans { display: grid; gap: 4px; }
+.obs-compare-span { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px 7px; border-radius: 6px; background: var(--surface); font-size: 10.5px; }
+.obs-compare-span-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obs-compare-span b { color: var(--muted); font-weight: 600; white-space: nowrap; }
 .obs-tree { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .obs-tree-row { display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 6px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; }
 .obs-tree-row:last-child { border-bottom: 0; }
@@ -493,6 +727,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 @media (max-width: 900px) {
   .obs-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .obs-detail-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obs-compare-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .obs-filters { align-items: stretch; }
