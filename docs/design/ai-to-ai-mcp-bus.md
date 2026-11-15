@@ -1,7 +1,7 @@
 # AI-to-AI MCP 沟通工具设计稿
 
-版本：v0.2  
-状态：设计稿，未实现  
+版本：v0.3  
+状态：Phase 0 本地实现已跑通；跨机器 / 人类 Web / TTL 未实现  
 目标读者：Qianke Agent 平台 / 多 Agent 协作 / MCP 接入方
 
 ## 0. 本版决策
@@ -664,4 +664,127 @@ trace:
 
 原因：单机 Bus 能先验证消息、群组、审批和保留策略；
 跨机器只替换传输层和部署形态，不推翻数据模型。
+```
+
+## 18. Phase 0 本地实现（v0.3）
+
+按“全部通过、先跑”落地了单机 Bus + MCP stdio + 固定能力 + 自动路由。
+
+### 18.1 固定能力
+
+能力由平台配置文件决定，Agent 只能读取，不能通过 MCP 自行新增/修改：
+
+```text
+config/agent_comm_agents.json
+```
+
+当前 Agent：
+
+```text
+c_end   : c_end / commerce / ui
+b_end   : b_end / merchant / ui
+system  : system / eval / monitor / release
+codex   : review / ui_audit
+```
+
+每个 Agent 还有：
+
+```text
+max_risk : low / medium / high
+owner
+auto_accept
+```
+
+### 18.2 MCP 启动
+
+```bash
+python -m rag_demo.mcp_agent_comm --agent system
+```
+
+环境变量：
+
+```text
+AGENT_COMM_AGENT_ID
+AGENT_COMM_CONFIG
+AGENT_COMM_DB
+```
+
+传输：stdio JSON-RPC 2.0，stdout 只输出 MCP 协议；日志写 stderr。
+
+### 18.3 MCP tools
+
+```text
+comm_whoami
+comm_list_agents
+comm_create_room
+comm_join_room
+comm_list_rooms
+comm_send
+comm_read
+comm_ack
+comm_propose_task
+comm_list_tasks
+comm_task_status
+```
+
+### 18.4 自动化：能力匹配 + 自动路由
+
+`comm_propose_task`：
+
+```text
+1. 要求 required_capabilities 非空
+2. 只选择固定能力覆盖全部 required_capabilities 的 Agent
+3. 排除自己
+4. 按待处理任务数选负载最低者
+5. 自动执行条件：
+   mode == auto
+   target.auto_accept == true
+   risk <= target.max_risk
+6. 满足 → ASSIGNED，并给目标 Agent 发 task 消息
+7. 不满足 → WAITING_APPROVAL，写审批记录，不执行
+8. 没有能力匹配 → NO_ELIGIBLE_AGENT
+```
+
+### 18.5 本地存储
+
+SQLite 默认：
+
+```text
+var/agent_comm.sqlite3
+```
+
+表：
+
+```text
+agents / rooms / room_members / messages / receipts
+cursors / tasks / approvals
+```
+
+消息、任务、群组当前是本地短链路，正文 TTL 和长期审计元数据尚未实现。
+
+### 18.6 当前未实现
+
+```text
+1. 跨机器 HTTPS/WSS 中继
+2. 人类 Web 控制台与审批操作
+3. 正文 30 天 TTL、长期审计元数据
+4. OIDC / mTLS / 端到端加密
+5. 审批通过后继续执行
+```
+
+### 18.7 验证
+
+```bash
+python -m pytest tests/test_mcp_agent_comm.py -q
+```
+
+覆盖：
+
+```text
+固定能力配置
+按能力自动路由
+无匹配能力拒绝
+高风险转审批
+单聊 + 群聊
+MCP initialize / tools/list / tools/call
 ```
