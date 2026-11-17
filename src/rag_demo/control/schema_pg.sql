@@ -511,6 +511,58 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_member (
   "created_at" TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_bargain_policy (
+  "merchant_id" TEXT PRIMARY KEY,
+  "enabled" INTEGER NOT NULL DEFAULT 1,
+  "floor_ratio" DOUBLE PRECISION NOT NULL DEFAULT 0.85,
+  "max_merchant_discount_ratio" DOUBLE PRECISION NOT NULL DEFAULT 0.10,
+  "auto_approve_discount_ratio" DOUBLE PRECISION NOT NULL DEFAULT 0.05,
+  "max_rounds" INTEGER NOT NULL DEFAULT 4,
+  "expires_minutes" INTEGER NOT NULL DEFAULT 15,
+  "updated_by" TEXT NOT NULL DEFAULT '',
+  "updated_at" TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_bargain_session (
+  "bargain_id" TEXT PRIMARY KEY,
+  "buyer_id" TEXT NOT NULL,
+  "friend_id" TEXT NOT NULL,
+  "merchant_id" TEXT NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'NEGOTIATING',
+  "list_total" DOUBLE PRECISION NOT NULL,
+  "platform_discount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  "target_price" DOUBLE PRECISION,
+  "items_json" TEXT NOT NULL DEFAULT '[]',
+  "current_offer_json" TEXT NOT NULL DEFAULT '{}',
+  "merchant_discount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+  "transcript_json" TEXT NOT NULL DEFAULT '[]',
+  "quote_id" TEXT NOT NULL DEFAULT '',
+  "approval_id" TEXT NOT NULL DEFAULT '',
+  "created_at" TEXT NOT NULL,
+  "updated_at" TEXT NOT NULL,
+  "expires_at" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "idx_c_bargain_session_merchant"
+  ON __SCHEMA__.c_bargain_session ("merchant_id", "status", "updated_at" DESC);
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_bargain_approval (
+  "approval_id" TEXT PRIMARY KEY,
+  "bargain_id" TEXT NOT NULL,
+  "merchant_id" TEXT NOT NULL,
+  "buyer_id" TEXT NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'PENDING',
+  "proposed_payable" DOUBLE PRECISION NOT NULL,
+  "merchant_discount" DOUBLE PRECISION NOT NULL,
+  "note" TEXT NOT NULL DEFAULT '',
+  "decided_by" TEXT NOT NULL DEFAULT '',
+  "decided_at" TEXT NOT NULL DEFAULT '',
+  "created_at" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "idx_c_bargain_approval_merchant"
+  ON __SCHEMA__.c_bargain_approval ("merchant_id", "status", "created_at" DESC);
+
 CREATE TABLE IF NOT EXISTS __SCHEMA__.c_merchant_policy (
   "merchant_id" TEXT PRIMARY KEY,
   "allowed_actions_json" TEXT NOT NULL DEFAULT '[]',

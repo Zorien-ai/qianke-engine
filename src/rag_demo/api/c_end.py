@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo.agent.checkpoint import get_checkpointer
 from rag_demo.c_end import agent as c_agent
-from rag_demo.c_end import companion_agent, contacts, express, group, idempotency, memory_daily, negotiation, persona as c_persona, social, store, store_agent
+from rag_demo.c_end import companion_agent, contacts, express, free_bargain, group, idempotency, memory_daily, negotiation, persona as c_persona, social, store, store_agent
 from rag_demo.merchant import MerchantConflictError, MerchantError, MerchantNotFoundError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/c", tags=["c-end"])
@@ -186,6 +186,22 @@ class NegotiationIn(BaseModel):
     items: list[NegotiationItemIn] | None = Field(default=None, max_length=10)
 
 
+class BargainCreateIn(BaseModel):
+    friend_id: str = Field(..., min_length=1, max_length=80)
+    sku: str | None = Field(default=None, max_length=128)
+    items: list[NegotiationItemIn] | None = Field(default=None, max_length=10)
+    target_price: float | None = Field(default=None, gt=0, le=100000)
+    message: str = Field(default="", max_length=500)
+
+
+class BargainMessageIn(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500)
+
+
+class BargainAcceptIn(BaseModel):
+    offer_id: str = Field(default="", max_length=80)
+
+
 class AppMessageIn(BaseModel):
     thread_id: str = Field(..., min_length=1, max_length=64)
     role: str = Field(..., pattern="^(user|companion|assistant|system)$")
@@ -246,6 +262,14 @@ def _http_error(exc: store.CStoreError) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
 
 
+def _bargain_http_error(exc: free_bargain.BargainError) -> HTTPException:
+    codes_404 = {"BARGAIN_NOT_FOUND", "BARGAIN_APPROVAL_NOT_FOUND", "BARGAIN_FRIEND_NOT_FOUND"}
+    codes_403 = {"BARGAIN_FORBIDDEN"}
+    codes_409 = {"BARGAIN_WAITING_APPROVAL", "BARGAIN_NOT_NEGOTIATING", "BARGAIN_OFFER_CHANGED"}
+    status = 404 if exc.code in codes_404 else 403 if exc.code in codes_403 else 409 if exc.code in codes_409 else 400
+    return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
+
+
 @router.post("/negotiations")
 def negotiate(req: NegotiationIn) -> dict:
     """C 伙伴与商家店宠的受控谈判；只生成 PENDING 报价，不自动下单。"""
@@ -267,6 +291,59 @@ def negotiate(req: NegotiationIn) -> dict:
             status_code=400,
             detail={"code": exc.code, "message": exc.message},
         ) from exc
+
+
+@router.post("/bargains")
+def create_bargain(req: BargainCreateIn) -> dict:
+    """C 小鱼与 B 店宠的自由砍价；价格由服务端确定性校验。"""
+    buyer_id, _ = _buyer()
+    try:
+        return free_bargain.create_bargain(
+            buyer_id,
+            friend_id=req.friend_id,
+            sku=req.sku,
+            items=[item.model_dump() for item in req.items] if req.items else None,
+            target_price=req.target_price,
+            message=req.message,
+        )
+    except free_bargain.BargainError as exc:
+        raise _bargain_http_error(exc) from exc
+
+
+@router.get("/bargains/{bargain_id}")
+def get_bargain(bargain_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return free_bargain.get_bargain(buyer_id, bargain_id)
+    except free_bargain.BargainError as exc:
+        raise _bargain_http_error(exc) from exc
+
+
+@router.post("/bargains/{bargain_id}/messages")
+def send_bargain_message(bargain_id: str, req: BargainMessageIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return free_bargain.send_message(buyer_id, bargain_id, req.message)
+    except free_bargain.BargainError as exc:
+        raise _bargain_http_error(exc) from exc
+
+
+@router.post("/bargains/{bargain_id}/accept")
+def accept_bargain(bargain_id: str, req: BargainAcceptIn) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return free_bargain.accept_offer(buyer_id, bargain_id, req.offer_id)
+    except free_bargain.BargainError as exc:
+        raise _bargain_http_error(exc) from exc
+
+
+@router.post("/bargains/{bargain_id}/cancel")
+def cancel_bargain(bargain_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    try:
+        return free_bargain.cancel_bargain(buyer_id, bargain_id)
+    except free_bargain.BargainError as exc:
+        raise _bargain_http_error(exc) from exc
 
 
 @router.get("/products")

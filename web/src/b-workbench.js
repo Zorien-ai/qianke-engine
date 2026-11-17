@@ -16,6 +16,7 @@ const VIEWS = [
   { key: "products", label: "商品与 SKU", short: "商品", group: "商品与库存" },
   { key: "profile-query", label: "画像查询", short: "画像", group: "客户" },
   { key: "superagent", label: "调查与审批", short: "协作", group: "经营协作" },
+  { key: "bargain-approvals", label: "砍价审批", short: "砍价", group: "经营协作" },
   { key: "policy", label: "动作策略", short: "策略", group: "管理" },
   { key: "audit", label: "执行审计", short: "审计", group: "管理" },
 ];
@@ -30,6 +31,7 @@ const NAV_ICONS = {
   products: '<path d="M12 3 3 8v8l9 5 9-5V8l-9-5Z"/><path d="M3 8l9 5 9-5"/><path d="M12 21v-8"/>',
   "profile-query": '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.2 2.7-5.5 6-5.5s6 2.3 6 5.5"/><circle cx="17.5" cy="9" r="2.4"/><path d="M15 14.8c3.3-.5 5.5 1.6 5.5 4.2"/>',
   superagent: '<path d="m12 3 7 3v5c0 4.4-2.8 7.7-7 10-4.2-2.3-7-5.6-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/>',
+  "bargain-approvals": '<path d="M4 7h16"/><path d="M7 7v12"/><path d="M17 7v12"/><path d="M4 19h16"/><path d="M8 11h8"/><path d="M8 15h5"/>',
   policy: '<path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h2"/><path d="M10 12h10"/><circle cx="8" cy="12" r="2"/><path d="M4 18h8"/><path d="M16 18h4"/><circle cx="14" cy="18" r="2"/>',
   audit: '<path d="M5 4h14v16H5z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/>',
 };
@@ -177,6 +179,13 @@ const state = {
   inventoryAlertsLoaded: false,
   inventoryScanning: false,
   inventoryDispatching: false,
+  bargainApprovals: [],
+  bargainApprovalsLoaded: false,
+  bargainApprovalsLoading: false,
+  bargainApprovalStatus: "PENDING_APPROVAL",
+  bargainPolicy: null,
+  bargainCanApprove: false,
+  bargainError: "",
   policy: null,
   policyLoaded: false,
   policySaving: false,
@@ -973,6 +982,10 @@ async function ensureViewData(view = state.view) {
   if (view === "audit") {
     if (!state.auditLoaded) await loadAudit();
   }
+  if (view === "bargain-approvals") {
+    if (!state.bargainApprovalsLoaded) await loadBargainApprovals();
+    return;
+  }
   if (view === "profile-query") {
     if (!state.profileSourcesLoaded) await loadProfileSources();
     if (!state.profileData) await loadProfiles();
@@ -1010,6 +1023,7 @@ async function refreshCurrent() {
   else if (state.view === "superagent") await loadWorkItems();
   else if (state.view === "policy") await loadPolicy();
   else if (state.view === "audit") await loadAudit();
+  else if (state.view === "bargain-approvals") await loadBargainApprovals();
   else if (state.view === "profile-query") {
     await loadProfileSources();
     await loadProfiles();
@@ -3615,6 +3629,120 @@ function superAgentView() {
   </section>`;
 }
 
+async function loadBargainApprovals() {
+  state.bargainApprovalsLoading = true;
+  state.bargainError = "";
+  render();
+  try {
+    const data = await api(`/api/b/workbench/bargains?status=${encodeURIComponent(state.bargainApprovalStatus)}&limit=100`);
+    state.bargainApprovals = Array.isArray(data?.approvals) ? data.approvals : [];
+    state.bargainPolicy = data?.policy || null;
+    state.bargainCanApprove = Boolean(data?.can_approve);
+    state.bargainApprovalsLoaded = true;
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    state.bargainError = errorMessage(error);
+  } finally {
+    state.bargainApprovalsLoading = false;
+    render();
+  }
+}
+
+async function decideBargainApproval(approvalId, approved) {
+  if (!approvalId || state.busy) return;
+  const approval = state.bargainApprovals.find((item) => item?.approval?.approval_id === approvalId)?.approval;
+  const price = approval ? Number(approval.proposed_payable || 0).toFixed(2) : "";
+  if (approved && !window.confirm(`允许这笔砍价按 ¥${price} 成交？`)) return;
+  state.busy = `bargain-${approvalId}`;
+  render();
+  try {
+    await api(`/api/b/workbench/bargains/${encodeURIComponent(approvalId)}/decide`, {
+      method: "POST",
+      body: JSON.stringify({ approved, note: approved ? "同意砍价报价" : "不同意砍价报价" }),
+    });
+    showToast(approved ? "已同意，C 端报价已生成" : "已拒绝砍价", approved ? "success" : "error");
+    state.bargainApprovalsLoaded = false;
+    await loadBargainApprovals();
+  } catch (error) {
+    if (handleAuthFailure(error)) return;
+    showToast(errorMessage(error), "error");
+  } finally {
+    state.busy = "";
+    render();
+  }
+}
+
+function bargainApprovalCard(item) {
+  const approval = item?.approval || {};
+  const session = item?.session || {};
+  const items = Array.isArray(session.items) ? session.items : [];
+  const status = String(approval.status || "").toUpperCase();
+  const statusLabel = status === "PENDING" ? "待审批" : status === "APPROVED" ? "已通过" : "已拒绝";
+  const whenDate = new Date(approval.created_at || "");
+  const when = Number.isNaN(whenDate.getTime()) ? String(approval.created_at || "").replace("T", " ").slice(0, 19) : whenDate.toLocaleString("zh-CN", { hour12: false });
+  const offer = session.current_offer || {};
+  return `<article class="b-card b-bargain-card">
+    <div class="b-bargain-head">
+      <div>
+        <strong>${escapeHtml(approval.buyer_id || session.buyer_id || "买家")}</strong>
+        <span class="b-bargain-status ${status === "PENDING" ? "is-wait" : status === "APPROVED" ? "is-ok" : "is-warn"}">${statusLabel}</span>
+      </div>
+      <span class="b-muted">${escapeHtml(when)}</span>
+    </div>
+    <div class="b-bargain-items">${items.map((line) => `<span>${escapeHtml(line.title || "商品")} <small>${escapeHtml(line.spec || "")} ×${Number(line.quantity || 1)}</small></span>`).join("")}</div>
+    <div class="b-bargain-money">
+      <span>商品小计 <strong>¥${Number(session.list_total || 0).toFixed(2)}</strong></span>
+      <span>买家价 <strong>¥${Number(approval.proposed_payable || 0).toFixed(2)}</strong></span>
+      <span>商家让利 <strong>¥${Number(approval.merchant_discount || 0).toFixed(2)}</strong></span>
+      <span>平台满减 <strong>¥${Number(session.platform_discount || 0).toFixed(2)}</strong></span>
+    </div>
+    ${offer.offer_id ? `<p class="b-muted b-bargain-note">报价 ${escapeHtml(String(offer.offer_id))} · ${Number(offer.approval_required) ? "需人工确认" : "自动额度内"}</p>` : ""}
+    ${approval.note ? `<p class="b-muted b-bargain-note">${escapeHtml(approval.note)}</p>` : ""}
+    ${status === "PENDING" && state.bargainCanApprove ? `<div class="b-bargain-actions">
+      <button type="button" class="b-btn b-btn-primary" data-bargain-approve="${escapeHtml(approval.approval_id)}" ${state.busy ? "disabled" : ""}>同意 ¥${Number(approval.proposed_payable || 0).toFixed(2)}</button>
+      <button type="button" class="b-btn b-btn-ghost" data-bargain-reject="${escapeHtml(approval.approval_id)}" ${state.busy ? "disabled" : ""}>拒绝</button>
+    </div>` : ""}
+  </article>`;
+}
+
+function bargainApprovalsView() {
+  const tabs = [
+    ["PENDING_APPROVAL", "待审批"],
+    ["APPROVED", "已通过"],
+    ["REJECTED", "已拒绝"],
+  ];
+  const pending = state.bargainApprovals.filter((item) => String(item?.approval?.status || "").toUpperCase() === "PENDING").length;
+  const policy = state.bargainPolicy || {};
+  const body = state.bargainApprovalsLoading
+    ? skeletonMarkup()
+    : state.bargainApprovals.length
+      ? `<div class="b-list">${state.bargainApprovals.map(bargainApprovalCard).join("")}</div>`
+      : emptyMarkup(state.bargainApprovalStatus === "PENDING_APPROVAL" ? "暂无待审批砍价" : "暂无记录");
+  return `<section class="b-view" aria-label="砍价审批">
+    <div class="b-view-head">
+      <div>
+        <h1>砍价审批</h1>
+        <p class="b-muted">C 小鱼与店宠自由协商；超出自动额度的报价由 owner/admin 确认。</p>
+      </div>
+      <div class="b-view-tools">
+        <button type="button" class="b-btn b-btn-ghost" data-refresh ${state.bargainApprovalsLoading ? "disabled" : ""}>刷新</button>
+      </div>
+    </div>
+    <div class="b-card b-bargain-policy">
+      <div><span>商家底价</span><strong>${Math.round(Number(policy.floor_ratio || 0.85) * 100)}%</strong></div>
+      <div><span>最大让利</span><strong>${Math.round(Number(policy.max_merchant_discount_ratio || 0.10) * 100)}%</strong></div>
+      <div><span>自动成交</span><strong>${Math.round(Number(policy.auto_approve_discount_ratio || 0.05) * 100)}%</strong></div>
+      <div><span>最大轮次</span><strong>${Number(policy.max_rounds || 4)}</strong></div>
+      <div><span>待处理</span><strong>${pending}</strong></div>
+    </div>
+    <div class="b-segmented" role="tablist" aria-label="砍价审批状态">
+      ${tabs.map(([value, label]) => `<button type="button" class="b-seg ${state.bargainApprovalStatus === value ? "active" : ""}" data-bargain-status="${value}">${label}</button>`).join("")}
+    </div>
+    ${state.bargainError ? `<p class="b-inline-error" role="alert">${escapeHtml(state.bargainError)}</p>` : ""}
+    ${body}
+  </section>`;
+}
+
 function shellMarkup() {
   const activeView = VIEWS.find((view) => view.key === state.view) || VIEWS[0];
   const viewMarkup =
@@ -3632,7 +3760,9 @@ function shellMarkup() {
             ? policyView()
             : activeView.key === "audit"
               ? auditView()
-              : activeView.key === "profile-query"
+              : activeView.key === "bargain-approvals"
+            ? bargainApprovalsView()
+            : activeView.key === "profile-query"
                 ? profileQueryView()
                 : productsView();
   const merchantName = state.me?.name || "商家";
@@ -4072,6 +4202,20 @@ function bindEvents() {
     if (viewButton) {
       state.mobileMoreOpen = false;
       await switchView(viewButton.dataset.view);
+      return;
+    }
+    if (target.closest("[data-bargain-approve]")) {
+      await decideBargainApproval(target.closest("[data-bargain-approve]").dataset.bargainApprove, true);
+      return;
+    }
+    if (target.closest("[data-bargain-reject]")) {
+      await decideBargainApproval(target.closest("[data-bargain-reject]").dataset.bargainReject, false);
+      return;
+    }
+    if (target.closest("[data-bargain-status]")) {
+      state.bargainApprovalStatus = target.closest("[data-bargain-status]").dataset.bargainStatus;
+      state.bargainApprovalsLoaded = false;
+      await loadBargainApprovals();
       return;
     }
     if (target.closest("[data-refresh]")) {

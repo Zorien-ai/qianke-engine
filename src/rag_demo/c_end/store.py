@@ -738,6 +738,58 @@ CREATE TABLE IF NOT EXISTS c_merchant_tenant (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS c_bargain_policy (
+    merchant_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    floor_ratio REAL NOT NULL DEFAULT 0.85,
+    max_merchant_discount_ratio REAL NOT NULL DEFAULT 0.10,
+    auto_approve_discount_ratio REAL NOT NULL DEFAULT 0.05,
+    max_rounds INTEGER NOT NULL DEFAULT 4,
+    expires_minutes INTEGER NOT NULL DEFAULT 15,
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS c_bargain_session (
+    bargain_id TEXT PRIMARY KEY,
+    buyer_id TEXT NOT NULL,
+    friend_id TEXT NOT NULL,
+    merchant_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'NEGOTIATING',
+    list_total REAL NOT NULL,
+    platform_discount REAL NOT NULL DEFAULT 0,
+    target_price REAL,
+    items_json TEXT NOT NULL DEFAULT '[]',
+    current_offer_json TEXT NOT NULL DEFAULT '{}',
+    merchant_discount REAL NOT NULL DEFAULT 0,
+    transcript_json TEXT NOT NULL DEFAULT '[]',
+    quote_id TEXT NOT NULL DEFAULT '',
+    approval_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_bargain_session_merchant
+    ON c_bargain_session (merchant_id, status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS c_bargain_approval (
+    approval_id TEXT PRIMARY KEY,
+    bargain_id TEXT NOT NULL,
+    merchant_id TEXT NOT NULL,
+    buyer_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    proposed_payable REAL NOT NULL,
+    merchant_discount REAL NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    decided_by TEXT NOT NULL DEFAULT '',
+    decided_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_bargain_approval_merchant
+    ON c_bargain_approval (merchant_id, status, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS c_merchant_policy (
     merchant_id              TEXT PRIMARY KEY,
     allowed_actions_json     TEXT NOT NULL DEFAULT '[]',
@@ -1750,7 +1802,7 @@ def get_quote(quote_id: str, buyer_id: str | None = None) -> dict[str, Any] | No
         conn.close()
 
 
-def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tuple[list[dict[str, Any]], list[str], str]:
+def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tuple[list[dict[str, Any]], list[str], str, list[dict[str, Any]]]:
     row = conn.execute("SELECT * FROM c_quote WHERE quote_id = ?", (quote_id,)).fetchone()
     if row is None:
         raise CStoreError("QUOTE_NOT_FOUND", "报价不存在")
@@ -1776,17 +1828,34 @@ def _quote_items(conn: sqlite3.Connection, quote_id: str, buyer_id: str) -> tupl
         raise CStoreError("QUOTE_NO_PRODUCTS", "报价没有可购买商品")
     policy_ids = [str(item.get("policy_id")) for item in policies if item.get("policy_id")]
     merchant_id = str(row["merchant_id"] or _MERCHANT_ID)
-    return items, policy_ids, merchant_id
+    return items, policy_ids, merchant_id, policies
 
 
-def _quote_discount(original: float, policy_ids: list[str]) -> float:
-    """只应用已配置、确定性的平台活动；C 伙伴/店宠不能自行发明优惠。"""
+def _quote_discount(
+    original: float,
+    policy_ids: list[str],
+    policies: list[dict[str, Any]] | None = None,
+) -> float:
+    """应用已配置的平台活动 + 商家审批后的砍价让利。
+
+    平台满减由确定性规则计算；商家砍价让利只能来自报价快照里的
+    `merchant_bargain.discount_amount`，不接受 LLM 临时生成的价格。
+    """
+    discount = 0.0
     if "platform_full_reduce" in policy_ids:
         if original >= 599:
-            return 80.0
-        if original >= 299:
-            return 30.0
-    return 0.0
+            discount += 80.0
+        elif original >= 299:
+            discount += 30.0
+    for policy in policies or []:
+        if str(policy.get("kind") or "") != "merchant_bargain":
+            continue
+        try:
+            amount = float(policy.get("discount_amount") or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        discount += max(0.0, amount)
+    return round(min(discount, original), 2)
 
 
 def _merchant_error(exc: MerchantError) -> CStoreError:
@@ -1852,8 +1921,9 @@ def prepare_order(
         policy_ids: list[str] = []
         merchant_id = _MERCHANT_ID
         quote_mode = bool(quote_id)
+        quote_policies: list[dict[str, Any]] = []
         if quote_id:
-            normalized, policy_ids, merchant_id = _quote_items(conn, quote_id, buyer_id)
+            normalized, policy_ids, merchant_id, quote_policies = _quote_items(conn, quote_id, buyer_id)
         else:
             normalized = _validate_items(items)
 
@@ -1885,7 +1955,7 @@ def prepare_order(
                 **({"spec": item["spec"]} if item.get("spec") else {}),
             })
 
-        discount = _quote_discount(original, policy_ids)
+        discount = _quote_discount(original, policy_ids, quote_policies)
         total = max(0.0, original - discount)
         order_id = f"draft_{uuid.uuid4().hex[:16]}"
         token = secrets.token_urlsafe(24)
@@ -5357,3 +5427,399 @@ def upsert_merchant_sop(
         "updated_at": now,
     }
 
+
+
+# ==================== 自由砍价（bargain） ====================
+# 价格/让利由确定性代码校验；这里只负责持久化策略、会话和商家审批。
+BARGAIN_POLICY_DEFAULTS: dict[str, Any] = {
+    "enabled": True,
+    "floor_ratio": 0.85,
+    "max_merchant_discount_ratio": 0.10,
+    "auto_approve_discount_ratio": 0.05,
+    "max_rounds": 4,
+    "expires_minutes": 15,
+}
+
+
+def _bargain_policy_payload(row: Any) -> dict[str, Any]:
+    if row is None:
+        return {"merchant_id": "", **BARGAIN_POLICY_DEFAULTS, "updated_by": "", "updated_at": ""}
+    data = dict(row) if not isinstance(row, dict) else dict(row)
+    data["enabled"] = bool(data.get("enabled"))
+    return data
+
+
+def get_bargain_policy(merchant_id: str, *, ensure: bool = True) -> dict[str, Any]:
+    """读取商家砍价策略；缺失时写入默认策略。"""
+    init()
+    merchant = str(merchant_id or "").strip()
+    if not merchant:
+        raise CStoreError("BARGAIN_MERCHANT_REQUIRED", "商家不能为空")
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_bargain_policy WHERE merchant_id = ?", (merchant,)
+        ).fetchone()
+        if row is None and ensure:
+            now = _now()
+            conn.execute(
+                "INSERT INTO c_bargain_policy(merchant_id, enabled, floor_ratio, "
+                "max_merchant_discount_ratio, auto_approve_discount_ratio, max_rounds, "
+                "expires_minutes, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(merchant_id) DO NOTHING",
+                (
+                    merchant,
+                    1,
+                    BARGAIN_POLICY_DEFAULTS["floor_ratio"],
+                    BARGAIN_POLICY_DEFAULTS["max_merchant_discount_ratio"],
+                    BARGAIN_POLICY_DEFAULTS["auto_approve_discount_ratio"],
+                    BARGAIN_POLICY_DEFAULTS["max_rounds"],
+                    BARGAIN_POLICY_DEFAULTS["expires_minutes"],
+                    "system",
+                    now,
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM c_bargain_policy WHERE merchant_id = ?", (merchant,)
+            ).fetchone()
+        payload = _bargain_policy_payload(row)
+        payload["merchant_id"] = merchant
+        return payload
+    finally:
+        conn.close()
+
+
+def upsert_bargain_policy(
+    merchant_id: str,
+    *,
+    enabled: bool | None = None,
+    floor_ratio: float | None = None,
+    max_merchant_discount_ratio: float | None = None,
+    auto_approve_discount_ratio: float | None = None,
+    max_rounds: int | None = None,
+    expires_minutes: int | None = None,
+    updated_by: str = "",
+) -> dict[str, Any]:
+    """B 端配置砍价策略；比例必须落在 0–1 且 auto <= max。"""
+    init()
+    current = get_bargain_policy(merchant_id)
+    next_policy = {
+        "enabled": current["enabled"] if enabled is None else bool(enabled),
+        "floor_ratio": current["floor_ratio"] if floor_ratio is None else float(floor_ratio),
+        "max_merchant_discount_ratio": (
+            current["max_merchant_discount_ratio"]
+            if max_merchant_discount_ratio is None
+            else float(max_merchant_discount_ratio)
+        ),
+        "auto_approve_discount_ratio": (
+            current["auto_approve_discount_ratio"]
+            if auto_approve_discount_ratio is None
+            else float(auto_approve_discount_ratio)
+        ),
+        "max_rounds": current["max_rounds"] if max_rounds is None else int(max_rounds),
+        "expires_minutes": current["expires_minutes"] if expires_minutes is None else int(expires_minutes),
+    }
+    for key in ("floor_ratio", "max_merchant_discount_ratio", "auto_approve_discount_ratio"):
+        if not 0 <= next_policy[key] <= 1:
+            raise CStoreError("BARGAIN_POLICY_INVALID", f"{key} 必须在 0–1 之间")
+    if next_policy["auto_approve_discount_ratio"] > next_policy["max_merchant_discount_ratio"]:
+        raise CStoreError("BARGAIN_POLICY_INVALID", "自动审批让利不能大于最大让利")
+    if not 1 <= next_policy["max_rounds"] <= 10:
+        raise CStoreError("BARGAIN_POLICY_INVALID", "max_rounds 必须在 1–10 之间")
+    if not 1 <= next_policy["expires_minutes"] <= 1440:
+        raise CStoreError("BARGAIN_POLICY_INVALID", "expires_minutes 必须在 1–1440 之间")
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE c_bargain_policy SET enabled = ?, floor_ratio = ?, "
+            "max_merchant_discount_ratio = ?, auto_approve_discount_ratio = ?, "
+            "max_rounds = ?, expires_minutes = ?, updated_by = ?, updated_at = ? "
+            "WHERE merchant_id = ?",
+            (
+                1 if next_policy["enabled"] else 0,
+                next_policy["floor_ratio"],
+                next_policy["max_merchant_discount_ratio"],
+                next_policy["auto_approve_discount_ratio"],
+                next_policy["max_rounds"],
+                next_policy["expires_minutes"],
+                str(updated_by or ""),
+                _now(),
+                str(merchant_id),
+            ),
+        )
+        conn.commit()
+        return get_bargain_policy(merchant_id)
+    finally:
+        conn.close()
+
+
+def _bargain_session_payload(row: Any) -> dict[str, Any]:
+    data = dict(row) if not isinstance(row, dict) else dict(row)
+    for key, default in (("current_offer_json", {}), ("transcript_json", [])):
+        raw = data.get(key)
+        if isinstance(raw, str):
+            try:
+                data[key] = json.loads(raw)
+            except (TypeError, ValueError):
+                data[key] = default
+    data["current_offer"] = data.pop("current_offer_json", {}) or {}
+    data["transcript"] = data.pop("transcript_json", []) or []
+    raw_items = data.get("items_json")
+    if isinstance(raw_items, str):
+        try:
+            data["items"] = json.loads(raw_items)
+        except (TypeError, ValueError):
+            data["items"] = []
+    elif raw_items is None:
+        data["items"] = []
+    data["target_price"] = None if data.get("target_price") is None else float(data["target_price"])
+    return data
+
+
+def create_bargain_session(
+    *,
+    bargain_id: str,
+    buyer_id: str,
+    friend_id: str,
+    merchant_id: str,
+    list_total: float,
+    platform_discount: float,
+    target_price: float | None,
+    items: list[dict[str, Any]] | None = None,
+    current_offer: dict[str, Any],
+    transcript: list[dict[str, Any]],
+    expires_at: str,
+) -> dict[str, Any]:
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_bargain_session(bargain_id, buyer_id, friend_id, merchant_id, status, "
+            "list_total, platform_discount, target_price, items_json, current_offer_json, merchant_discount, "
+            "transcript_json, quote_id, approval_id, created_at, updated_at, expires_at) "
+            "VALUES (?, ?, ?, ?, 'NEGOTIATING', ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)",
+            (
+                bargain_id,
+                buyer_id,
+                friend_id,
+                merchant_id,
+                float(list_total),
+                float(platform_discount),
+                None if target_price is None else float(target_price),
+                json.dumps(items or [], ensure_ascii=False),
+                json.dumps(current_offer or {}, ensure_ascii=False),
+                float(current_offer.get("merchant_discount") or 0),
+                json.dumps(transcript or [], ensure_ascii=False),
+                now,
+                now,
+                expires_at,
+            ),
+        )
+        conn.commit()
+        return get_bargain_session(bargain_id, buyer_id=buyer_id) or {}
+    finally:
+        conn.close()
+
+
+def get_bargain_session(
+    bargain_id: str,
+    *,
+    buyer_id: str | None = None,
+    merchant_id: str | None = None,
+) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_bargain_session WHERE bargain_id = ?", (str(bargain_id),)
+        ).fetchone()
+        if row is None:
+            return None
+        payload = _bargain_session_payload(row)
+        if buyer_id is not None and payload["buyer_id"] != str(buyer_id):
+            raise CStoreError("BARGAIN_FORBIDDEN", "不能访问其他买家的砍价")
+        if merchant_id is not None and payload["merchant_id"] != str(merchant_id):
+            raise CStoreError("BARGAIN_FORBIDDEN", "不能访问其他商家的砍价")
+        return payload
+    finally:
+        conn.close()
+
+
+def update_bargain_session(
+    bargain_id: str,
+    *,
+    status: str | None = None,
+    target_price: float | None = None,
+    items: list[dict[str, Any]] | None = None,
+    current_offer: dict[str, Any] | None = None,
+    merchant_discount: float | None = None,
+    transcript: list[dict[str, Any]] | None = None,
+    quote_id: str | None = None,
+    approval_id: str | None = None,
+    expires_at: str | None = None,
+) -> dict[str, Any] | None:
+    init()
+    fields: list[str] = ["updated_at = ?"]
+    params: list[Any] = [_now()]
+    if status is not None:
+        fields.append("status = ?")
+        params.append(str(status))
+    if target_price is not None:
+        fields.append("target_price = ?")
+        params.append(float(target_price))
+    if items is not None:
+        fields.append("items_json = ?")
+        params.append(json.dumps(items, ensure_ascii=False))
+    if current_offer is not None:
+        fields.append("current_offer_json = ?")
+        params.append(json.dumps(current_offer, ensure_ascii=False))
+    if merchant_discount is not None:
+        fields.append("merchant_discount = ?")
+        params.append(float(merchant_discount))
+    if transcript is not None:
+        fields.append("transcript_json = ?")
+        params.append(json.dumps(transcript, ensure_ascii=False))
+    if quote_id is not None:
+        fields.append("quote_id = ?")
+        params.append(str(quote_id))
+    if approval_id is not None:
+        fields.append("approval_id = ?")
+        params.append(str(approval_id))
+    if expires_at is not None:
+        fields.append("expires_at = ?")
+        params.append(str(expires_at))
+    params.append(str(bargain_id))
+    conn = _connect()
+    try:
+        conn.execute(f"UPDATE c_bargain_session SET {', '.join(fields)} WHERE bargain_id = ?", tuple(params))
+        conn.commit()
+        return get_bargain_session(bargain_id)
+    finally:
+        conn.close()
+
+
+def list_bargain_sessions(
+    merchant_id: str,
+    *,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    init()
+    where = "merchant_id = ?"
+    params: list[Any] = [str(merchant_id)]
+    if status:
+        where += " AND status = ?"
+        params.append(str(status))
+    params.append(max(1, min(int(limit), 500)))
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM c_bargain_session WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_bargain_session_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def _bargain_approval_payload(row: Any) -> dict[str, Any]:
+    return dict(row) if not isinstance(row, dict) else dict(row)
+
+
+def create_bargain_approval(
+    *,
+    approval_id: str,
+    bargain_id: str,
+    merchant_id: str,
+    buyer_id: str,
+    proposed_payable: float,
+    merchant_discount: float,
+    note: str = "",
+) -> dict[str, Any]:
+    init()
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO c_bargain_approval(approval_id, bargain_id, merchant_id, buyer_id, status, "
+            "proposed_payable, merchant_discount, note, decided_by, decided_at, created_at) "
+            "VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, '', '', ?)",
+            (
+                approval_id,
+                bargain_id,
+                merchant_id,
+                buyer_id,
+                float(proposed_payable),
+                float(merchant_discount),
+                str(note or ""),
+                _now(),
+            ),
+        )
+        conn.commit()
+        return get_bargain_approval(approval_id) or {}
+    finally:
+        conn.close()
+
+
+def get_bargain_approval(approval_id: str) -> dict[str, Any] | None:
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_bargain_approval WHERE approval_id = ?", (str(approval_id),)
+        ).fetchone()
+        return _bargain_approval_payload(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def list_bargain_approvals(
+    merchant_id: str,
+    *,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    init()
+    where = "merchant_id = ?"
+    params: list[Any] = [str(merchant_id)]
+    if status:
+        where += " AND status = ?"
+        params.append(str(status))
+    params.append(max(1, min(int(limit), 500)))
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM c_bargain_approval WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [_bargain_approval_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def decide_bargain_approval(
+    approval_id: str,
+    *,
+    approved: bool,
+    decided_by: str,
+    note: str = "",
+) -> dict[str, Any]:
+    init()
+    approval = get_bargain_approval(approval_id)
+    if approval is None:
+        raise CStoreError("BARGAIN_APPROVAL_NOT_FOUND", "砍价审批不存在")
+    if approval["status"] != "PENDING":
+        raise CStoreError("BARGAIN_APPROVAL_DONE", "砍价审批已处理")
+    status = "APPROVED" if approved else "REJECTED"
+    conn = _connect()
+    try:
+        conn.execute(
+            "UPDATE c_bargain_approval SET status = ?, decided_by = ?, decided_at = ?, note = ? "
+            "WHERE approval_id = ? AND status = 'PENDING'",
+            (status, str(decided_by or ""), _now(), str(note or ""), str(approval_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_bargain_approval(approval_id) or {}

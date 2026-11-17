@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
+import BargainChat from "../components/BargainChat.vue";
 import CompanionAvatar from "../components/CompanionAvatar.vue";
 import { getJson, postJson, patchJson, del, postForm } from "../api";
 import { productMatchesQuery } from "../catalogSearch";
@@ -317,6 +318,8 @@ const storeQuote = ref(null);
 const negotiating = ref(false);
 const negotiateError = ref("");
 const negotiationRejected = ref(false);
+const freeBargainOpen = ref(false);
+const freeBargainContext = ref({ friendId: "", merchantName: "", title: "", sku: "", items: [] });
 const negotiationOpen = ref(false);
 const negotiationNeed = ref("");
 const negotiationBudget = ref(500);
@@ -1781,7 +1784,7 @@ async function send() {
     if (input) input.style.height = "auto";
     pendingRetry.value = null;
     scrollToBottom();
-    openNegotiationForPrompt(text);
+    openFreeBargainForPrompt(text);
     return;
   }
   const clientId = newClientMessageId();
@@ -2417,6 +2420,35 @@ function selectNegotiationSku(skuValue) {
   const selected = negotiationSkuOptions.value.find((item) => item.sku === skuValue);
   negotiationSku.value = String(skuValue || "");
   negotiationSkuSpec.value = selected?.spec || "";
+}
+
+function openFreeBargainForPrompt(text) {
+  const thread = latestMerchantThread();
+  const remembered = rememberedLastProduct();
+  if (thread && remembered?.sku) {
+    freeBargainContext.value = {
+      friendId: String(thread.id || ""),
+      merchantName: String(thread.name || ""),
+      title: `${remembered.title || "商品"} · 自由砍价`,
+      sku: String(remembered.sku || ""),
+      items: [],
+    };
+    freeBargainOpen.value = true;
+    return;
+  }
+  // 没有商品上下文时保留旧确认层，让用户先选商品/规格。
+  openNegotiationForPrompt(text);
+}
+
+function closeFreeBargain() {
+  freeBargainOpen.value = false;
+}
+
+function handleFreeBargainQuote(quote) {
+  if (!quote?.quote_id) return;
+  storeQuote.value = { ...quote, cart_quote: false };
+  negotiationRejected.value = false;
+  showCopyTip("砍价报价已生成，请确认订单");
 }
 
 function openNegotiationForPrompt(text) {
@@ -4010,6 +4042,16 @@ onBeforeUnmount(() => {
       @change="onAvatarFileChange"
     />
   </div>
+  <BargainChat
+    :open="freeBargainOpen"
+    :friend-id="freeBargainContext.friendId"
+    :merchant-name="freeBargainContext.merchantName"
+    :title="freeBargainContext.title"
+    :sku="freeBargainContext.sku"
+    :items="freeBargainContext.items"
+    @close="closeFreeBargain"
+    @quote-created="handleFreeBargainQuote"
+  />
 </template>
 
 <style scoped>

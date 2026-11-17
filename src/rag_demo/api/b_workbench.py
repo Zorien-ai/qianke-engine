@@ -27,7 +27,7 @@ from rag_demo import auth, config, product_media as media
 from rag_demo.b_end import insights as b_insights
 from rag_demo.b_end import user_pool as b_user_pool
 from rag_demo.c_end import alerts as alert_notifier
-from rag_demo.c_end import store
+from rag_demo.c_end import free_bargain, store
 from rag_demo.merchant import MerchantError, get_merchant_repository, get_merchant_write_repository
 
 router = APIRouter(prefix="/api/b/workbench", tags=["b-workbench"])
@@ -60,17 +60,17 @@ ROLE_PERMISSIONS = {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
         "operate_orders", "resolve_after_sale", "receive_return",
         "approve_superagent", "manage_members", "operate_inventory",
-        "view_profiles", "manage_profiles",
+        "view_profiles", "manage_profiles", "view_bargains", "approve_bargain",
     },
     "admin": {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
         "operate_orders", "resolve_after_sale", "receive_return",
         "approve_superagent", "operate_inventory",
-        "view_profiles", "manage_profiles",
+        "view_profiles", "manage_profiles", "view_bargains", "approve_bargain",
     },
     "staff": {
         "view_orders", "view_products", "view_after_sales", "view_superagent",
-        "view_profiles",
+        "view_profiles", "view_bargains",
     },
 }
 
@@ -160,6 +160,11 @@ def _require_permission(account: dict[str, Any], permission: str) -> dict[str, A
     if permission not in permissions_for(member["role"]):
         raise HTTPException(status_code=403, detail=f"当前角色 {member['role']} 没有 {permission} 权限")
     return member
+
+
+class BargainDecisionIn(BaseModel):
+    approved: bool
+    note: str = Field(default="", max_length=300)
 
 
 class ProfileQueryIn(BaseModel):
@@ -1048,6 +1053,47 @@ def workbench_profile_import_sample() -> dict[str, Any]:
     state = wizard_app._state_payload(upload_id)
     state["rejected"] = rejected
     return {"upload_id": upload_id, "dataset": dataset, "state": state}
+
+
+@router.get("/bargains")
+def workbench_bargains(status: str = "PENDING_APPROVAL", limit: int = 100) -> dict:
+    """B 端砍价审批列表；staff 只读，owner/admin 可审批。"""
+    account = _account()
+    member = _require_permission(account, "view_bargains")
+    merchant_id = str(member["merchant_id"])
+    allowed = {"PENDING_APPROVAL", "APPROVED", "REJECTED"}
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail="不支持的砍价审批状态")
+    rows = free_bargain.list_approvals(merchant_id, status=status, limit=limit)
+    policy = store.get_bargain_policy(merchant_id)
+    return {
+        "merchant_id": merchant_id,
+        "status": status,
+        "approvals": rows,
+        "policy": policy,
+        "can_approve": "approve_bargain" in permissions_for(member["role"]),
+    }
+
+
+@router.post("/bargains/{approval_id}/decide")
+def decide_workbench_bargain(approval_id: str, req: BargainDecisionIn) -> dict:
+    account = _account()
+    member = _require_permission(account, "approve_bargain")
+    approval = free_bargain.store.get_bargain_approval(approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail={"code": "BARGAIN_APPROVAL_NOT_FOUND", "message": "砍价审批不存在"})
+    if str(approval["merchant_id"]) != str(member["merchant_id"]):
+        raise HTTPException(status_code=403, detail="不能审批其他商家的砍价")
+    try:
+        result = free_bargain.decide_approval(
+            approval_id,
+            approved=req.approved,
+            decided_by=str(account.get("username") or account.get("id") or ""),
+            note=req.note,
+        )
+    except free_bargain.BargainError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+    return result
 
 
 @router.get("/orders")
