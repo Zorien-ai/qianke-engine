@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { getJson, postJson } from "../api";
 import { toast } from "../store";
 import { productMatchesQuery } from "../catalogSearch";
+import BargainChat from "../components/BargainChat.vue";
 import ShoppingCart from "../components/ShoppingCart.vue";
 import { cart } from "../cart";
 
@@ -26,6 +27,8 @@ const cartQuoteChanged = computed(() => cartQuote.value && quoteSignature(cart.i
 const quoteItems = computed(() => quoteDraft.value?.items || quote.value?.product_refs || []);
 const quoteSubtotal = computed(() => quoteItems.value.reduce((sum, item) => sum + Math.round(Number(item.unit_price ?? item.price ?? 0) * 100) * Number(item.quantity || 1), 0) / 100);
 
+const bargainOpen = ref(false);
+const bargainContext = ref({ friendId: "", merchantName: "", title: "", sku: "", items: [] });
 const negotiationBusy = ref(false);
 const negotiationBudget = ref(500);
 const message = ref("");
@@ -469,7 +472,74 @@ async function runMerchantNegotiation(needOverride = "", sku = "", quantity = 1,
 }
 
 function checkoutCart(checkout) {
-  runMerchantNegotiation("购物车合并报价", "", 1, checkout);
+  openBargainForCart(checkout);
+}
+
+function openBargain(context) {
+  bargainContext.value = {
+    friendId: String(context.friendId || ""),
+    merchantName: String(context.merchantName || shopScopeLabel.value || ""),
+    title: String(context.title || "自由砍价"),
+    sku: String(context.sku || ""),
+    items: Array.isArray(context.items) ? context.items : [],
+  };
+  bargainOpen.value = true;
+}
+
+function closeBargain() {
+  bargainOpen.value = false;
+}
+
+async function handleBargainQuote(quote) {
+  if (!quote?.quote_id) return;
+  await loadQuoteById(quote.quote_id);
+  quoteAmounts.value = {
+    total: Number(quote.total_amount || 0),
+    discount: Number(quote.discount_amount || 0),
+  };
+  if (bargainContext.value.items?.length) {
+    cartQuote.value = {
+      friend_id: bargainContext.value.friendId,
+      items: bargainContext.value.items,
+    };
+  }
+  toast("砍价报价已生成，请确认订单", "success");
+}
+
+async function openBargainForProduct(product, sku = null) {
+  const selected = sku || selectedSku.value || defaultSku(product);
+  try {
+    const friendId = await ensureProductFriend(product);
+    rememberProduct(product, selected, detailQuantity.value);
+    openBargain({
+      friendId,
+      merchantName: product.merchant_name || shopScopeLabel.value,
+      title: `${product.title} · 自由砍价`,
+      sku: selected?.sku || "",
+    });
+    closeProductDetail();
+  } catch (e) {
+    toast(e?.message || "打开砍价失败", "error");
+  }
+}
+
+function openBargainForCart(checkout) {
+  if (!checkout?.friend_id) return;
+  openBargain({
+    friendId: checkout.friend_id,
+    merchantName: checkout.merchant_name || shopScopeLabel.value,
+    title: "购物车合并砍价",
+    items: checkout.items || [],
+  });
+}
+
+async function openBargainFromInput() {
+  const product = selectedProduct.value || products.value[0];
+  if (product) {
+    await openBargainForProduct(product, defaultSku(product));
+  } else {
+    toast("先选一个商品再砍价", "error");
+  }
 }
 
 async function ensureProductFriend(product) {
@@ -587,14 +657,11 @@ function askProduct(product, sku = null) {
 
 function negotiateProduct(product, sku = null) {
   const selected = sku || selectedSku.value || defaultSku(product);
-  closeProductDetail();
   if (!isMerchantShop.value) {
     askProduct(product, selected);
     return;
   }
-  rememberProduct(product, selected, detailQuantity.value);
-  message.value = productNeedText(product, selected);
-  runMerchantNegotiation(product.title, selected?.sku || "", detailQuantity.value);
+  void openBargainForProduct(product, selected);
 }
 
 watch(merchantFriendId, () => { loadProducts(); ensureMerchantFriend(); closeProductDetail(); });
@@ -858,17 +925,13 @@ onMounted(() => {
         </div>
 
         <div v-if="isMerchantShop" class="negotiation-row">
-          <label class="negotiation-budget">
-            <span>预算 ¥</span>
-            <input v-model.number="negotiationBudget" type="number" min="1" max="100000" step="10" />
-          </label>
           <button
             class="ghost-btn"
             type="button"
             :disabled="negotiationBusy || running || quoteBusy || !!quoteDraft"
-            @click="runMerchantNegotiation()"
-          >{{ negotiationBusy ? "双宠谈判中…" : "让小鱼去砍价" }}</button>
-          <span>平台满减规则内协商，成交仍需确认</span>
+            @click="openBargainFromInput"
+          >让小鱼去砍价</button>
+          <span>自由多轮协商 · 超出自动额度需商家确认</span>
         </div>
 
         <p v-if="agentError" class="state-line state-error" role="alert">{{ agentError }}</p>
@@ -1016,6 +1079,16 @@ onMounted(() => {
       </div>
     </section>
   </div>
+  <BargainChat
+    :open="bargainOpen"
+    :friend-id="bargainContext.friendId"
+    :merchant-name="bargainContext.merchantName"
+    :title="bargainContext.title"
+    :sku="bargainContext.sku"
+    :items="bargainContext.items"
+    @close="closeBargain"
+    @quote-created="handleBargainQuote"
+  />
 </template>
 
 <style scoped>

@@ -17,7 +17,7 @@ EXPECTED_TABLES = {
     "c_order", "c_order_item", "c_product", "c_quote", "c_reconciliation_alert",
     "c_reconciliation_run", "c_merchant_tenant", "c_merchant_member", "c_merchant_policy",
     "c_merchant_policy_audit", "c_policy_audit_anchor", "c_login_attempt", "c_user_attribute",
-    "c_tenant_provision", "c_thread_read",
+    "c_tenant_provision", "c_thread_read", "c_bargain_policy", "c_bargain_session", "c_bargain_approval",
     "sa_thread", "sa_trigger", "sa_work_item", "sa_approval", "sa_job",
 }
 

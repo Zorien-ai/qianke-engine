@@ -3915,3 +3915,39 @@ button.b-text-link {
   font-size: 11px;
   text-align: right;
 }
+
+/* ==================== 砍价审批 ==================== */
+.b-bargain-policy {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.b-bargain-policy div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 9px;
+  background: var(--b-soft);
+}
+.b-bargain-policy span { color: var(--b-muted); font-size: 12px; }
+.b-bargain-policy strong { font-size: 18px; color: var(--b-text); }
+.b-bargain-card { padding: 15px 16px; display: flex; flex-direction: column; gap: 10px; }
+.b-bargain-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.b-bargain-head > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.b-bargain-status { padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+.b-bargain-status.is-wait { background: #fff3dd; color: #8a5a18; }
+.b-bargain-status.is-ok { background: #e8f4e8; color: #356a3d; }
+.b-bargain-status.is-warn { background: #f7e8e5; color: #8c463d; }
+.b-bargain-items { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--b-text); font-size: 13px; }
+.b-bargain-items small { color: var(--b-muted); }
+.b-bargain-money { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 12px; border-radius: 9px; background: var(--b-soft); font-size: 12px; color: var(--b-muted); }
+.b-bargain-money strong { color: var(--b-text); font-size: 14px; }
+.b-bargain-note { margin: 0; font-size: 12px; }
+.b-bargain-actions { display: flex; gap: 8px; padding-top: 2px; }
+@media (max-width: 720px) {
+  .b-bargain-policy { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .b-bargain-actions .b-btn { flex: 1; }
+}
