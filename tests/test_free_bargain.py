@@ -12,6 +12,7 @@ from rag_demo.c_end import free_bargain, store
 def bargain_store(tmp_path, monkeypatch):
     monkeypatch.setenv("QIANKE_CEND_BACKEND", "sqlite")
     monkeypatch.setenv("QIANKE_C_END_DB", str(tmp_path / "c_end.sqlite"))
+    monkeypatch.setenv("QIANKE_BARGAIN_DIALOGUE_MODE", "template")
     monkeypatch.setattr(store, "_DB_PATH", None)
     store.init()
     store.create_tenant("m_sim_tea", "山岚茶事")

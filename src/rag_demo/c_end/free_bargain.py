@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from rag_demo.c_end import store
+from rag_demo.c_end import bargain_dialogue, store
 from rag_demo.merchant import MerchantError, get_merchant_repository
 
 BARGAIN_VERSION = 1
@@ -204,15 +204,86 @@ def _counter_offer(
     if discount <= values["max_discount"] + 0.005:
         offer = _offer(values, discount, approval_required=True, expires_minutes=policy["expires_minutes"])
         return offer, (
-            f"¥{target:.2f} 我这边可以做，但让利超过自动额度，"
-            f"需要店长确认；确认后按 ¥{offer['payable']:.2f} 成交。"
+            f"¥{target:.2f} 我可以帮你申请，但需要店长确认；"
+            f"确认后按 ¥{offer['payable']:.2f} 成交。"
         )
     discount = values["max_discount"]
     offer = _offer(values, discount, approval_required=discount > values["auto_cap"], expires_minutes=policy["expires_minutes"])
     return offer, (
-        f"¥{target:.2f} 低于我的底价，我最多能给到 ¥{offer['payable']:.2f}；"
-        f"这个价{'需要店长确认' if offer['approval_required'] else '可以直接成交'}。"
+        f"¥{target:.2f} 太低了，我最多能做到 ¥{offer['payable']:.2f}；"
+        f"这个价{'需要店长确认' if offer['approval_required'] else '可以直接给你'}。"
     )
+
+
+def _candidate_offers(
+    values: dict[str, float],
+    target: float | None,
+    policy: dict[str, Any],
+    primary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """给 B LLM 的合法报价候选；只能是服务端算出的 offer。"""
+    candidates: list[dict[str, Any]] = [primary]
+    # 自动额度上限：如果它比当前愿意给买家的报价更高（让利更少），作为备选。
+    auto_discount = float(values.get("auto_cap") or 0)
+    if auto_discount > float(primary.get("merchant_discount") or 0) + 0.005:
+        auto_offer = _offer(
+            values,
+            auto_discount,
+            approval_required=False,
+            expires_minutes=policy["expires_minutes"],
+        )
+        if float(auto_offer["payable"]) >= float(primary["payable"]):
+            candidates.append(auto_offer)
+    # 去重（同一应付价只留第一个）
+    seen: set[float] = set()
+    unique: list[dict[str, Any]] = []
+    for item in candidates:
+        payable = round(float(item.get("payable") or 0), 2)
+        if payable in seen:
+            continue
+        seen.add(payable)
+        unique.append(item)
+    return unique
+
+
+def _store_turn(
+    *,
+    session: dict[str, Any],
+    user_message: str,
+    target: float | None,
+    fallback_reply: str,
+    fallback_offer: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    """调用 B 店宠 LLM；返回 (选定合法 offer, 话术, 内部元数据)。"""
+    store_name = str((store.get_tenant(str(session["merchant_id"])) or {}).get("name") or "商家")
+    pet_name = f"{store_name}店宠"
+    result = bargain_dialogue.generate_store_reply(
+        store_name=store_name,
+        pet_name=pet_name,
+        items=session.get("items") or [],
+        list_total=float(session.get("list_total") or 0),
+        platform_discount=float(session.get("platform_discount") or 0),
+        target_price=target,
+        current_offer=session.get("current_offer") or {},
+        allowed_offers=candidates,
+        history=session.get("transcript") or [],
+        user_message=user_message,
+        fallback_reply=fallback_reply,
+        fallback_offer=fallback_offer,
+    )
+    chosen = next(
+        (item for item in candidates if str(item.get("offer_id")) == str(result.offer_id)),
+        fallback_offer,
+    )
+    meta = {
+        "source": result.source,
+        "model": result.model,
+        "latency_ms": result.latency_ms,
+        "reason": result.reason,
+        "chosen_offer_id": chosen.get("offer_id"),
+    }
+    return chosen, result.text, meta
 
 
 def _public(session: dict[str, Any]) -> dict[str, Any]:
@@ -393,19 +464,48 @@ def create_bargain(
         "at": _iso(_now()),
     }]
     if target_price is not None:
-        offer, reply = _counter_offer(values, target_price, policy)
-        transcript.append({"actor": "b_pet", "name": "店宠", "text": reply, "at": _iso(_now()), "offer": offer})
+        primary, fallback_reply = _counter_offer(values, target_price, policy)
+        candidates = _candidate_offers(values, target_price, policy, primary)
+        chosen, reply, dialogue_meta = _store_turn(
+            session={
+                "merchant_id": merchant_id,
+                "items": resolved,
+                "list_total": values["list_total"],
+                "platform_discount": values["platform_discount"],
+                "current_offer": offer,
+                "transcript": transcript,
+            },
+            user_message=str(message or transcript[0]["text"]),
+            target=target_price,
+            fallback_reply=fallback_reply,
+            fallback_offer=primary,
+            candidates=candidates,
+        )
+        offer = chosen
+        transcript.append({"actor": "b_pet", "name": "店宠", "text": reply, "at": _iso(_now()), "offer": offer, "dialogue": dialogue_meta})
     else:
-        transcript.append({
-            "actor": "b_pet",
-            "name": "店宠",
-            "text": (
-                f"原价 ¥{values['list_total']:.2f}，平台优惠 ¥{values['platform_discount']:.2f}，"
-                f"当前到手 ¥{offer['payable']:.2f}；你想多少钱拿？"
-            ),
-            "at": _iso(_now()),
-            "offer": offer,
-        })
+        candidates = _candidate_offers(values, None, policy, offer)
+        fallback_reply = (
+            f"原价 ¥{values['list_total']:.2f}，平台优惠 ¥{values['platform_discount']:.2f}，"
+            f"当前到手 ¥{offer['payable']:.2f}；你想多少钱拿？"
+        )
+        chosen, reply, dialogue_meta = _store_turn(
+            session={
+                "merchant_id": merchant_id,
+                "items": resolved,
+                "list_total": values["list_total"],
+                "platform_discount": values["platform_discount"],
+                "current_offer": offer,
+                "transcript": transcript,
+            },
+            user_message=str(message or transcript[0]["text"]),
+            target=None,
+            fallback_reply=fallback_reply,
+            fallback_offer=offer,
+            candidates=candidates,
+        )
+        offer = chosen
+        transcript.append({"actor": "b_pet", "name": "店宠", "text": reply, "at": _iso(_now()), "offer": offer, "dialogue": dialogue_meta})
     bargain_id = f"bargain_{uuid.uuid4().hex[:16]}"
     session = store.create_bargain_session(
         bargain_id=bargain_id,
@@ -473,14 +573,23 @@ def send_message(buyer_id: str, bargain_id: str, message: str) -> dict[str, Any]
     if target <= 0 or target > 100000:
         raise BargainError("BARGAIN_TARGET_INVALID", "目标价必须在 1–100000 元之间")
 
-    offer, reply = _counter_offer(values, target, policy)
+    primary, fallback_reply = _counter_offer(values, target, policy)
+    candidates = _candidate_offers(values, target, policy, primary)
+    chosen, reply, dialogue_meta = _store_turn(
+        session={**session, "current_offer": current},
+        user_message=text,
+        target=target,
+        fallback_reply=fallback_reply,
+        fallback_offer=primary,
+        candidates=candidates,
+    )
     transcript = _append(session, "c_pet", "小鱼", text)
-    transcript = _append({"transcript": transcript}, "b_pet", "店宠", reply, offer=offer)
+    transcript = _append({"transcript": transcript}, "b_pet", "店宠", reply, offer=chosen, dialogue=dialogue_meta)
     store.update_bargain_session(
         bargain_id,
         target_price=target,
-        current_offer=offer,
-        merchant_discount=float(offer.get("merchant_discount") or 0),
+        current_offer=chosen,
+        merchant_discount=float(chosen.get("merchant_discount") or 0),
         transcript=transcript,
     )
     return _public(store.get_bargain_session(bargain_id, buyer_id=buyer_id) or session)
