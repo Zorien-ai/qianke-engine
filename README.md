@@ -4,16 +4,16 @@
 
 <h1 align="center">千客引擎 (Qianke Engine)</h1>
 
-<p align="center"><strong>专为电商打造的轻量级 AI 用户画像与业务分析引擎</strong></p>
+<p align="center"><strong>面向电商经营与交易场景的 Agent 平台</strong></p>
 
 [![CI](https://github.com/Zorien-ai/qianke-engine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Zorien-ai/qianke-engine/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml) [![Vue](https://img.shields.io/badge/vue-3.x-42b883?logo=vue.js&logoColor=white)](web/package.json) [![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](web/package.json) <br>
-[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml) [![Offline Eval](https://img.shields.io/badge/offline%20eval-93.9%25-yellowgreen)](tests/eval_report.md) [![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/Zorien-ai/qianke-engine)
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)](docs/接口文档.md) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](docker-compose.yml) [![Offline Eval](https://img.shields.io/badge/offline%20eval-93.9%25-yellowgreen)](tests/eval_report.md) [![Agent Update](https://img.shields.io/badge/Agent%20Update-2026.11-f2a45c)](https://www.bilibili.com/video/BV1WjsQ6SE5X/) [![GitHub](https://img.shields.io/badge/GitHub-qianke--engine-181717?logo=github)](https://github.com/Zorien-ai/qianke-engine)
 
 </div>
 
-> Qianke Engine is a lightweight, evaluation-driven RAG engine for e-commerce
-> user-profile analytics: hybrid retrieval, Text2SQL, anti-hallucination guard,
-> physical tenant isolation, and an offline LLM-as-a-Judge gate.
+> Qianke Engine is an evaluation-driven Agent platform for e-commerce operations
+> and transactions: user profiles, hybrid retrieval, Text2SQL, human-in-the-loop
+> approvals, traceable Agent runs, and an offline LLM-as-a-Judge gate.
 
 面向电商运营、客服、数据分析与管理层的**千客引擎工作台**。它不是「把资料丢给大模型」：
 系统先判断问题该走知识问答还是结构化统计，再经过**多路混合检索、RRF 融合、Cross-Encoder 精排**，
@@ -26,12 +26,25 @@
 > `uv run python scripts/run_eval.py` 可复现；低于 85% 会以退出码 1 阻止提交。
 > 详见 [评测报告](tests/eval_report.md)。
 
-## 宣传片
+## Agent Update 2026.11
 
-[![千客引擎宣传片 · 79 秒](docs/assets/promo-cover.jpg)](https://www.bilibili.com/video/BV1g9nJ6hEZ9)
+**Agent 不再只是回答问题，而是进入真实经营链路。**
 
-**79 秒看懂千客引擎** — [B 站观看](https://www.bilibili.com/video/BV1g9nJ6hEZ9) ·
-6 段 AI 空镜 + 2 段真实产品录屏 + 中文配音与字幕（视频标注：含 AI 生成内容）。
+| 中文发布片 · 60fps | English cut · 60fps |
+| --- | --- |
+| [![千客引擎 Agent Update 中文版](docs/design/bilibili-cover-1146x717.jpg)](https://www.bilibili.com/video/BV1WjsQ6SE5X/) | [![Qianke Engine Agent Update English cut](docs/design/bilibili-cover-en-1146x717.jpg)](https://www.bilibili.com/video/BV1z6sU6iE6h/) |
+| [在 B 站观看中文版](https://www.bilibili.com/video/BV1WjsQ6SE5X/) | [Watch the English cut](https://www.bilibili.com/video/BV1z6sU6iE6h/) |
+
+**这次更新带来了什么：**
+
+- **C 端 · 自由砍价**：LLM 店宠自然对话；价格、底价与审批由确定性引擎守住。
+- **B 端 · 经营闭环**：从会话、画像、报价、审批到订单，接成一条可执行链路。
+- **A 端 · Agent Infra**：每次调用可追踪、每次回答可评测；Trace / Eval / Guardrails 全部产品化。
+- **质量基线**：868 automated tests passing，10/10 profile golden set。
+
+> 发布片使用真实产品界面；视频中的交易为模拟交易，不接真实支付。
+
+更早的产品片：[79 秒看懂千客引擎 · B 站](https://www.bilibili.com/video/BV1g9nJ6hEZ9)。
 
 ---
 
@@ -64,7 +77,7 @@
 
 ## 目录
 
-- [宣传片](#宣传片)
+- [Agent Update 2026.11](#agent-update-202611)
 - [核心功能截图](#核心功能截图)
 - [核心特性](#核心特性)
 - [系统架构](#系统架构)
@@ -354,7 +367,7 @@ uv run python scripts/run_eval.py --min-pass-rate 0.85
 | [项目背景](docs/项目背景.md) | 业务痛点、技术路线与能力边界 |
 | [MVP 产品目标](docs/MVP产品目标.md) | 产品范围与里程碑 |
 | [原始流程图](docs/千客引擎-流程图.md) | 手绘 Excalidraw 版 RAG 数据流 |
-| [宣传片（B 站）](https://www.bilibili.com/video/BV1g9nJ6hEZ9) | 79 秒产品宣传片：6 段 AI 空镜 + 真实录屏 + 配音/字幕 |
+| [Agent Update 2026.11 · B 站](https://www.bilibili.com/video/BV1WjsQ6SE5X/) | 40 秒中文发布片（60fps）+ English cut；Agent 更新与真实产品界面 |
 | [产品宣传片脚本](docs/video_script.md) | 75s Demo 分镜、配音文案、字幕与事实核验 |
 | [录屏操作指南](docs/recording_guide.md) | 演示账号/数据准备、逐镜头点击步骤、Auto-Pilot |
 | [评测报告](tests/eval_report.md) | 最新 33 题逐题结果与失败复盘（历史快照见 commit b93c851） |
