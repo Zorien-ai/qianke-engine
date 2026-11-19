@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Qianke Agent Runtime · Architecture Flow</title>
+<style>
+  :root{
+    --bg:#14110e; --card:#211b17; --card2:#191512; --line:#3b2f27; --line2:#554439;
+    --ink:#f7f3ec; --muted:#b8a99b; --faint:#88796c; --accent:#e0a15c; --accent2:#ffd4a0;
+    --red:#b14a35; --green:#5f8f74; --blue:#6b7f9c; --purple:#8873a3;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:2600px;height:1400px;overflow:hidden;background:var(--bg)}
+  body{font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+  .canvas{position:absolute;inset:0;overflow:hidden;background:
+    radial-gradient(1100px 700px at 84% 12%,rgba(224,161,92,.13),transparent 66%),
+    radial-gradient(900px 600px at 8% 88%,rgba(177,74,53,.08),transparent 70%),
+    linear-gradient(180deg,#17130f 0%,#14110e 55%,#100e0c 100%)}
+  .grid{position:absolute;inset:0;opacity:.32;background-image:linear-gradient(rgba(247,243,236,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(247,243,236,.035) 1px,transparent 1px);background-size:96px 96px;mask-image:radial-gradient(1200px 900px at 50% 45%,#000,transparent 85%)}
+  .vignette{position:absolute;inset:0;background:radial-gradient(130% 100% at 50% 45%,transparent 50%,rgba(5,4,3,.8) 100%)}
+  .wires{position:absolute;inset:0;z-index:1}
+  .box{position:absolute;z-index:2;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,rgba(38,30,25,.96),rgba(28,23,19,.96));box-shadow:0 18px 46px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.045)}
+  .box .inner{padding:20px 22px}
+  .box .k{font-family:Consolas,monospace;font-size:13px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase}
+  .box .t{font-size:27px;font-weight:700;letter-spacing:.01em;margin-top:8px;color:var(--ink)}
+  .box .d{font-size:18px;line-height:1.5;color:var(--muted);margin-top:8px}
+  .head{position:absolute;left:100px;top:54px;z-index:3}
+  .kicker{display:flex;align-items:center;gap:14px;font-family:Consolas,monospace;font-size:17px;letter-spacing:.22em;color:var(--accent);text-transform:uppercase}
+  .kicker::before{content:"";width:34px;height:1px;background:var(--accent);box-shadow:0 0 14px rgba(224,161,92,.7)}
+  h1{font-size:56px;line-height:1.12;letter-spacing:-.035em;font-weight:700;margin-top:22px}
+  .sub{font-size:24px;line-height:1.55;color:var(--muted);margin-top:14px;letter-spacing:.01em}
+  .sub b{color:var(--ink);font-weight:600}
+  .topright{position:absolute;right:100px;top:62px;z-index:3;text-align:right}
+  .topright .tag{display:inline-flex;gap:8px;align-items:center;font-family:Consolas,monospace;font-size:14px;letter-spacing:.13em;color:var(--faint);border:1px solid var(--line);border-radius:999px;padding:8px 13px;margin-left:8px}
+  .topright .tag b{color:var(--accent2);font-weight:500}
+  .topright .note{margin-top:12px;font-family:Consolas,monospace;font-size:12px;letter-spacing:.12em;color:rgba(184,169,155,.55)}
+  .summary{position:absolute;top:218px;left:100px;width:2400px;height:152px;display:grid;grid-template-columns:repeat(4,1fr);gap:28px;z-index:3}
+  .sumcard{position:relative;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,rgba(36,29,24,.9),rgba(26,21,18,.92));padding:20px 22px;overflow:hidden}
+  .sumcard::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,rgba(224,161,92,.55),rgba(224,161,92,0))}
+  .sumcard .n{position:absolute;right:20px;top:18px;font-family:Consolas,monospace;font-size:13px;letter-spacing:.1em;color:rgba(224,161,92,.62)}
+  .sumcard .st{font-size:26px;font-weight:700;margin-top:5px}
+  .sumcard .sd{font-size:17px;line-height:1.45;color:var(--muted);margin-top:9px}
+  .sumcard .sk{font-family:Consolas,monospace;font-size:11px;letter-spacing:.16em;color:var(--faint)}
+  .req{left:100px;top:500px;width:210px;height:110px}
+  .route{left:355px;top:500px;width:230px;height:110px}
+  .route .d{font-size:16px;line-height:1.45}
+  .runtime{left:635px;top:430px;width:430px;height:270px;border-color:rgba(224,161,92,.5);background:linear-gradient(160deg,rgba(91,38,28,.94),rgba(51,29,23,.96));box-shadow:0 24px 70px rgba(0,0,0,.42),0 0 0 1px rgba(224,161,92,.1),inset 0 1px 0 rgba(255,255,255,.06)}
+  .runtime .inner{padding:24px 26px}
+  .runtime .k{color:rgba(255,212,160,.72)}
+  .runtime .t{font-size:34px;color:var(--accent2);margin-top:8px}
+  .runtime .d{font-size:17px;line-height:1.5;color:rgba(247,243,236,.72);margin-top:8px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  .chip{font-family:Consolas,monospace;font-size:12px;letter-spacing:.08em;color:rgba(255,212,160,.82);border:1px solid rgba(255,212,160,.2);border-radius:999px;padding:6px 9px;background:rgba(0,0,0,.12)}
+  .tools{left:1115px;top:410px;width:430px;height:310px;background:linear-gradient(180deg,rgba(30,25,21,.98),rgba(24,20,17,.98))}
+  .tools .inner{padding:18px 20px}
+  .tools .t{font-size:24px}
+  .toolrow{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-top:1px solid rgba(247,243,236,.075)}
+  .toolrow:first-of-type{margin-top:8px}
+  .toolrow .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:7px;box-shadow:0 0 12px rgba(224,161,92,.5);flex:0 0 auto}
+  .toolrow b{display:block;font-family:Consolas,monospace;font-size:15px;letter-spacing:.03em;color:var(--ink);font-weight:600}
+  .toolrow span{display:block;font-size:15px;color:var(--faint);margin-top:3px}
+  .evidence{left:1595px;top:485px;width:235px;height:140px;border-color:rgba(95,143,116,.48);background:linear-gradient(180deg,rgba(25,36,30,.96),rgba(23,29,25,.96))}
+  .evidence .t{color:#b9d6c2}
+  .answer{left:1880px;top:380px;width:310px;height:120px;border-color:rgba(224,161,92,.32)}
+  .action{left:1880px;top:530px;width:310px;height:120px;border-color:rgba(224,161,92,.2)}
+  .approval{left:1880px;top:700px;width:310px;height:110px;border-color:rgba(177,74,53,.55);background:linear-gradient(180deg,rgba(55,30,24,.96),rgba(39,27,23,.96))}
+  .approval .t{color:#efb7a4}
+  .execute{left:1880px;top:850px;width:310px;height:110px;border-color:rgba(95,143,116,.4)}
+  .execute .t{color:#b9d6c2}
+  .trace{left:2250px;top:700px;width:250px;height:260px;background:linear-gradient(180deg,rgba(28,24,33,.96),rgba(22,19,26,.96));border-color:rgba(136,115,163,.45)}
+  .trace .t{font-size:24px;color:#cbbce0}
+  .trace .d{font-size:15px}
+  .trace ul{margin-top:12px;padding-left:16px;color:var(--muted);font-size:14px;line-height:1.8}
+  .memory{position:absolute;top:1030px;left:100px;width:1620px;height:145px;display:grid;grid-template-columns:repeat(5,1fr);gap:30px;z-index:3}
+  .memcard{border:1px solid var(--line);border-radius:14px;background:rgba(31,25,21,.88);padding:16px 18px;position:relative}
+  .memcard::before{content:"";position:absolute;left:18px;right:18px;top:0;height:2px;background:linear-gradient(90deg,rgba(107,127,156,.7),rgba(107,127,156,0))}
+  .memcard .mt{font-size:22px;font-weight:700;margin-top:3px}
+  .memcard .md{font-size:15px;line-height:1.5;color:var(--faint);margin-top:7px}
+  .memcard .mk{font-family:Consolas,monospace;font-size:10px;letter-spacing:.14em;color:var(--blue)}
+  .review{left:1880px;top:1030px;width:310px;height:145px;border-color:rgba(136,115,163,.35);background:linear-gradient(180deg,rgba(29,24,35,.92),rgba(23,20,28,.94))}
+  .review .t{font-size:23px;color:#cbbce0}
+  .review .d{font-size:15px}
+  .principle{position:absolute;left:100px;top:1228px;width:2300px;z-index:4;display:flex;align-items:center;gap:22px;font-size:23px;color:var(--muted);letter-spacing:.01em}
+  .principle b{color:var(--ink);font-weight:600}
+  .principle .p{border:1px solid rgba(224,161,92,.3);border-radius:999px;padding:9px 14px;background:rgba(224,161,92,.06);color:var(--accent2);font-size:18px}
+  .principle .arrow{color:var(--faint);font-family:Consolas,monospace;font-size:18px}
+  .legend{position:absolute;left:100px;top:1305px;z-index:4;display:flex;align-items:center;gap:26px;font-family:Consolas,monospace;font-size:13px;letter-spacing:.06em;color:var(--faint)}
+  .lg{display:flex;align-items:center;gap:8px}
+  .lgline{width:30px;height:2px;background:var(--accent)}
+  .lgline.dash{background:repeating-linear-gradient(90deg,var(--purple) 0 5px,transparent 5px 9px);height:2px}
+  .lgline.red{background:var(--red)}
+  .foot{position:absolute;right:100px;top:1305px;z-index:4;font-family:Consolas,monospace;font-size:12px;letter-spacing:.14em;color:rgba(184,169,155,.38)}
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="grid"></div><div class="vignette"></div>
+
+  <svg class="wires" width="2600" height="1400" viewBox="0 0 2600 1400" aria-hidden="true">
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#8b7463"/></marker>
+      <marker id="arrowWarm" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#d99a62"/></marker>
+      <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#c06a52"/></marker>
+      <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#9a86b3"/></marker>
+    </defs>
+    <!-- main path -->
+    <path d="M310 555 H355" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <path d="M585 555 H635" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <path d="M1065 555 H1115" stroke="#d99a62" stroke-width="2.5" fill="none" marker-end="url(#arrowWarm)"/>
+    <path d="M1545 555 H1595" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <path d="M1830 535 H1855 V435 H1880" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+    <path d="M1830 575 H1855 V595 H1880" stroke="#d99a62" stroke-width="2" fill="none" marker-end="url(#arrowWarm)"/>
+    <path d="M2035 650 V700" stroke="#c06a52" stroke-width="2" fill="none" marker-end="url(#arrowRed)"/>
+    <path d="M2035 810 V850" stroke="#c06a52" stroke-width="2" fill="none" marker-end="url(#arrowRed)"/>
+    <!-- action to approval label path -->
+    <path d="M2035 960 V1000 H1600 V1030" stroke="#9a86b3" stroke-width="1.6" stroke-dasharray="6 6" fill="none" marker-end="url(#arrowPurple)"/>
+    <!-- runtime to memory -->
+    <path d="M770 700 V960 H580 V1030" stroke="#6b7f9c" stroke-width="1.6" stroke-dasharray="6 6" fill="none" marker-end="url(#arrowPurple)"/>
+    <!-- tools to memory -->
+    <path d="M1330 720 V960 H1310 V1030" stroke="#6b7f9c" stroke-width="1.4" stroke-dasharray="5 7" fill="none" marker-end="url(#arrowPurple)"/>
+    <!-- trace path, above main row -->
+    <path d="M850 430 V372 H2250 V700" stroke="#9a86b3" stroke-width="1.4" stroke-dasharray="5 7" fill="none" marker-end="url(#arrowPurple)"/>
+    <!-- review dashed from execute area -->
+    <path d="M2035 960 V1000 H2035 V1030" stroke="#9a86b3" stroke-width="1.4" stroke-dasharray="5 7" fill="none" marker-end="url(#arrowPurple)"/>
+    <!-- labels -->
+    <text x="318" y="544" fill="#88796c" font-size="13" font-family="Consolas,monospace">IN</text>
+    <text x="590" y="544" fill="#88796c" font-size="13" font-family="Consolas,monospace">ROUTE</text>
+    <text x="1072" y="544" fill="#d99a62" font-size="13" font-family="Consolas,monospace">TOOLS</text>
+    <text x="1552" y="544" fill="#88796c" font-size="13" font-family="Consolas,monospace">CHECK</text>
+    <text x="1838" y="424" fill="#88796c" font-size="13" font-family="Consolas,monospace">ANSWER</text>
+    <text x="1838" y="616" fill="#d99a62" font-size="13" font-family="Consolas,monospace">DRAFT</text>
+    <text x="2050" y="682" fill="#c06a52" font-size="13" font-family="Consolas,monospace">HUMAN</text>
+    <text x="2050" y="838" fill="#c06a52" font-size="13" font-family="Consolas,monospace">EXECUTE</text>
+    <text x="1630" y="1020" fill="#9a86b3" font-size="13" font-family="Consolas,monospace">AUDIT</text>
+    <text x="780" y="724" fill="#6b7f9c" font-size="13" font-family="Consolas,monospace">STATE / PROFILE</text>
+    <text x="1342" y="744" fill="#6b7f9c" font-size="13" font-family="Consolas,monospace">OBSERVATION</text>
+    <text x="880" y="358" fill="#9a86b3" font-size="13" font-family="Consolas,monospace">TRACE / EVAL · ASYNC</text>
+  </svg>
+
+  <header class="head">
+    <div class="kicker">QIANKE AGENT RUNTIME · 2026.11</div>
+    <h1>一次经营任务，Agent 怎么走完</h1>
+    <p class="sub">不是 <b>Question → Answer</b>，而是 <b>任务 → 规划 → 工具 → 证据 → 动作 → 审计</b>。</p>
+  </header>
+  <div class="topright">
+    <span class="tag">C 端 <b>·</b></span><span class="tag">B 端 <b>·</b></span><span class="tag">A 端</span>
+    <div class="note">ARCHITECTURE OVERVIEW · DEMO DATA</div>
+  </div>
+
+  <section class="summary">
+    <div class="sumcard"><span class="n">01</span><div class="sk">ENTRY</div><div class="st">任务入口</div><div class="sd">C 端导购 · B 端经营<br>A 端审计</div></div>
+    <div class="sumcard"><span class="n">02</span><div class="sk">OBJECT</div><div class="st">业务对象</div><div class="sd">客户 · 商品 · 订单<br>SOP / 知识</div></div>
+    <div class="sumcard"><span class="n">03</span><div class="sk">BOUNDARY</div><div class="st">权限边界</div><div class="sd">只读查询<br>写操作人工确认</div></div>
+    <div class="sumcard"><span class="n">04</span><div class="sk">CONTEXT</div><div class="st">上下文</div><div class="sd">画像 · 会话<br>历史证据</div></div>
+  </section>
+
+  <div class="box req"><div class="inner"><div class="k">INPUT</div><div class="t">任务请求</div><div class="d">自然语言 / 操作意图</div></div></div>
+  <div class="box route"><div class="inner"><div class="k">ROUTER</div><div class="t">意图路由</div><div class="d">RAG · SQL · 交易 · 闲聊</div></div></div>
+  <div class="box runtime"><div class="inner"><div class="k">CORE LOOP</div><div class="t">Agent Runtime</div><div class="d">State · Planning · Tool Calling<br>Human-in-the-loop</div><div class="chips"><span class="chip">STEP LIMIT</span><span class="chip">TIMEOUT</span><span class="chip">TOKEN BUDGET</span><span class="chip">TRACE</span></div></div></div>
+  <div class="box tools"><div class="inner"><div class="k">TOOL LAYER</div><div class="t">工具层</div>
+    <div class="toolrow"><span class="dot"></span><div><b>RAG Search</b><span>知识 / SOP / 口径</span></div></div>
+    <div class="toolrow"><span class="dot"></span><div><b>Text2SQL</b><span>只读 · SELECT-only · LIMIT</span></div></div>
+    <div class="toolrow"><span class="dot"></span><div><b>Commerce</b><span>商品 / 报价 / 订单</span></div></div>
+    <div class="toolrow"><span class="dot"></span><div><b>Profile &amp; Memory</b><span>画像 / 会话 / 长期记忆</span></div></div>
+  </div></div>
+  <div class="box evidence"><div class="inner"><div class="k">VERIFY</div><div class="t">证据校验</div><div class="d">引用 · 事实 · 边界</div></div></div>
+  <div class="box answer"><div class="inner"><div class="k">OUTPUT</div><div class="t">回答</div><div class="d">带来源 · 可解释</div></div></div>
+  <div class="box action"><div class="inner"><div class="k">PROPOSAL</div><div class="t">动作草稿</div><div class="d">不直接执行</div></div></div>
+  <div class="box approval"><div class="inner"><div class="k">HUMAN IN THE LOOP</div><div class="t">人工审批</div><div class="d">高风险动作 · 明确确认</div></div></div>
+  <div class="box execute"><div class="inner"><div class="k">CONTROLLED WRITE</div><div class="t">执行 + 审计</div><div class="d">写入 / 留痕 / 可回放</div></div></div>
+  <div class="box trace"><div class="inner"><div class="k">OBSERVABILITY</div><div class="t">Trace / Eval</div><div class="d">旁路，不影响主链路</div><ul><li>每次调用可追踪</li><li>工具 / 延迟 / Token</li><li>黄金集回归门禁</li></ul></div></div>
+
+  <section class="memory">
+    <div class="memcard"><div class="mk">SHORT TERM</div><div class="mt">短期任务</div><div class="md">目标 / 进度 / 待办</div></div>
+    <div class="memcard"><div class="mk">LONG TERM</div><div class="mt">长期画像</div><div class="md">身份 / 偏好 / 关系</div></div>
+    <div class="memcard"><div class="mk">SESSION</div><div class="mt">会话历史</div><div class="md">消息 / 证据 / 结果</div></div>
+    <div class="memcard"><div class="mk">KNOWLEDGE</div><div class="mt">文档与 SOP</div><div class="md">知识 / 口径 / 规则</div></div>
+    <div class="memcard"><div class="mk">AUDIT</div><div class="mt">审计记录</div><div class="md">谁 / 何时 / 做了什么</div></div>
+  </section>
+  <div class="box review"><div class="inner"><div class="k">ASYNC REVIEW</div><div class="t">异步复盘 Agent</div><div class="d">会话结束 → 画像回写<br>不阻塞主链路</div></div></div>
+
+  <div class="principle">
+    <span class="p">没有可靠证据 → 先补问</span><span class="arrow">/</span>
+    <span class="p">高风险写操作 → 先审批</span><span class="arrow">/</span>
+    <span class="p">每次执行 → 留下 Trace</span>
+  </div>
+  <div class="legend">
+    <span class="lg"><span class="lgline"></span>主链路</span>
+    <span class="lg"><span class="lgline red"></span>人工审批</span>
+    <span class="lg"><span class="lgline dash"></span>异步 / 记忆 / 观测</span>
+    <span class="lg">架构示意 · 数据为演示</span>
+  </div>
+  <div class="foot">QIANKE ENGINE · AGENT UPDATE 2026.11</div>
+</div>
+</body>
+</html>
