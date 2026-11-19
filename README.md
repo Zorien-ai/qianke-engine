@@ -79,7 +79,15 @@
 
 ## 系统架构
 
-### 端到端数据流
+### 一次经营任务怎么走
+
+![Agent Runtime 架构流程图](docs/assets/architecture-agent-runtime.png)
+
+> 上图只回答一个问题：一次经营任务如何从请求走到可审计结果。  
+> 主线是 **任务 → 规划 → 工具 → 证据 → 回答/动作草稿 → 人工审批 → 执行与审计**；  
+> 画像、会话、SOP 和审计记录在下方作为状态层；Trace / Eval 走旁路，不阻塞主流程。
+
+### 更细的检索与分层架构
 
 ![端到端数据流](docs/assets/architecture-pipeline.png)
 

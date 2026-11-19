@@ -5,6 +5,11 @@
 > 项目：用户画像分析助手 Demo ｜ 数据规模：8110 个画像样本（聚合口径，见 README「数据口径」）+ 知识文档分块
 > 部署形态：FastAPI 单进程 + pgvector 容器（:5432）
 > 本文档为 Mermaid 源码，可直接渲染；配套渲染预览见 `architecture-diagrams.html`
+>
+> **新版入口**：面向 Agent 任务执行链路的流程图见
+> [README「一次经营任务怎么走」](../README.md#一次经营任务怎么走)，
+> 对应资源 `docs/assets/architecture-agent-runtime.png`、源文件
+> `docs/design/architecture-agent-runtime.html`。下方 Mermaid 保留 RAG/检索分层细节。
 
 ---
 
