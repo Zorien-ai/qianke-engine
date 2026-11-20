@@ -16,7 +16,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
-from rag_demo import ai_monitor, chat_history
+from rag_demo import ai_monitor, chat_history, memory_context
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,14 @@ def load_memory(tenant_id: str, account_id: int, session_id: str) -> dict:
     state = chat_history.get_context_state(tenant_id, account_id, session_id)
     summary = state.get("summary") if isinstance(state.get("summary"), str) else ""
     entities = state.get("entities") if isinstance(state.get("entities"), dict) else {}
-    return {"summary": summary, "entities": _clean_entities(entities)}
+    return {
+        "summary": summary,
+        "entities": _clean_entities(entities),
+        "tenant_id": str(tenant_id or ""),
+        "customer_id": f"account:{int(account_id)}",
+        "source": "chat_sessions.context_state",
+        "updated_at": str(state.get("updated_at") or "") or None,
+    }
 
 
 def short_term(messages: list[dict]) -> list[dict]:
@@ -60,9 +67,52 @@ def _memory_text(memory: dict) -> str:
     return "\n".join(parts)
 
 
+def _structured_memory_text(memory: dict) -> str:
+    """把会话摘要/实体转成带来源、时效和置信度的上下文；旧调用无身份字段时返回空。"""
+    tenant_id = str((memory or {}).get("tenant_id") or "")
+    customer_id = str((memory or {}).get("customer_id") or "")
+    if not tenant_id or not customer_id:
+        return ""
+    updated_at = (memory or {}).get("updated_at")
+    source = str((memory or {}).get("source") or "chat_sessions.context_state")
+    items: list[memory_context.MemoryItem] = []
+    summary = str((memory or {}).get("summary") or "").strip()
+    if summary:
+        items.append(
+            memory_context.MemoryItem(
+                memory_id="chat_summary",
+                tenant_id=tenant_id,
+                customer_id=customer_id,
+                kind="summary",
+                content=f"历史对话摘要：{summary}",
+                source=source,
+                updated_at=updated_at,
+                confidence=None,
+                confidence_basis="uncalibrated_model_summary",
+            )
+        )
+    for key, value in _clean_entities((memory or {}).get("entities") or {}).items():
+        items.append(
+            memory_context.MemoryItem(
+                memory_id=f"chat_entity:{key}",
+                tenant_id=tenant_id,
+                customer_id=customer_id,
+                kind="entity",
+                content=f"{key}={value}",
+                source=source,
+                updated_at=updated_at,
+                confidence=None,
+                confidence_basis="uncalibrated_llm_extraction",
+            )
+        )
+    identity = memory_context.resolve_authenticated_identity(tenant_id, customer_id)
+    packet = memory_context.assemble_context(items, identity, max_items=12, max_chars=1600)
+    return memory_context.format_items(packet, header="会话记忆")
+
+
 def system_prompt(memory: dict, history: list[dict]) -> str:
     """构造生成阶段的 System Prompt：摘要 + 实体 + 最近 6 轮完整对话。"""
-    memory_text = _memory_text(memory)
+    memory_text = _structured_memory_text(memory) or _memory_text(memory)
     recent = short_term(history)
     lines = [
         "你在进行一段连续对话。下面是会话记忆，只用于理解指代和保持业务条件一致，"
@@ -82,7 +132,7 @@ def system_prompt(memory: dict, history: list[dict]) -> str:
 
 def rewrite_prompt_context(memory: dict, history: list[dict]) -> str:
     """改写追问时注入的记忆上下文（摘要 + 实体 + 最近对话）。"""
-    base = _memory_text(memory)
+    base = _structured_memory_text(memory) or _memory_text(memory)
     lines = []
     if base:
         lines.append(base)
