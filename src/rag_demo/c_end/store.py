@@ -3545,7 +3545,7 @@ def list_memories(owner_id: str, limit: int = 20) -> list[dict[str, Any]]:
     try:
         rows = conn.execute(
             "SELECT memory_id, kind, content, source, importance, reinforced_count, pinned, "
-            "last_reinforced_at, created_at FROM c_companion_memory "
+            "last_reinforced_at, created_at, updated_at FROM c_companion_memory "
             "WHERE owner_id = ? AND status = 'ACTIVE' ORDER BY pinned DESC, importance DESC, "
             "created_at DESC LIMIT ?",
             (owner_id, max(1, min(int(limit), 500))),

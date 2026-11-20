@@ -1,8 +1,23 @@
 # Agent 用户记忆与上下文 · 架构契约
 
-> 状态：架构设计 / 吸收参考方案，**业务代码尚未改动**  
-> 适用：C 端店宠、B 端经营 Agent、A 端审计  
+> 状态：架构设计 + **Phase 1 开始落地**
+> 适用：C 端店宠、B 端经营 Agent、A 端审计
 > 关联：`docs/decisions/three_agent_platform_architecture_decisions_v0.1.md` §7
+
+## 0. 实现进度（2026-11-20）
+
+| 能力 | 状态 | 位置 |
+|---|---|---|
+| 身份解析 / 歧义判定 | ✅ 纯逻辑 + 单测 | `src/rag_demo/memory_context.py` |
+| 租户 / 客户 / DELETED 过滤 | ✅ 纯逻辑 + 单测 | `memory_context.assemble_context` |
+| 上下文条目 source / updated_at / confidence | ✅ C 端 Agent 记忆注入 | `src/rag_demo/c_end/agent.py` |
+| B 端画像 Tool 身份与来源元数据 | ✅ | `src/rag_demo/agent/tools/chat_profile.py` |
+| C 端记忆列表 `updated_at` | ✅ | `src/rag_demo/c_end/store.py` |
+| B 端主会话记忆上下文接入 | ⏳ Phase 2 | `src/rag_demo/chat_memory.py` |
+| 候选记忆 / 确认写回 / 版本审计 | ⏳ Phase 2 | 尚未实现 |
+
+Phase 1 目前覆盖“认证身份 + 读取过滤 + 元数据”，**尚未把 B 端会话主链路和多客户别名查询接到新的身份解析器**。
+证据：`tests/test_memory_context.py`、`tests/test_c_end_memory.py`、`tests/test_b_chat_profile.py`。
 
 ## 1. 核心结论
 
@@ -99,7 +114,7 @@ status（ACTIVE / SUPERSEDED / DELETED）
 → 输出可解释上下文
 ```
 
-每个进入 Prompt 的片段都应可回指到 `memory_id` / `source`。  
+每个进入 Prompt 的片段都应可回指到 `memory_id` / `source`。
 当前对话与历史记忆冲突时，**当前对话优先**；如果可能代表长期偏好变化，生成候选记忆等待确认。
 
 ### 2.5 Agent
@@ -236,7 +251,7 @@ src/rag_demo/agent/tools/chat_profile.py  画像 Tool
 docs/e2e/profile-three-layers.md     三层画像
 ```
 
-但“身份解析 → 上下文组装元数据 → 候选记忆确认 → 版本化写回”目前还没有形成一条统一的 Memory Service 契约。  
+但“身份解析 → 上下文组装元数据 → 候选记忆确认 → 版本化写回”目前还没有形成一条统一的 Memory Service 契约。
 本文件是目标契约，**不代表所有能力已经实现**。
 
 ## 7. 落地顺序

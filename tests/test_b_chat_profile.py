@@ -122,6 +122,10 @@ def test_profile_tool_is_tenant_scoped(c_store, monkeypatch):
     assert result["ok"] is True
     assert result["summary"]
     assert result["profile"]["needs"]
+    assert result["identity"]["resolved"] is True
+    assert result["identity"]["customer_id"] == "buyer_1"
+    assert result["context_item"]["source"] == "b_chat_user_profile"
+    assert result["context_item"]["updated_at"]
 
     monkeypatch.setattr(
         auth,
