@@ -19,6 +19,7 @@ B_AGENT_TOOL_NAMES: tuple[str, ...] = (
     "execute_sql",
     "calculator",
     "prepare_followup_task",
+    "resolve_customer_identity",
     "get_chat_user_profile",
     "search_chat_user_profiles",
 )
@@ -72,5 +73,5 @@ class ToolPolicy:
         if role in _ANALYTICS_ROLES:
             return cls(B_AGENT_TOOL_NAMES)
         if role == _CS_ROLE:
-            return cls(("rag_search", "calculator", "get_chat_user_profile", "search_chat_user_profiles"))
+            return cls(("rag_search", "calculator", "resolve_customer_identity", "get_chat_user_profile", "search_chat_user_profiles"))
         return cls(())

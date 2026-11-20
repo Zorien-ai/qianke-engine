@@ -6,7 +6,11 @@ from typing import Any, Iterable
 from rag_demo.agent.tool import Tool
 from rag_demo.agent.tools.action import prepare_followup_task
 from rag_demo.agent.tools.calculator import _calculator_adapter, calculator
-from rag_demo.agent.tools.chat_profile import get_chat_user_profile, search_chat_user_profiles
+from rag_demo.agent.tools.chat_profile import (
+    get_chat_user_profile,
+    resolve_customer_identity,
+    search_chat_user_profiles,
+)
 from rag_demo.agent.tools.rag import _rag_adapter, rag_search
 from rag_demo.agent.tools.sql import _sql_adapter, execute_sql
 
@@ -16,7 +20,7 @@ def get_tools(allowed_tools: Iterable[str] | None = None) -> list[Any]:
 
     allowed_tools 非 None 时只暴露白名单内的 Tool；执行前的二次校验在 chatbot 节点。
     """
-    tools = [rag_search, execute_sql, calculator, prepare_followup_task, get_chat_user_profile, search_chat_user_profiles]
+    tools = [rag_search, execute_sql, calculator, prepare_followup_task, resolve_customer_identity, get_chat_user_profile, search_chat_user_profiles]
     if allowed_tools is None:
         return tools
     allowed = set(allowed_tools)
@@ -49,6 +53,12 @@ def get_tool_contracts() -> dict[str, Tool]:
             description=prepare_followup_task.description,
             input_schema=prepare_followup_task.args_schema.model_json_schema(),
             fn=lambda **kwargs: prepare_followup_task.invoke(kwargs),
+        ),
+        "resolve_customer_identity": Tool(
+            name=resolve_customer_identity.name,
+            description=resolve_customer_identity.description,
+            input_schema=resolve_customer_identity.args_schema.model_json_schema(),
+            fn=lambda **kwargs: resolve_customer_identity.invoke(kwargs),
         ),
         "get_chat_user_profile": Tool(
             name=get_chat_user_profile.name,

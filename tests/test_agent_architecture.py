@@ -36,6 +36,7 @@ def test_registry_exposes_tools_and_json_schemas():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "resolve_customer_identity",
         "get_chat_user_profile",
         "search_chat_user_profiles",
     ]
@@ -45,6 +46,7 @@ def test_registry_exposes_tools_and_json_schemas():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "resolve_customer_identity",
         "get_chat_user_profile",
         "search_chat_user_profiles",
     }
@@ -56,6 +58,7 @@ def test_registry_exposes_tools_and_json_schemas():
         "execute_sql",
         "calculator",
         "prepare_followup_task",
+        "resolve_customer_identity",
         "get_chat_user_profile",
         "search_chat_user_profiles",
     }

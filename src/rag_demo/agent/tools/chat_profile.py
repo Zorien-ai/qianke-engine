@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from rag_demo import auth
 from rag_demo import memory_context
 from rag_demo.agent import actions
+from rag_demo.b_end import identity as b_identity
 from rag_demo.c_end import store
 
 
@@ -55,6 +56,23 @@ def _merchant_scope(requested: str | None = None) -> str:
 
 def _error(exc: _ScopeError) -> dict[str, Any]:
     return {"ok": False, "error": {"code": exc.code, "message": exc.message}}
+
+
+class ResolveIdentityInput(BaseModel):
+    query: str = Field(..., min_length=1, max_length=80, description="客户称呼、手机号、用户名或 buyer_id")
+    merchant_id: str | None = Field(default=None, max_length=80, description="仅系统管理员可指定")
+
+
+@tool(args_schema=ResolveIdentityInput)
+def resolve_customer_identity(query: str, merchant_id: str | None = None) -> dict[str, Any]:
+    """在当前商家内把称呼/别名/手机号解析为唯一买家 ID；多命中时返回候选并要求补问。"""
+    try:
+        scope = _merchant_scope(merchant_id)
+        return b_identity.resolve_customer_identity(scope, str(query).strip())
+    except _ScopeError as exc:
+        return _error(exc)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": {"code": "IDENTITY_RESOLVE_FAILED", "message": "身份解析失败"}}
 
 
 class GetProfileInput(BaseModel):
@@ -153,4 +171,4 @@ def search_chat_user_profiles(
         return {"ok": False, "error": {"code": "PROFILE_SEARCH_FAILED", "message": "画像搜索失败"}}
 
 
-__all__ = ["get_chat_user_profile", "search_chat_user_profiles"]
+__all__ = ["resolve_customer_identity", "get_chat_user_profile", "search_chat_user_profiles"]

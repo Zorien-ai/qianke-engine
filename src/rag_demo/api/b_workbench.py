@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from rag_demo import auth, config, product_media as media
 from rag_demo.b_end import insights as b_insights
+from rag_demo.b_end import identity as b_identity
 from rag_demo.b_end import user_pool as b_user_pool
 from rag_demo.c_end import alerts as alert_notifier
 from rag_demo.c_end import free_bargain, store
@@ -172,6 +173,12 @@ class ProfileQueryIn(BaseModel):
 
     question: str = Field(..., min_length=1, max_length=500)
     source: str = Field(default="all", pattern="^(qianke|imported|all)$")
+
+
+class IdentityResolveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(..., min_length=1, max_length=80)
 
 
 PROFILE_SOURCES = {
@@ -984,6 +991,15 @@ def workbench_profiles(
             "imported": {"ready": imported_ready, **imported_payload},
         },
     }
+
+
+@router.post("/identity/resolve")
+def workbench_resolve_identity(req: IdentityResolveIn) -> dict[str, Any]:
+    """把客户称呼/别名/买家 ID 解析为当前商户下的唯一的 buyer_id。"""
+    account = _account()
+    _member, merchant_id, _dataset, _status = _profile_scope(account, "view_profiles")
+    result = b_identity.resolve_customer_identity(merchant_id, req.query)
+    return {"merchant_id": merchant_id, **result}
 
 
 @router.post("/profile-query")
