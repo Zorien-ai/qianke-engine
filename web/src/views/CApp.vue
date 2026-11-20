@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import BargainChat from "../components/BargainChat.vue";
@@ -295,6 +295,7 @@ const companion = ref({
   user_avatar_url: "",
 });
 const memories = ref([]);
+const memoryCandidates = ref([]);
 const memoryDigests = ref([]);
 const memoriesError = ref("");
 const memoryBusy = ref("");
@@ -2646,8 +2647,17 @@ async function loadMemories() {
     memories.value = Array.isArray(data?.memories) ? data.memories : [];
     memoryDigests.value = Array.isArray(data?.digests) ? data.digests : [];
     diaryEnabled.value = Boolean(data?.diary_enabled);
+    try {
+      const candidateData = await getJson("/api/c/companion/memory-candidates");
+      memoryCandidates.value = Array.isArray(candidateData?.candidates)
+        ? candidateData.candidates
+        : [];
+    } catch {
+      memoryCandidates.value = [];
+    }
   } catch (error) {
     memories.value = [];
+    memoryCandidates.value = [];
     memoriesError.value = error?.detail || error?.message || "记忆加载失败";
   }
 }
@@ -2664,6 +2674,22 @@ async function removeMemory(memoryId) {
     await loadMemories();
   } catch (error) {
     memoriesError.value = error?.detail || error?.message || "删除记忆失败";
+  } finally {
+    memoryBusy.value = "";
+  }
+}
+
+async function decideMemoryCandidate(memoryId, action) {
+  if (!memoryId || memoryBusy.value) return;
+  memoryBusy.value = memoryId;
+  try {
+    await postJson(
+      `/api/c/companion/memory-candidates/${encodeURIComponent(memoryId)}/${action}`,
+      {},
+    );
+    await loadMemories();
+  } catch (error) {
+    memoriesError.value = error?.detail || error?.message || "候选记忆处理失败";
   } finally {
     memoryBusy.value = "";
   }
@@ -3645,6 +3671,31 @@ onBeforeUnmount(() => {
               <strong>—</strong>
               <span class="c-trend">暂无消费数据</span>
             </div>
+          </section>
+
+          <section v-if="activeId === 'companion' && memoryCandidates.length" class="c-context-section">
+            <header>
+              <span>待确认记忆</span>
+              <span class="c-memory-hint">确认后才会记住</span>
+            </header>
+            <ul class="c-memory-list">
+              <li v-for="item in memoryCandidates" :key="item.memory_id" class="c-memory-item">
+                <span class="c-memory-kind">{{ memoryKindLabel(item.kind) }}</span>
+                <span class="c-memory-text">{{ item.content }}</span>
+                <button
+                  type="button"
+                  class="c-memory-confirm"
+                  :disabled="memoryBusy === item.memory_id"
+                  @click="decideMemoryCandidate(item.memory_id, 'confirm')"
+                >确认</button>
+                <button
+                  type="button"
+                  class="c-memory-remove"
+                  :disabled="memoryBusy === item.memory_id"
+                  @click="decideMemoryCandidate(item.memory_id, 'reject')"
+                >忽略</button>
+              </li>
+            </ul>
           </section>
 
           <section v-if="activeId === 'companion'" class="c-context-section">
@@ -5416,6 +5467,22 @@ onBeforeUnmount(() => {
   color: var(--c-text-3);
   font-size: 9px;
   cursor: pointer;
+}
+
+.c-memory-confirm {
+  flex: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--c-accent);
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.c-memory-hint {
+  color: var(--c-text-3);
+  font-size: 9px;
 }
 
 .c-memory-remove:hover,

@@ -737,3 +737,28 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_login_attempt (
   "attempts" INTEGER NOT NULL DEFAULT 0,
   "updated_at" DOUBLE PRECISION NOT NULL
 );
+
+-- Phase 2B: candidate memory + version/audit fields for c_companion_memory
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "confidence" REAL;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "source_message_ids" TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "version" INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "confirmed_at" TEXT;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "rejected_at" TEXT;
+
+CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_memory_audit (
+    "audit_id" TEXT PRIMARY KEY,
+    "owner_id" TEXT NOT NULL,
+    "memory_id" TEXT NOT NULL,
+    "action" TEXT NOT NULL,
+    "actor" TEXT NOT NULL DEFAULT '',
+    "detail_json" TEXT NOT NULL DEFAULT '{}',
+    "created_at" TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_memory_audit_owner
+    ON __SCHEMA__.c_companion_memory_audit ("owner_id", "created_at" DESC);

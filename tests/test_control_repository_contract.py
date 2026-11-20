@@ -10,7 +10,7 @@ from rag_demo.control.sqlite_repository import SQLiteControlRepository
 
 EXPECTED_TABLES = {
     "c_after_sale", "c_app_message", "c_client_request", "c_companion", "c_companion_memory",
-    "c_companion_rhythm", "c_companion_checkin", "c_companion_memory_digest", "c_companion_diary", "b_chat_user_profile", "b_chat_user_profile_vector", "b_qianke_user_profile", "b_qianke_user_profile_vector", "c_merchant_store_friend", "c_merchant_sop", "c_logistics_event", "c_compensation",
+    "c_companion_rhythm", "c_companion_checkin", "c_companion_memory_digest", "c_companion_diary", "c_companion_memory_audit", "b_chat_user_profile", "b_chat_user_profile_vector", "b_qianke_user_profile", "b_qianke_user_profile_vector", "c_merchant_store_friend", "c_merchant_sop", "c_logistics_event", "c_compensation",
     "c_inventory_alert",
     "c_friend", "c_friend_removed", "c_friend_request", "c_conversation_pref", "c_group_notice",
     "c_group", "c_group_member", "c_group_message", "c_mention", "c_message",

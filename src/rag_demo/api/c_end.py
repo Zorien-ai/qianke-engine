@@ -384,6 +384,33 @@ def list_companion_memories() -> dict:
     }
 
 
+@router.get("/companion/memory-candidates")
+def list_companion_memory_candidates() -> dict:
+    buyer_id, _ = _buyer()
+    return {
+        "candidates": store.list_memory_candidates(buyer_id, limit=20),
+        "write_mode": store.memory_write_mode(),
+    }
+
+
+@router.post("/companion/memory-candidates/{memory_id}/confirm")
+def confirm_companion_memory_candidate(memory_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    candidate = store.confirm_memory_candidate(buyer_id, memory_id, actor=buyer_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="候选记忆不存在或已处理")
+    return {"ok": True, "candidate": store.candidate_payload(candidate)}
+
+
+@router.post("/companion/memory-candidates/{memory_id}/reject")
+def reject_companion_memory_candidate(memory_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    candidate = store.reject_memory_candidate(buyer_id, memory_id, actor=buyer_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="候选记忆不存在或已处理")
+    return {"ok": True, "candidate": store.candidate_payload(candidate)}
+
+
 @router.get("/companion/diary")
 def list_companion_diary(limit: int = 30) -> dict:
     buyer_id, _ = _buyer()
@@ -1705,6 +1732,14 @@ def c_agent_run(req: CAgentRunIn) -> dict:
         memories_added = []
         logger.warning("C 端记忆保存失败，已忽略", exc_info=True)
 
+    try:
+        pending_candidates = (
+            len(store.list_memory_candidates(buyer_id, limit=20))
+            if store.memory_write_mode() == "candidate" else 0
+        )
+    except Exception:  # noqa: BLE001
+        pending_candidates = 0
+
     response = {
         "thread_id": thread_id,
         "mode": result.get("mode", ""),
@@ -1717,6 +1752,7 @@ def c_agent_run(req: CAgentRunIn) -> dict:
         "draft": result["draft"],
         "order": result["order"],
         "memories_added": len(memories_added),
+        "memory_candidates_pending": pending_candidates,
         "product_refs": result.get("product_refs") or [],
         # 模型输出统一过 persona guard；确认/取消文案由代码生成，不走这里。
         "reply": c_persona.guard(_last_ai_text(result["messages"]), tier="L2").text

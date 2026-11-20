@@ -1,6 +1,6 @@
 # Agent 用户记忆与上下文 · 架构契约
 
-> 状态：**Phase 1 + Phase 2A 已落地**
+> 状态：**Phase 1 + Phase 2A + Phase 2B（候选模式）已落地**
 > 适用：C 端店宠、B 端经营 Agent、A 端审计
 > 关联：`docs/decisions/three_agent_platform_architecture_decisions_v0.1.md` §7
 
@@ -14,13 +14,33 @@
 | B 端画像 Tool 身份与来源元数据 | ✅ | `src/rag_demo/agent/tools/chat_profile.py` |
 | C 端记忆列表 `updated_at` | ✅ | `src/rag_demo/c_end/store.py` |
 | B 端主会话记忆上下文接入 | ✅ Phase 2A | `src/rag_demo/chat_memory.py` |
-| 候选记忆 / 确认写回 / 版本审计 | ⏳ Phase 2 | 尚未实现 |
+| 候选记忆状态机 | ✅ Phase 2B | `c_companion_memory` + `c_companion_memory_audit` |
+| 用户确认 / 拒绝 + 写回 | ✅ Phase 2B | `c_end/store.py` + `/api/c/companion/memory-candidates` |
+| 版本 / 审计字段 | ✅ Phase 2B | `version` / `confirmed_at` / `rejected_at` + audit |
+| CApp 待确认记忆 UI | ✅ Phase 2B | `web/src/views/CApp.vue` |
 
 Phase 1 覆盖认证身份 + 读取过滤 + 元数据；Phase 2A 已把 B 端 `/qa`、`/chat/stream` 使用的 `chat_memory` 会话摘要/实体接入同一套身份、租户、时效元数据。
 
-仍待接入：多客户别名生产入口、候选记忆确认与版本化写回。
+仍待接入：多客户别名生产入口；真实 B 端主链路之外的其它记忆写入口。
 
-证据：`tests/test_memory_context.py`、`tests/test_c_end_memory.py`、`tests/test_b_chat_profile.py`、`tests/test_chat_memory.py`。
+证据：`tests/test_memory_context.py`、`tests/test_c_end_memory.py`、`tests/test_b_chat_profile.py`、`tests/test_chat_memory.py`、`tests/test_c_memory_candidates.py`。
+
+### Phase 2B 开关
+
+```text
+QIANKE_C_MEMORY_WRITE_MODE=direct      # 默认，兼容旧行为：直接写 ACTIVE
+QIANKE_C_MEMORY_WRITE_MODE=candidate   # 新行为：先写 PENDING_CONFIRMATION
+```
+
+候选确认接口：
+
+```text
+GET  /api/c/companion/memory-candidates
+POST /api/c/companion/memory-candidates/{memory_id}/confirm
+POST /api/c/companion/memory-candidates/{memory_id}/reject
+```
+
+候选写入不会进入 Agent 上下文；确认后 status=ACTIVE、version 保留、写入审计。
 
 ## 1. 核心结论
 

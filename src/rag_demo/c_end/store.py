@@ -449,6 +449,11 @@ CREATE TABLE IF NOT EXISTS c_companion_memory (
     status     TEXT NOT NULL DEFAULT 'ACTIVE',
     pinned     INTEGER NOT NULL DEFAULT 0,
     compressed_into TEXT,
+    confidence REAL,
+    source_message_ids TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1,
+    confirmed_at TEXT,
+    rejected_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE (owner_id, kind, content)
@@ -456,6 +461,19 @@ CREATE TABLE IF NOT EXISTS c_companion_memory (
 
 CREATE INDEX IF NOT EXISTS idx_c_companion_memory_owner
     ON c_companion_memory (owner_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS c_companion_memory_audit (
+    audit_id   TEXT PRIMARY KEY,
+    owner_id   TEXT NOT NULL,
+    memory_id  TEXT NOT NULL,
+    action     TEXT NOT NULL,
+    actor      TEXT NOT NULL DEFAULT '',
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_c_companion_memory_audit_owner
+    ON c_companion_memory_audit (owner_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS c_companion_memory_digest (
     digest_id  TEXT PRIMARY KEY,
@@ -1022,11 +1040,26 @@ def init() -> None:
                 ("status", "TEXT NOT NULL DEFAULT 'ACTIVE'"),
                 ("pinned", "INTEGER NOT NULL DEFAULT 0"),
                 ("compressed_into", "TEXT"),
+                ("confidence", "REAL"),
+                ("source_message_ids", "TEXT NOT NULL DEFAULT '[]'"),
+                ("version", "INTEGER NOT NULL DEFAULT 1"),
+                ("confirmed_at", "TEXT"),
+                ("rejected_at", "TEXT"),
             ):
                 if column_name not in memory_columns:
                     conn.execute(
                         f"ALTER TABLE c_companion_memory ADD COLUMN {column_name} {column_ddl}"
                     )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS c_companion_memory_audit ("
+                "audit_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, memory_id TEXT NOT NULL, "
+                "action TEXT NOT NULL, actor TEXT NOT NULL DEFAULT '', "
+                "detail_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_c_companion_memory_audit_owner "
+                "ON c_companion_memory_audit (owner_id, created_at DESC)"
+            )
             conn.execute(
                 "UPDATE c_companion SET name = ? WHERE name = '小伴' AND user_nickname = ''",
                 (c_persona.DEFAULT_NAME,),
@@ -3495,10 +3528,16 @@ def _memory_importance(kind: str, content: str) -> int:
 
 
 def save_memories(owner_id: str, message: str, *, source: str = "extracted") -> list[dict[str, Any]]:
-    """保存明确记忆；重复内容只强化，不重复插入。"""
+    """保存明确记忆；重复内容只强化，不重复插入。
+
+    默认 direct 模式保持旧行为；设置 QIANKE_C_MEMORY_WRITE_MODE=candidate 时
+    只生成待确认候选，不直接进入长期记忆。
+    """
     items = extract_memories(message)
     if not items:
         return []
+    if memory_write_mode() == "candidate":
+        return create_memory_candidates(owner_id, items=items, source=source)
     init()
     now = _now()
     added: list[dict[str, Any]] = []
@@ -3537,6 +3576,228 @@ def save_memories(owner_id: str, message: str, *, source: str = "extracted") -> 
     finally:
         conn.close()
     return added
+
+
+def memory_write_mode() -> str:
+    """direct = 旧行为；candidate = 只写候选，等待用户确认。"""
+    value = os.environ.get("QIANKE_C_MEMORY_WRITE_MODE", "direct").strip().lower()
+    return "candidate" if value == "candidate" else "direct"
+
+
+def candidate_payload(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    try:
+        data["source_message_ids"] = json.loads(data.get("source_message_ids") or "[]")
+    except (TypeError, ValueError):
+        data["source_message_ids"] = []
+    return data
+
+
+def create_memory_candidates(
+    owner_id: str,
+    *,
+    items: list[dict[str, str]] | None = None,
+    message: str = "",
+    source: str = "extracted",
+    source_message_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """把明确记忆写成 PENDING_CONFIRMATION 候选，不直接注入 Agent。"""
+    candidates = items if items is not None else extract_memories(message)
+    if not candidates:
+        return []
+    init()
+    now = _now()
+    source_ids = json.dumps(source_message_ids or [], ensure_ascii=False)
+    added: list[dict[str, Any]] = []
+    conn = _connect()
+    try:
+        for item in candidates:
+            existing = conn.execute(
+                "SELECT memory_id, status FROM c_companion_memory "
+                "WHERE owner_id = ? AND kind = ? AND content = ?",
+                (owner_id, item["kind"], item["content"]),
+            ).fetchone()
+            if existing is not None:
+                # 已有 ACTIVE / PENDING / REJECTED 都不重复创建；用户可先处理现有状态。
+                continue
+            memory_id = f"memc_{uuid.uuid4().hex[:20]}"
+            importance = _memory_importance(item["kind"], item["content"])
+            conn.execute(
+                "INSERT INTO c_companion_memory(memory_id, owner_id, kind, content, source, "
+                "importance, reinforced_count, status, pinned, confidence, source_message_ids, "
+                "version, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, 'PENDING_CONFIRMATION', 0, NULL, ?, 1, ?, ?)",
+                (memory_id, owner_id, item["kind"], item["content"], source, importance, source_ids, now, now),
+            )
+            added.append({
+                "memory_id": memory_id,
+                **item,
+                "source": source,
+                "importance": importance,
+                "status": "PENDING_CONFIRMATION",
+                "confidence": None,
+                "source_message_ids": source_message_ids or [],
+                "version": 1,
+                "created_at": now,
+                "updated_at": now,
+            })
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return added
+
+
+def list_memory_candidates(owner_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT memory_id, kind, content, source, importance, confidence, source_message_ids, "
+            "version, status, created_at, updated_at FROM c_companion_memory "
+            "WHERE owner_id = ? AND status = 'PENDING_CONFIRMATION' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (owner_id, max(1, min(int(limit), 100))),
+        ).fetchall()
+        return [candidate_payload(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def _memory_audit(
+    conn: sqlite3.Connection,
+    *,
+    owner_id: str,
+    memory_id: str,
+    action: str,
+    actor: str,
+    detail: dict[str, Any] | None = None,
+) -> None:
+    conn.execute(
+        "INSERT INTO c_companion_memory_audit(audit_id, owner_id, memory_id, action, actor, "
+        "detail_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            f"ma_{uuid.uuid4().hex[:20]}",
+            owner_id,
+            memory_id,
+            action,
+            actor,
+            json.dumps(detail or {}, ensure_ascii=False),
+            _now(),
+        ),
+    )
+
+
+def confirm_memory_candidate(owner_id: str, memory_id: str, *, actor: str = "user") -> dict[str, Any] | None:
+    """用户确认候选：PENDING_CONFIRMATION → ACTIVE，并记录版本/审计。"""
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_companion_memory WHERE owner_id = ? AND memory_id = ? "
+            "AND status = 'PENDING_CONFIRMATION'",
+            (owner_id, memory_id),
+        ).fetchone()
+        if row is None:
+            return None
+        version = int(row["version"] or 1)
+        conn.execute(
+            "UPDATE c_companion_memory SET status = 'ACTIVE', confirmed_at = ?, updated_at = ?, "
+            "version = ? WHERE owner_id = ? AND memory_id = ?",
+            (now, now, version, owner_id, memory_id),
+        )
+        _memory_audit(
+            conn,
+            owner_id=owner_id,
+            memory_id=memory_id,
+            action="CONFIRM",
+            actor=actor,
+            detail={"kind": row["kind"], "content": row["content"], "version": version},
+        )
+        conn.commit()
+        confirmed = conn.execute(
+            "SELECT * FROM c_companion_memory WHERE owner_id = ? AND memory_id = ?",
+            (owner_id, memory_id),
+        ).fetchone()
+        return dict(confirmed) if confirmed is not None else None
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def reject_memory_candidate(owner_id: str, memory_id: str, *, actor: str = "user") -> dict[str, Any] | None:
+    """用户拒绝候选：PENDING_CONFIRMATION → REJECTED，不进入长期记忆。"""
+    init()
+    now = _now()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM c_companion_memory WHERE owner_id = ? AND memory_id = ? "
+            "AND status = 'PENDING_CONFIRMATION'",
+            (owner_id, memory_id),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "UPDATE c_companion_memory SET status = 'REJECTED', rejected_at = ?, updated_at = ? "
+            "WHERE owner_id = ? AND memory_id = ?",
+            (now, now, owner_id, memory_id),
+        )
+        _memory_audit(
+            conn,
+            owner_id=owner_id,
+            memory_id=memory_id,
+            action="REJECT",
+            actor=actor,
+            detail={"kind": row["kind"], "content": row["content"]},
+        )
+        conn.commit()
+        rejected = conn.execute(
+            "SELECT * FROM c_companion_memory WHERE owner_id = ? AND memory_id = ?",
+            (owner_id, memory_id),
+        ).fetchone()
+        return dict(rejected) if rejected is not None else None
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def list_memory_audit(owner_id: str, *, memory_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    init()
+    conn = _connect()
+    try:
+        if memory_id:
+            rows = conn.execute(
+                "SELECT audit_id, memory_id, action, actor, detail_json, created_at "
+                "FROM c_companion_memory_audit WHERE owner_id = ? AND memory_id = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (owner_id, memory_id, max(1, min(int(limit), 100))),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT audit_id, memory_id, action, actor, detail_json, created_at "
+                "FROM c_companion_memory_audit WHERE owner_id = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (owner_id, max(1, min(int(limit), 100))),
+            ).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["detail"] = json.loads(item.pop("detail_json") or "{}")
+            except (TypeError, ValueError):
+                item["detail"] = {}
+            out.append(item)
+        return out
+    finally:
+        conn.close()
 
 
 def list_memories(owner_id: str, limit: int = 20) -> list[dict[str, Any]]:
