@@ -10,6 +10,10 @@
 > [README「一次经营任务怎么走」](../README.md#一次经营任务怎么走)，
 > 对应资源 `docs/assets/architecture-agent-runtime.png`、源文件
 > `docs/design/architecture-agent-runtime.html`。下方 Mermaid 保留 RAG/检索分层细节。
+>
+> **记忆链路**：读 / 写分离、身份消歧、候选记忆确认与版本化写回见
+> [`docs/product/agent-memory-context.md`](product/agent-memory-context.md)，
+> 对应图 `docs/assets/architecture-agent-memory.png`。
 
 ---
 
