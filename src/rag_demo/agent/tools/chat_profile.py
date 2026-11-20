@@ -14,6 +14,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from rag_demo import auth
+from rag_demo import memory_context
 from rag_demo.agent import actions
 from rag_demo.c_end import store
 
@@ -69,6 +70,24 @@ def get_chat_user_profile(buyer_id: str, merchant_id: str | None = None) -> dict
         profile = store.get_chat_user_profile(scope, str(buyer_id).strip())
         if profile is None:
             return {"ok": False, "error": {"code": "PROFILE_NOT_FOUND", "message": "没有找到该用户的画像"}}
+        confidence = float(profile.get("confidence") or 0.0)
+        updated_at = str(profile.get("extracted_at") or "") or None
+        identity = memory_context.resolve_authenticated_identity(
+            f"b_merchant:{scope}",
+            profile["buyer_id"],
+            evidence=("merchant_scoped_buyer_id",),
+        )
+        context_item = memory_context.MemoryItem(
+            memory_id=f"b_chat_user_profile:{profile['profile_id']}",
+            tenant_id=f"b_merchant:{scope}",
+            customer_id=profile["buyer_id"],
+            kind="profile",
+            content=str(profile["profile_text"]),
+            source="b_chat_user_profile",
+            created_at=updated_at,
+            updated_at=updated_at,
+            confidence=confidence,
+        )
         return {
             "ok": True,
             "merchant_id": scope,
@@ -79,6 +98,14 @@ def get_chat_user_profile(buyer_id: str, merchant_id: str | None = None) -> dict
             "source_message_count": profile["source_message_count"],
             "extracted_at": profile["extracted_at"],
             "version": profile["version"],
+            "identity": identity.as_dict(),
+            "context_item": {
+                "memory_id": context_item.memory_id,
+                "source": context_item.source,
+                "updated_at": context_item.updated_at,
+                "confidence": context_item.confidence,
+                "status": context_item.status,
+            },
         }
     except _ScopeError as exc:
         return _error(exc)

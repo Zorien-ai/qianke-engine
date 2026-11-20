@@ -44,6 +44,9 @@ def test_memory_crud_and_prompt_injection(c_store):
     assert "你记得的事" in prompt
     assert "预算 500 元" in prompt
     assert "不要推荐跑鞋" in prompt
+    assert "来源=extracted" in prompt
+    assert "更新=" in prompt
+    assert "置信度=未校准" in prompt
 
     target = memories[0]["memory_id"]
     assert store.delete_memory("buyer_1", target) is True

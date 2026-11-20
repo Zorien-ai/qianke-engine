@@ -13,6 +13,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
+from rag_demo import memory_context
 from rag_demo.c_end import persona as c_persona
 from rag_demo.c_end import express, store, store_agent
 from rag_demo.c_end import router as question_router
@@ -139,16 +140,55 @@ def build_system_prompt(
         persona=companion.get("persona"),
     )
     if memories:
-        lines = [f"- {item['kind']}：{item['content']}" for item in memories]
-        text += (
-            "\n【你记得的事】\n"
-            + "\n".join(lines)
-            + "\n这些是用户明确说过的偏好或边界，只作为上下文参考；"
-            "价格、库存、订单仍以工具结果为准，用户当前说法与记忆冲突时以当前说法为准。"
-        )
+        identity = memory_context.resolve_authenticated_identity("c_end", buyer_id)
+        items = [
+            memory_context.memory_item_from_record(
+                tenant_id="c_end",
+                customer_id=buyer_id,
+                record={
+                    **item,
+                    "source": item.get("source") or "extracted",
+                    "updated_at": item.get("updated_at") or item.get("created_at"),
+                },
+                default_source="extracted",
+                default_kind="preference",
+            )
+            for item in memories
+        ]
+        packet = memory_context.assemble_context(items, identity, max_items=8, max_chars=1200)
+        memory_text = memory_context.format_items(packet, header="你记得的事")
+        if memory_text:
+            text += (
+                "\n" + memory_text
+                + "\n这些是用户明确说过的偏好或边界，只作为上下文参考；"
+                "价格、库存、订单仍以工具结果为准，用户当前说法与记忆冲突时以当前说法为准。"
+            )
+        elif packet.needs_clarification:
+            text += "\n【记忆身份校验】\n" + packet.clarification
     if digests:
-        lines = [f"- {item['kind']}：{item['content']}" for item in digests]
-        text += "\n【你压缩后的记忆】\n" + "\n".join(lines)
+        identity = memory_context.resolve_authenticated_identity("c_end", buyer_id)
+        digest_items = [
+            memory_context.memory_item_from_record(
+                tenant_id="c_end",
+                customer_id=buyer_id,
+                record={
+                    **item,
+                    "kind": item.get("kind") or "digest",
+                    "content": item.get("content") or "",
+                    "source": "memory_digest",
+                    "updated_at": item.get("updated_at") or item.get("created_at"),
+                },
+                default_source="memory_digest",
+                default_kind="digest",
+            )
+            for item in digests
+        ]
+        digest_packet = memory_context.assemble_context(
+            digest_items, identity, max_items=5, max_chars=1200
+        )
+        digest_text = memory_context.format_items(digest_packet, header="你压缩后的记忆")
+        if digest_text:
+            text += "\n" + digest_text
     if diary:
         text += (
             f"\n【你 {diary.get('diary_date')} 的日记】\n"
