@@ -1,6 +1,6 @@
 # Agent 用户记忆与上下文 · 架构契约
 
-> 状态：架构设计 + **Phase 1 开始落地**
+> 状态：**Phase 1 + Phase 2A 已落地**
 > 适用：C 端店宠、B 端经营 Agent、A 端审计
 > 关联：`docs/decisions/three_agent_platform_architecture_decisions_v0.1.md` §7
 
@@ -13,11 +13,14 @@
 | 上下文条目 source / updated_at / confidence | ✅ C 端 Agent 记忆注入 | `src/rag_demo/c_end/agent.py` |
 | B 端画像 Tool 身份与来源元数据 | ✅ | `src/rag_demo/agent/tools/chat_profile.py` |
 | C 端记忆列表 `updated_at` | ✅ | `src/rag_demo/c_end/store.py` |
-| B 端主会话记忆上下文接入 | ⏳ Phase 2 | `src/rag_demo/chat_memory.py` |
+| B 端主会话记忆上下文接入 | ✅ Phase 2A | `src/rag_demo/chat_memory.py` |
 | 候选记忆 / 确认写回 / 版本审计 | ⏳ Phase 2 | 尚未实现 |
 
-Phase 1 目前覆盖“认证身份 + 读取过滤 + 元数据”，**尚未把 B 端会话主链路和多客户别名查询接到新的身份解析器**。
-证据：`tests/test_memory_context.py`、`tests/test_c_end_memory.py`、`tests/test_b_chat_profile.py`。
+Phase 1 覆盖认证身份 + 读取过滤 + 元数据；Phase 2A 已把 B 端 `/qa`、`/chat/stream` 使用的 `chat_memory` 会话摘要/实体接入同一套身份、租户、时效元数据。
+
+仍待接入：多客户别名生产入口、候选记忆确认与版本化写回。
+
+证据：`tests/test_memory_context.py`、`tests/test_c_end_memory.py`、`tests/test_b_chat_profile.py`、`tests/test_chat_memory.py`。
 
 ## 1. 核心结论
 
