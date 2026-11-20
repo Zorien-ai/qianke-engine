@@ -1,6 +1,6 @@
 # Agent 用户记忆与上下文 · 架构契约
 
-> 状态：**Phase 1 + Phase 2A + Phase 2B（候选模式）已落地**
+> 状态：**Phase 1 + 2A + 2B + 3A（自动复盘候选）已落地**
 > 适用：C 端店宠、B 端经营 Agent、A 端审计
 > 关联：`docs/decisions/three_agent_platform_architecture_decisions_v0.1.md` §7
 
@@ -18,6 +18,8 @@
 | 用户确认 / 拒绝 + 写回 | ✅ Phase 2B | `c_end/store.py` + `/api/c/companion/memory-candidates` |
 | 版本 / 审计字段 | ✅ Phase 2B | `version` / `confirmed_at` / `rejected_at` + audit |
 | CApp 待确认记忆 UI | ✅ Phase 2B | `web/src/views/CApp.vue` |
+| 会话空闲自动复盘候选 | ✅ Phase 3A | `src/rag_demo/c_end/memory_review.py` |
+| 常驻复盘脚本 | ✅ Phase 3A | `scripts/c_memory_review.py --watch` |
 
 Phase 1 覆盖认证身份 + 读取过滤 + 元数据；Phase 2A 已把 B 端 `/qa`、`/chat/stream` 使用的 `chat_memory` 会话摘要/实体接入同一套身份、租户、时效元数据。
 
@@ -41,6 +43,32 @@ POST /api/c/companion/memory-candidates/{memory_id}/reject
 ```
 
 候选写入不会进入 Agent 上下文；确认后 status=ACTIVE、version 保留、写入审计。
+
+### Phase 3A 自动复盘
+
+```text
+会话空闲（默认 30 分钟）
+→ memory_review.review_owner
+→ 确定性规则抽取用户明确陈述
+→ create_memory_candidates(source=session_review)
+→ 待确认 UI
+```
+
+手动：
+
+```bash
+python scripts/c_memory_review.py --owner buyer_193
+python scripts/c_memory_review.py --watch --interval 300
+```
+
+边界：
+
+- 只复盘 `companion` 线程；
+- 只生成候选，不写 ACTIVE；
+- 疑问句/回忆问句不抽取；
+- 重复复盘幂等；
+- 需要 `QIANKE_C_MEMORY_WRITE_MODE=candidate`；
+- 未接入真实 LLM 抽取，先用确定性规则，避免复盘幻觉。
 
 ## 1. 核心结论
 
