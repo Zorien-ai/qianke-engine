@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Qianke Agent Memory · Read / Write Loop</title>
+<style>
+  :root{
+    --bg:#14110e; --card:#211b17; --line:#3b2f27; --ink:#f7f3ec; --muted:#b8a99b; --faint:#88796c;
+    --accent:#e0a15c; --accent2:#ffd4a0; --red:#b14a35; --green:#5f8f74; --blue:#6b7f9c; --purple:#8873a3;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:2600px;height:1300px;overflow:hidden;background:var(--bg)}
+  body{font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+  .canvas{position:absolute;inset:0;overflow:hidden;background:
+    radial-gradient(1000px 700px at 84% 8%,rgba(224,161,92,.11),transparent 66%),
+    radial-gradient(900px 600px at 6% 82%,rgba(136,115,163,.08),transparent 72%),
+    linear-gradient(180deg,#17130f,#14110e 58%,#100e0c)}
+  .grid{position:absolute;inset:0;opacity:.32;background-image:linear-gradient(rgba(247,243,236,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(247,243,236,.035) 1px,transparent 1px);background-size:96px 96px;mask-image:radial-gradient(1200px 900px at 50% 45%,#000,transparent 86%)}
+  .vig{position:absolute;inset:0;background:radial-gradient(130% 100% at 50% 46%,transparent 50%,rgba(5,4,3,.8) 100%)}
+  .wires{position:absolute;inset:0;z-index:1}
+  .box{position:absolute;z-index:2;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,rgba(38,30,25,.96),rgba(28,23,19,.96));box-shadow:0 18px 46px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.045)}
+  .inner{padding:20px 22px}
+  .k{font-family:Consolas,monospace;font-size:13px;letter-spacing:.17em;color:var(--faint);text-transform:uppercase}
+  .t{font-size:27px;font-weight:700;margin-top:8px;color:var(--ink)}
+  .d{font-size:17px;line-height:1.5;color:var(--muted);margin-top:8px}
+  .head{position:absolute;left:100px;top:52px;z-index:3}
+  .kicker{display:flex;align-items:center;gap:14px;font-family:Consolas,monospace;font-size:17px;letter-spacing:.2em;color:var(--accent);text-transform:uppercase}
+  .kicker::before{content:"";width:34px;height:1px;background:var(--accent);box-shadow:0 0 14px rgba(224,161,92,.7)}
+  h1{font-size:54px;line-height:1.12;letter-spacing:-.035em;font-weight:700;margin-top:20px}
+  .sub{font-size:23px;line-height:1.55;color:var(--muted);margin-top:13px}
+  .sub b{color:var(--ink);font-weight:600}
+  .topright{position:absolute;right:100px;top:62px;z-index:3;text-align:right}
+  .topright .tag{display:inline-flex;gap:8px;align-items:center;font-family:Consolas,monospace;font-size:14px;letter-spacing:.12em;color:var(--faint);border:1px solid var(--line);border-radius:999px;padding:8px 13px;margin-left:8px}
+  .topright .note{margin-top:12px;font-family:Consolas,monospace;font-size:12px;letter-spacing:.12em;color:rgba(184,169,155,.5)}
+  .lane{position:absolute;z-index:3;font-family:Consolas,monospace;font-size:14px;letter-spacing:.17em;color:var(--accent);text-transform:uppercase}
+  .lane i{display:inline-block;width:24px;height:1px;background:var(--accent);vertical-align:middle;margin-right:10px}
+  .lane.write{color:#b7a8ca}.lane.write i{background:#8873a3}
+  .identity{left:100px;top:270px;width:300px;height:140px}
+  .address{left:455px;top:270px;width:270px;height:140px}
+  .readgroup{left:780px;top:245px;width:560px;height:230px;background:linear-gradient(180deg,rgba(33,26,21,.98),rgba(24,20,17,.98))}
+  .readgroup .t{font-size:24px}
+  .store{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid rgba(247,243,236,.075)}
+  .store:first-of-type{margin-top:6px}
+  .store b{font-size:16px;color:var(--ink);font-weight:600}
+  .store b span{font-family:Consolas,monospace;font-size:11px;color:var(--faint);font-weight:400;margin-left:8px;letter-spacing:.08em}
+  .store em{font-style:normal;font-family:Consolas,monospace;font-size:11px;color:var(--accent);letter-spacing:.06em}
+  .context{left:1395px;top:270px;width:340px;height:140px;border-color:rgba(95,143,116,.42);background:linear-gradient(180deg,rgba(25,36,30,.95),rgba(23,29,25,.96))}
+  .context .t{color:#b9d6c2}
+  .agent{left:1790px;top:245px;width:360px;height:190px;border-color:rgba(224,161,92,.5);background:linear-gradient(160deg,rgba(91,38,28,.94),rgba(51,29,23,.96));box-shadow:0 24px 70px rgba(0,0,0,.42),0 0 0 1px rgba(224,161,92,.1),inset 0 1px 0 rgba(255,255,255,.06)}
+  .agent .t{font-size:32px;color:var(--accent2)}
+  .agent .d{color:rgba(247,243,236,.72)}
+  .agent .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px}
+  .chip{font-family:Consolas,monospace;font-size:11px;letter-spacing:.07em;color:rgba(255,212,160,.82);border:1px solid rgba(255,212,160,.2);border-radius:999px;padding:5px 8px}
+  .session{left:1790px;top:470px;width:360px;height:70px;background:rgba(31,25,21,.94)}
+  .session .inner{padding:13px 18px}
+  .session .t{font-size:19px;margin-top:0}
+  .session .d{font-size:14px;margin-top:3px}
+  .guard{left:2215px;top:245px;width:285px;height:430px;border-color:rgba(177,74,53,.35);background:linear-gradient(180deg,rgba(45,28,24,.92),rgba(28,22,20,.95))}
+  .guard .t{font-size:23px;color:#efb7a4}
+  .guard ul{margin:15px 0 0 16px;color:var(--muted);font-size:15px;line-height:1.9}
+  .guard li{margin-bottom:7px}
+  .guard li b{color:var(--ink)}
+  .write1{left:100px;top:680px;width:280px;height:120px}
+  .write2{left:425px;top:680px;width:300px;height:120px;border-color:rgba(136,115,163,.4);background:linear-gradient(180deg,rgba(29,24,35,.94),rgba(23,20,28,.94))}
+  .write2 .t{color:#cbbce0}
+  .write3{left:770px;top:680px;width:280px;height:120px}
+  .write4{left:1095px;top:680px;width:280px;height:120px;border-color:rgba(95,143,116,.4)}
+  .write4 .t{color:#b9d6c2}
+  .write5{left:1420px;top:680px;width:300px;height:120px;border-color:rgba(177,74,53,.55);background:linear-gradient(180deg,rgba(55,30,24,.96),rgba(39,27,23,.96))}
+  .write5 .t{color:#efb7a4}
+  .write6{left:1765px;top:680px;width:350px;height:120px;border-color:rgba(95,143,116,.5);background:linear-gradient(180deg,rgba(25,36,30,.96),rgba(23,29,25,.96))}
+  .write6 .t{color:#b9d6c2}
+  .rule{position:absolute;left:100px;top:860px;width:2450px;display:flex;align-items:center;gap:18px;padding:22px 26px;border:1px solid rgba(224,161,92,.28);border-radius:16px;background:rgba(224,161,92,.055);z-index:3;font-size:20px;color:var(--muted)}
+  .rule b{color:var(--accent2);font-size:22px}
+  .rule span{font-family:Consolas,monospace;font-size:15px;color:var(--faint);letter-spacing:.05em}
+  .principle{position:absolute;left:100px;top:990px;z-index:3;font-size:28px;color:var(--ink);letter-spacing:.01em}
+  .principle em{font-style:normal;color:var(--accent2)}
+  .legend{position:absolute;left:100px;top:1065px;z-index:3;display:flex;gap:26px;align-items:center;font-family:Consolas,monospace;font-size:13px;color:var(--faint);letter-spacing:.05em}
+  .lg{display:flex;align-items:center;gap:8px}
+  .line{width:30px;height:2px;background:var(--accent)}
+  .line.purple{background:var(--purple)}
+  .line.red{background:var(--red)}
+  .line.green{background:var(--green)}
+  .line.dash{height:2px;background:repeating-linear-gradient(90deg,var(--purple) 0 5px,transparent 5px 9px)}
+  .foot{position:absolute;right:100px;top:1065px;z-index:3;font-family:Consolas,monospace;font-size:12px;letter-spacing:.14em;color:rgba(184,169,155,.4)}
+  .caption{position:absolute;left:100px;top:1140px;z-index:3;font-size:16px;color:rgba(184,169,155,.55)}
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="grid"></div><div class="vig"></div>
+  <svg class="wires" width="2600" height="1300" viewBox="0 0 2600 1300" aria-hidden="true">
+    <defs>
+      <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#8b7463"/></marker>
+      <marker id="aw" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#d99a62"/></marker>
+      <marker id="ap" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#9a86b3"/></marker>
+      <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#c06a52"/></marker>
+    </defs>
+    <!-- read path -->
+    <path d="M400 340 H455" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <path d="M725 340 H780" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <path d="M1340 340 H1395" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <path d="M1735 340 H1790" stroke="#d99a62" stroke-width="2.5" fill="none" marker-end="url(#aw)"/>
+    <!-- agent to session end / write loop -->
+    <path d="M1970 435 V470" stroke="#9a86b3" stroke-width="1.8" stroke-dasharray="6 6" fill="none" marker-end="url(#ap)"/>
+    <path d="M1970 540 V575 H240 V680" stroke="#9a86b3" stroke-width="1.8" stroke-dasharray="6 6" fill="none" marker-end="url(#ap)"/>
+    <!-- write path -->
+    <path d="M380 740 H425" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <path d="M725 740 H770" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <path d="M1050 740 H1095" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <path d="M1375 740 H1420" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <path d="M1720 740 H1765" stroke="#8b7463" stroke-width="2" fill="none" marker-end="url(#a)"/>
+    <!-- writeback loop to stores -->
+    <path d="M1940 800 V830 H1060 V475" stroke="#5f8f74" stroke-width="1.8" stroke-dasharray="6 6" fill="none" marker-end="url(#a)"/>
+    <!-- labels -->
+    <text x="410" y="329" fill="#88796c" font-size="12" font-family="Consolas,monospace">IDENTITY</text>
+    <text x="735" y="329" fill="#88796c" font-size="12" font-family="Consolas,monospace">ADDRESS</text>
+    <text x="1350" y="329" fill="#88796c" font-size="12" font-family="Consolas,monospace">ASSEMBLE</text>
+    <text x="1742" y="329" fill="#d99a62" font-size="12" font-family="Consolas,monospace">ACT</text>
+    <text x="390" y="728" fill="#88796c" font-size="12" font-family="Consolas,monospace">SESSION END</text>
+    <text x="735" y="728" fill="#88796c" font-size="12" font-family="Consolas,monospace">ASYNC</text>
+    <text x="1060" y="728" fill="#88796c" font-size="12" font-family="Consolas,monospace">CANDIDATE</text>
+    <text x="1385" y="728" fill="#88796c" font-size="12" font-family="Consolas,monospace">VALIDATE</text>
+    <text x="1730" y="728" fill="#88796c" font-size="12" font-family="Consolas,monospace">CONFIRM</text>
+    <text x="1952" y="820" fill="#5f8f74" font-size="12" font-family="Consolas,monospace">WRITE + VERSION + AUDIT</text>
+    <text x="247" y="565" fill="#9a86b3" font-size="12" font-family="Consolas,monospace">SESSION CLOSES →</text>
+  </svg>
+
+  <header class="head">
+    <div class="kicker">QIANKE AGENT MEMORY · CONTEXT LIFECYCLE</div>
+    <h1>记忆不是上下文窗口，是一条可校验的链路</h1>
+    <p class="sub">读之前先确认是谁；写之前先校验能不能信；<b>读取有来源，写回有版本</b>。</p>
+  </header>
+  <div class="topright">
+    <span class="tag">READ PATH</span><span class="tag">WRITE PATH</span>
+    <div class="note">ARCHITECTURE OVERVIEW · DEMO DATA</div>
+  </div>
+
+  <div class="lane" style="left:100px;top:218px"><i></i>READ PATH · 读</div>
+  <div class="lane write" style="left:100px;top:635px"><i></i>WRITE PATH · 写</div>
+
+  <div class="box identity"><div class="inner"><div class="k">01 · IDENTITY</div><div class="t">身份解析</div><div class="d">别名 / 客户 ID / 订单 /<br>收货人 → 唯一客户</div></div></div>
+  <div class="box address"><div class="inner"><div class="k">02 · ADDRESSING</div><div class="t">记忆寻址</div><div class="d">客户 + 租户 + 权限<br>定位可读范围</div></div></div>
+  <div class="box readgroup"><div class="inner"><div class="k">03 · MULTI-SOURCE READ</div><div class="t">多源读取</div>
+    <div class="store"><b>长期画像<span>LONG TERM</span></b><em>偏好 / 关系</em></div>
+    <div class="store"><b>短期任务<span>SHORT TERM</span></b><em>目标 / 进度</em></div>
+    <div class="store"><b>会话历史<span>SESSION</span></b><em>消息 / 证据</em></div>
+    <div class="store"><b>处理记录<span>AUDIT</span></b><em>谁 / 何时 / 做了什么</em></div>
+    <div class="store"><b>文档与 SOP<span>KNOWLEDGE</span></b><em>口径 / 规则</em></div>
+  </div></div>
+  <div class="box context"><div class="inner"><div class="k">04 · CONTEXT ASSEMBLY</div><div class="t">上下文组装</div><div class="d">来源 · 时效 · 置信度<br>冲突标记</div></div></div>
+  <div class="box agent"><div class="inner"><div class="k">05 · AGENT</div><div class="t">Agent</div><div class="d">在可解释上下文上<br>做规划 / 回答 / 动作草稿</div><div class="chips"><span class="chip">SOURCE</span><span class="chip">FRESHNESS</span><span class="chip">CONFIDENCE</span></div></div></div>
+  <div class="box session"><div class="inner"><div class="k">CURRENT SESSION</div><div class="t">当前会话</div><div class="d">消息 · 结果 · 动作 · Trace</div></div></div>
+  <div class="box guard"><div class="inner"><div class="k">GUARDRAILS</div><div class="t">先补问，再回答</div>
+    <ul>
+      <li><b>身份不唯一</b><br>先补问，不猜客户</li>
+      <li><b>记录不足</b><br>先补问，不编记忆</li>
+      <li><b>记忆冲突</b><br>标注来源，等待确认</li>
+      <li><b>跨租户 / PII</b><br>直接拒绝，不进入上下文</li>
+    </ul>
+  </div></div>
+
+  <div class="box write1"><div class="inner"><div class="k">06 · SESSION END</div><div class="t">会话结束</div><div class="d">消息 / 结果 / Trace<br>异步触发</div></div></div>
+  <div class="box write2"><div class="inner"><div class="k">07 · ASYNC REVIEW</div><div class="t">异步复盘 Agent</div><div class="d">抽取事实与偏好<br>不阻塞当前回答</div></div></div>
+  <div class="box write3"><div class="inner"><div class="k">08 · CANDIDATE</div><div class="t">候选记忆</div><div class="d">LLM 只生成候选<br>不直接写入</div></div></div>
+  <div class="box write4"><div class="inner"><div class="k">09 · VALIDATE</div><div class="t">规则校验</div><div class="d">字段 / 权限 / 冲突<br>敏感信息</div></div></div>
+  <div class="box write5"><div class="inner"><div class="k">10 · HUMAN POLICY</div><div class="t">用户确认 / 策略允许</div><div class="d">正式长期记忆需要确认<br>策略允许才落库</div></div></div>
+  <div class="box write6"><div class="inner"><div class="k">11 · WRITE BACK</div><div class="t">写回 + 版本 + 审计</div><div class="d">ACTIVE / SUPERSEDED<br>可回滚 / 可删除</div></div></div>
+
+  <div class="rule"><b>读的原则</b><span>先识别，再读取；先校验，再组装。</span><b style="margin-left:26px">写的原则</b><span>候选不等于正式记忆；确认后才生效。</span></div>
+  <div class="principle">能读到 <em>≠</em> 能相信　·　能写入 <em>≠</em> 能生效</div>
+  <div class="legend">
+    <span class="lg"><span class="line"></span>读路径</span>
+    <span class="lg"><span class="line purple"></span>写路径 / 异步</span>
+    <span class="lg"><span class="line red"></span>人工确认</span>
+    <span class="lg"><span class="line green"></span>写回 / 审计</span>
+    <span class="lg"><span class="line dash"></span>回写存储</span>
+  </div>
+  <div class="foot">QIANKE ENGINE · AGENT UPDATE 2026.11</div>
+  <div class="caption">示意图：记忆的读取与写回分离；正式长期记忆需确认，删除后立即不可用。</div>
+</div>
+</body>
+</html>
