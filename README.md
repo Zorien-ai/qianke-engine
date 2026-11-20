@@ -87,6 +87,16 @@
 > 主线是 **任务 → 规划 → 工具 → 证据 → 回答/动作草稿 → 人工审批 → 执行与审计**；  
 > 画像、会话、SOP 和审计记录在下方作为状态层；Trace / Eval 走旁路，不阻塞主流程。
 
+### 用户记忆与上下文
+
+![Agent 记忆读写架构](docs/assets/architecture-agent-memory.png)
+
+> 记忆不是一次性塞进 Prompt：**读之前先做身份解析和记忆寻址，读之后按来源/时效/置信度组装上下文；会话结束后异步复盘，只生成候选记忆，规则校验 + 确认/策略允许后才写回，并带版本与审计。**
+>
+> 身份不唯一、记录不足、记忆冲突、跨租户或 PII，都有明确的“先补问 / 标注 / 拒绝”边界。
+>
+> 读写契约、状态机与 Memory Eval 清单见 [Agent 用户记忆与上下文](docs/product/agent-memory-context.md)。
+
 ### 更细的检索与分层架构
 
 ![端到端数据流](docs/assets/architecture-pipeline.png)
