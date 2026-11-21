@@ -762,3 +762,13 @@ CREATE TABLE IF NOT EXISTS __SCHEMA__.c_companion_memory_audit (
 
 CREATE INDEX IF NOT EXISTS idx_c_companion_memory_audit_owner
     ON __SCHEMA__.c_companion_memory_audit ("owner_id", "created_at" DESC);
+
+-- Phase 3C: conflict key + supersede chain
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "conflict_key" TEXT NOT NULL DEFAULT '';
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "supersedes_memory_id" TEXT;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "superseded_by_memory_id" TEXT;
+ALTER TABLE __SCHEMA__.c_companion_memory
+    ADD COLUMN IF NOT EXISTS "superseded_at" TEXT;

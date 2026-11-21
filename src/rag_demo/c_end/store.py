@@ -454,6 +454,10 @@ CREATE TABLE IF NOT EXISTS c_companion_memory (
     version INTEGER NOT NULL DEFAULT 1,
     confirmed_at TEXT,
     rejected_at TEXT,
+    conflict_key TEXT NOT NULL DEFAULT '',
+    supersedes_memory_id TEXT,
+    superseded_by_memory_id TEXT,
+    superseded_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE (owner_id, kind, content)
@@ -1045,6 +1049,10 @@ def init() -> None:
                 ("version", "INTEGER NOT NULL DEFAULT 1"),
                 ("confirmed_at", "TEXT"),
                 ("rejected_at", "TEXT"),
+                ("conflict_key", "TEXT NOT NULL DEFAULT ''"),
+                ("supersedes_memory_id", "TEXT"),
+                ("superseded_by_memory_id", "TEXT"),
+                ("superseded_at", "TEXT"),
             ):
                 if column_name not in memory_columns:
                     conn.execute(
@@ -3513,6 +3521,77 @@ def extract_memories(message: str) -> list[dict[str, str]]:
     return found
 
 
+def memory_conflict_key(kind: str, content: str) -> str:
+    """确定性冲突键：只有结构明确的记忆才参与 supersede，不做 LLM 模糊判断。"""
+    text = " ".join(str(content or "").split())
+    if not text:
+        return ""
+    if "预算" in text:
+        return "budget"
+    if "尺码" in text:
+        return "size"
+    match = re.match(r"^(不)?喜欢(.+)$", text)
+    if match:
+        return f"taste:{match.group(2).strip()[:40]}"
+    match = re.match(r"^不要推荐(.+)$", text)
+    if match:
+        return f"avoid:{match.group(1).strip()[:40]}"
+    match = re.match(r"^对(.+)过敏$", text)
+    if match:
+        return f"allergy:{match.group(1).strip()[:40]}"
+    return ""
+
+
+def _active_conflicts(
+    conn: sqlite3.Connection,
+    owner_id: str,
+    conflict_key: str,
+    *,
+    exclude_memory_id: str = "",
+) -> list[dict[str, Any]]:
+    if not conflict_key:
+        return []
+    rows = conn.execute(
+        "SELECT memory_id, version, content FROM c_companion_memory "
+        "WHERE owner_id = ? AND status = 'ACTIVE' AND conflict_key = ? "
+        "AND memory_id != ? ORDER BY version ASC",
+        (owner_id, conflict_key, exclude_memory_id),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _supersede_active_conflicts(
+    conn: sqlite3.Connection,
+    *,
+    owner_id: str,
+    new_memory_id: str,
+    conflict_key: str,
+    now: str,
+) -> list[dict[str, Any]]:
+    old_rows = _active_conflicts(conn, owner_id, conflict_key, exclude_memory_id=new_memory_id)
+    for old in old_rows:
+        conn.execute(
+            "UPDATE c_companion_memory SET status = 'SUPERSEDED', "
+            "superseded_by_memory_id = ?, superseded_at = ?, updated_at = ? "
+            "WHERE owner_id = ? AND memory_id = ?",
+            (new_memory_id, now, now, owner_id, old["memory_id"]),
+        )
+        _memory_audit(
+            conn,
+            owner_id=owner_id,
+            memory_id=old["memory_id"],
+            action="SUPERSEDE",
+            actor="system",
+            detail={
+                "new_memory_id": new_memory_id,
+                "old_version": int(old.get("version") or 1),
+                "conflict_key": conflict_key,
+                "content": old.get("content"),
+            },
+        )
+    return old_rows
+
+
 def _memory_importance(kind: str, content: str) -> int:
     """确定性重要性；安全/过敏边界 5 分，预算/尺码 4 分，其余 3 分。"""
     text = str(content or "")
@@ -3545,29 +3624,59 @@ def save_memories(owner_id: str, message: str, *, source: str = "extracted") -> 
     try:
         for item in items:
             importance = _memory_importance(item["kind"], item["content"])
+            conflict_key = memory_conflict_key(item["kind"], item["content"])
             exists = conn.execute(
-                "SELECT memory_id, importance, reinforced_count FROM c_companion_memory "
+                "SELECT memory_id, importance, reinforced_count, status, version FROM c_companion_memory "
                 "WHERE owner_id = ? AND kind = ? AND content = ?",
                 (owner_id, item["kind"], item["content"]),
             ).fetchone()
             if exists is not None:
+                active_conflicts = _active_conflicts(
+                    conn, owner_id, conflict_key, exclude_memory_id=exists["memory_id"]
+                )
+                version = max(
+                    [int(exists["version"] or 1), *(int(row.get("version") or 1) for row in active_conflicts)]
+                )
+                if active_conflicts:
+                    version += 1
                 conn.execute(
                     "UPDATE c_companion_memory SET reinforced_count = reinforced_count + 1, "
-                    "importance = ?, last_reinforced_at = ?, status = 'ACTIVE', updated_at = ? "
-                    "WHERE memory_id = ?",
-                    (max(int(exists["importance"] or 3), importance), now, now, exists["memory_id"]),
+                    "importance = ?, last_reinforced_at = ?, status = 'ACTIVE', conflict_key = ?, "
+                    "version = ?, supersedes_memory_id = ?, superseded_by_memory_id = NULL, "
+                    "superseded_at = NULL, updated_at = ? WHERE memory_id = ?",
+                    (
+                        max(int(exists["importance"] or 3), importance), now, conflict_key, version,
+                        active_conflicts[-1]["memory_id"] if active_conflicts else None, now,
+                        exists["memory_id"],
+                    ),
+                )
+                _supersede_active_conflicts(
+                    conn, owner_id=owner_id, new_memory_id=exists["memory_id"],
+                    conflict_key=conflict_key, now=now,
                 )
                 continue
+            conflicts = _active_conflicts(conn, owner_id, conflict_key)
+            version = max((int(row.get("version") or 1) for row in conflicts), default=1)
+            if conflicts:
+                version += 1
             memory_id = f"mem_{uuid.uuid4().hex[:20]}"
             conn.execute(
                 "INSERT INTO c_companion_memory(memory_id, owner_id, kind, content, source, "
-                "importance, reinforced_count, last_reinforced_at, status, pinned, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'ACTIVE', 0, ?, ?)",
-                (memory_id, owner_id, item["kind"], item["content"], source, importance, now, now, now),
+                "importance, reinforced_count, last_reinforced_at, status, pinned, conflict_key, "
+                "version, supersedes_memory_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, 'ACTIVE', 0, ?, ?, ?, ?, ?)",
+                (
+                    memory_id, owner_id, item["kind"], item["content"], source, importance, now,
+                    conflict_key, version, conflicts[-1]["memory_id"] if conflicts else None, now, now,
+                ),
+            )
+            _supersede_active_conflicts(
+                conn, owner_id=owner_id, new_memory_id=memory_id, conflict_key=conflict_key, now=now
             )
             added.append({
                 "memory_id": memory_id, **item, "source": source,
-                "importance": importance, "created_at": now,
+                "importance": importance, "conflict_key": conflict_key,
+                "version": version, "created_at": now,
             })
         conn.commit()
     except Exception:
@@ -3622,12 +3731,18 @@ def create_memory_candidates(
                 continue
             memory_id = f"memc_{uuid.uuid4().hex[:20]}"
             importance = _memory_importance(item["kind"], item["content"])
+            conflict_key = memory_conflict_key(item["kind"], item["content"])
+            conflicts = _active_conflicts(conn, owner_id, conflict_key)
             conn.execute(
                 "INSERT INTO c_companion_memory(memory_id, owner_id, kind, content, source, "
                 "importance, reinforced_count, status, pinned, confidence, source_message_ids, "
-                "version, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1, 'PENDING_CONFIRMATION', 0, NULL, ?, 1, ?, ?)",
-                (memory_id, owner_id, item["kind"], item["content"], source, importance, source_ids, now, now),
+                "version, conflict_key, supersedes_memory_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, 'PENDING_CONFIRMATION', 0, NULL, ?, 1, ?, ?, ?, ?)",
+                (
+                    memory_id, owner_id, item["kind"], item["content"], source, importance,
+                    source_ids, conflict_key, conflicts[-1]["memory_id"] if conflicts else None,
+                    now, now,
+                ),
             )
             added.append({
                 "memory_id": memory_id,
@@ -3638,6 +3753,9 @@ def create_memory_candidates(
                 "confidence": None,
                 "source_message_ids": source_message_ids or [],
                 "version": 1,
+                "conflict_key": conflict_key,
+                "supersedes_memory_id": conflicts[-1]["memory_id"] if conflicts else None,
+                "conflicts_with": conflicts,
                 "created_at": now,
                 "updated_at": now,
             })
@@ -3656,7 +3774,8 @@ def list_memory_candidates(owner_id: str, limit: int = 20) -> list[dict[str, Any
     try:
         rows = conn.execute(
             "SELECT memory_id, kind, content, source, importance, confidence, source_message_ids, "
-            "version, status, created_at, updated_at FROM c_companion_memory "
+            "version, status, conflict_key, supersedes_memory_id, created_at, updated_at "
+            "FROM c_companion_memory "
             "WHERE owner_id = ? AND status = 'PENDING_CONFIRMATION' "
             "ORDER BY created_at DESC LIMIT ?",
             (owner_id, max(1, min(int(limit), 100))),
@@ -3703,11 +3822,24 @@ def confirm_memory_candidate(owner_id: str, memory_id: str, *, actor: str = "use
         ).fetchone()
         if row is None:
             return None
-        version = int(row["version"] or 1)
+        conflict_key = str(row["conflict_key"] or "")
+        conflicts = _active_conflicts(conn, owner_id, conflict_key, exclude_memory_id=memory_id)
+        version = max((int(item.get("version") or 1) for item in conflicts), default=1)
+        if conflicts:
+            version += 1
         conn.execute(
             "UPDATE c_companion_memory SET status = 'ACTIVE', confirmed_at = ?, updated_at = ?, "
-            "version = ? WHERE owner_id = ? AND memory_id = ?",
-            (now, now, version, owner_id, memory_id),
+            "version = ?, conflict_key = ?, supersedes_memory_id = ? "
+            "WHERE owner_id = ? AND memory_id = ?",
+            (
+                now, now, version, conflict_key,
+                conflicts[-1]["memory_id"] if conflicts else row["supersedes_memory_id"],
+                owner_id, memory_id,
+            ),
+        )
+        _supersede_active_conflicts(
+            conn, owner_id=owner_id, new_memory_id=memory_id,
+            conflict_key=conflict_key, now=now,
         )
         _memory_audit(
             conn,
@@ -3715,7 +3847,13 @@ def confirm_memory_candidate(owner_id: str, memory_id: str, *, actor: str = "use
             memory_id=memory_id,
             action="CONFIRM",
             actor=actor,
-            detail={"kind": row["kind"], "content": row["content"], "version": version},
+            detail={
+                "kind": row["kind"],
+                "content": row["content"],
+                "version": version,
+                "conflict_key": conflict_key,
+                "superseded": [item["memory_id"] for item in conflicts],
+            },
         )
         conn.commit()
         confirmed = conn.execute(
@@ -3806,12 +3944,46 @@ def list_memories(owner_id: str, limit: int = 20) -> list[dict[str, Any]]:
     try:
         rows = conn.execute(
             "SELECT memory_id, kind, content, source, importance, reinforced_count, pinned, "
-            "last_reinforced_at, created_at, updated_at FROM c_companion_memory "
+            "last_reinforced_at, status, version, conflict_key, supersedes_memory_id, "
+            "created_at, updated_at FROM c_companion_memory "
             "WHERE owner_id = ? AND status = 'ACTIVE' ORDER BY pinned DESC, importance DESC, "
             "created_at DESC LIMIT ?",
             (owner_id, max(1, min(int(limit), 500))),
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def list_memory_history(owner_id: str, memory_id: str) -> dict[str, Any] | None:
+    """返回同一 conflict_key 的版本链；跨 owner 不返回。"""
+    init()
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT memory_id, conflict_key FROM c_companion_memory WHERE owner_id = ? AND memory_id = ?",
+            (owner_id, memory_id),
+        ).fetchone()
+        if row is None:
+            return None
+        conflict_key = str(row["conflict_key"] or "")
+        if conflict_key:
+            rows = conn.execute(
+                "SELECT memory_id, kind, content, status, version, conflict_key, "
+                "supersedes_memory_id, superseded_by_memory_id, confirmed_at, superseded_at, "
+                "created_at, updated_at FROM c_companion_memory "
+                "WHERE owner_id = ? AND conflict_key = ? ORDER BY version DESC, created_at DESC",
+                (owner_id, conflict_key),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT memory_id, kind, content, status, version, conflict_key, "
+                "supersedes_memory_id, superseded_by_memory_id, confirmed_at, superseded_at, "
+                "created_at, updated_at FROM c_companion_memory "
+                "WHERE owner_id = ? AND memory_id = ?",
+                (owner_id, memory_id),
+            ).fetchall()
+        return {"conflict_key": conflict_key, "versions": [dict(item) for item in rows]}
     finally:
         conn.close()
 

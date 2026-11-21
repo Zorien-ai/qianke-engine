@@ -1,6 +1,6 @@
 # Agent 用户记忆与上下文 · 架构契约
 
-> 状态：**Phase 1 + 2A + 2B + 3A（自动复盘候选）已落地**
+> 状态：**Phase 1 + 2A + 2B + 3A + 3B + 3C（冲突/版本）已落地**
 > 适用：C 端店宠、B 端经营 Agent、A 端审计
 > 关联：`docs/decisions/three_agent_platform_architecture_decisions_v0.1.md` §7
 
@@ -20,6 +20,8 @@
 | CApp 待确认记忆 UI | ✅ Phase 2B | `web/src/views/CApp.vue` |
 | 会话空闲自动复盘候选 | ✅ Phase 3A | `src/rag_demo/c_end/memory_review.py` |
 | 常驻复盘脚本 | ✅ Phase 3A | `scripts/c_memory_review.py --watch` |
+| 身份消歧生产入口 | ✅ Phase 3B | `b_end/identity.py` + B API / Agent Tool |
+| 冲突 supersede / 版本链 | ✅ Phase 3C | `c_end/store.py` + history API + CApp |
 
 Phase 1 覆盖认证身份 + 读取过滤 + 元数据；Phase 2A 已把 B 端 `/qa`、`/chat/stream` 使用的 `chat_memory` 会话摘要/实体接入同一套身份、租户、时效元数据。
 
@@ -353,3 +355,13 @@ user_rejected_not_written
 - 读 / 写链路图：`docs/assets/architecture-agent-memory.png`
 - 源文件：`docs/design/architecture-agent-memory.html`
 - Runtime 主图：`docs/assets/architecture-agent-runtime.png`
+
+
+## 10. 冲突与版本
+
+见 [`memory-conflict-version.md`](memory-conflict-version.md)：
+
+- 预算 / 尺码 / 喜好 / 避雷 / 过敏使用确定性 `conflict_key`；
+- 新 ACTIVE 确认后旧 ACTIVE 变 `SUPERSEDED`；
+- 版本号递增，旧版本保留；
+- CApp 显示 `v2`、历史版本与「替换旧记忆」提示。
