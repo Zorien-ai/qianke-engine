@@ -296,6 +296,9 @@ const companion = ref({
 });
 const memories = ref([]);
 const memoryCandidates = ref([]);
+const memoryHistory = ref(null);
+const memoryHistoryFor = ref("");
+const memoryHistoryBusy = ref("");
 const memoryDigests = ref([]);
 const memoriesError = ref("");
 const memoryBusy = ref("");
@@ -2666,6 +2669,30 @@ function memoryKindLabel(kind) {
   return { preference: "偏好", boundary: "边界", fact: "信息", event: "事件" }[kind] || "记忆";
 }
 
+function memoryStatusLabel(status) {
+  return { ACTIVE: "当前", SUPERSEDED: "已替换", PENDING_CONFIRMATION: "待确认", REJECTED: "已拒绝" }[status] || status;
+}
+
+async function loadMemoryHistory(memoryId) {
+  if (!memoryId || memoryHistoryBusy.value) return;
+  memoryHistoryBusy.value = memoryId;
+  try {
+    memoryHistory.value = await getJson(
+      `/api/c/companion/memories/${encodeURIComponent(memoryId)}/history`,
+    );
+    memoryHistoryFor.value = memoryId;
+  } catch (error) {
+    memoriesError.value = error?.detail || error?.message || "版本记录加载失败";
+  } finally {
+    memoryHistoryBusy.value = "";
+  }
+}
+
+function closeMemoryHistory() {
+  memoryHistory.value = null;
+  memoryHistoryFor.value = "";
+}
+
 async function removeMemory(memoryId) {
   if (!memoryId || memoryBusy.value) return;
   memoryBusy.value = memoryId;
@@ -3682,6 +3709,7 @@ onBeforeUnmount(() => {
               <li v-for="item in memoryCandidates" :key="item.memory_id" class="c-memory-item">
                 <span class="c-memory-kind">{{ memoryKindLabel(item.kind) }}</span>
                 <span class="c-memory-text">{{ item.content }}</span>
+                <span v-if="item.supersedes_memory_id" class="c-memory-kind">替换旧记忆</span>
                 <button
                   type="button"
                   class="c-memory-confirm"
@@ -3717,6 +3745,13 @@ onBeforeUnmount(() => {
               <li v-for="item in memories" :key="item.memory_id" class="c-memory-item">
                 <span class="c-memory-kind">{{ memoryKindLabel(item.kind) }}</span>
                 <span class="c-memory-text">{{ item.content }}</span>
+                <span class="c-memory-version">v{{ item.version || 1 }}</span>
+                <button
+                  type="button"
+                  class="c-memory-history-btn"
+                  :disabled="memoryHistoryBusy === item.memory_id"
+                  @click="loadMemoryHistory(item.memory_id)"
+                >历史</button>
                 <button
                   type="button"
                   class="c-memory-remove"
@@ -3724,6 +3759,20 @@ onBeforeUnmount(() => {
                   aria-label="删除这条记忆"
                   @click="removeMemory(item.memory_id)"
                 >删</button>
+              </li>
+            </ul>
+          </section>
+
+          <section v-if="memoryHistory && memoryHistoryFor" class="c-context-section c-memory-history">
+            <header>
+              <span>版本记录 · {{ memoryHistory.conflict_key || '记忆' }}</span>
+              <button type="button" class="c-context-link" @click="closeMemoryHistory">关闭</button>
+            </header>
+            <ul class="c-memory-list">
+              <li v-for="version in memoryHistory.versions" :key="version.memory_id" class="c-memory-history-row">
+                <span class="c-memory-version">v{{ version.version || 1 }}</span>
+                <span class="c-memory-text">{{ version.content }}</span>
+                <span class="c-memory-kind">{{ memoryStatusLabel(version.status) }}</span>
               </li>
             </ul>
           </section>
@@ -5483,6 +5532,32 @@ onBeforeUnmount(() => {
 .c-memory-hint {
   color: var(--c-text-3);
   font-size: 9px;
+}
+
+.c-memory-version {
+  flex: none;
+  color: var(--c-text-3);
+  font-family: var(--c-mono, monospace);
+  font-size: 9px;
+}
+
+.c-memory-history-btn {
+  flex: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--c-text-3);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.c-memory-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--c-line-soft);
+  color: var(--c-text-2);
 }
 
 .c-memory-remove:hover,

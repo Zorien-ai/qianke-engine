@@ -411,6 +411,15 @@ def reject_companion_memory_candidate(memory_id: str) -> dict:
     return {"ok": True, "candidate": store.candidate_payload(candidate)}
 
 
+@router.get("/companion/memories/{memory_id}/history")
+def companion_memory_history(memory_id: str) -> dict:
+    buyer_id, _ = _buyer()
+    history = store.list_memory_history(buyer_id, memory_id)
+    if history is None:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+    return {"memory_id": memory_id, **history}
+
+
 @router.get("/companion/diary")
 def list_companion_diary(limit: int = 30) -> dict:
     buyer_id, _ = _buyer()
