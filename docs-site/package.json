@@ -1,0 +1,20 @@
+{
+  "name": "qianke-architecture-handbook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ./node_modules/vitepress/bin/vitepress.js dev",
+    "build": "node ./node_modules/vitepress/bin/vitepress.js build",
+    "preview": "node ./node_modules/vitepress/bin/vitepress.js preview"
+  },
+  "devDependencies": {
+    "mermaid": "^12.3.0",
+    "vitepress": "^1.6.3",
+    "vue": "^3.5.46"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
