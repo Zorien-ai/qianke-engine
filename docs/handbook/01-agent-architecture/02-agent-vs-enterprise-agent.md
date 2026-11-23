@@ -705,6 +705,3 @@ Qianke Engine 当前已经具备 B 端主 Agent Runtime、Tool Policy、受控�
 - PostgreSQL：<https://www.postgresql.org/docs/>
 
 > 外部链接仅作为学习入口；发布前需接入构建期链接检查。
-
-<!-- CI failure probe: READ_ONLY_VIOLATION -->
-
