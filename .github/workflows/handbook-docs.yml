@@ -8,9 +8,7 @@ on:
       - "docs-site/**"
   pull_request:
     branches: [main]
-    paths:
-      - "docs/handbook/**"
-      - "docs-site/**"
+    # No paths filter: this job becomes a required branch check for every PR.
   workflow_dispatch:
 
 permissions:
